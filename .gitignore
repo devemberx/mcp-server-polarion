@@ -1,0 +1,44 @@
+# Environment variables — NEVER commit secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# uv
+uv.lock
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+*.egg
+
+# mypy cache
+.mypy_cache/
+.dmypy.json
+
+# ruff cache
+.ruff_cache/
+
+# pytest cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# VS Code
+.vscode/*
+!.vscode/mcp.json
+!.vscode/settings.json
+
+# OS
+.DS_Store
+Thumbs.db
