@@ -36,7 +36,7 @@ htmlcov/
 
 # VS Code
 .vscode/*
-!.vscode/mcp.json
+!.vscode/mcp.json.example
 !.vscode/settings.json
 
 # OS
