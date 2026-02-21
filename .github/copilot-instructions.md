@@ -19,7 +19,7 @@ These rules apply to **every file** in the codebase. Violating any of them will 
 | 11 | **Every write tool must support `dry_run`** — preview payload without mutating. |
 | 12 | **Secrets in `.env` only** — never hardcode credentials. Load via `pydantic-settings`. |
 | 13 | **Use `uv` exclusively** — no pip, poetry, or pipenv. |
-| 14 | **Keep tool count minimal** — 12 tools total (8 read + 4 write). |
+| 14 | **Keep tool count minimal** — 13 tools total (9 read + 4 write). |
 
 ---
 
@@ -89,7 +89,7 @@ mcp-server-polarion/
 │       │   └── html.py           # HTML ↔ plain text conversion
 │       └── tools/                # MCP tool definitions
 │           ├── __init__.py       # Imports read & write to register tools on mcp
-│           ├── read.py           # 8 read tools
+│           ├── read.py           # 9 read tools
 │           └── write.py          # 4 write tools
 └── tests/
     ├── conftest.py               # Shared fixtures (mock client, MCP test client)
@@ -103,7 +103,7 @@ mcp-server-polarion/
     │   └── test_html.py          # HTML ↔ text conversion edge cases
     └── tools/
         ├── __init__.py
-        ├── test_read.py          # 8 read tools
+        ├── test_read.py          # 9 read tools
         └── test_write.py         # 4 write tools + dry_run verification
 ```
 
@@ -181,6 +181,7 @@ mcp-server-polarion/
 - Base URL: `{POLARION_URL}/polarion/rest/v1`.
 - Maps HTTP status codes to custom exceptions: 401/403 → `PolarionAuthError`, 404 → `PolarionNotFoundError`, others → `PolarionError`.
 - **Must implement exponential backoff retry for 429 and 5xx** (max 2 retries).
+- **Must add a 1–2 second delay between sequential write operations** to account for Polarion cluster propagation delay (~3s).
 - Provides `get()`, `post()`, `patch()`, and `close()` methods.
 
 **`core/config.py` (PolarionConfig)**
@@ -241,7 +242,7 @@ List response:
 
 ### Pagination
 
-All list endpoints support `page[size]` (default 50) and `page[number]` (1-based) query parameters.
+All list endpoints support `page[size]` and `page[number]` (1-based) query parameters. The Polarion server default page size is **100**, but MCP tools should default to **50** to keep responses within LLM context window limits.
 
 ### Common Query Parameters
 
@@ -251,7 +252,7 @@ All list endpoints support `page[size]` (default 50) and `page[number]` (1-based
 
 ### Tool → Endpoint Mapping
 
-#### Read Tools (8)
+#### Read Tools (9)
 
 | Tool | Method | Path |
 |---|---|---|
@@ -263,6 +264,7 @@ All list endpoints support `page[size]` (default 50) and `page[number]` (1-based
 | `list_work_items` | GET | `/projects/{projectId}/workitems` |
 | `get_work_item` | GET | `/projects/{projectId}/workitems/{workItemId}` |
 | `search_work_items` | GET | `/projects/{projectId}/workitems?query={luceneQuery}` |
+| `get_linked_work_items` | GET | `/projects/{projectId}/workitems/{workItemId}/linkedworkitems` |
 
 #### Write Tools (4)
 
@@ -278,6 +280,8 @@ All list endpoints support `page[size]` (default 50) and `page[number]` (1-based
 - **The description field is always HTML**: `{ "type": "text/html", "value": "<p>...</p>" }`.
 - **Space ID is required to access documents** — guide the user to call `list_spaces` first in tool docstrings.
 - **`update_work_item` must GET current state first**, then PATCH only the changed fields.
+- **Document Recycle Bin**: Creating a Work Item with a `module` relationship places it in the Document's Recycle Bin — it is NOT visible. `create_work_item` must auto-call `POST .../documents/{documentName}/parts` to make it visible in the document body.
+- **`get_linked_work_items`** must fetch both forward links (`linkedworkitems`) and back links (`backlinkedworkitems`) and merge into a single result for complete traceability.
 
 ---
 
@@ -301,6 +305,8 @@ All tool inputs and outputs are defined as Pydantic `BaseModel` subclasses. Add 
 | `WorkItemUpdateResult` | Response from `update_work_item` (`updated`, `dry_run`, `current`, `changes`) |
 | `CommentResult` | Response from `add_document_comment` (`created`, `dry_run`, `comment_id`, `payload_preview`) |
 | `LinkResult` | Response from `link_work_items` (`created`, `dry_run`, `payload_preview`) |
+| `LinkedWorkItemSummary` | Item returned by `get_linked_work_items` (`id`, `title`, `role`, `direction`, `suspect`) |
+| `LinkedWorkItemsList` | Response from `get_linked_work_items` (`items`, `forward_count`, `back_count`) |
 
 ### Model Rules
 
@@ -336,6 +342,7 @@ Every tool must have a Google-style docstring with these mandatory sections:
 - When `dry_run=True`, return a payload preview without making any API call.
 - `update_work_item` must GET the current state before issuing a PATCH.
 - Convert plain text to HTML using `text_to_polarion_html()`.
+- `create_work_item`: when `document_name` is provided, auto-create a Document Part (`POST .../documents/{documentName}/parts`) after the Work Item is created. Without this step, the item lands in the Document Recycle Bin and is invisible.
 
 ### Error Handling in Tools
 
