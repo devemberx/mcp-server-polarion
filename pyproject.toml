@@ -17,11 +17,11 @@ polarion-mcp = "polarion_mcp.__main__:main"
 
 [dependency-groups]
 dev = [
-    "pytest>=8.0",
+    "pytest>=9.0",
     "pytest-asyncio>=0.24",
-    "respx>=0.21",
-    "ruff>=0.4",
-    "mypy>=1.10",
+    "respx>=0.22",
+    "ruff>=0.15",
+    "mypy>=1.19",
 ]
 
 [build-system]
@@ -36,15 +36,18 @@ target-version = "py312"
 line-length = 88
 
 [tool.ruff.lint]
-select = ["E", "W", "F", "I", "UP", "B", "SIM", "ANN"]
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "ANN", "PL", "C4", "PTH", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["ANN"]
+"tests/**" = ["ANN", "PLR"]
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
+warn_unreachable = true
+enable_error_codes = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
