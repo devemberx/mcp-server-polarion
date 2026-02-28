@@ -185,7 +185,7 @@ mcp-server-polarion/
 - Provides `get()`, `post()`, `patch()`, and `close()` methods.
 
 **`core/config.py` (PolarionConfig)**
-- `PolarionConfig(BaseSettings)` — loads `POLARION_URL`, `POLARION_TOKEN`, `POLARION_PROJECT_ID`, `POLARION_VERIFY_SSL` from environment variables.
+- `PolarionConfig(BaseSettings)` — loads `POLARION_URL`, `POLARION_TOKEN` from environment variables.
 - `.env` file is for local development only and must be listed in `.gitignore`.
 - Commit `.env.example` to document all required variables.
 
@@ -367,7 +367,7 @@ Every tool must have a Google-style docstring with these mandatory sections:
 
 - All secrets are loaded from environment variables (`config.py` via `pydantic-settings`).
 - `.env` must be in `.gitignore`; only `.env.example` is committed.
-- Environment variables: `POLARION_URL`, `POLARION_TOKEN`, `POLARION_PROJECT_ID`, `POLARION_VERIFY_SSL`.
+- Environment variables: `POLARION_URL`, `POLARION_TOKEN`
 
 ---
 
@@ -414,8 +414,7 @@ testpaths = ["tests"]
       "args": ["run", "polarion-mcp"],
       "env": {
         "POLARION_URL": "https://your-polarion-instance.com",
-        "POLARION_TOKEN": "your-token",
-        "POLARION_PROJECT_ID": "your-project-id"
+        "POLARION_TOKEN": "your-token"
       }
     }
   }

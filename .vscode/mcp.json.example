@@ -6,8 +6,7 @@
       "args": ["run", "polarion-mcp"],
       "env": {
         "POLARION_URL": "https://your-polarion-instance.com",
-        "POLARION_TOKEN": "your-personal-access-token",
-        "POLARION_PROJECT_ID": "your-project-id"
+        "POLARION_TOKEN": "your-personal-access-token"
       }
     }
   }
