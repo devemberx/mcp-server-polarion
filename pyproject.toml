@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.scripts]
-polarion-mcp = "polarion_mcp.__main__:main"
+mcp-server-polarion = "mcp_server_polarion.__main__:main"
 
 [dependency-groups]
 dev = [
@@ -35,7 +35,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/polarion_mcp"]
+packages = ["src/mcp_server_polarion"]
 
 [tool.ruff]
 target-version = "py312"
@@ -52,7 +52,7 @@ python_version = "3.12"
 strict = true
 warn_unreachable = true
 enable_error_codes = true
-files = ["src/polarion_mcp"]
+files = ["src/mcp_server_polarion"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -30,7 +30,7 @@ A Model Context Protocol (MCP) server for reading, analyzing, and writing docume
 | Aspect | Choice |
 |---|---|
 | Framework | FastMCP 2.0 (`fastmcp>=2.0,<3`) |
-| Transport | stdio (`uvx polarion-mcp`) |
+| Transport | stdio (`uvx mcp-server-polarion`) |
 | HTTP Client | httpx (async) |
 | HTML Processing | BeautifulSoup4 |
 | Validation | Pydantic v2 |
@@ -48,9 +48,9 @@ A Model Context Protocol (MCP) server for reading, analyzing, and writing docume
 ```bash
 uv add "fastmcp>=2.0,<3" httpx "beautifulsoup4>=4.12" pydantic "pydantic-settings>=2.0"
 uv add --dev pytest pytest-asyncio respx ruff mypy
-uv run polarion-mcp          # local run
+uv run mcp-server-polarion    # local run
 uv run pytest                 # tests
-uvx polarion-mcp              # production (no install)
+uvx mcp-server-polarion       # production (no install)
 ```
 
 ---
@@ -73,7 +73,7 @@ mcp-server-polarion/
 │       ├── ci.yml
 │       └── publish.yml
 ├── src/
-│   └── polarion_mcp/
+│   └── mcp_server_polarion/
 │       ├── __init__.py
 │       ├── __main__.py           # Entry point → mcp.run(transport="stdio")
 │       ├── server.py             # FastMCP instance + lifespan
@@ -110,16 +110,16 @@ mcp-server-polarion/
 ### Import Structure
 
 - `server.py` creates the `mcp = FastMCP(...)` instance.
-- `tools/read.py` and `tools/write.py` import it via `from polarion_mcp.server import mcp` to use the `@mcp.tool()` decorator.
-- `tools/__init__.py` runs `import polarion_mcp.tools.read` and `import polarion_mcp.tools.write` to register all tools.
-- `server.py` calls `import polarion_mcp.tools` at the very bottom of the module (to avoid circular imports).
+- `tools/read.py` and `tools/write.py` import it via `from mcp_server_polarion.server import mcp` to use the `@mcp.tool()` decorator.
+- `tools/__init__.py` runs `import mcp_server_polarion.tools.read` and `import mcp_server_polarion.tools.write` to register all tools.
+- `server.py` calls `import mcp_server_polarion.tools` at the very bottom of the module (to avoid circular imports).
 - `core/__init__.py` re-exports `PolarionClient`, `PolarionConfig`, and exception classes.
 - `utils/__init__.py` re-exports `html_to_text`, `text_to_polarion_html`, and `sanitize_html`.
 
 **Import examples:**
-- `from polarion_mcp.core import PolarionClient, PolarionConfig`
-- `from polarion_mcp.core.exceptions import PolarionNotFoundError`
-- `from polarion_mcp.utils import html_to_text, text_to_polarion_html`
+- `from mcp_server_polarion.core import PolarionClient, PolarionConfig`
+- `from mcp_server_polarion.core.exceptions import PolarionNotFoundError`
+- `from mcp_server_polarion.utils import html_to_text, text_to_polarion_html`
 
 ---
 
@@ -171,7 +171,7 @@ mcp-server-polarion/
 - `server.py` creates the `FastMCP` instance and initializes/cleans up `PolarionClient` via a `lifespan` context manager.
 - All tools access the client via `ctx.request_context.lifespan_context["polarion_client"]`.
 - `__main__.py` only calls `mcp.run(transport="stdio")`.
-- Entry point: `polarion-mcp = "polarion_mcp.__main__:main"` (pyproject.toml).
+- Entry point: `mcp-server-polarion = "mcp_server_polarion.__main__:main"` (pyproject.toml).
 
 ### core/ — Infrastructure Layer
 
@@ -191,7 +191,7 @@ mcp-server-polarion/
 
 **`core/logging.py`**
 - Uses a single `logging.StreamHandler(sys.stderr)` handler.
-- Logger name: `polarion_mcp` (sub-modules: `polarion_mcp.core.client`, `polarion_mcp.tools`, etc.).
+- Logger name: `mcp_server_polarion` (sub-modules: `mcp_server_polarion.core.client`, `mcp_server_polarion.tools`, etc.).
 - Set `propagate = False` to prevent propagation to the root logger.
 
 **`core/exceptions.py`**
@@ -378,7 +378,7 @@ Every tool must have a Google-style docstring with these mandatory sections:
 requires-python = ">=3.12"
 
 [project.scripts]
-polarion-mcp = "polarion_mcp.__main__:main"
+mcp-server-polarion = "mcp_server_polarion.__main__:main"
 
 [tool.ruff]
 target-version = "py312"
@@ -408,10 +408,10 @@ testpaths = ["tests"]
 ```json
 {
   "servers": {
-    "polarion-mcp": {
+    "mcp-server-polarion": {
       "type": "stdio",
       "command": "uv",
-      "args": ["run", "polarion-mcp"],
+      "args": ["run", "mcp-server-polarion"],
       "env": {
         "POLARION_URL": "https://your-polarion-instance.com",
         "POLARION_TOKEN": "your-token"

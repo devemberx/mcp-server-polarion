@@ -1,9 +1,9 @@
 {
   "servers": {
-    "polarion-mcp": {
+    "mcp-server-polarion": {
       "type": "stdio",
       "command": "uv",
-      "args": ["run", "polarion-mcp"],
+      "args": ["run", "mcp-server-polarion"],
       "env": {
         "POLARION_URL": "https://your-polarion-instance.com",
         "POLARION_TOKEN": "your-personal-access-token"
