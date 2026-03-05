@@ -19,7 +19,7 @@ These rules apply to **every file** in the codebase. Violating any of them will 
 | 11 | **Every write tool must support `dry_run`** — preview payload without mutating. |
 | 12 | **Secrets in `.env` only** — never hardcode credentials. Load via `pydantic-settings`. |
 | 13 | **Use `uv` exclusively** — no pip, poetry, or pipenv. |
-| 14 | **Keep tool count minimal** — 13 tools total (9 read + 4 write). |
+| 14 | **Keep tool count minimal** — 13 tools total (8 read + 5 write). |
 
 ---
 
@@ -89,8 +89,8 @@ mcp-server-polarion/
 │       │   └── html.py           # HTML ↔ plain text conversion
 │       └── tools/                # MCP tool definitions
 │           ├── __init__.py       # Imports read & write to register tools on mcp
-│           ├── read.py           # 9 read tools
-│           └── write.py          # 4 write tools
+│           ├── read.py           # 8 read tools
+│           └── write.py          # 5 write tools
 └── tests/
     ├── conftest.py               # Shared fixtures (mock client, MCP test client)
     ├── test_models.py            # Pydantic model validation
@@ -103,8 +103,8 @@ mcp-server-polarion/
     │   └── test_html.py          # HTML ↔ text conversion edge cases
     └── tools/
         ├── __init__.py
-        ├── test_read.py          # 9 read tools
-        └── test_write.py         # 4 write tools + dry_run verification
+        ├── test_read.py          # 8 read tools
+        └── test_write.py         # 5 write tools + dry_run verification
 ```
 
 ### Import Structure
@@ -242,7 +242,7 @@ List response:
 
 ### Pagination
 
-All list endpoints support `page[size]` and `page[number]` (1-based) query parameters. The Polarion server default page size is **100**, but MCP tools should default to **50** to keep responses within LLM context window limits.
+All list endpoints support `page[size]` and `page[number]` (1-based) query parameters. The Polarion server maximum page size is **100**. MCP tools should default to **100** to minimize API calls.
 
 ### Common Query Parameters
 
@@ -252,13 +252,12 @@ All list endpoints support `page[size]` and `page[number]` (1-based) query param
 
 ### Tool → Endpoint Mapping
 
-#### Read Tools (9)
+#### Read Tools (8)
 
 | Tool | Method | Path |
 |---|---|---|
 | `list_projects` | GET | `/projects` |
-| `list_spaces` | GET | `/projects/{projectId}/spaces` |
-| `list_documents` | GET | `/projects/{projectId}/spaces/{spaceId}/documents` |
+| `list_spaces` | GET | `/projects/{projectId}/workitems?fields[workitems]=module` (indirect — parse `module` field to extract unique Space IDs) |
 | `get_document` | GET | `/projects/{projectId}/spaces/{spaceId}/documents/{documentName}` |
 | `get_document_parts` | GET | `/projects/{projectId}/spaces/{spaceId}/documents/{documentName}/parts` |
 | `list_work_items` | GET | `/projects/{projectId}/workitems` |
@@ -266,7 +265,9 @@ All list endpoints support `page[size]` and `page[number]` (1-based) query param
 | `search_work_items` | GET | `/projects/{projectId}/workitems?query={luceneQuery}` |
 | `get_linked_work_items` | GET | `/projects/{projectId}/workitems/{workItemId}/linkedworkitems` |
 
-#### Write Tools (4)
+> **Unsupported**: `list_documents` (`GET /projects/{projectId}/documents`) — not available on the target Polarion version.
+
+#### Write Tools (5)
 
 | Tool | Method | Path |
 |---|---|---|
@@ -274,14 +275,23 @@ All list endpoints support `page[size]` and `page[number]` (1-based) query param
 | `update_work_item` | PATCH | `/projects/{projectId}/workitems/{workItemId}` |
 | `add_document_comment` | POST | `/projects/{projectId}/spaces/{spaceId}/documents/{documentName}/comments` |
 | `link_work_items` | POST | `/projects/{projectId}/workitems/{workItemId}/linkedworkitems` |
+| `create_document_part` | POST | `/projects/{projectId}/spaces/{spaceId}/documents/{documentName}/parts` |
+
+> **Unsupported**: `move_document_part` (`POST .../parts/{partId}/actions/move`) — not available on the target Polarion version. Use `create_document_part` with `next_part_id`/`previous_part_id` for positioning instead.
 
 ### Key API Notes
 
 - **The description field is always HTML**: `{ "type": "text/html", "value": "<p>...</p>" }`.
+- **Content-Type is `application/json`** — NOT `application/vnd.api+json`.
+- **`POST /workitems` returns 201 with array response**: `{"data": [...]}` — parse accordingly.
+- **`GET /projects/{projectId}/spaces` does NOT exist** — `list_spaces` must use an indirect approach: query Work Items with `fields[workitems]=module`, parse the `module` field (`{spaceId}/{documentName}` format), and extract unique Space IDs.
 - **Space ID is required to access documents** — guide the user to call `list_spaces` first in tool docstrings.
 - **`update_work_item` must GET current state first**, then PATCH only the changed fields.
-- **Document Recycle Bin**: Creating a Work Item with a `module` relationship places it in the Document's Recycle Bin — it is NOT visible. `create_work_item` must auto-call `POST .../documents/{documentName}/parts` to make it visible in the document body.
+- **Document Recycle Bin**: Creating a Work Item with a `module` relationship places it in the Document's Recycle Bin — it is NOT visible. After `create_work_item`, call `create_document_part` separately to insert the Work Item into the document body as a visible Part.
 - **`get_linked_work_items`** must fetch both forward links (`linkedworkitems`) and back links (`backlinkedworkitems`) and merge into a single result for complete traceability.
+- **URL encoding required** for document names with spaces (e.g., `Software%20Requirement%20Specification`).
+- **Document Part ID format**: `heading_MCPT-xxx` or `workitem_MCPT-xxx`.
+- **`document_parts` (underscore)** is the JSON:API resource type name.
 
 ---
 
@@ -296,7 +306,7 @@ All tool inputs and outputs are defined as Pydantic `BaseModel` subclasses. Add 
 | `PaginatedResult[T]` | Common response wrapper for all list tools (`items`, `total_count`, `page`, `page_size`) |
 | `ProjectSummary` | Item returned by `list_projects` (`id`, `name`) |
 | `SpaceSummary` | Item returned by `list_spaces` (`id`, `name`) |
-| `DocumentSummary` | Item returned by `list_documents` (`id`, `title`, `space_id`) |
+| `DocumentPartCreateResult` | Response from `create_document_part` (`created`, `dry_run`, `part_id`, `payload_preview`) |
 | `DocumentDetail` | Response from `get_document` (`id`, `title`, `description`, `space_id`, `project_id`) |
 | `DocumentPart` | Item returned by `get_document_parts` (`id`, `title`, `content`, `type`, `level`) |
 | `WorkItemSummary` | Item returned by `list_work_items` and `search_work_items` (`id`, `title`, `type`, `status`) |
@@ -342,7 +352,9 @@ Every tool must have a Google-style docstring with these mandatory sections:
 - When `dry_run=True`, return a payload preview without making any API call.
 - `update_work_item` must GET the current state before issuing a PATCH.
 - Convert plain text to HTML using `text_to_polarion_html()`.
-- `create_work_item`: when `document_name` is provided, auto-create a Document Part (`POST .../documents/{documentName}/parts`) after the Work Item is created. Without this step, the item lands in the Document Recycle Bin and is invisible.
+- Sequential write operations must include a 1–2 second delay to account for Polarion cluster propagation delay.
+- `create_work_item`: returns the created Work Item ID. To make it visible in a document, the user must call `create_document_part` separately afterward.
+- `create_document_part`: inserts a Work Item into the Document Body as a Part. Uses the `document_partsListPostRequest` schema with `relationships.workItem` (required) and optional `nextPart`/`previousPart` for positioning. This is the tool that solves the Recycle Bin problem.
 
 ### Error Handling in Tools
 
