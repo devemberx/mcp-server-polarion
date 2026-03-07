@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from mcp_server_polarion.utils.html import (
+    ALLOWED_ATTRS,
     ALLOWED_TAGS,
     html_to_markdown,
     markdown_to_html,
@@ -309,6 +310,31 @@ class TestSanitizeHtml:
         result = sanitize_html(html)
         assert 'href="https://example.com"' in result
         assert "Click" in result
+
+    def test_event_handler_stripped_from_allowed_tag(self) -> None:
+        """on* event handlers must be removed even from allowed tags."""
+        html = '<a href="https://example.com" onclick="evil()">Click</a>'
+        result = sanitize_html(html)
+        assert 'href="https://example.com"' in result  # safe attr kept
+        assert "onclick" not in result  # event handler removed
+
+    def test_disallowed_attr_stripped_from_allowed_tag(self) -> None:
+        """Arbitrary non-allowlisted attributes are removed from allowed tags."""
+        html = '<p class="red" style="color:red">Text</p>'
+        result = sanitize_html(html)
+        assert "class" not in result
+        assert "style" not in result
+        assert "Text" in result
+
+    def test_allowed_attrs_constant_covers_a_href(self) -> None:
+        """ALLOWED_ATTRS must permit 'href' on anchor tags."""
+        assert "href" in ALLOWED_ATTRS.get("a", frozenset())
+
+    def test_table_cell_span_attributes_preserved(self) -> None:
+        """colspan/rowspan on td/th must be preserved as they control table layout."""
+        html = '<table><tr><td colspan="2">Cell</td></tr></table>'
+        result = sanitize_html(html)
+        assert 'colspan="2"' in result
 
     def test_multiple_disallowed_tags(self) -> None:
         html = "<font><marquee>Text</marquee></font>"
