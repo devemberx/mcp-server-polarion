@@ -262,6 +262,16 @@ class TestSanitizeHtml:
         assert "<div>" in result
         assert "<p>Content</p>" in result
 
+    def test_decompose_with_nested_disallowed_child_no_error(self) -> None:
+        """decompose() removes a script subtree; the loop must not crash when it
+        subsequently encounters the already-detached child tag (font inside script)."""
+        html = "<p><script><font>nested</font></script>After</p>"
+        # Should not raise ValueError; script + its child are silently dropped
+        result = sanitize_html(html)
+        assert "<script>" not in result
+        assert "nested" not in result
+        assert "After" in result
+
     def test_empty_string(self) -> None:
         assert sanitize_html("") == ""
 
