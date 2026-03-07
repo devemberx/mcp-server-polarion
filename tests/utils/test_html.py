@@ -223,7 +223,7 @@ class TestMarkdownToHtml:
         text = 'Click <a onclick="evil()">here</a>'
         result = markdown_to_html(text)
         # html_inline rule is disabled → inline HTML is HTML-escaped, not live
-        assert '<a onclick=' not in result  # no executable attribute
+        assert "<a onclick=" not in result  # no executable attribute
         assert "&lt;a" in result  # tag is safely encoded as text
 
 
