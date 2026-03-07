@@ -33,6 +33,7 @@ htmlcov/
 
 # VS Code
 .vscode/*
+!.vscode/git_commit_guide.md
 !.vscode/mcp.json.example
 !.vscode/settings.json
 
