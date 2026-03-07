@@ -50,6 +50,16 @@ ALLOWED_TAGS: Final[frozenset[str]] = frozenset(
     }
 )
 
+# Per-tag allowlist of safe attributes.  Tags absent from this map permit NO
+# attributes.  This blocks on* event handlers (onclick, onerror, etc.) and any
+# other non-presentational attributes that could enable stored XSS when Polarion
+# renders the content in a browser.
+ALLOWED_ATTRS: Final[dict[str, frozenset[str]]] = {
+    "a": frozenset({"href", "title"}),
+    "td": frozenset({"colspan", "rowspan"}),
+    "th": frozenset({"colspan", "rowspan"}),
+}
+
 # Tags whose entire content (text + children) must be removed, not just unwrapped.
 # JS and CSS source code is never meaningful as visible Polarion text.
 _DECOMPOSE_TAGS: Final[frozenset[str]] = frozenset({"script", "style"})
@@ -108,9 +118,9 @@ def markdown_to_html(text: str) -> str:
 
 
 def sanitize_html(html: str) -> str:
-    """Remove disallowed HTML tags while preserving or discarding their content.
+    """Remove disallowed HTML tags and attributes from HTML.
 
-    Two removal strategies are applied:
+    Two tag-removal strategies are applied:
 
     * **Decompose** (tag + all content removed): ``script`` and ``style`` tags.
       Their text content is executable code or CSS — never meaningful as visible
@@ -119,12 +129,18 @@ def sanitize_html(html: str) -> str:
       Structural or presentational tags (e.g. ``section``, ``font``) are
       stripped while preserving their visible text and nested children.
 
+    Additionally, attributes on surviving tags are restricted to the
+    ``ALLOWED_ATTRS`` allowlist.  Any attribute not explicitly permitted
+    (including all ``on*`` event handlers such as ``onclick`` and ``onerror``)
+    is removed to prevent stored XSS when Polarion renders the content.
+
     Args:
-        html: Raw HTML string that may contain disallowed tags.
+        html: Raw HTML string that may contain disallowed tags or attributes.
 
     Returns:
-        Sanitized HTML containing only tags from ``ALLOWED_TAGS``.
-        Returns an empty string when given empty or whitespace-only input.
+        Sanitized HTML containing only tags from ``ALLOWED_TAGS`` with only
+        attributes from ``ALLOWED_ATTRS``.  Returns an empty string when given
+        empty or whitespace-only input.
     """
     if not html or not html.strip():
         return ""
@@ -144,5 +160,14 @@ def sanitize_html(html: str) -> str:
             tag.decompose()
         else:
             tag.unwrap()
+
+    # Strip disallowed attributes from every surviving tag.
+    # Iterating over a fresh find_all after the tag loop ensures we only visit
+    # tags that are still attached to the tree.
+    for tag in soup.find_all(True):
+        allowed_attrs: frozenset[str] = ALLOWED_ATTRS.get(tag.name, frozenset())
+        for attr in list(tag.attrs):
+            if attr not in allowed_attrs:
+                del tag.attrs[attr]
 
     return str(soup)

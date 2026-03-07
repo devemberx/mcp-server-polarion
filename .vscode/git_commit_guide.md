@@ -46,16 +46,16 @@
 
 ## Case 1: Documentation
 - INCORRECT: feat(docs): add guide (X) -> Never mix feat and docs.
-- CORRECT: docs(prompt): add mcp tool development instructions (O)
+- CORRECT: docs(meta): add mcp tool development instructions (O)
 
 ## Case 2: Tense & Punctuation
 - INCORRECT: fix(tool): Fixed the prompt injection bug. (X) -> Wrong tense, has period.
 - CORRECT: fix(tool): prevent prompt injection in search tool (O)
 
 ## Case 3: Scope & Case
-- INCORRECT: feat: add new resource (X) -> Missing scope.
-- INCORRECT: feat(RESOURCE): Add new resource (X) -> Use lowercase for scope and subject.
-- CORRECT: feat(resource): add user profile data provider (O)
+- INCORRECT: feat: add new tool (X) -> Missing scope.
+- INCORRECT: feat(TOOL): Add new tool (X) -> Use lowercase for scope and subject.
+- CORRECT: feat(tool): add user profile data provider (O)
 
 ## Case 4: Mandatory Body
 - INCORRECT: docs(git): update readme (X) -> Missing mandatory blank line and 2 bullets.
