@@ -546,6 +546,43 @@ class TestPagination:
 
             assert items == []
 
+    async def test_non_list_data_raises_polarion_error(self) -> None:
+        """``data`` that is not a list must raise ``PolarionError``, not silently stop.
+
+        Previously the implementation would ``break`` and return partial results
+        when the server response shape was unexpected.  Now it raises so callers
+        are not silently handed incomplete data.
+        """
+        with respx.mock(base_url=BASE) as mock:
+            mock.get("/projects").mock(
+                return_value=httpx.Response(
+                    200,
+                    json={"data": "unexpected-string"},
+                ),
+            )
+
+            async with PolarionClient(_config(), write_delay=0) as client:
+                with pytest.raises(
+                    PolarionError, match="'data' field is missing or not a list"
+                ):
+                    await client.get_all_pages("/projects")
+
+    async def test_missing_data_key_raises_polarion_error(self) -> None:
+        """A response with no ``data`` key at all must also raise ``PolarionError``."""
+        with respx.mock(base_url=BASE) as mock:
+            mock.get("/projects").mock(
+                return_value=httpx.Response(
+                    200,
+                    json={"meta": {"totalCount": 0}},
+                ),
+            )
+
+            async with PolarionClient(_config(), write_delay=0) as client:
+                with pytest.raises(
+                    PolarionError, match="'data' field is missing or not a list"
+                ):
+                    await client.get_all_pages("/projects")
+
     async def test_pagination_merges_params(self) -> None:
         """User-supplied params are preserved across pages."""
         with respx.mock(base_url=BASE) as mock:

@@ -243,7 +243,9 @@ class PolarionClient:
             path: URL path relative to the base API URL.
             params: Additional query parameters (merged with pagination
                 params on each request).
-            page_size: Number of items per page (max 100).
+            page_size: Requested number of items per page.  The Polarion
+                server caps this at 100 items per page; larger values are
+                allowed but will be limited server-side.
 
         Returns:
             A flat list of all ``data`` items across every page.
@@ -260,7 +262,12 @@ class PolarionClient:
 
             data = response.get("data")
             if not isinstance(data, list):
-                break
+                raise PolarionError(
+                    f"Unexpected response shape from {path}: "
+                    f"'data' field is missing or not a list "
+                    f"(got {type(data).__name__!r}).",
+                    status_code=0,
+                )
             all_items.extend(data)
 
             # Prefer ``links.next`` as the authoritative stop signal.  Only
