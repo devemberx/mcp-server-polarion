@@ -136,6 +136,10 @@ def sanitize_html(html: str) -> str:
         tag for tag in soup.find_all(True) if tag.name not in ALLOWED_TAGS
     ]
     for tag in disallowed:
+        # A parent's decompose() removes the element and all its descendants
+        # from the tree.  Skip tags that were already detached this way.
+        if tag.parent is None:
+            continue
         if tag.name in _DECOMPOSE_TAGS:
             tag.decompose()
         else:
