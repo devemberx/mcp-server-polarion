@@ -287,8 +287,7 @@ class PolarionClient:
             is_retryable = response.status_code in _RETRYABLE_STATUS_CODES
             if is_retryable and attempt < _MAX_RETRIES:
                 logger.warning(
-                    "Retryable error %d on %s %s (attempt %d/%d). "
-                    "Backing off %.1f s.",
+                    "Retryable error %d on %s %s (attempt %d/%d). Backing off %.1f s.",
                     response.status_code,
                     method,
                     path,
@@ -331,9 +330,7 @@ class PolarionClient:
         except (ValueError, UnicodeDecodeError):
             detail = response.text
 
-        message = (
-            f"Polarion API error {status} {response.reason_phrase}: {detail}"
-        )
+        message = f"Polarion API error {status} {response.reason_phrase}: {detail}"
 
         if status in {_HTTP_UNAUTHORIZED, _HTTP_FORBIDDEN}:
             return PolarionAuthError(message, status_code=status)

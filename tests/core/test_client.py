@@ -171,7 +171,8 @@ class TestErrorMapping:
         with respx.mock(base_url=BASE) as mock:
             mock.get("/projects").mock(
                 return_value=httpx.Response(
-                    401, json={"error": "Unauthorized"},
+                    401,
+                    json={"error": "Unauthorized"},
                 ),
             )
 
@@ -185,7 +186,8 @@ class TestErrorMapping:
         with respx.mock(base_url=BASE) as mock:
             mock.get("/projects").mock(
                 return_value=httpx.Response(
-                    403, json={"error": "Forbidden"},
+                    403,
+                    json={"error": "Forbidden"},
                 ),
             )
 
@@ -199,7 +201,8 @@ class TestErrorMapping:
         with respx.mock(base_url=BASE) as mock:
             mock.get("/projects/MISSING/workitems/WI-999").mock(
                 return_value=httpx.Response(
-                    404, json={"error": "Not Found"},
+                    404,
+                    json={"error": "Not Found"},
                 ),
             )
 
@@ -213,7 +216,8 @@ class TestErrorMapping:
         with respx.mock(base_url=BASE) as mock:
             mock.post("/projects/P1/workitems").mock(
                 return_value=httpx.Response(
-                    400, json={"error": "Bad Request"},
+                    400,
+                    json={"error": "Bad Request"},
                 ),
             )
 
@@ -347,7 +351,8 @@ class TestRetry:
         with respx.mock(base_url=BASE) as mock:
             route = mock.get("/projects").mock(
                 return_value=httpx.Response(
-                    400, json={"error": "Bad Request"},
+                    400,
+                    json={"error": "Bad Request"},
                 ),
             )
 
@@ -362,7 +367,8 @@ class TestRetry:
         with respx.mock(base_url=BASE) as mock:
             route = mock.get("/projects").mock(
                 return_value=httpx.Response(
-                    401, json={"error": "Unauthorized"},
+                    401,
+                    json={"error": "Unauthorized"},
                 ),
             )
 
@@ -413,7 +419,8 @@ class TestPagination:
 
             async with PolarionClient(_config(), write_delay=0) as client:
                 items = await client.get_all_pages(
-                    "/projects", page_size=100,
+                    "/projects",
+                    page_size=100,
                 )
 
             assert len(items) == 2
@@ -457,7 +464,11 @@ class TestPagination:
 
             assert len(items) == 5
             assert [i["id"] for i in items] == [
-                "P1", "P2", "P3", "P4", "P5",
+                "P1",
+                "P2",
+                "P3",
+                "P4",
+                "P5",
             ]
 
     async def test_stops_when_no_next_link(self) -> None:
@@ -558,6 +569,4 @@ class TestConfigWiring:
             polarion_url="https://example.com///",
             polarion_token="t",
         )
-        assert (
-            config.base_api_url == "https://example.com/polarion/rest/v1"
-        )
+        assert config.base_api_url == "https://example.com/polarion/rest/v1"

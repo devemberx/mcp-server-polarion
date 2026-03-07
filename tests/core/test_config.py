@@ -56,27 +56,18 @@ class TestBaseApiUrl:
             polarion_url="https://polarion.corp.com",
             polarion_token="t",
         )
-        assert (
-            config.base_api_url
-            == "https://polarion.corp.com/polarion/rest/v1"
-        )
+        assert config.base_api_url == "https://polarion.corp.com/polarion/rest/v1"
 
     def test_base_api_url_strips_single_trailing_slash(self) -> None:
         config = PolarionConfig(
             polarion_url="https://polarion.corp.com/",
             polarion_token="t",
         )
-        assert (
-            config.base_api_url
-            == "https://polarion.corp.com/polarion/rest/v1"
-        )
+        assert config.base_api_url == "https://polarion.corp.com/polarion/rest/v1"
 
     def test_base_api_url_strips_multiple_trailing_slashes(self) -> None:
         config = PolarionConfig(
             polarion_url="https://polarion.corp.com///",
             polarion_token="t",
         )
-        assert (
-            config.base_api_url
-            == "https://polarion.corp.com/polarion/rest/v1"
-        )
+        assert config.base_api_url == "https://polarion.corp.com/polarion/rest/v1"
