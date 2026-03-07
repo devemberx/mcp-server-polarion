@@ -51,7 +51,6 @@ select = ["E", "W", "F", "I", "UP", "B", "SIM", "ANN", "PL", "C4", "PTH", "RUF"]
 python_version = "3.12"
 strict = true
 warn_unreachable = true
-enable_error_codes = true
 files = ["src/mcp_server_polarion"]
 
 [tool.pytest.ini_options]
