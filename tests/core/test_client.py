@@ -10,7 +10,10 @@ import httpx
 import pytest
 import respx
 
-from mcp_server_polarion.core.client import PolarionClient
+from mcp_server_polarion.core.client import (
+    _MAX_ERROR_DETAIL_LEN,
+    PolarionClient,
+)
 from mcp_server_polarion.core.config import PolarionConfig
 from mcp_server_polarion.core.exceptions import (
     PolarionAuthError,
@@ -258,6 +261,44 @@ class TestErrorMapping:
             async with PolarionClient(_config(), write_delay=0) as client:
                 with pytest.raises(PolarionAuthError, match="Unauthorized"):
                     await client.get("/projects")
+
+    async def test_html_tags_stripped_from_error_message(self) -> None:
+        """HTML in non-JSON error body must be stripped, not exposed raw."""
+        with respx.mock(base_url=BASE) as mock:
+            mock.get("/projects").mock(
+                return_value=httpx.Response(
+                    503,
+                    text="<html><body><h1>Service Unavailable</h1></body></html>",
+                ),
+            )
+
+            async with PolarionClient(_config(), write_delay=0) as client:
+                with pytest.raises(PolarionError) as exc_info:
+                    await client.get("/projects")
+
+        message = str(exc_info.value)
+        assert "<html>" not in message
+        assert "Service Unavailable" in message
+
+    async def test_long_error_body_is_truncated(self) -> None:
+        """Very long error detail must be capped at _MAX_ERROR_DETAIL_LEN."""
+        long_text = "x" * 500
+        with respx.mock(base_url=BASE) as mock:
+            mock.get("/projects").mock(
+                return_value=httpx.Response(
+                    400,
+                    json={"message": long_text},
+                ),
+            )
+
+            async with PolarionClient(_config(), write_delay=0) as client:
+                with pytest.raises(PolarionError) as exc_info:
+                    await client.get("/projects")
+
+        # The error detail portion must not exceed the configured limit.
+        status_prefix = "Polarion API error 400 Bad Request: "
+        detail_part = str(exc_info.value)[len(status_prefix) :]
+        assert len(detail_part) <= _MAX_ERROR_DETAIL_LEN
 
 
 # ---------------------------------------------------------------------------
@@ -523,6 +564,42 @@ class TestPagination:
             url_str = str(request.url)
             assert "fields%5Bworkitems%5D=title" in url_str
             assert "page%5Bsize%5D=50" in url_str
+
+    async def test_server_capped_page_size_with_next_link_continues(self) -> None:
+        """page_size mismatch must NOT halt pagination when ``links.next`` is present.
+
+        If the server caps its page size below the caller-requested value
+        (e.g., caller asks 200, server returns 100), the old heuristic
+        ``len(data) < page_size`` would stop early and silently drop items.
+        The fix: rely on ``links.next`` as the authoritative stop signal.
+        """
+        server_items = [{"id": f"P{i}"} for i in range(100)]
+        with respx.mock(base_url=BASE) as mock:
+            mock.get("/projects").mock(
+                side_effect=[
+                    httpx.Response(
+                        200,
+                        json={
+                            "data": server_items,
+                            "links": {"self": "...", "next": "..."},
+                        },
+                    ),
+                    httpx.Response(
+                        200,
+                        json={
+                            "data": [{"id": "P100"}],
+                            "links": {"self": "..."},
+                        },
+                    ),
+                ],
+            )
+
+            async with PolarionClient(_config(), write_delay=0) as client:
+                # Caller requests page_size=200, but server returns only 100.
+                items = await client.get_all_pages("/projects", page_size=200)
+
+        # Both pages must be fetched — no silent drop.
+        assert len(items) == 101
 
 
 # ---------------------------------------------------------------------------

@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
+import types
 from typing import Final
 
 import httpx
@@ -47,6 +49,56 @@ _HTTP_NO_CONTENT: Final[int] = 204
 _HTTP_UNAUTHORIZED: Final[int] = 401
 _HTTP_FORBIDDEN: Final[int] = 403
 _HTTP_NOT_FOUND: Final[int] = 404
+
+# Error detail ---------------------------------------------------------------
+_MAX_ERROR_DETAIL_LEN: Final[int] = 200
+
+
+def _extract_json_api_detail(body: object) -> str:
+    """Extract a concise detail string from a JSON:API response body.
+
+    Prefers ``errors[*].detail`` (or ``errors[*].title``) from the
+    JSON:API error object array.  Falls back to a truncated string
+    representation of the full body.
+
+    Args:
+        body: Decoded JSON response body.
+
+    Returns:
+        A human-readable error detail string, at most
+        ``_MAX_ERROR_DETAIL_LEN`` characters.
+    """
+    if not isinstance(body, dict):
+        return str(body)[:_MAX_ERROR_DETAIL_LEN]
+    errors = body.get("errors")
+    if isinstance(errors, list) and errors:
+        details = [
+            str(e.get("detail") or e.get("title") or "")
+            for e in errors
+            if isinstance(e, dict)
+        ]
+        text = "; ".join(d for d in details if d)
+        if text:
+            return text[:_MAX_ERROR_DETAIL_LEN]
+    return str(body)[:_MAX_ERROR_DETAIL_LEN]
+
+
+def _sanitize_error_text(raw: str) -> str:
+    """Strip HTML tags and truncate raw error text for safe display.
+
+    Args:
+        raw: Raw response body text (may contain HTML).
+
+    Returns:
+        Plain text with HTML tags removed, at most
+        ``_MAX_ERROR_DETAIL_LEN`` characters.  A trailing ellipsis (…)
+        is appended when the text is truncated.
+    """
+    clean = re.sub(r"<[^>]+>", " ", raw)
+    clean = " ".join(clean.split())
+    if len(clean) > _MAX_ERROR_DETAIL_LEN:
+        return clean[:_MAX_ERROR_DETAIL_LEN] + "\u2026"
+    return clean
 
 
 class PolarionClient:
@@ -98,7 +150,7 @@ class PolarionClient:
         self,
         exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
-        exc_tb: object | None,
+        exc_tb: types.TracebackType | None,
     ) -> None:
         await self.close()
 
@@ -207,16 +259,19 @@ class PolarionClient:
             response = await self.get(path, params=merged_params)
 
             data = response.get("data")
-            if isinstance(data, list):
-                all_items.extend(data)
-                if len(data) < page_size:
-                    break
-            else:
+            if not isinstance(data, list):
                 break
+            all_items.extend(data)
 
-            # Also stop when the server signals no next page.
+            # Prefer ``links.next`` as the authoritative stop signal.  Only
+            # fall back to the partial-page heuristic when the server omits
+            # the ``links`` object entirely, because the server may cap
+            # page sizes below the caller-requested value.
             links = response.get("links")
-            if isinstance(links, dict) and "next" not in links:
+            if isinstance(links, dict):
+                if "next" not in links:
+                    break
+            elif len(data) < page_size:
                 break
 
             page_number += 1
@@ -326,9 +381,9 @@ class PolarionClient:
         """
         status = response.status_code
         try:
-            detail = response.json()
+            detail: str = _extract_json_api_detail(response.json())
         except (ValueError, UnicodeDecodeError):
-            detail = response.text
+            detail = _sanitize_error_text(response.text)
 
         message = f"Polarion API error {status} {response.reason_phrase}: {detail}"
 

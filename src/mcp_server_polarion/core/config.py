@@ -14,7 +14,8 @@ class PolarionConfig(BaseSettings):
     """Environment-based configuration for the Polarion MCP server.
 
     Attributes:
-        polarion_url: Base URL of the Polarion instance (no trailing slash).
+        polarion_url: Base URL of the Polarion instance.  Trailing slashes
+            are accepted and will be stripped automatically.
         polarion_token: Personal access token for Bearer authentication.
     """
 
@@ -24,7 +25,10 @@ class PolarionConfig(BaseSettings):
     )
 
     polarion_url: str = Field(
-        description="Base URL of the Polarion instance (no trailing slash).",
+        description=(
+            "Base URL of the Polarion instance. "
+            "Trailing slashes are accepted and will be stripped automatically."
+        ),
     )
     polarion_token: str = Field(
         description="Personal access token for Polarion REST API.",
