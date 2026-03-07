@@ -50,8 +50,16 @@ ALLOWED_TAGS: Final[frozenset[str]] = frozenset(
     }
 )
 
+# Tags whose entire content (text + children) must be removed, not just unwrapped.
+# JS and CSS source code is never meaningful as visible Polarion text.
+_DECOMPOSE_TAGS: Final[frozenset[str]] = frozenset({"script", "style"})
+
 # markdown-it-py renderer: CommonMark base + GFM tables.
-_md_renderer: Final[MarkdownIt] = MarkdownIt("commonmark").enable("table")
+# html_block and html_inline are disabled so that raw HTML embedded in
+# LLM/user-supplied Markdown cannot bypass sanitization.
+_md_renderer: Final[MarkdownIt] = (
+    MarkdownIt("commonmark").disable(["html_block", "html_inline"]).enable("table")
+)
 
 
 def html_to_markdown(html: str) -> str:
@@ -100,12 +108,16 @@ def markdown_to_html(text: str) -> str:
 
 
 def sanitize_html(html: str) -> str:
-    """Remove disallowed HTML tags while preserving their inner content.
+    """Remove disallowed HTML tags while preserving or discarding their content.
 
-    Tags not in ``ALLOWED_TAGS`` are *unwrapped* — the tag itself is
-    removed but its children (text and nested elements) are kept in
-    place.  This prevents injection of scripts, styles, or other
-    dangerous elements into Polarion without losing visible content.
+    Two removal strategies are applied:
+
+    * **Decompose** (tag + all content removed): ``script`` and ``style`` tags.
+      Their text content is executable code or CSS — never meaningful as visible
+      Polarion text — so it must be discarded entirely.
+    * **Unwrap** (tag removed, content kept): all other disallowed tags.
+      Structural or presentational tags (e.g. ``section``, ``font``) are
+      stripped while preserving their visible text and nested children.
 
     Args:
         html: Raw HTML string that may contain disallowed tags.
@@ -119,12 +131,14 @@ def sanitize_html(html: str) -> str:
 
     soup = BeautifulSoup(html, "html.parser")
 
-    # Iterate over all tags; unwrap those that are not allowed.
-    # We must collect tags first because unwrap() modifies the tree.
+    # Collect first — both decompose() and unwrap() mutate the tree in-place.
     disallowed: list[Tag] = [
         tag for tag in soup.find_all(True) if tag.name not in ALLOWED_TAGS
     ]
     for tag in disallowed:
-        tag.unwrap()
+        if tag.name in _DECOMPOSE_TAGS:
+            tag.decompose()
+        else:
+            tag.unwrap()
 
     return str(soup)

@@ -210,6 +210,22 @@ class TestMarkdownToHtml:
     def test_only_newlines(self) -> None:
         assert markdown_to_html("\n\n\n") == ""
 
+    def test_html_block_not_passed_through(self) -> None:
+        """Raw HTML blocks in Markdown must be escaped, not injected as live HTML."""
+        text = "<script>alert('xss')</script>\n\nSafe"
+        result = markdown_to_html(text)
+        # html_block rule is disabled → the tag is HTML-escaped, never a live element
+        assert "<script>" not in result  # no executable script tag
+        assert "&lt;script&gt;" in result  # tag is safely encoded as text
+
+    def test_html_inline_not_passed_through(self) -> None:
+        """Inline raw HTML in Markdown must be escaped, not injected as live HTML."""
+        text = 'Click <a onclick="evil()">here</a>'
+        result = markdown_to_html(text)
+        # html_inline rule is disabled → inline HTML is HTML-escaped, not live
+        assert '<a onclick=' not in result  # no executable attribute
+        assert "&lt;a" in result  # tag is safely encoded as text
+
 
 # ---------------------------------------------------------------------------
 # sanitize_html
@@ -223,16 +239,20 @@ class TestSanitizeHtml:
         html = "<p>Hello <strong>world</strong></p>"
         assert sanitize_html(html) == html
 
-    def test_disallowed_tag_unwrapped(self) -> None:
+    def test_script_tag_and_content_removed(self) -> None:
+        """script content (JS code) must be fully discarded, not leaked as text."""
         html = "<p><script>alert('xss')</script>Safe text</p>"
         result = sanitize_html(html)
         assert "<script>" not in result
+        assert "alert" not in result  # JS code must not appear as visible text
         assert "Safe text" in result
 
-    def test_style_tag_removed(self) -> None:
+    def test_style_tag_and_content_removed(self) -> None:
+        """style content (CSS) must be fully discarded, not leaked as text."""
         html = "<style>.red{color:red}</style><p>Visible</p>"
         result = sanitize_html(html)
         assert "<style>" not in result
+        assert "color:red" not in result  # CSS must not appear as visible text
         assert "Visible" in result
 
     def test_nested_disallowed_tags(self) -> None:
