@@ -14,7 +14,7 @@ These rules apply to **every file** in the codebase. Violating any of them will 
 | 6 | **All tool functions must be `async def`** — Polarion API calls use httpx async. |
 | 7 | **Tool docstrings are the LLM's only manual** — Google-style with Args / Returns / Raises. |
 | 8 | **Never expose raw HTML to the AI** — convert via `html_to_markdown()` in read tools. |
-| 9 | **Never send unsanitized HTML to Polarion** — use `markdown_to_html()` or `sanitize_html()` in write tools. |
+| 9 | **Never send unsanitized HTML to Polarion** — use `markdown_to_html()` or `sanitize_html()` in write tools. `sanitize_html()` also validates URL schemes (only `http`, `https`, `mailto` allowed in `href`). |
 | 10 | **Every list tool must support pagination** — `page_size` and `page_number` with `Field()` constraints. |
 | 11 | **Every write tool must support `dry_run`** — preview payload without mutating. |
 | 12 | **Secrets in `.env` only** — never hardcode credentials. Load via `pydantic-settings`. |
@@ -204,8 +204,8 @@ mcp-server-polarion/
 
 **`utils/html.py`**
 - `html_to_markdown(html: str) -> str` — converts Polarion HTML to Markdown via `markdownify`. Preserves headings, lists, tables, and inline formatting as Markdown syntax. LLMs process Markdown far more efficiently than raw HTML.
-- `markdown_to_html(md: str) -> str` — converts Markdown to Polarion-compatible HTML via ``markdown-it-py`` (CommonMark + GFM tables). Handles 2-space nested lists correctly (critical for LLM output). LLMs write Markdown naturally; this converts their output to the HTML format Polarion requires.
-- `sanitize_html(html: str) -> str` — unwraps any tags not in the `ALLOWED_TAGS` frozenset.
+- `markdown_to_html(text: str) -> str` — converts Markdown to Polarion-compatible HTML via ``markdown-it-py`` (CommonMark + GFM tables). Handles 2-space nested lists correctly (critical for LLM output). LLMs write Markdown naturally; this converts their output to the HTML format Polarion requires.
+- `sanitize_html(html: str) -> str` — removes disallowed tags (decomposing `script`/`style` entirely, unwrapping others) and strips unsafe attributes. Validates `href` URLs against a safe-protocol allowlist (`http`, `https`, `mailto`) to prevent `javascript:` URI injection.
 - `ALLOWED_TAGS`: `p, br, b, i, u, strong, em, ul, ol, li, h1-h4, table, tr, td, th, thead, tbody, a, span, div, pre, code`.
 
 ---

@@ -336,6 +336,44 @@ class TestSanitizeHtml:
         result = sanitize_html(html)
         assert 'colspan="2"' in result
 
+    def test_javascript_href_stripped(self) -> None:
+        """javascript: URIs in href must be removed to prevent stored XSS."""
+        html = "<a href=\"javascript:alert('xss')\">Click</a>"
+        result = sanitize_html(html)
+        assert "javascript:" not in result
+        assert "Click" in result  # anchor text preserved
+
+    def test_data_href_stripped(self) -> None:
+        """data: URIs in href must be removed."""
+        html = '<a href="data:text/html,<script>evil()</script>">Link</a>'
+        result = sanitize_html(html)
+        assert "data:" not in result
+        assert "Link" in result
+
+    def test_vbscript_href_stripped(self) -> None:
+        """vbscript: URIs in href must be removed."""
+        html = '<a href="vbscript:MsgBox">Link</a>'
+        result = sanitize_html(html)
+        assert "vbscript:" not in result
+
+    def test_safe_http_href_preserved(self) -> None:
+        """http:// and https:// hrefs must be preserved."""
+        html = '<a href="https://example.com">Safe</a>'
+        result = sanitize_html(html)
+        assert 'href="https://example.com"' in result
+
+    def test_mailto_href_preserved(self) -> None:
+        """mailto: hrefs must be preserved."""
+        html = '<a href="mailto:user@example.com">Email</a>'
+        result = sanitize_html(html)
+        assert 'href="mailto:user@example.com"' in result
+
+    def test_relative_href_preserved(self) -> None:
+        """Relative URLs (no scheme) must be preserved."""
+        html = '<a href="/docs/readme">Docs</a>'
+        result = sanitize_html(html)
+        assert 'href="/docs/readme"' in result
+
     def test_multiple_disallowed_tags(self) -> None:
         html = "<font><marquee>Text</marquee></font>"
         result = sanitize_html(html)

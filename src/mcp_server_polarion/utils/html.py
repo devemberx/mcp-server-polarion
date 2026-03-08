@@ -64,6 +64,10 @@ ALLOWED_ATTRS: Final[dict[str, frozenset[str]]] = {
 # JS and CSS source code is never meaningful as visible Polarion text.
 _DECOMPOSE_TAGS: Final[frozenset[str]] = frozenset({"script", "style"})
 
+# URL schemes considered safe for href attributes.  Any other scheme
+# (javascript:, data:, vbscript:, etc.) is stripped to prevent stored XSS.
+_SAFE_URL_SCHEMES: Final[frozenset[str]] = frozenset({"http", "https", "mailto"})
+
 # markdown-it-py renderer: CommonMark base + GFM tables.
 # html_block and html_inline are disabled so that raw HTML embedded in
 # LLM/user-supplied Markdown cannot bypass sanitization.
@@ -134,6 +138,10 @@ def sanitize_html(html: str) -> str:
     (including all ``on*`` event handlers such as ``onclick`` and ``onerror``)
     is removed to prevent stored XSS when Polarion renders the content.
 
+    ``href`` values are validated against a safe-protocol allowlist
+    (``http``, ``https``, ``mailto``).  Links with dangerous schemes such
+    as ``javascript:`` or ``data:`` have their ``href`` attribute removed.
+
     Args:
         html: Raw HTML string that may contain disallowed tags or attributes.
 
@@ -169,5 +177,15 @@ def sanitize_html(html: str) -> str:
         for attr in list(tag.attrs):
             if attr not in allowed_attrs:
                 del tag.attrs[attr]
+
+    # Validate href URLs against safe-protocol allowlist.
+    for anchor in soup.find_all("a", href=True):
+        raw_href = anchor.get("href", "")
+        href = raw_href if isinstance(raw_href, str) else ""
+        href = href.strip()
+        if ":" in href:
+            scheme = href.split(":", maxsplit=1)[0].lower()
+            if scheme not in _SAFE_URL_SCHEMES:
+                del anchor["href"]
 
     return str(soup)
