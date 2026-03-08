@@ -13,8 +13,8 @@ These rules apply to **every file** in the codebase. Violating any of them will 
 | 5 | **Return Pydantic models, not `dict`** — all tool inputs and outputs are Pydantic models. |
 | 6 | **All tool functions must be `async def`** — Polarion API calls use httpx async. |
 | 7 | **Tool docstrings are the LLM's only manual** — Google-style with Args / Returns / Raises. |
-| 8 | **Never expose raw HTML to the AI** — convert via `html_to_text()` in read tools. |
-| 9 | **Never send unsanitized HTML to Polarion** — use `text_to_polarion_html()` or `sanitize_html()` in write tools. |
+| 8 | **Never expose raw HTML to the AI** — convert via `html_to_markdown()` in read tools. |
+| 9 | **Never send unsanitized HTML to Polarion** — use `markdown_to_html()` or `sanitize_html()` in write tools. `sanitize_html()` also validates URL schemes (only `http`, `https`, `mailto` allowed in `href`). |
 | 10 | **Every list tool must support pagination** — `page_size` and `page_number` with `Field()` constraints. |
 | 11 | **Every write tool must support `dry_run`** — preview payload without mutating. |
 | 12 | **Secrets in `.env` only** — never hardcode credentials. Load via `pydantic-settings`. |
@@ -32,7 +32,7 @@ A Model Context Protocol (MCP) server for reading, analyzing, and writing docume
 | Framework | FastMCP 2.0 (`fastmcp>=2.0,<3`) |
 | Transport | stdio (`uvx mcp-server-polarion`) |
 | HTTP Client | httpx (async) |
-| HTML Processing | BeautifulSoup4 |
+| HTML Processing | markdownify (HTML→MD) + markdown-it-py (MD→HTML) + BeautifulSoup4 (sanitize) |
 | Validation | Pydantic v2 |
 | Config | pydantic-settings (env vars) |
 | Python | **3.12+** |
@@ -46,7 +46,7 @@ A Model Context Protocol (MCP) server for reading, analyzing, and writing docume
 ## Tooling: `uv`
 
 ```bash
-uv add "fastmcp>=2.0,<3" httpx "beautifulsoup4>=4.12" pydantic "pydantic-settings>=2.0"
+uv add "fastmcp>=2.0,<3" httpx "beautifulsoup4>=4.12" pydantic "pydantic-settings>=2.0" markdownify markdown-it-py
 uv add --dev pytest pytest-asyncio respx ruff mypy
 uv run mcp-server-polarion    # local run
 uv run pytest                 # tests
@@ -85,8 +85,8 @@ mcp-server-polarion/
 │       │   ├── exceptions.py     # PolarionError / PolarionAuthError / PolarionNotFoundError
 │       │   └── logging.py        # setup_logging() → stderr only
 │       ├── utils/                # Pure utility functions
-│       │   ├── __init__.py       # Re-exports: html_to_text, text_to_polarion_html, sanitize_html
-│       │   └── html.py           # HTML ↔ plain text conversion
+│       │   ├── __init__.py       # Re-exports: html_to_markdown, markdown_to_html, sanitize_html
+│       │   └── html.py           # HTML ↔ Markdown conversion + HTML sanitization
 │       └── tools/                # MCP tool definitions
 │           ├── __init__.py       # Imports read & write to register tools on mcp
 │           ├── read.py           # 8 read tools
@@ -100,7 +100,7 @@ mcp-server-polarion/
     │   └── test_config.py        # Config loading, env var validation
     ├── utils/
     │   ├── __init__.py
-    │   └── test_html.py          # HTML ↔ text conversion edge cases
+    │   └── test_html.py          # HTML ↔ Markdown conversion edge cases
     └── tools/
         ├── __init__.py
         ├── test_read.py          # 8 read tools
@@ -114,12 +114,12 @@ mcp-server-polarion/
 - `tools/__init__.py` runs `import mcp_server_polarion.tools.read` and `import mcp_server_polarion.tools.write` to register all tools.
 - `server.py` calls `import mcp_server_polarion.tools` at the very bottom of the module (to avoid circular imports).
 - `core/__init__.py` re-exports `PolarionClient`, `PolarionConfig`, and exception classes.
-- `utils/__init__.py` re-exports `html_to_text`, `text_to_polarion_html`, and `sanitize_html`.
+- `utils/__init__.py` re-exports `html_to_markdown`, `markdown_to_html`, and `sanitize_html`.
 
 **Import examples:**
 - `from mcp_server_polarion.core import PolarionClient, PolarionConfig`
 - `from mcp_server_polarion.core.exceptions import PolarionNotFoundError`
-- `from mcp_server_polarion.utils import html_to_text, text_to_polarion_html`
+- `from mcp_server_polarion.utils import html_to_markdown, markdown_to_html`
 
 ---
 
@@ -203,9 +203,9 @@ mcp-server-polarion/
 ### utils/ — Pure Utility Functions
 
 **`utils/html.py`**
-- `html_to_text(html: str) -> str` — BeautifulSoup `get_text(separator="\n", strip=True)`.
-- `text_to_polarion_html(text: str) -> str` — wraps blank-line-separated paragraphs in `<p>` tags; converts single line breaks to `<br/>`.
-- `sanitize_html(html: str) -> str` — unwraps any tags not in the `ALLOWED_TAGS` frozenset.
+- `html_to_markdown(html: str) -> str` — converts Polarion HTML to Markdown via `markdownify`. Preserves headings, lists, tables, and inline formatting as Markdown syntax. LLMs process Markdown far more efficiently than raw HTML.
+- `markdown_to_html(text: str) -> str` — converts Markdown to Polarion-compatible HTML via ``markdown-it-py`` (CommonMark + GFM tables). Handles 2-space nested lists correctly (critical for LLM output). LLMs write Markdown naturally; this converts their output to the HTML format Polarion requires.
+- `sanitize_html(html: str) -> str` — removes disallowed tags (decomposing `script`/`style` entirely, unwrapping others) and strips unsafe attributes. Validates `href` URLs against a safe-protocol allowlist (`http`, `https`, `mailto`) to prevent `javascript:` URI injection.
 - `ALLOWED_TAGS`: `p, br, b, i, u, strong, em, ul, ol, li, h1-h4, table, tr, td, th, thead, tbody, a, span, div, pre, code`.
 
 ---
@@ -343,7 +343,7 @@ Every tool must have a Google-style docstring with these mandatory sections:
 
 - Always return Pydantic models — never expose raw API responses.
 - Wrap results in `PaginatedResult[T]` for pagination metadata.
-- Convert HTML descriptions via `html_to_text()` before returning.
+- Convert HTML descriptions via `html_to_markdown()` before returning.
 - Use sparse fieldsets (e.g., `fields[workitems]=title,description,type,status`).
 
 ### Write Tool Rules
@@ -351,7 +351,7 @@ Every tool must have a Google-style docstring with these mandatory sections:
 - Every write tool must include `dry_run: bool = Field(default=False)`.
 - When `dry_run=True`, return a payload preview without making any API call.
 - `update_work_item` must GET the current state before issuing a PATCH.
-- Convert plain text to HTML using `text_to_polarion_html()`.
+- Convert Markdown input to HTML using `markdown_to_html()`. LLMs write Markdown naturally; accept both Markdown and plain text.
 - Sequential write operations must include a 1–2 second delay to account for Polarion cluster propagation delay.
 - `create_work_item`: returns the created Work Item ID. To make it visible in a document, the user must call `create_document_part` separately afterward.
 - `create_document_part`: inserts a Work Item into the Document Body as a Part. Uses the `document_partsListPostRequest` schema with `relationships.workItem` (required) and optional `nextPart`/`previousPart` for positioning. This is the tool that solves the Recycle Bin problem.
