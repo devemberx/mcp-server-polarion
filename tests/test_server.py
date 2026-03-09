@@ -72,9 +72,7 @@ class TestLifespan:
                     pass
 
             connect_calls = [
-                c
-                for c in mock_logger.info.call_args_list
-                if "Connecting" in str(c)
+                c for c in mock_logger.info.call_args_list if "Connecting" in str(c)
             ]
             assert len(connect_calls) >= 1
 
