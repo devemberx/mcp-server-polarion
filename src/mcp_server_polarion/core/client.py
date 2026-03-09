@@ -154,6 +154,11 @@ class PolarionClient:
     ) -> None:
         await self.close()
 
+    @property
+    def is_closed(self) -> bool:
+        """Whether the underlying HTTP transport has been closed."""
+        return self._client.is_closed
+
     async def close(self) -> None:
         """Close the underlying ``httpx.AsyncClient``."""
         await self._client.aclose()

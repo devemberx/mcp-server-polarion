@@ -40,14 +40,14 @@ class TestLifespan:
         with patch.dict("os.environ", _FAKE_ENV, clear=False):
             async with _lifespan(mcp) as ctx:
                 client = ctx["polarion_client"]
-                assert not client._client.is_closed
+                assert not client.is_closed
 
     async def test_lifespan_client_is_closed_after_context(self) -> None:
         with patch.dict("os.environ", _FAKE_ENV, clear=False):
             async with _lifespan(mcp) as ctx:
                 client = ctx["polarion_client"]
 
-            assert client._client.is_closed
+            assert client.is_closed
 
     async def test_lifespan_context_type(self) -> None:
         with patch.dict("os.environ", _FAKE_ENV, clear=False):
@@ -71,15 +71,15 @@ class TestLifespan:
                 async with _lifespan(mcp) as _ctx:
                     pass
 
-            connect_calls = [
-                c for c in mock_logger.info.call_args_list if "Connecting" in str(c)
-            ]
-            assert len(connect_calls) >= 1
+            mock_logger.info.assert_any_call(
+                "Connecting to Polarion at %s",
+                _FAKE_ENV["POLARION_URL"],
+            )
 
     async def test_lifespan_client_has_correct_base_url(self) -> None:
         with patch.dict("os.environ", _FAKE_ENV, clear=False):
             async with _lifespan(mcp) as ctx:
                 client = ctx["polarion_client"]
-                base_url = str(client._client.base_url)
+                base_url = str(client.base_url)
                 assert "polarion.example.com" in base_url
                 assert "polarion/rest/v1" in base_url

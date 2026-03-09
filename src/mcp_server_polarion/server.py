@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import TypedDict
 
 from fastmcp import FastMCP
 
@@ -14,7 +15,11 @@ from mcp_server_polarion.core.logging import setup_logging
 
 logger = logging.getLogger("mcp_server_polarion.server")
 
-type LifespanContext = dict[str, PolarionClient]
+
+class LifespanContext(TypedDict):
+    """Typed context yielded by the server lifespan."""
+
+    polarion_client: PolarionClient
 
 
 @asynccontextmanager

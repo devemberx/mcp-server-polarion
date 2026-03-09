@@ -653,13 +653,13 @@ class TestContextManager:
             assert client.base_url.endswith("/polarion/rest/v1")
 
         # After closing, the underlying httpx client is closed.
-        assert client._client.is_closed
+        assert client.is_closed
 
     async def test_manual_close(self) -> None:
         """Calling ``close()`` directly also shuts down the client."""
         client = PolarionClient(_config(), write_delay=0)
         await client.close()
-        assert client._client.is_closed
+        assert client.is_closed
 
 
 # ---------------------------------------------------------------------------
