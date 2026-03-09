@@ -15,7 +15,15 @@ Models are organised into three categories:
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+# Recursive JSON-safe type alias.  Constrains payload previews and change
+# maps to values that are guaranteed to round-trip through JSON-RPC.
+type JsonValue = (
+    str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
+)
 
 # ---------------------------------------------------------------------------
 # Generic pagination wrapper
@@ -113,7 +121,7 @@ class DocumentPart(BaseModel):
             "Empty string when the part has no body content."
         ),
     )
-    type: str = Field(
+    type: Literal["heading", "workitem"] = Field(
         description="Part type: 'heading' or 'workitem'.",
     )
     level: int = Field(
@@ -172,7 +180,7 @@ class LinkedWorkItemSummary(BaseModel):
     role: str = Field(
         description=("Link role identifier (e.g. 'parent', 'relates_to', 'verifies')."),
     )
-    direction: str = Field(
+    direction: Literal["forward", "back"] = Field(
         description="Link direction: 'forward' or 'back'.",
     )
     suspect: bool = Field(
@@ -223,10 +231,11 @@ class WorkItemCreateResult(BaseModel):
             "ID of the created work item (e.g. 'MCPT-042'). None when dry_run is True."
         ),
     )
-    payload_preview: dict[str, object] | None = Field(
+    payload_preview: dict[str, JsonValue] | None = Field(
         description=(
             "JSON:API request payload that was (or would be) sent. "
-            "Present for both real and dry-run operations."
+            "Usually populated for dry-run previews and may be None "
+            "after a successful real operation."
         ),
     )
 
@@ -248,7 +257,7 @@ class WorkItemUpdateResult(BaseModel):
             "Included so the LLM can verify what changed."
         ),
     )
-    changes: dict[str, object] = Field(
+    changes: dict[str, JsonValue] = Field(
         description="Map of field names to their new values in the PATCH payload.",
     )
 
@@ -267,10 +276,11 @@ class CommentResult(BaseModel):
     comment_id: str | None = Field(
         description=("ID of the created comment. None when dry_run is True."),
     )
-    payload_preview: dict[str, object] | None = Field(
+    payload_preview: dict[str, JsonValue] | None = Field(
         description=(
             "JSON:API request payload that was (or would be) sent. "
-            "Present for both real and dry-run operations."
+            "Usually populated for dry-run previews and may be None "
+            "after a successful real operation."
         ),
     )
 
@@ -286,10 +296,11 @@ class LinkResult(BaseModel):
     dry_run: bool = Field(
         description="Whether this was a dry-run (preview only, no mutation).",
     )
-    payload_preview: dict[str, object] | None = Field(
+    payload_preview: dict[str, JsonValue] | None = Field(
         description=(
             "JSON:API request payload that was (or would be) sent. "
-            "Present for both real and dry-run operations."
+            "Usually populated for dry-run previews and may be None "
+            "after a successful real operation."
         ),
     )
 
@@ -313,10 +324,11 @@ class DocumentPartCreateResult(BaseModel):
             "None when dry_run is True."
         ),
     )
-    payload_preview: dict[str, object] | None = Field(
+    payload_preview: dict[str, JsonValue] | None = Field(
         description=(
             "JSON:API request payload that was (or would be) sent. "
-            "Present for both real and dry-run operations."
+            "Usually populated for dry-run previews and may be None "
+            "after a successful real operation."
         ),
     )
 
@@ -326,6 +338,7 @@ __all__: list[str] = [
     "DocumentDetail",
     "DocumentPart",
     "DocumentPartCreateResult",
+    "JsonValue",
     "LinkResult",
     "LinkedWorkItemSummary",
     "LinkedWorkItemsList",

@@ -201,6 +201,16 @@ class TestDocumentPart:
         assert data["id"] == "heading_MCPT-010"
         assert data["level"] == 2
 
+    def test_invalid_type_rejected(self):
+        with pytest.raises(ValidationError):
+            DocumentPart(
+                id="part-1",
+                title="Bad",
+                content="",
+                type="invalid",
+                level=0,
+            )
+
 
 # ---------------------------------------------------------------------------
 # WorkItemSummary
@@ -295,6 +305,16 @@ class TestLinkedWorkItemSummary:
         )
         assert link.suspect is True
         assert link.direction == "back"
+
+    def test_invalid_direction_rejected(self):
+        with pytest.raises(ValidationError):
+            LinkedWorkItemSummary(
+                id="MCPT-004",
+                title="Bad",
+                role="parent",
+                direction="sideways",
+                suspect=False,
+            )
 
 
 # ---------------------------------------------------------------------------

@@ -13,7 +13,7 @@ This skill automates the reflection of GitHub Pull Request reviews by analyzing 
 3. **Apply Changes**: Modify the source code based on the approved feedback.
    - If a comment is ambiguous, use the appropriate PR tool to ask the reviewer for clarification in English.
 4. **Validation Pipeline**: Execute the following quality checks in order:
-   - **Lint & Format**: Run `ruff format` followed by `ruff --check` to ensure style compliance.
+   - **Lint & Format**: Run `ruff format --check .` and `ruff check .` to match the CI lint step and ensure style compliance.
    - **Type Integrity**: Run `mypy` to verify static type safety. (--strict is required for all type checks)
    - **Functional Testing**: Run `pytest` to ensure no regressions were introduced.
    - *Error Handling*: If any validation fails, analyze the output, fix the code, and restart the validation pipeline.
