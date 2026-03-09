@@ -38,4 +38,4 @@ class PolarionConfig(BaseSettings):
     @property
     def base_api_url(self) -> str:
         """Return the full REST API v1 base URL."""
-        return f"{self.polarion_url.rstrip('/')}/rest/v1"
+        return f"{self.polarion_url.rstrip('/')}/polarion/rest/v1"

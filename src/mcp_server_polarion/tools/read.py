@@ -8,8 +8,7 @@ their relationships.  Every tool returns Pydantic models -- never raw
 
 from __future__ import annotations
 
-import logging
-from typing import Final
+from typing import Final, Literal
 from urllib.parse import quote
 
 from fastmcp import Context
@@ -34,8 +33,6 @@ from mcp_server_polarion.models import (
 )
 from mcp_server_polarion.server import mcp
 from mcp_server_polarion.utils import html_to_markdown
-
-logger: Final = logging.getLogger("mcp_server_polarion.tools.read")
 
 # Default page size -- Polarion caps at 100.
 _DEFAULT_PAGE_SIZE: Final[int] = 100
@@ -486,7 +483,7 @@ async def get_document_parts(  # noqa: PLR0913
             part_id = _safe_str(item.get("id", ""))
 
             # Determine type from ID prefix.
-            part_type: str = "workitem"
+            part_type: Literal["heading", "workitem"] = "workitem"
             if part_id.startswith("heading_"):
                 part_type = "heading"
 
@@ -514,7 +511,7 @@ async def get_document_parts(  # noqa: PLR0913
                     id=part_id,
                     title=_safe_str(attrs.get("title", "")),
                     content=html_to_markdown(content_html),
-                    type=part_type,  # type: ignore[arg-type]
+                    type=part_type,
                     level=level,
                 )
             )
@@ -914,7 +911,7 @@ def _parse_work_item_summaries(
 def _parse_linked_items(
     response: dict[str, object],
     *,
-    direction: str,
+    direction: Literal["forward", "back"],
 ) -> list[LinkedWorkItemSummary]:
     """Parse linked work items from a JSON:API response.
 
@@ -953,7 +950,7 @@ def _parse_linked_items(
                 id=wi_id,
                 title=_safe_str(attrs.get("title", "")),
                 role=role,
-                direction=direction,  # type: ignore[arg-type]
+                direction=direction,
                 suspect=suspect,
             )
         )
