@@ -26,7 +26,8 @@ class PolarionConfig(BaseSettings):
 
     polarion_url: str = Field(
         description=(
-            "Base URL of the Polarion instance. "
+            "Base URL of the Polarion instance including the application "
+            "context path (e.g. 'https://example.com/polarion'). "
             "Trailing slashes are accepted and will be stripped automatically."
         ),
     )
@@ -37,4 +38,4 @@ class PolarionConfig(BaseSettings):
     @property
     def base_api_url(self) -> str:
         """Return the full REST API v1 base URL."""
-        return f"{self.polarion_url.rstrip('/')}/polarion/rest/v1"
+        return f"{self.polarion_url.rstrip('/')}/rest/v1"
