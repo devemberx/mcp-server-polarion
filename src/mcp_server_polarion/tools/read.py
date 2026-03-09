@@ -156,13 +156,10 @@ async def list_projects(
         )
     except PolarionAuthError as exc:
         raise PermissionError(
-            "Cannot list projects -- "
-            "check your POLARION_TOKEN permissions."
+            "Cannot list projects -- check your POLARION_TOKEN permissions."
         ) from exc
     except PolarionError as exc:
-        raise RuntimeError(
-            f"Failed to list projects: {exc.message}"
-        ) from exc
+        raise RuntimeError(f"Failed to list projects: {exc.message}") from exc
 
     data = response.get("data", [])
     items: list[ProjectSummary] = []
@@ -250,13 +247,11 @@ async def list_spaces(
         ) from exc
     except PolarionAuthError as exc:
         raise PermissionError(
-            "Cannot list spaces -- "
-            "check your POLARION_TOKEN permissions."
+            "Cannot list spaces -- check your POLARION_TOKEN permissions."
         ) from exc
     except PolarionError as exc:
         raise RuntimeError(
-            f"Failed to list spaces for project "
-            f"'{project_id}': {exc.message}"
+            f"Failed to list spaces for project '{project_id}': {exc.message}"
         ) from exc
 
     # Parse module from relationships to extract unique space IDs.
@@ -277,9 +272,7 @@ async def list_spaces(
         if isinstance(mod_id, str) and mod_id:
             parts = mod_id.split("/")
             # Format: "projectId/spaceId/docName" → parts[1] is spaceId
-            if len(parts) >= 3:
-                space_ids.add(parts[1])
-            elif len(parts) == 2:
+            if len(parts) >= 2:  # noqa: PLR2004
                 space_ids.add(parts[1])
 
     sorted_spaces = sorted(space_ids)
@@ -366,13 +359,11 @@ async def get_document(
         ) from exc
     except PolarionAuthError as exc:
         raise PermissionError(
-            "Cannot access document -- "
-            "check your POLARION_TOKEN permissions."
+            "Cannot access document -- check your POLARION_TOKEN permissions."
         ) from exc
     except PolarionError as exc:
         raise RuntimeError(
-            f"Failed to get document '{document_name}': "
-            f"{exc.message}"
+            f"Failed to get document '{document_name}': {exc.message}"
         ) from exc
 
     data = response.get("data", {})
@@ -476,13 +467,11 @@ async def get_document_parts(  # noqa: PLR0913
         ) from exc
     except PolarionAuthError as exc:
         raise PermissionError(
-            "Cannot access document parts -- "
-            "check your POLARION_TOKEN permissions."
+            "Cannot access document parts -- check your POLARION_TOKEN permissions."
         ) from exc
     except PolarionError as exc:
         raise RuntimeError(
-            f"Failed to get parts for "
-            f"'{document_name}': {exc.message}"
+            f"Failed to get parts for '{document_name}': {exc.message}"
         ) from exc
 
     data = response.get("data", [])
@@ -509,7 +498,8 @@ async def get_document_parts(  # noqa: PLR0913
 
             # Content/description is HTML.
             content_obj = attrs.get(
-                "content", attrs.get("description", {}),
+                "content",
+                attrs.get("description", {}),
             )
             content_html = ""
             if isinstance(content_obj, dict):
@@ -542,8 +532,7 @@ async def list_work_items(
     ctx: Context,
     project_id: str = Field(
         description=(
-            "Polarion project ID. "
-            "Use ``list_projects`` to discover valid IDs."
+            "Polarion project ID. Use ``list_projects`` to discover valid IDs."
         ),
     ),
     page_size: int = Field(
@@ -600,13 +589,10 @@ async def list_work_items(
         ) from exc
     except PolarionAuthError as exc:
         raise PermissionError(
-            "Cannot list work items -- "
-            "check your POLARION_TOKEN permissions."
+            "Cannot list work items -- check your POLARION_TOKEN permissions."
         ) from exc
     except PolarionError as exc:
-        raise RuntimeError(
-            f"Failed to list work items: {exc.message}"
-        ) from exc
+        raise RuntimeError(f"Failed to list work items: {exc.message}") from exc
 
     data = response.get("data", [])
     items = _parse_work_item_summaries(data)
@@ -673,13 +659,11 @@ async def get_work_item(
         ) from exc
     except PolarionAuthError as exc:
         raise PermissionError(
-            "Cannot access work item -- "
-            "check your POLARION_TOKEN permissions."
+            "Cannot access work item -- check your POLARION_TOKEN permissions."
         ) from exc
     except PolarionError as exc:
         raise RuntimeError(
-            f"Failed to get work item "
-            f"'{work_item_id}': {exc.message}"
+            f"Failed to get work item '{work_item_id}': {exc.message}"
         ) from exc
 
     data = response.get("data", {})
@@ -698,9 +682,7 @@ async def get_work_item(
     # Extract work item ID from JSON:API id
     # (format: "projectId/WI-001").
     raw_id = _safe_str(data.get("id", ""))
-    wi_id = (
-        raw_id.split("/", maxsplit=1)[-1] if "/" in raw_id else raw_id
-    )
+    wi_id = raw_id.split("/", maxsplit=1)[-1] if "/" in raw_id else raw_id
 
     return WorkItemDetail(
         id=wi_id or work_item_id,
@@ -785,13 +767,10 @@ async def search_work_items(
         ) from exc
     except PolarionAuthError as exc:
         raise PermissionError(
-            "Cannot search work items -- "
-            "check your POLARION_TOKEN permissions."
+            "Cannot search work items -- check your POLARION_TOKEN permissions."
         ) from exc
     except PolarionError as exc:
-        raise RuntimeError(
-            f"Failed to search work items: {exc.message}"
-        ) from exc
+        raise RuntimeError(f"Failed to search work items: {exc.message}") from exc
 
     data = response.get("data", [])
     items = _parse_work_item_summaries(data)
@@ -847,9 +826,7 @@ async def get_linked_work_items(
         RuntimeError: On unexpected Polarion API errors.
     """
     client = _get_client(ctx)
-    base_path = (
-        f"/projects/{project_id}/workitems/{work_item_id}"
-    )
+    base_path = f"/projects/{project_id}/workitems/{work_item_id}"
 
     try:
         forward_response = await client.get(
@@ -866,20 +843,20 @@ async def get_linked_work_items(
         ) from exc
     except PolarionAuthError as exc:
         raise PermissionError(
-            "Cannot access linked work items -- "
-            "check your POLARION_TOKEN permissions."
+            "Cannot access linked work items -- check your POLARION_TOKEN permissions."
         ) from exc
     except PolarionError as exc:
         raise RuntimeError(
-            f"Failed to get links for "
-            f"'{work_item_id}': {exc.message}"
+            f"Failed to get links for '{work_item_id}': {exc.message}"
         ) from exc
 
     forward_items = _parse_linked_items(
-        forward_response, direction="forward",
+        forward_response,
+        direction="forward",
     )
     back_items = _parse_linked_items(
-        back_response, direction="back",
+        back_response,
+        direction="back",
     )
 
     all_items = forward_items + back_items
@@ -921,11 +898,7 @@ def _parse_work_item_summaries(
         # Extract ID from JSON:API id
         # (format: "projectId/WI-001").
         raw_id = _safe_str(item.get("id", ""))
-        wi_id = (
-            raw_id.split("/", maxsplit=1)[-1]
-            if "/" in raw_id
-            else raw_id
-        )
+        wi_id = raw_id.split("/", maxsplit=1)[-1] if "/" in raw_id else raw_id
 
         items.append(
             WorkItemSummary(
@@ -967,11 +940,7 @@ def _parse_linked_items(
 
         # Extract the linked work item ID.
         raw_id = _safe_str(item.get("id", ""))
-        wi_id = (
-            raw_id.split("/", maxsplit=1)[-1]
-            if "/" in raw_id
-            else raw_id
-        )
+        wi_id = raw_id.split("/", maxsplit=1)[-1] if "/" in raw_id else raw_id
 
         # Parse role from attributes.
         role = _safe_str(attrs.get("role", ""))

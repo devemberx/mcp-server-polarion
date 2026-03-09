@@ -89,7 +89,9 @@ class TestListProjects:
         }
 
         result = await list_projects(
-            mock_ctx, page_size=100, page_number=1,
+            mock_ctx,
+            page_size=100,
+            page_number=1,
         )
 
         assert isinstance(result, PaginatedResult)
@@ -111,7 +113,9 @@ class TestListProjects:
         }
 
         result = await list_projects(
-            mock_ctx, page_size=100, page_number=1,
+            mock_ctx,
+            page_size=100,
+            page_number=1,
         )
 
         assert result.items == []
@@ -126,7 +130,9 @@ class TestListProjects:
         }
 
         await list_projects(
-            mock_ctx, page_size=10, page_number=3,
+            mock_ctx,
+            page_size=10,
+            page_number=3,
         )
 
         mock_client.get.assert_called_once_with(
@@ -138,24 +144,30 @@ class TestListProjects:
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.get.side_effect = PolarionAuthError(
-            "Unauthorized", status_code=401,
+            "Unauthorized",
+            status_code=401,
         )
 
         with pytest.raises(PermissionError, match="POLARION_TOKEN"):
             await list_projects(
-                mock_ctx, page_size=100, page_number=1,
+                mock_ctx,
+                page_size=100,
+                page_number=1,
             )
 
     async def test_generic_error_raises_runtime_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.get.side_effect = PolarionError(
-            "Server error", status_code=500,
+            "Server error",
+            status_code=500,
         )
 
         with pytest.raises(RuntimeError, match="Failed to list"):
             await list_projects(
-                mock_ctx, page_size=100, page_number=1,
+                mock_ctx,
+                page_size=100,
+                page_number=1,
             )
 
     async def test_missing_meta_returns_zero_total(
@@ -164,7 +176,9 @@ class TestListProjects:
         mock_client.get.return_value = {"data": []}
 
         result = await list_projects(
-            mock_ctx, page_size=100, page_number=1,
+            mock_ctx,
+            page_size=100,
+            page_number=1,
         )
 
         assert result.total_count == 0
@@ -182,16 +196,44 @@ class TestListSpaces:
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.get_all_pages.return_value = [
-            {"relationships": {"module": {"data": {"type": "documents", "id": "proj1/_default/Doc1"}}}},
-            {"relationships": {"module": {"data": {"type": "documents", "id": "proj1/_default/Doc2"}}}},
-            {"relationships": {"module": {"data": {"type": "documents", "id": "proj1/Design/SRS"}}}},
-            {"relationships": {"module": {"data": {"type": "documents", "id": "proj1/Design/SDD"}}}},
-            {"relationships": {"module": {"data": {"type": "documents", "id": "proj1/Testing/TestPlan"}}}},
+            {
+                "relationships": {
+                    "module": {
+                        "data": {"type": "documents", "id": "proj1/_default/Doc1"}
+                    }
+                }
+            },
+            {
+                "relationships": {
+                    "module": {
+                        "data": {"type": "documents", "id": "proj1/_default/Doc2"}
+                    }
+                }
+            },
+            {
+                "relationships": {
+                    "module": {"data": {"type": "documents", "id": "proj1/Design/SRS"}}
+                }
+            },
+            {
+                "relationships": {
+                    "module": {"data": {"type": "documents", "id": "proj1/Design/SDD"}}
+                }
+            },
+            {
+                "relationships": {
+                    "module": {
+                        "data": {"type": "documents", "id": "proj1/Testing/TestPlan"}
+                    }
+                }
+            },
         ]
 
         result = await list_spaces(
-            mock_ctx, project_id="proj1",
-            page_size=100, page_number=1,
+            mock_ctx,
+            project_id="proj1",
+            page_size=100,
+            page_number=1,
         )
 
         assert isinstance(result, PaginatedResult)
@@ -203,14 +245,28 @@ class TestListSpaces:
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.get_all_pages.return_value = [
-            {"relationships": {"module": {"data": {"type": "documents", "id": "proj1/Space1/DocA"}}}},
-            {"relationships": {"module": {"data": {"type": "documents", "id": "proj1/Space1/DocB"}}}},
-            {"relationships": {"module": {"data": {"type": "documents", "id": "proj1/Space1/DocC"}}}},
+            {
+                "relationships": {
+                    "module": {"data": {"type": "documents", "id": "proj1/Space1/DocA"}}
+                }
+            },
+            {
+                "relationships": {
+                    "module": {"data": {"type": "documents", "id": "proj1/Space1/DocB"}}
+                }
+            },
+            {
+                "relationships": {
+                    "module": {"data": {"type": "documents", "id": "proj1/Space1/DocC"}}
+                }
+            },
         ]
 
         result = await list_spaces(
-            mock_ctx, project_id="proj1",
-            page_size=100, page_number=1,
+            mock_ctx,
+            project_id="proj1",
+            page_size=100,
+            page_number=1,
         )
 
         assert result.total_count == 1
@@ -220,13 +276,21 @@ class TestListSpaces:
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.get_all_pages.return_value = [
-            {"relationships": {"module": {"data": {"type": "documents", "id": f"proj1/Space{i}/Doc"}}}}
+            {
+                "relationships": {
+                    "module": {
+                        "data": {"type": "documents", "id": f"proj1/Space{i}/Doc"}
+                    }
+                }
+            }
             for i in range(5)
         ]
 
         result = await list_spaces(
-            mock_ctx, project_id="proj1",
-            page_size=2, page_number=2,
+            mock_ctx,
+            project_id="proj1",
+            page_size=2,
+            page_number=2,
         )
 
         assert result.total_count == 5
@@ -243,8 +307,10 @@ class TestListSpaces:
         ]
 
         result = await list_spaces(
-            mock_ctx, project_id="proj1",
-            page_size=100, page_number=1,
+            mock_ctx,
+            project_id="proj1",
+            page_size=100,
+            page_number=1,
         )
 
         assert result.total_count == 0
@@ -253,27 +319,31 @@ class TestListSpaces:
     async def test_not_found_raises_value_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get_all_pages.side_effect = (
-            PolarionNotFoundError("Not found", status_code=404)
+        mock_client.get_all_pages.side_effect = PolarionNotFoundError(
+            "Not found", status_code=404
         )
 
         with pytest.raises(ValueError, match="not found"):
             await list_spaces(
-                mock_ctx, project_id="missing",
-                page_size=100, page_number=1,
+                mock_ctx,
+                project_id="missing",
+                page_size=100,
+                page_number=1,
             )
 
     async def test_auth_error_raises_permission_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get_all_pages.side_effect = (
-            PolarionAuthError("Forbidden", status_code=403)
+        mock_client.get_all_pages.side_effect = PolarionAuthError(
+            "Forbidden", status_code=403
         )
 
         with pytest.raises(PermissionError, match="POLARION_TOKEN"):
             await list_spaces(
-                mock_ctx, project_id="proj1",
-                page_size=100, page_number=1,
+                mock_ctx,
+                project_id="proj1",
+                page_size=100,
+                page_number=1,
             )
 
 
@@ -297,10 +367,7 @@ class TestGetDocument:
                     "title": "Software Requirement Spec",
                     "description": {
                         "type": "text/html",
-                        "value": (
-                            "<p>This is the "
-                            "<strong>SRS</strong> document.</p>"
-                        ),
+                        "value": ("<p>This is the <strong>SRS</strong> document.</p>"),
                     },
                 },
             },
@@ -369,7 +436,8 @@ class TestGetDocument:
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.get.side_effect = PolarionNotFoundError(
-            "Not found", status_code=404,
+            "Not found",
+            status_code=404,
         )
 
         with pytest.raises(ValueError, match="not found"):
@@ -494,7 +562,8 @@ class TestGetDocumentParts:
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.get.side_effect = PolarionNotFoundError(
-            "Not found", status_code=404,
+            "Not found",
+            status_code=404,
         )
 
         with pytest.raises(ValueError, match="not found"):
@@ -574,8 +643,10 @@ class TestListWorkItems:
         }
 
         result = await list_work_items(
-            mock_ctx, project_id="proj1",
-            page_size=100, page_number=1,
+            mock_ctx,
+            project_id="proj1",
+            page_size=100,
+            page_number=1,
         )
 
         assert isinstance(result, PaginatedResult)
@@ -594,8 +665,10 @@ class TestListWorkItems:
         }
 
         await list_work_items(
-            mock_ctx, project_id="proj1",
-            page_size=100, page_number=1,
+            mock_ctx,
+            project_id="proj1",
+            page_size=100,
+            page_number=1,
         )
 
         _, kwargs = mock_client.get.call_args
@@ -605,13 +678,16 @@ class TestListWorkItems:
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.get.side_effect = PolarionNotFoundError(
-            "Not found", status_code=404,
+            "Not found",
+            status_code=404,
         )
 
         with pytest.raises(ValueError, match="not found"):
             await list_work_items(
-                mock_ctx, project_id="missing",
-                page_size=100, page_number=1,
+                mock_ctx,
+                project_id="missing",
+                page_size=100,
+                page_number=1,
             )
 
     async def test_strips_project_prefix_from_id(
@@ -632,8 +708,10 @@ class TestListWorkItems:
         }
 
         result = await list_work_items(
-            mock_ctx, project_id="myproject",
-            page_size=100, page_number=1,
+            mock_ctx,
+            project_id="myproject",
+            page_size=100,
+            page_number=1,
         )
 
         assert result.items[0].id == "WI-100"
@@ -661,8 +739,7 @@ class TestGetWorkItem:
                     "description": {
                         "type": "text/html",
                         "value": (
-                            "<p>User must be able to "
-                            "<strong>log in</strong>.</p>"
+                            "<p>User must be able to <strong>log in</strong>.</p>"
                         ),
                     },
                 },
@@ -710,7 +787,8 @@ class TestGetWorkItem:
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.get.side_effect = PolarionNotFoundError(
-            "Not found", status_code=404,
+            "Not found",
+            status_code=404,
         )
 
         with pytest.raises(ValueError, match="not found"):
@@ -824,7 +902,8 @@ class TestSearchWorkItems:
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.get.side_effect = PolarionNotFoundError(
-            "Not found", status_code=404,
+            "Not found",
+            status_code=404,
         )
 
         with pytest.raises(ValueError, match="not found"):
@@ -840,7 +919,8 @@ class TestSearchWorkItems:
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.get.side_effect = PolarionError(
-            "Bad query syntax", status_code=400,
+            "Bad query syntax",
+            status_code=400,
         )
 
         with pytest.raises(RuntimeError, match="Failed to search"):
@@ -924,9 +1004,7 @@ class TestGetLinkedWorkItems:
         assert len(suspects) == 1
         assert suspects[0].id == "MCPT-020"
 
-    async def test_no_links(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
+    async def test_no_links(self, mock_ctx: MagicMock, mock_client: AsyncMock) -> None:
         mock_client.get.side_effect = [
             {"data": []},
             {"data": []},
@@ -946,7 +1024,8 @@ class TestGetLinkedWorkItems:
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.get.side_effect = PolarionNotFoundError(
-            "Not found", status_code=404,
+            "Not found",
+            status_code=404,
         )
 
         with pytest.raises(ValueError, match="not found"):
@@ -960,7 +1039,8 @@ class TestGetLinkedWorkItems:
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.get.side_effect = PolarionAuthError(
-            "Forbidden", status_code=403,
+            "Forbidden",
+            status_code=403,
         )
 
         with pytest.raises(PermissionError, match="POLARION_TOKEN"):
