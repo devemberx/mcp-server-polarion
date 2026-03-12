@@ -19,7 +19,7 @@ These rules apply to **every file** in the codebase. Violating any of them will 
 | 11 | **Every write tool must support `dry_run`** — preview payload without mutating. |
 | 12 | **Secrets in `.env` only** — never hardcode credentials. Load via `pydantic-settings`. |
 | 13 | **Use `uv` exclusively** — no pip, poetry, or pipenv. |
-| 14 | **Keep tool count minimal** — 13 tools total (8 read + 5 write). |
+| 14 | **Keep tool count minimal** — 12 tools total (7 read + 5 write). |
 
 ---
 
@@ -89,7 +89,7 @@ mcp-server-polarion/
 │       │   └── html.py           # HTML ↔ Markdown conversion + HTML sanitization
 │       └── tools/                # MCP tool definitions
 │           ├── __init__.py       # Imports read & write to register tools on mcp
-│           ├── read.py           # 8 read tools
+│       │   ├── read.py           # 7 read tools
 │           └── write.py          # 5 write tools
 └── tests/
     ├── conftest.py               # Shared fixtures (mock client, MCP test client)
@@ -103,7 +103,7 @@ mcp-server-polarion/
     │   └── test_html.py          # HTML ↔ Markdown conversion edge cases
     └── tools/
         ├── __init__.py
-        ├── test_read.py          # 8 read tools
+│       ├── test_read.py          # 7 read tools
         └── test_write.py         # 5 write tools + dry_run verification
 ```
 
@@ -252,20 +252,19 @@ All list endpoints support `page[size]` and `page[number]` (1-based) query param
 
 ### Tool → Endpoint Mapping
 
-#### Read Tools (8)
+#### Read Tools (7)
 
 | Tool | Method | Path |
 |---|---|---|
 | `list_projects` | GET | `/projects` |
-| `list_spaces` | GET | `/projects/{projectId}/workitems?fields[workitems]=module` (indirect — parse `module` field to extract unique Space IDs) |
+| `list_documents` | GET | `/projects/{projectId}/workitems?fields[workitems]=module&query=type:heading&sort=module` (indirect — parse `module` field to extract unique Space ID + Document Name pairs) |
 | `get_document` | GET | `/projects/{projectId}/spaces/{spaceId}/documents/{documentName}` |
 | `get_document_parts` | GET | `/projects/{projectId}/spaces/{spaceId}/documents/{documentName}/parts` |
-| `list_work_items` | GET | `/projects/{projectId}/workitems` |
+| `list_work_items` | GET | `/projects/{projectId}/workitems` (optional `query` param for Lucene filtering) |
 | `get_work_item` | GET | `/projects/{projectId}/workitems/{workItemId}` |
-| `search_work_items` | GET | `/projects/{projectId}/workitems?query={luceneQuery}` |
 | `get_linked_work_items` | GET | `/projects/{projectId}/workitems/{workItemId}/linkedworkitems` |
 
-> **Unsupported**: `list_documents` (`GET /projects/{projectId}/documents`) — not available on the target Polarion version.
+> **Unsupported**: `GET /projects/{projectId}/documents` — not available on the target Polarion version. `list_documents` uses an indirect approach via heading work items.
 
 #### Write Tools (5)
 
@@ -284,8 +283,8 @@ All list endpoints support `page[size]` and `page[number]` (1-based) query param
 - **The description field is always HTML**: `{ "type": "text/html", "value": "<p>...</p>" }`.
 - **Content-Type is `application/json`** — NOT `application/vnd.api+json`.
 - **`POST /workitems` returns 201 with array response**: `{"data": [...]}` — parse accordingly.
-- **`GET /projects/{projectId}/spaces` does NOT exist** — `list_spaces` must use an indirect approach: query Work Items with `fields[workitems]=module`, parse the `module` field (`{spaceId}/{documentName}` format), and extract unique Space IDs.
-- **Space ID is required to access documents** — guide the user to call `list_spaces` first in tool docstrings.
+- **`GET /projects/{projectId}/spaces` does NOT exist** — `list_documents` must use an indirect approach: query heading Work Items with `fields[workitems]=module` and `query=type:heading`, parse the `module` field (`{projectId}/{spaceId}/{documentName}` format), and extract unique (Space ID, Document Name) pairs.
+- **Space ID and document name are required to access documents** — guide the user to call `list_documents` first in tool docstrings.
 - **`update_work_item` must GET current state first**, then PATCH only the changed fields.
 - **Document Recycle Bin**: Creating a Work Item with a `module` relationship places it in the Document's Recycle Bin — it is NOT visible. After `create_work_item`, call `create_document_part` separately to insert the Work Item into the document body as a visible Part.
 - **`get_linked_work_items`** must fetch both forward links (`linkedworkitems`) and back links (`backlinkedworkitems`) and merge into a single result for complete traceability.
@@ -305,11 +304,11 @@ All tool inputs and outputs are defined as Pydantic `BaseModel` subclasses. Add 
 |---|---|
 | `PaginatedResult[T]` | Common response wrapper for all list tools (`items`, `total_count`, `page`, `page_size`) |
 | `ProjectSummary` | Item returned by `list_projects` (`id`, `name`) |
-| `SpaceSummary` | Item returned by `list_spaces` (`id`, `name`) |
+| `DocumentSummary` | Item returned by `list_documents` (`space_id`, `document_name`) |
 | `DocumentPartCreateResult` | Response from `create_document_part` (`created`, `dry_run`, `part_id`, `payload_preview`) |
-| `DocumentDetail` | Response from `get_document` (`id`, `title`, `description`, `space_id`, `project_id`) |
+| `DocumentDetail` | Response from `get_document` (`id`, `title`, `content`, `space_id`, `project_id`) |
 | `DocumentPart` | Item returned by `get_document_parts` (`id`, `title`, `content`, `type`, `level`) |
-| `WorkItemSummary` | Item returned by `list_work_items` and `search_work_items` (`id`, `title`, `type`, `status`) |
+| `WorkItemSummary` | Item returned by `list_work_items` (`id`, `title`, `type`, `status`) |
 | `WorkItemDetail` | Response from `get_work_item` — extends `WorkItemSummary` (`description`, `project_id`) |
 | `WorkItemCreateResult` | Response from `create_work_item` (`created`, `dry_run`, `work_item_id`, `payload_preview`) |
 | `WorkItemUpdateResult` | Response from `update_work_item` (`updated`, `dry_run`, `current`, `changes`) |

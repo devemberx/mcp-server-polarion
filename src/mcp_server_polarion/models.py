@@ -67,16 +67,19 @@ class ProjectSummary(BaseModel):
     )
 
 
-class SpaceSummary(BaseModel):
-    """Summary of a Polarion space returned by ``list_spaces``."""
+class DocumentSummary(BaseModel):
+    """Summary of a Polarion document returned by ``list_documents``."""
 
-    id: str = Field(
-        description="Space identifier (e.g. '_default', 'Design').",
-    )
-    name: str = Field(
+    space_id: str = Field(
         description=(
-            "Human-readable space name. "
-            "Defaults to the space ID when no display name is available."
+            "Space identifier that contains the document"
+            " (e.g. '_default', 'Design')."
+        ),
+    )
+    document_name: str = Field(
+        description=(
+            "Document name within the space"
+            " (e.g. 'Software Requirement Specification')."
         ),
     )
 
@@ -90,10 +93,10 @@ class DocumentDetail(BaseModel):
     title: str = Field(
         description="Document title.",
     )
-    description: str = Field(
+    content: str = Field(
         description=(
-            "Document description converted to Markdown. "
-            "Empty string when the document has no description."
+            "Full document content (homePageContent) converted to Markdown. "
+            "Empty string when the document has no content."
         ),
     )
     space_id: str = Field(
@@ -338,13 +341,13 @@ __all__: list[str] = [
     "DocumentDetail",
     "DocumentPart",
     "DocumentPartCreateResult",
+    "DocumentSummary",
     "JsonValue",
     "LinkResult",
     "LinkedWorkItemSummary",
     "LinkedWorkItemsList",
     "PaginatedResult",
     "ProjectSummary",
-    "SpaceSummary",
     "WorkItemCreateResult",
     "WorkItemDetail",
     "WorkItemSummary",

@@ -26,7 +26,8 @@ class PolarionConfig(BaseSettings):
 
     polarion_url: str = Field(
         description=(
-            "Base URL of the Polarion instance. "
+            "Base URL of the Polarion instance including the application "
+            "context path (e.g. 'https://example.com/polarion'). "
             "Trailing slashes are accepted and will be stripped automatically."
         ),
     )
