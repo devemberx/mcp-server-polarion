@@ -1,7 +1,7 @@
 """Read-only MCP tools for querying Polarion ALM.
 
-Eight tools that retrieve projects, spaces, documents, work items, and
-their relationships.  Every tool returns Pydantic models -- never raw
+Seven tools that retrieve projects, documents, work items, and their
+relationships.  Every tool returns Pydantic models -- never raw
 ``dict`` -- and converts HTML descriptions to Markdown via
 ``html_to_markdown()``.
 """
@@ -23,11 +23,11 @@ from mcp_server_polarion.core.exceptions import (
 from mcp_server_polarion.models import (
     DocumentDetail,
     DocumentPart,
+    DocumentSummary,
     LinkedWorkItemsList,
     LinkedWorkItemSummary,
     PaginatedResult,
     ProjectSummary,
-    SpaceSummary,
     WorkItemDetail,
     WorkItemSummary,
 )
@@ -147,6 +147,7 @@ async def list_projects(
         response = await client.get(
             "/projects",
             params={
+                "fields[projects]": "id,name",
                 "page[size]": page_size,
                 "page[number]": page_number,
             },
@@ -183,7 +184,7 @@ async def list_projects(
 
 
 @mcp.tool()
-async def list_spaces(
+async def list_documents(  # noqa: PLR0913
     ctx: Context,
     project_id: str = Field(
         description=(
@@ -191,40 +192,63 @@ async def list_spaces(
             "Use ``list_projects`` to discover valid IDs."
         ),
     ),
+    name_filter: str | None = Field(
+        default=None,
+        description=(
+            "Optional substring filter for document names "
+            "(case-insensitive, client-side). "
+            "E.g. 'SRS' matches 'Software Requirement Specification'."
+        ),
+    ),
+    space_filter: str | None = Field(
+        default=None,
+        description=(
+            "Optional exact-match filter for Space ID "
+            "(e.g. '_default', 'Design'). Only returns documents "
+            "in the specified space."
+        ),
+    ),
     page_size: int = Field(
         default=_DEFAULT_PAGE_SIZE,
         ge=1,
         le=100,
-        description="Number of spaces per page (1-100, default 100).",
+        description="Number of documents per page (1-100, default 100).",
     ),
     page_number: int = Field(
         default=1,
         ge=1,
         description="Page number to retrieve (1-based, default 1).",
     ),
-) -> PaginatedResult[SpaceSummary]:
-    """List all spaces (folders) in a Polarion project.
+) -> PaginatedResult[DocumentSummary]:
+    """List all documents in a Polarion project.
 
-    Spaces are containers for documents.  Use this tool to discover Space
-    IDs before calling ``get_document`` or ``get_document_parts``.
+    Returns space IDs and document names so the LLM can call
+    ``get_document`` or ``get_document_parts`` with the correct
+    parameters.
 
-    Since ``GET /projects/{projectId}/spaces`` does not exist in the
-    target Polarion version, this tool queries work items with
-    ``fields[workitems]=module``, parses the ``relationships.module.data.id``
-    field (format: ``projectId/spaceId/documentName``) to extract unique
-    Space IDs, and returns them as ``SpaceSummary`` items.
+    Since ``GET /projects/{projectId}/documents`` is not available on
+    the target Polarion version, this tool queries heading-type work
+    items with ``fields[workitems]=module`` and ``query=type:heading``
+    to extract unique (space_id, document_name) pairs from the
+    ``relationships.module.data.id`` field (format:
+    ``projectId/spaceId/documentName``).
+
+    Use ``name_filter`` for client-side substring matching on document
+    names, or ``space_filter`` to restrict results to a specific space.
 
     Args:
         ctx: MCP tool context (injected automatically).
         project_id: Polarion project ID.
-        page_size: Number of spaces per page (1-100, default 100).
+        name_filter: Optional substring filter for document names.
+        space_filter: Optional exact Space ID filter.
+        page_size: Number of documents per page (1-100, default 100).
         page_number: Page number to retrieve (1-based, default 1).
 
     Returns:
-        PaginatedResult containing ``SpaceSummary`` items with:
-        - ``id``: Space identifier (e.g. '_default', 'Design').
-        - ``name``: Defaults to the space ID.
-        - ``total_count``: Total number of unique spaces found.
+        PaginatedResult containing ``DocumentSummary`` items with:
+        - ``space_id``: Space that contains the document.
+        - ``document_name``: Document name within the space.
+        - ``total_count``: Total number of documents found.
 
     Raises:
         ValueError: If the project ID is invalid or not found.
@@ -235,7 +259,11 @@ async def list_spaces(
     try:
         all_items = await client.get_all_pages(
             f"/projects/{project_id}/workitems",
-            params={"fields[workitems]": "module"},
+            params={
+                "fields[workitems]": "module",
+                "query": "type:heading",
+                "sort": "module",
+            },
         )
     except PolarionNotFoundError as exc:
         raise ValueError(
@@ -244,17 +272,17 @@ async def list_spaces(
         ) from exc
     except PolarionAuthError as exc:
         raise PermissionError(
-            "Cannot list spaces -- check your POLARION_TOKEN permissions."
+            "Cannot list documents -- check your POLARION_TOKEN permissions."
         ) from exc
     except PolarionError as exc:
         raise RuntimeError(
-            f"Failed to list spaces for project '{project_id}': {exc.message}"
+            f"Failed to list documents for project '{project_id}': {exc.message}"
         ) from exc
 
-    # Parse module from relationships to extract unique space IDs.
+    # Parse module from relationships to extract unique (space, doc) pairs.
     # The API returns module in relationships.module.data.id with format:
     # "{projectId}/{spaceId}/{documentName}".
-    space_ids: set[str] = set()
+    documents: set[tuple[str, str]] = set()
     for item in all_items:
         rels = item.get("relationships", {})
         if not isinstance(rels, dict):
@@ -268,21 +296,37 @@ async def list_spaces(
         mod_id = mod_data.get("id", "")
         if isinstance(mod_id, str) and mod_id:
             parts = mod_id.split("/")
-            # Format: "projectId/spaceId/docName" → parts[1] is spaceId
-            if len(parts) >= 2:  # noqa: PLR2004
-                space_ids.add(parts[1])
+            # Format: "projectId/spaceId/docName" → parts[1], parts[2:]
+            if len(parts) >= 3:  # noqa: PLR2004
+                space_id = parts[1]
+                doc_name = "/".join(parts[2:])
+                documents.add((space_id, doc_name))
 
-    sorted_spaces = sorted(space_ids)
-    total = len(sorted_spaces)
+    # Apply filters.
+    filtered: list[tuple[str, str]] = sorted(documents)
+    if space_filter is not None:
+        filtered = [
+            (s, d) for s, d in filtered if s == space_filter
+        ]
+    if name_filter is not None:
+        name_lower = name_filter.lower()
+        filtered = [
+            (s, d) for s, d in filtered if name_lower in d.lower()
+        ]
+
+    total = len(filtered)
 
     # Manual pagination over the extracted set.
     start = (page_number - 1) * page_size
     end = start + page_size
-    page_slice = sorted_spaces[start:end]
+    page_slice = filtered[start:end]
 
-    items = [SpaceSummary(id=sid, name=sid) for sid in page_slice]
+    items = [
+        DocumentSummary(space_id=s, document_name=d)
+        for s, d in page_slice
+    ]
 
-    return PaginatedResult[SpaceSummary](
+    return PaginatedResult[DocumentSummary](
         items=items,
         total_count=total,
         page=page_number,
@@ -299,7 +343,7 @@ async def get_document(
     space_id: str = Field(
         description=(
             "Space ID that contains the document (e.g. '_default'). "
-            "Use ``list_spaces`` to discover valid IDs."
+            "Use ``list_documents`` to discover valid IDs."
         ),
     ),
     document_name: str = Field(
@@ -312,11 +356,11 @@ async def get_document(
 ) -> DocumentDetail:
     """Get full details of a Polarion document.
 
-    Retrieves the title, description, and metadata for a specific
-    document in a space.  Use ``list_spaces`` first to discover valid
-    space IDs, then call this tool with the space ID and document name.
+    Retrieves the title, full content (homePageContent), and metadata
+    for a specific document in a space.  Use ``list_documents`` first
+    to discover valid space IDs and document names.
 
-    The document description is automatically converted from HTML to
+    The document content is automatically converted from HTML to
     Markdown for easier consumption.
 
     Args:
@@ -329,7 +373,7 @@ async def get_document(
         DocumentDetail with:
         - ``id``: Document identifier.
         - ``title``: Document title.
-        - ``description``: Description in Markdown.
+        - ``content``: Full document content in Markdown.
         - ``space_id``: Containing space.
         - ``project_id``: Containing project.
 
@@ -347,12 +391,15 @@ async def get_document(
     )
 
     try:
-        response = await client.get(path)
+        response = await client.get(
+            path,
+            params={"fields[documents]": "title,homePageContent"},
+        )
     except PolarionNotFoundError as exc:
         raise ValueError(
             f"Document '{document_name}' not found in space "
             f"'{space_id}' of project '{project_id}'. "
-            "Use `list_spaces` to verify the space ID."
+            "Use `list_documents` to verify the space ID and document name."
         ) from exc
     except PolarionAuthError as exc:
         raise PermissionError(
@@ -370,17 +417,17 @@ async def get_document(
     if not isinstance(attrs, dict):
         attrs = {}
 
-    # Description is always HTML:
+    # homePageContent is always HTML:
     # { "type": "text/html", "value": "<p>...</p>" }
-    desc_obj = attrs.get("description", {})
-    desc_html = ""
-    if isinstance(desc_obj, dict):
-        desc_html = _safe_str(desc_obj.get("value", ""))
+    content_obj = attrs.get("homePageContent", {})
+    content_html = ""
+    if isinstance(content_obj, dict):
+        content_html = _safe_str(content_obj.get("value", ""))
 
     return DocumentDetail(
         id=_safe_str(attrs.get("id", data.get("id", ""))),
         title=_safe_str(attrs.get("title", "")),
-        description=html_to_markdown(desc_html),
+        content=html_to_markdown(content_html),
         space_id=space_id,
         project_id=project_id,
     )
@@ -393,7 +440,10 @@ async def get_document_parts(  # noqa: PLR0913
         description="Polarion project ID.",
     ),
     space_id: str = Field(
-        description="Space ID that contains the document.",
+        description=(
+            "Space ID that contains the document. "
+            "Use ``list_documents`` to discover valid IDs."
+        ),
     ),
     document_name: str = Field(
         description="Document name within the space.",
@@ -460,7 +510,7 @@ async def get_document_parts(  # noqa: PLR0913
         raise ValueError(
             f"Document '{document_name}' not found in space "
             f"'{space_id}' of project '{project_id}'. "
-            "Use `list_spaces` to discover valid space IDs."
+            "Use `list_documents` to discover valid space IDs and document names."
         ) from exc
     except PolarionAuthError as exc:
         raise PermissionError(
@@ -532,6 +582,18 @@ async def list_work_items(
             "Polarion project ID. Use ``list_projects`` to discover valid IDs."
         ),
     ),
+    query: str | None = Field(
+        default=None,
+        description=(
+            "Optional Lucene query string for filtering work items. "
+            "Examples: 'type:requirement', "
+            "'status:approved AND type:requirement', "
+            "'title:SRS*' (trailing wildcard only — leading wildcards "
+            "like '*SRS*' cause 400 errors). "
+            "The ``module`` field is NOT indexed and cannot be queried. "
+            "Omit to list all work items without filtering."
+        ),
+    ),
     page_size: int = Field(
         default=_DEFAULT_PAGE_SIZE,
         ge=1,
@@ -544,16 +606,26 @@ async def list_work_items(
         description="Page number to retrieve (1-based, default 1).",
     ),
 ) -> PaginatedResult[WorkItemSummary]:
-    """List work items in a Polarion project.
+    """List and search work items in a Polarion project.
 
     Returns a paginated list of work items with basic metadata (title,
-    type, status).  Use ``search_work_items`` to apply Lucene query
-    filters, or ``get_work_item`` for full details including the
-    description.
+    type, status).  Pass a Lucene ``query`` to filter results, or omit
+    it to list all work items.
+
+    Common Lucene query examples:
+
+    - ``type:requirement`` — all requirements
+    - ``status:approved AND type:requirement`` — approved requirements
+    - ``title:Login`` — work items with "Login" in the title
+    - ``title:SRS*`` — trailing wildcard (leading wildcards not supported)
+    - ``type:testCase AND status:draft`` — draft test cases
+
+    Use ``get_work_item`` for full details including the description.
 
     Args:
         ctx: MCP tool context (injected automatically).
         project_id: Polarion project ID.
+        query: Optional Lucene query string for filtering.
         page_size: Number of work items per page (1-100, default 100).
         page_number: Page number to retrieve (1-based, default 1).
 
@@ -567,17 +639,21 @@ async def list_work_items(
     Raises:
         ValueError: If the project is not found.
         PermissionError: If the token lacks permissions.
-        RuntimeError: On unexpected Polarion API errors.
+        RuntimeError: On unexpected Polarion API errors (including
+            invalid Lucene query syntax).
     """
     client = _get_client(ctx)
+    params: dict[str, str | int] = {
+        "fields[workitems]": _WI_LIST_FIELDS,
+        "page[size]": page_size,
+        "page[number]": page_number,
+    }
+    if query is not None:
+        params["query"] = query
     try:
         response = await client.get(
             f"/projects/{project_id}/workitems",
-            params={
-                "fields[workitems]": _WI_LIST_FIELDS,
-                "page[size]": page_size,
-                "page[number]": page_number,
-            },
+            params=params,
         )
     except PolarionNotFoundError as exc:
         raise ValueError(
@@ -611,16 +687,15 @@ async def get_work_item(
     work_item_id: str = Field(
         description=(
             "Work Item ID (e.g. 'MCPT-001'). "
-            "Use ``list_work_items`` or ``search_work_items`` to "
-            "discover valid IDs."
+            "Use ``list_work_items`` to discover valid IDs."
         ),
     ),
 ) -> WorkItemDetail:
     """Get full details of a single Polarion work item.
 
     Retrieves the complete work item including its description (converted
-    to Markdown).  Use ``list_work_items`` or ``search_work_items`` first
-    to discover valid work item IDs.
+    to Markdown).  Use ``list_work_items`` first to discover valid work
+    item IDs.
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -692,95 +767,6 @@ async def get_work_item(
 
 
 @mcp.tool()
-async def search_work_items(
-    ctx: Context,
-    project_id: str = Field(
-        description="Polarion project ID.",
-    ),
-    query: str = Field(
-        description=(
-            "Lucene query string for filtering work items "
-            "(e.g. 'type:requirement AND status:approved'). "
-            "See Polarion documentation for query syntax."
-        ),
-    ),
-    page_size: int = Field(
-        default=_DEFAULT_PAGE_SIZE,
-        ge=1,
-        le=100,
-        description="Number of work items per page (1-100, default 100).",
-    ),
-    page_number: int = Field(
-        default=1,
-        ge=1,
-        description="Page number to retrieve (1-based, default 1).",
-    ),
-) -> PaginatedResult[WorkItemSummary]:
-    """Search work items using a Lucene query.
-
-    Filters work items in a Polarion project using the Polarion Lucene
-    query syntax.  Common query examples:
-
-    - ``type:requirement`` -- all requirements
-    - ``status:approved AND type:requirement`` -- approved requirements
-    - ``title:Login`` -- work items with "Login" in the title
-    - ``type:testCase AND status:draft`` -- draft test cases
-
-    Use ``list_work_items`` without a query to retrieve all work items,
-    or ``get_work_item`` for full details of a specific work item.
-
-    Args:
-        ctx: MCP tool context (injected automatically).
-        project_id: Polarion project ID.
-        query: Lucene query string.
-        page_size: Number of work items per page (1-100, default 100).
-        page_number: Page number to retrieve (1-based, default 1).
-
-    Returns:
-        PaginatedResult containing ``WorkItemSummary`` items matching
-        the query, with the same fields as ``list_work_items``.
-
-    Raises:
-        ValueError: If the project is not found.
-        PermissionError: If the token lacks permissions.
-        RuntimeError: On unexpected Polarion API errors (including
-            invalid Lucene query syntax).
-    """
-    client = _get_client(ctx)
-    try:
-        response = await client.get(
-            f"/projects/{project_id}/workitems",
-            params={
-                "fields[workitems]": _WI_LIST_FIELDS,
-                "query": query,
-                "page[size]": page_size,
-                "page[number]": page_number,
-            },
-        )
-    except PolarionNotFoundError as exc:
-        raise ValueError(
-            f"Project '{project_id}' not found. "
-            "Use `list_projects` to discover valid project IDs."
-        ) from exc
-    except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot search work items -- check your POLARION_TOKEN permissions."
-        ) from exc
-    except PolarionError as exc:
-        raise RuntimeError(f"Failed to search work items: {exc.message}") from exc
-
-    data = response.get("data", [])
-    items = _parse_work_item_summaries(data)
-
-    return PaginatedResult[WorkItemSummary](
-        items=items,
-        total_count=_extract_total_count(response),
-        page=page_number,
-        page_size=page_size,
-    )
-
-
-@mcp.tool()
 async def get_linked_work_items(
     ctx: Context,
     project_id: str = Field(
@@ -803,8 +789,7 @@ async def get_linked_work_items(
     ``verifies``, ``depends_on``, etc.  The ``suspect`` flag indicates
     whether the linked item has changed since the link was last reviewed.
 
-    Use ``list_work_items`` or ``search_work_items`` first to discover
-    valid work item IDs.
+    Use ``list_work_items`` first to discover valid work item IDs.
 
     Args:
         ctx: MCP tool context (injected automatically).

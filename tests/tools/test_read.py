@@ -1,4 +1,4 @@
-"""Tests for the 8 read-only MCP tools.
+"""Tests for the 7 read-only MCP tools.
 
 Each tool is tested by calling the async function directly with a mock
 ``PolarionClient`` injected via a mock ``Context``.
@@ -32,10 +32,9 @@ get_document = _read_mod.get_document.fn
 get_document_parts = _read_mod.get_document_parts.fn
 get_linked_work_items = _read_mod.get_linked_work_items.fn
 get_work_item = _read_mod.get_work_item.fn
+list_documents = _read_mod.list_documents.fn
 list_projects = _read_mod.list_projects.fn
-list_spaces = _read_mod.list_spaces.fn
 list_work_items = _read_mod.list_work_items.fn
-search_work_items = _read_mod.search_work_items.fn
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -137,7 +136,7 @@ class TestListProjects:
 
         mock_client.get.assert_called_once_with(
             "/projects",
-            params={"page[size]": 10, "page[number]": 3},
+            params={"fields[projects]": "id,name", "page[size]": 10, "page[number]": 3},
         )
 
     async def test_auth_error_raises_permission_error(
@@ -185,14 +184,14 @@ class TestListProjects:
 
 
 # ---------------------------------------------------------------------------
-# list_spaces
+# list_documents
 # ---------------------------------------------------------------------------
 
 
-class TestListSpaces:
-    """Tests for the ``list_spaces`` tool."""
+class TestListDocuments:
+    """Tests for the ``list_documents`` tool."""
 
-    async def test_extracts_spaces_from_modules(
+    async def test_extracts_documents_from_modules(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.get_all_pages.return_value = [
@@ -229,19 +228,25 @@ class TestListSpaces:
             },
         ]
 
-        result = await list_spaces(
+        result = await list_documents(
             mock_ctx,
             project_id="proj1",
+            name_filter=None,
+            space_filter=None,
             page_size=100,
             page_number=1,
         )
 
         assert isinstance(result, PaginatedResult)
-        assert result.total_count == 3
-        ids = [s.id for s in result.items]
-        assert sorted(ids) == ["Design", "Testing", "_default"]
+        assert result.total_count == 5
+        space_doc_pairs = [(d.space_id, d.document_name) for d in result.items]
+        assert ("_default", "Doc1") in space_doc_pairs
+        assert ("_default", "Doc2") in space_doc_pairs
+        assert ("Design", "SDD") in space_doc_pairs
+        assert ("Design", "SRS") in space_doc_pairs
+        assert ("Testing", "TestPlan") in space_doc_pairs
 
-    async def test_deduplicates_spaces(
+    async def test_deduplicates_documents(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.get_all_pages.return_value = [
@@ -252,25 +257,28 @@ class TestListSpaces:
             },
             {
                 "relationships": {
-                    "module": {"data": {"type": "documents", "id": "proj1/Space1/DocB"}}
+                    "module": {"data": {"type": "documents", "id": "proj1/Space1/DocA"}}
                 }
             },
             {
                 "relationships": {
-                    "module": {"data": {"type": "documents", "id": "proj1/Space1/DocC"}}
+                    "module": {"data": {"type": "documents", "id": "proj1/Space1/DocA"}}
                 }
             },
         ]
 
-        result = await list_spaces(
+        result = await list_documents(
             mock_ctx,
             project_id="proj1",
+            name_filter=None,
+            space_filter=None,
             page_size=100,
             page_number=1,
         )
 
         assert result.total_count == 1
-        assert result.items[0].id == "Space1"
+        assert result.items[0].space_id == "Space1"
+        assert result.items[0].document_name == "DocA"
 
     async def test_pagination_slicing(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -286,9 +294,11 @@ class TestListSpaces:
             for i in range(5)
         ]
 
-        result = await list_spaces(
+        result = await list_documents(
             mock_ctx,
             project_id="proj1",
+            name_filter=None,
+            space_filter=None,
             page_size=2,
             page_number=2,
         )
@@ -306,15 +316,120 @@ class TestListSpaces:
             {"relationships": {"module": {}}},
         ]
 
-        result = await list_spaces(
+        result = await list_documents(
             mock_ctx,
             project_id="proj1",
+            name_filter=None,
+            space_filter=None,
             page_size=100,
             page_number=1,
         )
 
         assert result.total_count == 0
         assert result.items == []
+
+    async def test_name_filter(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get_all_pages.return_value = [
+            {
+                "relationships": {
+                    "module": {
+                        "data": {
+                            "type": "documents",
+                            "id": "proj1/_default/Software Requirement Specification",
+                        }
+                    }
+                }
+            },
+            {
+                "relationships": {
+                    "module": {
+                        "data": {
+                            "type": "documents",
+                            "id": "proj1/_default/SDD",
+                        }
+                    }
+                }
+            },
+        ]
+
+        result = await list_documents(
+            mock_ctx,
+            project_id="proj1",
+            name_filter="SRS",
+            space_filter=None,
+            page_size=100,
+            page_number=1,
+        )
+
+        # "SRS" should not match either document
+        assert result.total_count == 0
+
+        result2 = await list_documents(
+            mock_ctx,
+            project_id="proj1",
+            name_filter="Requirement",
+            space_filter=None,
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result2.total_count == 1
+        assert result2.items[0].document_name == "Software Requirement Specification"
+
+    async def test_space_filter(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get_all_pages.return_value = [
+            {
+                "relationships": {
+                    "module": {
+                        "data": {"type": "documents", "id": "proj1/_default/Doc1"}
+                    }
+                }
+            },
+            {
+                "relationships": {
+                    "module": {"data": {"type": "documents", "id": "proj1/Design/SRS"}}
+                }
+            },
+        ]
+
+        result = await list_documents(
+            mock_ctx,
+            project_id="proj1",
+            name_filter=None,
+            space_filter="Design",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.total_count == 1
+        assert result.items[0].space_id == "Design"
+        assert result.items[0].document_name == "SRS"
+
+    async def test_api_params_include_query_and_sort(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get_all_pages.return_value = []
+
+        await list_documents(
+            mock_ctx,
+            project_id="proj1",
+            name_filter=None,
+            space_filter=None,
+            page_size=100,
+            page_number=1,
+        )
+
+        call_args = mock_client.get_all_pages.call_args
+        params = call_args[1].get(
+            "params",
+            call_args[0][1] if len(call_args[0]) > 1 else {},
+        )
+        assert params["query"] == "type:heading"
+        assert params["sort"] == "module"
 
     async def test_not_found_raises_value_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -324,9 +439,11 @@ class TestListSpaces:
         )
 
         with pytest.raises(ValueError, match="not found"):
-            await list_spaces(
+            await list_documents(
                 mock_ctx,
                 project_id="missing",
+                name_filter=None,
+                space_filter=None,
                 page_size=100,
                 page_number=1,
             )
@@ -339,9 +456,11 @@ class TestListSpaces:
         )
 
         with pytest.raises(PermissionError, match="POLARION_TOKEN"):
-            await list_spaces(
+            await list_documents(
                 mock_ctx,
                 project_id="proj1",
+                name_filter=None,
+                space_filter=None,
                 page_size=100,
                 page_number=1,
             )
@@ -365,7 +484,7 @@ class TestGetDocument:
                 "attributes": {
                     "id": "SRS",
                     "title": "Software Requirement Spec",
-                    "description": {
+                    "homePageContent": {
                         "type": "text/html",
                         "value": ("<p>This is the <strong>SRS</strong> document.</p>"),
                     },
@@ -383,8 +502,8 @@ class TestGetDocument:
         assert isinstance(result, DocumentDetail)
         assert result.id == "SRS"
         assert result.title == "Software Requirement Spec"
-        assert "SRS" in result.description
-        assert "<p>" not in result.description
+        assert "SRS" in result.content
+        assert "<p>" not in result.content
         assert result.space_id == "_default"
         assert result.project_id == "proj1"
 
@@ -407,7 +526,7 @@ class TestGetDocument:
         call_path = mock_client.get.call_args[0][0]
         assert "Software%20Requirement%20Specification" in call_path
 
-    async def test_empty_description(
+    async def test_empty_content(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.get.return_value = {
@@ -415,7 +534,7 @@ class TestGetDocument:
                 "attributes": {
                     "id": "EmptyDoc",
                     "title": "Empty",
-                    "description": {
+                    "homePageContent": {
                         "type": "text/html",
                         "value": "",
                     },
@@ -430,7 +549,7 @@ class TestGetDocument:
             document_name="EmptyDoc",
         )
 
-        assert result.description == ""
+        assert result.content == ""
 
     async def test_not_found_raises_value_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -448,14 +567,14 @@ class TestGetDocument:
                 document_name="Missing",
             )
 
-    async def test_no_description_field(
+    async def test_no_content_field(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.get.return_value = {
             "data": {
                 "attributes": {
-                    "id": "NoDesc",
-                    "title": "No Description",
+                    "id": "NoContent",
+                    "title": "No Content",
                 },
             },
         }
@@ -464,10 +583,10 @@ class TestGetDocument:
             mock_ctx,
             project_id="proj1",
             space_id="_default",
-            document_name="NoDesc",
+            document_name="NoContent",
         )
 
-        assert result.description == ""
+        assert result.content == ""
 
 
 # ---------------------------------------------------------------------------
@@ -645,6 +764,7 @@ class TestListWorkItems:
         result = await list_work_items(
             mock_ctx,
             project_id="proj1",
+            query=None,
             page_size=100,
             page_number=1,
         )
@@ -667,6 +787,7 @@ class TestListWorkItems:
         await list_work_items(
             mock_ctx,
             project_id="proj1",
+            query=None,
             page_size=100,
             page_number=1,
         )
@@ -686,6 +807,7 @@ class TestListWorkItems:
             await list_work_items(
                 mock_ctx,
                 project_id="missing",
+                query=None,
                 page_size=100,
                 page_number=1,
             )
@@ -710,11 +832,79 @@ class TestListWorkItems:
         result = await list_work_items(
             mock_ctx,
             project_id="myproject",
+            query=None,
             page_size=100,
             page_number=1,
         )
 
         assert result.items[0].id == "WI-100"
+
+    async def test_query_param_forwarded(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": [],
+            "meta": {"totalCount": 0},
+        }
+
+        await list_work_items(
+            mock_ctx,
+            project_id="proj1",
+            query="type:testCase",
+            page_size=100,
+            page_number=1,
+        )
+
+        _, kwargs = mock_client.get.call_args
+        assert kwargs["params"]["query"] == "type:testCase"
+
+    async def test_query_none_omits_param(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": [],
+            "meta": {"totalCount": 0},
+        }
+
+        await list_work_items(
+            mock_ctx,
+            project_id="proj1",
+            query=None,
+            page_size=100,
+            page_number=1,
+        )
+
+        _, kwargs = mock_client.get.call_args
+        assert "query" not in kwargs["params"]
+
+    async def test_query_returns_matching_items(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "id": "proj1/MCPT-001",
+                    "attributes": {
+                        "title": "Login Feature",
+                        "type": "requirement",
+                        "status": "approved",
+                    },
+                },
+            ],
+            "meta": {"totalCount": 1},
+        }
+
+        result = await list_work_items(
+            mock_ctx,
+            project_id="proj1",
+            query="type:requirement AND status:approved",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert isinstance(result, PaginatedResult)
+        assert len(result.items) == 1
+        assert result.items[0].id == "MCPT-001"
 
 
 # ---------------------------------------------------------------------------
@@ -821,116 +1011,6 @@ class TestGetWorkItem:
         call_path = mock_client.get.call_args[0][0]
         expected = "/projects/proj1/workitems/MCPT-010"
         assert call_path == expected
-
-
-# ---------------------------------------------------------------------------
-# search_work_items
-# ---------------------------------------------------------------------------
-
-
-class TestSearchWorkItems:
-    """Tests for the ``search_work_items`` tool."""
-
-    async def test_returns_matching_items(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": [
-                {
-                    "id": "proj1/MCPT-001",
-                    "attributes": {
-                        "title": "Login Feature",
-                        "type": "requirement",
-                        "status": "approved",
-                    },
-                },
-            ],
-            "meta": {"totalCount": 1},
-        }
-
-        result = await search_work_items(
-            mock_ctx,
-            project_id="proj1",
-            query="type:requirement AND status:approved",
-            page_size=100,
-            page_number=1,
-        )
-
-        assert isinstance(result, PaginatedResult)
-        assert len(result.items) == 1
-        assert result.items[0].id == "MCPT-001"
-
-    async def test_query_param_forwarded(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": [],
-            "meta": {"totalCount": 0},
-        }
-
-        await search_work_items(
-            mock_ctx,
-            project_id="proj1",
-            query="type:testCase",
-            page_size=100,
-            page_number=1,
-        )
-
-        _, kwargs = mock_client.get.call_args
-        assert kwargs["params"]["query"] == "type:testCase"
-
-    async def test_empty_results(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": [],
-            "meta": {"totalCount": 0},
-        }
-
-        result = await search_work_items(
-            mock_ctx,
-            project_id="proj1",
-            query="type:nonexistent",
-            page_size=100,
-            page_number=1,
-        )
-
-        assert result.items == []
-        assert result.total_count == 0
-
-    async def test_project_not_found(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.side_effect = PolarionNotFoundError(
-            "Not found",
-            status_code=404,
-        )
-
-        with pytest.raises(ValueError, match="not found"):
-            await search_work_items(
-                mock_ctx,
-                project_id="missing",
-                query="type:requirement",
-                page_size=100,
-                page_number=1,
-            )
-
-    async def test_generic_error_raises_runtime_error(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.side_effect = PolarionError(
-            "Bad query syntax",
-            status_code=400,
-        )
-
-        with pytest.raises(RuntimeError, match="Failed to search"):
-            await search_work_items(
-                mock_ctx,
-                project_id="proj1",
-                query="invalid:::query",
-                page_size=100,
-                page_number=1,
-            )
 
 
 # ---------------------------------------------------------------------------
