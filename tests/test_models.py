@@ -10,12 +10,12 @@ from mcp_server_polarion.models import (
     DocumentDetail,
     DocumentPart,
     DocumentPartCreateResult,
+    DocumentSummary,
     LinkedWorkItemsList,
     LinkedWorkItemSummary,
     LinkResult,
     PaginatedResult,
     ProjectSummary,
-    SpaceSummary,
     WorkItemCreateResult,
     WorkItemDetail,
     WorkItemSummary,
@@ -111,18 +111,22 @@ class TestProjectSummary:
 
 
 # ---------------------------------------------------------------------------
-# SpaceSummary
+# DocumentSummary
 # ---------------------------------------------------------------------------
 
 
-class TestSpaceSummary:
+class TestDocumentSummary:
     def test_valid(self):
-        s = SpaceSummary(id="_default", name="_default")
-        assert s.id == "_default"
+        d = DocumentSummary(space_id="_default", document_name="SRS")
+        assert d.space_id == "_default"
+        assert d.document_name == "SRS"
 
-    def test_custom_name(self):
-        s = SpaceSummary(id="Design", name="Design Space")
-        assert s.name == "Design Space"
+    def test_custom_document_name(self):
+        d = DocumentSummary(
+            space_id="Design",
+            document_name="Software Requirement Specification",
+        )
+        assert d.document_name == "Software Requirement Specification"
 
 
 # ---------------------------------------------------------------------------
@@ -135,7 +139,7 @@ class TestDocumentDetail:
         d = DocumentDetail(
             id="SRS",
             title="Software Requirement Specification",
-            description="## Overview\n\nSystem requirements.",
+            content="## Overview\n\nSystem requirements.",
             space_id="_default",
             project_id="myproject",
         )
@@ -143,15 +147,15 @@ class TestDocumentDetail:
         assert d.title == "Software Requirement Specification"
         assert d.space_id == "_default"
 
-    def test_empty_description(self):
+    def test_empty_content(self):
         d = DocumentDetail(
             id="doc1",
             title="Empty Doc",
-            description="",
+            content="",
             space_id="space1",
             project_id="proj1",
         )
-        assert d.description == ""
+        assert d.content == ""
 
     def test_missing_required_field(self):
         with pytest.raises(ValidationError):
@@ -603,7 +607,7 @@ class TestCrossModelIntegration:
         """Every field in every model must have a description for LLM docs."""
         models = [
             ProjectSummary,
-            SpaceSummary,
+            DocumentSummary,
             DocumentDetail,
             DocumentPart,
             WorkItemSummary,
