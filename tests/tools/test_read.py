@@ -89,6 +89,7 @@ class TestListProjects:
 
         result = await list_projects(
             mock_ctx,
+            query=None,
             page_size=100,
             page_number=1,
         )
@@ -113,6 +114,7 @@ class TestListProjects:
 
         result = await list_projects(
             mock_ctx,
+            query=None,
             page_size=100,
             page_number=1,
         )
@@ -130,6 +132,7 @@ class TestListProjects:
 
         await list_projects(
             mock_ctx,
+            query=None,
             page_size=10,
             page_number=3,
         )
@@ -150,6 +153,7 @@ class TestListProjects:
         with pytest.raises(PermissionError, match="POLARION_TOKEN"):
             await list_projects(
                 mock_ctx,
+                query=None,
                 page_size=100,
                 page_number=1,
             )
@@ -165,6 +169,7 @@ class TestListProjects:
         with pytest.raises(RuntimeError, match="Failed to list"):
             await list_projects(
                 mock_ctx,
+                query=None,
                 page_size=100,
                 page_number=1,
             )
@@ -176,11 +181,63 @@ class TestListProjects:
 
         result = await list_projects(
             mock_ctx,
+            query=None,
             page_size=100,
             page_number=1,
         )
 
         assert result.total_count == 0
+
+    async def test_query_param_passed_to_api(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "type": "projects",
+                    "id": "proj1",
+                    "attributes": {"name": "Project One"},
+                },
+            ],
+            "meta": {"totalCount": 1},
+        }
+
+        result = await list_projects(
+            mock_ctx,
+            query="name:proj1",
+            page_size=100,
+            page_number=1,
+        )
+
+        mock_client.get.assert_called_once_with(
+            "/projects",
+            params={
+                "fields[projects]": "id,name",
+                "page[size]": 100,
+                "page[number]": 1,
+                "query": "name:proj1",
+            },
+        )
+        assert len(result.items) == 1
+        assert result.items[0].id == "proj1"
+
+    async def test_query_none_omits_query_param(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": [],
+            "meta": {"totalCount": 0},
+        }
+
+        await list_projects(
+            mock_ctx,
+            query=None,
+            page_size=100,
+            page_number=1,
+        )
+
+        call_params = mock_client.get.call_args[1]["params"]
+        assert "query" not in call_params
 
 
 # ---------------------------------------------------------------------------
@@ -583,9 +640,7 @@ class TestListDocuments:
     async def test_auth_error_raises_permission_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.side_effect = PolarionAuthError(
-            "Forbidden", status_code=403
-        )
+        mock_client.get.side_effect = PolarionAuthError("Forbidden", status_code=403)
 
         with pytest.raises(PermissionError, match="POLARION_TOKEN"):
             await list_documents(

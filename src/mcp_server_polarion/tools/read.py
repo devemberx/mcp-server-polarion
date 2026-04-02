@@ -265,6 +265,14 @@ async def _discover_documents(
 @mcp.tool()
 async def list_projects(
     ctx: Context,
+    query: str | None = Field(
+        default=None,
+        description=(
+            "Optional Lucene query string for filtering projects. "
+            "Examples: 'name:myproject', 'name:*infotainment*'. "
+            "Omit to list all accessible projects."
+        ),
+    ),
     page_size: int = Field(
         default=_DEFAULT_PAGE_SIZE,
         ge=1,
@@ -283,8 +291,12 @@ async def list_projects(
     can access.  Use this as the starting point to discover valid project
     IDs for other tools.
 
+    Pass a Lucene ``query`` to search for specific projects by name,
+    or omit it to list all accessible projects.
+
     Args:
         ctx: MCP tool context (injected automatically).
+        query: Optional Lucene query string for filtering projects.
         page_size: Number of projects per page (1-100, default 100).
         page_number: Page number to retrieve (1-based, default 1).
 
@@ -301,14 +313,17 @@ async def list_projects(
         RuntimeError: On unexpected Polarion API errors.
     """
     client = _get_client(ctx)
+    params: dict[str, str | int] = {
+        "fields[projects]": "id,name",
+        "page[size]": page_size,
+        "page[number]": page_number,
+    }
+    if query is not None:
+        params["query"] = query
     try:
         response = await client.get(
             "/projects",
-            params={
-                "fields[projects]": "id,name",
-                "page[size]": page_size,
-                "page[number]": page_number,
-            },
+            params=params,
         )
     except PolarionAuthError as exc:
         raise PermissionError(
