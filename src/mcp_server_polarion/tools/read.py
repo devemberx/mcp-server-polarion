@@ -9,7 +9,7 @@ relationships.  Every tool returns Pydantic models -- never raw
 from __future__ import annotations
 
 import re
-from typing import Final, Literal
+from typing import Final, Literal, cast
 from urllib.parse import quote
 
 from fastmcp import Context
@@ -41,6 +41,12 @@ _DEFAULT_PAGE_SIZE: Final[int] = 100
 # Sparse fieldset for list/search endpoints.
 _WI_LIST_FIELDS: Final[str] = "title,type,status"
 _WI_DETAIL_FIELDS: Final[str] = "title,description,type,status"
+
+# Valid document part types returned by Polarion.
+type _PartType = Literal["heading", "workitem", "normal", "toc", "wikiblock"]
+_VALID_PART_TYPES: Final[frozenset[str]] = frozenset(
+    {"heading", "workitem", "normal", "toc", "wikiblock"},
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -98,6 +104,159 @@ def _encode_path_segment(segment: str) -> str:
         URL-encoded segment safe for use in URL paths.
     """
     return quote(segment, safe="")
+
+
+def _extract_document_pair(
+    item: object,
+    documents: set[tuple[str, str]],
+) -> None:
+    """Parse ``module`` relationship from a heading work item and add the
+    (space_id, document_name) pair to *documents*.
+
+    The module relationship ``data.id`` has the format
+    ``{projectId}/{spaceId}/{documentName}``.
+
+    Args:
+        item: A single JSON:API resource object from the ``data`` array.
+        documents: Mutable set to collect unique (space, doc) pairs into.
+    """
+    mod_id = _get_module_id(item)
+    if mod_id:
+        parts = mod_id.split("/")
+        # Format: "projectId/spaceId/docName" → parts[1], parts[2:]
+        if len(parts) >= 3:  # noqa: PLR2004
+            space_id = parts[1]
+            doc_name = "/".join(parts[2:])
+            documents.add((space_id, doc_name))
+
+
+def _get_module_id(item: object) -> str:
+    """Extract the ``module`` relationship ID from a heading work item.
+
+    Args:
+        item: A single JSON:API resource object.
+
+    Returns:
+        The module ID string (e.g. ``projectId/spaceId/docName``),
+        or ``""`` if not available.
+    """
+    if not isinstance(item, dict):
+        return ""
+    rels = item.get("relationships", {})
+    if not isinstance(rels, dict):
+        return ""
+    module_rel = rels.get("module", {})
+    if not isinstance(module_rel, dict):
+        return ""
+    mod_data = module_rel.get("data")
+    if not isinstance(mod_data, dict):
+        return ""
+    mod_id = mod_data.get("id", "")
+    return str(mod_id) if isinstance(mod_id, str) else ""
+
+
+async def _discover_documents(
+    client: PolarionClient,
+    project_id: str,
+) -> set[tuple[str, str]]:
+    """Discover all unique (space_id, document_name) pairs via binary search.
+
+    Because heading work items are sorted by ``module``, all headings for the
+    same document are contiguous.  This lets us **binary search** for document
+    transition boundaries rather than scanning every page linearly.
+
+    Complexity: O(D * log(N / D)) page fetches, where D is the number of
+    unique documents and N is the total number of pages.
+
+    Args:
+        client: Active ``PolarionClient`` instance.
+        project_id: Polarion project ID.
+
+    Returns:
+        Set of (space_id, document_name) tuples.
+    """
+    base_params: dict[str, str | int] = {
+        "fields[workitems]": "module",
+        "query": "type:heading",
+        "sort": "module",
+        "page[size]": _DEFAULT_PAGE_SIZE,
+    }
+
+    async def _fetch_page(page: int) -> list[object]:
+        """Fetch a single page and return the ``data`` array."""
+        resp = await client.get(
+            f"/projects/{project_id}/workitems",
+            params={**base_params, "page[number]": page},
+        )
+        data = resp.get("data", [])
+        return data if isinstance(data, list) else []
+
+    # -- Step 1: fetch page 1 to get the total count. --------------------
+    first_resp = await client.get(
+        f"/projects/{project_id}/workitems",
+        params={**base_params, "page[number]": 1},
+    )
+    first_data = first_resp.get("data", [])
+    if not isinstance(first_data, list) or not first_data:
+        return set()
+
+    total_count = _extract_total_count(first_resp)
+    max_page = max(1, -(-total_count // _DEFAULT_PAGE_SIZE))  # ceil div
+
+    documents: set[tuple[str, str]] = set()
+    for item in first_data:
+        _extract_document_pair(item, documents)
+
+    if max_page <= 1:
+        return documents
+
+    # -- Step 2: binary search for successive document boundaries. -------
+    # ``last_module`` is the module ID of the *last* item on the most
+    # recently processed boundary page.  Because results are sorted,
+    # all items between the current position and the next transition have
+    # the same (or earlier) module.
+    last_module = _get_module_id(first_data[-1])
+    current_page = 1
+
+    while current_page < max_page:
+        # Binary-search for the first page after ``current_page`` where
+        # at least one item has a module different from ``last_module``.
+        lo, hi = current_page + 1, max_page
+        transition_page = 0
+        transition_data: list[object] = []
+
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            mid_data = await _fetch_page(mid)
+            if not mid_data:
+                hi = mid - 1
+                continue
+
+            # Collect documents from every probed page (free wins).
+            for item in mid_data:
+                _extract_document_pair(item, documents)
+
+            # Check monotonic property: does this page have any item
+            # whose module differs from ``last_module``?
+            has_new = any(
+                _get_module_id(it) != last_module for it in mid_data
+            )
+
+            if has_new:
+                transition_page = mid
+                transition_data = mid_data
+                hi = mid - 1
+            else:
+                lo = mid + 1
+
+        if transition_page == 0:
+            break  # No more transitions — all documents discovered.
+
+        # Advance to the transition page for the next iteration.
+        current_page = transition_page
+        last_module = _get_module_id(transition_data[-1])
+
+    return documents
 
 
 # ---------------------------------------------------------------------------
@@ -257,15 +416,11 @@ async def list_documents(  # noqa: PLR0913
         RuntimeError: On unexpected Polarion API errors.
     """
     client = _get_client(ctx)
+
+    # Binary-search discovery: O(D * log(N/D)) page fetches instead of
+    # O(N) linear scanning, where D = unique documents, N = total pages.
     try:
-        all_items = await client.get_all_pages(
-            f"/projects/{project_id}/workitems",
-            params={
-                "fields[workitems]": "module",
-                "query": "type:heading",
-                "sort": "module",
-            },
-        )
+        documents = await _discover_documents(client, project_id)
     except PolarionNotFoundError as exc:
         raise ValueError(
             f"Project '{project_id}' not found. "
@@ -279,29 +434,6 @@ async def list_documents(  # noqa: PLR0913
         raise RuntimeError(
             f"Failed to list documents for project '{project_id}': {exc.message}"
         ) from exc
-
-    # Parse module from relationships to extract unique (space, doc) pairs.
-    # The API returns module in relationships.module.data.id with format:
-    # "{projectId}/{spaceId}/{documentName}".
-    documents: set[tuple[str, str]] = set()
-    for item in all_items:
-        rels = item.get("relationships", {})
-        if not isinstance(rels, dict):
-            continue
-        module_rel = rels.get("module", {})
-        if not isinstance(module_rel, dict):
-            continue
-        mod_data = module_rel.get("data")
-        if not isinstance(mod_data, dict):
-            continue
-        mod_id = mod_data.get("id", "")
-        if isinstance(mod_id, str) and mod_id:
-            parts = mod_id.split("/")
-            # Format: "projectId/spaceId/docName" → parts[1], parts[2:]
-            if len(parts) >= 3:  # noqa: PLR2004
-                space_id = parts[1]
-                doc_name = "/".join(parts[2:])
-                documents.add((space_id, doc_name))
 
     # Apply filters.
     filtered: list[tuple[str, str]] = sorted(documents)
@@ -538,11 +670,11 @@ async def get_document_parts(  # noqa: PLR0913
             part_id = _safe_str(item.get("id", ""))
 
             # Use API's type attribute directly.
-            _VALID_PART_TYPES = frozenset(
-                {"heading", "workitem", "normal", "toc", "wikiblock"},
-            )
             raw_type = _safe_str(attrs.get("type", ""))
-            part_type = raw_type if raw_type in _VALID_PART_TYPES else "normal"
+            part_type: _PartType = cast(
+                _PartType,
+                raw_type if raw_type in _VALID_PART_TYPES else "normal",
+            )
 
             # Content is returned as a plain HTML string (not a dict).
             content_html = ""

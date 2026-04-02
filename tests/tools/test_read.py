@@ -194,7 +194,7 @@ class TestListDocuments:
     async def test_extracts_documents_from_modules(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get_all_pages.return_value = [
+        items = [
             {
                 "relationships": {
                     "module": {
@@ -227,6 +227,11 @@ class TestListDocuments:
                 }
             },
         ]
+        # Single page — totalCount ≤ page_size, so no binary search.
+        mock_client.get.return_value = {
+            "data": items,
+            "meta": {"totalCount": 5},
+        }
 
         result = await list_documents(
             mock_ctx,
@@ -249,7 +254,7 @@ class TestListDocuments:
     async def test_deduplicates_documents(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get_all_pages.return_value = [
+        items = [
             {
                 "relationships": {
                     "module": {"data": {"type": "documents", "id": "proj1/Space1/DocA"}}
@@ -266,6 +271,10 @@ class TestListDocuments:
                 }
             },
         ]
+        mock_client.get.return_value = {
+            "data": items,
+            "meta": {"totalCount": 3},
+        }
 
         result = await list_documents(
             mock_ctx,
@@ -283,7 +292,7 @@ class TestListDocuments:
     async def test_pagination_slicing(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get_all_pages.return_value = [
+        items = [
             {
                 "relationships": {
                     "module": {
@@ -293,6 +302,10 @@ class TestListDocuments:
             }
             for i in range(5)
         ]
+        mock_client.get.return_value = {
+            "data": items,
+            "meta": {"totalCount": 5},
+        }
 
         result = await list_documents(
             mock_ctx,
@@ -310,11 +323,15 @@ class TestListDocuments:
     async def test_empty_modules(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get_all_pages.return_value = [
+        items = [
             {"relationships": {"module": {"data": None}}},
             {"relationships": {}},
             {"relationships": {"module": {}}},
         ]
+        mock_client.get.return_value = {
+            "data": items,
+            "meta": {"totalCount": 3},
+        }
 
         result = await list_documents(
             mock_ctx,
@@ -328,10 +345,110 @@ class TestListDocuments:
         assert result.total_count == 0
         assert result.items == []
 
+    async def test_binary_search_skips_pages(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Binary search discovers document boundaries without scanning every page.
+
+        Layout (5 pages total, sorted by module):
+          Page 1: DocA × 100   (page 1 always fetched)
+          Page 2: DocA × 100
+          Page 3: DocA × 50 + DocB × 50  (transition)
+          Page 4: DocB × 100
+          Page 5: DocB × 30   (partial → end)
+
+        Binary search from page 1 (last_module=DocA):
+          lo=2, hi=5 → mid=3 → DocA+DocB (has_new) → transition_page=3, hi=2
+          lo=2, hi=2 → mid=2 → DocA only → lo=3
+          lo>hi → done, transition_page=3
+        Then from page 3 (last_module=DocB):
+          lo=4, hi=5 → mid=4 → DocB only → lo=5
+          lo=5, hi=5 → mid=5 → DocB only → lo=6
+          lo>hi → done, no transition
+        Total fetches: page 1 + page 3 + page 2 + page 4 + page 5 = 5
+        (but in a larger dataset, most pages would be skipped)
+        """
+
+        def _make_item(doc: str) -> dict:
+            return {
+                "relationships": {
+                    "module": {"data": {"type": "documents", "id": f"p/S/{doc}"}}
+                }
+            }
+
+        page_data = {
+            1: [_make_item("DocA")] * 100,
+            2: [_make_item("DocA")] * 100,
+            3: [_make_item("DocA")] * 50 + [_make_item("DocB")] * 50,
+            4: [_make_item("DocB")] * 100,
+            5: [_make_item("DocB")] * 30,
+        }
+
+        async def _mock_get(path, *, params=None):
+            page_num = params["page[number]"]
+            return {
+                "data": page_data.get(page_num, []),
+                "meta": {"totalCount": 430},  # 5 pages
+            }
+
+        mock_client.get.side_effect = _mock_get
+
+        result = await list_documents(
+            mock_ctx,
+            project_id="p",
+            name_filter=None,
+            space_filter=None,
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.total_count == 2
+        pairs = {(d.space_id, d.document_name) for d in result.items}
+        assert pairs == {("S", "DocA"), ("S", "DocB")}
+
+    async def test_binary_search_many_documents_on_few_pages(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """When multiple small documents fit on one page, all are discovered."""
+
+        def _make_item(doc: str) -> dict:
+            return {
+                "relationships": {
+                    "module": {"data": {"type": "documents", "id": f"p/S/{doc}"}}
+                }
+            }
+
+        # Single page with 4 different documents (sorted).
+        items = (
+            [_make_item("Alpha")] * 25
+            + [_make_item("Bravo")] * 25
+            + [_make_item("Charlie")] * 25
+            + [_make_item("Delta")] * 25
+        )
+        mock_client.get.return_value = {
+            "data": items,
+            "meta": {"totalCount": 100},
+        }
+
+        result = await list_documents(
+            mock_ctx,
+            project_id="p",
+            name_filter=None,
+            space_filter=None,
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.total_count == 4
+        names = {d.document_name for d in result.items}
+        assert names == {"Alpha", "Bravo", "Charlie", "Delta"}
+        # Only 1 API call needed (single page).
+        assert mock_client.get.call_count == 1
+
     async def test_name_filter(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get_all_pages.return_value = [
+        items = [
             {
                 "relationships": {
                     "module": {
@@ -353,6 +470,10 @@ class TestListDocuments:
                 }
             },
         ]
+        mock_client.get.return_value = {
+            "data": items,
+            "meta": {"totalCount": 2},
+        }
 
         result = await list_documents(
             mock_ctx,
@@ -366,6 +487,10 @@ class TestListDocuments:
         # "SRS" should not match either document
         assert result.total_count == 0
 
+        mock_client.get.return_value = {
+            "data": items,
+            "meta": {"totalCount": 2},
+        }
         result2 = await list_documents(
             mock_ctx,
             project_id="proj1",
@@ -381,7 +506,7 @@ class TestListDocuments:
     async def test_space_filter(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get_all_pages.return_value = [
+        items = [
             {
                 "relationships": {
                     "module": {
@@ -395,6 +520,10 @@ class TestListDocuments:
                 }
             },
         ]
+        mock_client.get.return_value = {
+            "data": items,
+            "meta": {"totalCount": 2},
+        }
 
         result = await list_documents(
             mock_ctx,
@@ -412,7 +541,10 @@ class TestListDocuments:
     async def test_api_params_include_query_and_sort(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get_all_pages.return_value = []
+        mock_client.get.return_value = {
+            "data": [],
+            "meta": {"totalCount": 0},
+        }
 
         await list_documents(
             mock_ctx,
@@ -423,7 +555,7 @@ class TestListDocuments:
             page_number=1,
         )
 
-        call_args = mock_client.get_all_pages.call_args
+        call_args = mock_client.get.call_args
         params = call_args[1].get(
             "params",
             call_args[0][1] if len(call_args[0]) > 1 else {},
@@ -434,7 +566,7 @@ class TestListDocuments:
     async def test_not_found_raises_value_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get_all_pages.side_effect = PolarionNotFoundError(
+        mock_client.get.side_effect = PolarionNotFoundError(
             "Not found", status_code=404
         )
 
@@ -451,7 +583,7 @@ class TestListDocuments:
     async def test_auth_error_raises_permission_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get_all_pages.side_effect = PolarionAuthError(
+        mock_client.get.side_effect = PolarionAuthError(
             "Forbidden", status_code=403
         )
 
