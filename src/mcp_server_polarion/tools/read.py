@@ -8,6 +8,7 @@ relationships.  Every tool returns Pydantic models -- never raw
 
 from __future__ import annotations
 
+import re
 from typing import Final, Literal
 from urllib.parse import quote
 
@@ -349,12 +350,19 @@ async def get_document(
 ) -> DocumentDetail:
     """Get full details of a Polarion document.
 
-    Retrieves the title, full content (homePageContent), and metadata
-    for a specific document in a space.  Use ``list_documents`` first
-    to discover valid space IDs and document names.
+    Retrieves the title, **complete body content**, and metadata for a
+    specific document in a space.  The returned ``content`` field
+    contains the entire document text (all sections, headings, and
+    descriptions) — it is NOT a summary or excerpt.
 
-    The document content is automatically converted from HTML to
-    Markdown for easier consumption.
+    **This tool alone is sufficient for reading, summarising, or
+    analysing a document.**  There is no need to call
+    ``get_document_parts`` afterward unless you specifically need the
+    structural part IDs (e.g. for ``create_document_part`` positioning).
+
+    Use ``list_documents`` first to discover valid space IDs and
+    document names.  The content is automatically converted from HTML
+    to Markdown for easier consumption.
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -366,7 +374,7 @@ async def get_document(
         DocumentDetail with:
         - ``id``: Document identifier.
         - ``title``: Document title.
-        - ``content``: Full document content in Markdown.
+        - ``content``: Complete document body in Markdown (not a summary).
         - ``space_id``: Containing space.
         - ``project_id``: Containing project.
 
@@ -453,14 +461,17 @@ async def get_document_parts(  # noqa: PLR0913
         description="Page number to retrieve (1-based, default 1).",
     ),
 ) -> PaginatedResult[DocumentPart]:
-    """List the parts (headings and work items) of a Polarion document.
+    """List the structural parts (headings and work items) of a document.
 
-    Returns the ordered list of parts that make up a document's body.
-    Each part is either a heading or a work item reference.  Use
-    ``get_document`` first to verify the document exists.
+    Returns the ordered list of part IDs, titles, and types that make
+    up a document's body.  Use this tool **only** when you need:
 
-    Part content (descriptions) is automatically converted from HTML to
-    Markdown.
+    - Part IDs for positioning with ``create_document_part``
+      (``next_part_id`` / ``previous_part_id``).
+    - The hierarchical structure (heading levels) of the document.
+
+    **Do NOT call this tool just to read or summarise a document.**
+    ``get_document`` already returns the complete document body.
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -495,6 +506,7 @@ async def get_document_parts(  # noqa: PLR0913
         response = await client.get(
             path,
             params={
+                "fields[document_parts]": "content,type",
                 "page[size]": page_size,
                 "page[number]": page_number,
             },
@@ -525,29 +537,31 @@ async def get_document_parts(  # noqa: PLR0913
                 attrs = {}
             part_id = _safe_str(item.get("id", ""))
 
-            # Determine type from ID prefix.
-            part_type: Literal["heading", "workitem"] = "workitem"
-            if part_id.startswith("heading_"):
-                part_type = "heading"
-
-            # Extract heading level.
-            level = 0
-            raw_level = attrs.get("level")
-            if isinstance(raw_level, int):
-                level = raw_level
-
-            # Content/description is HTML.
-            content_obj = attrs.get(
-                "content",
-                attrs.get("description", {}),
+            # Use API's type attribute directly.
+            _VALID_PART_TYPES = frozenset(
+                {"heading", "workitem", "normal", "toc", "wikiblock"},
             )
+            raw_type = _safe_str(attrs.get("type", ""))
+            part_type = raw_type if raw_type in _VALID_PART_TYPES else "normal"
+
+            # Content is returned as a plain HTML string (not a dict).
             content_html = ""
+            content_obj = attrs.get("content")
             if isinstance(content_obj, dict):
-                content_html = _safe_str(
-                    content_obj.get("value", ""),
-                )
+                content_html = _safe_str(content_obj.get("value", ""))
             elif isinstance(content_obj, str):
                 content_html = content_obj
+
+            # Extract heading level from HTML tag (e.g. <h2 …> → 2).
+            level = 0
+            if part_type == "heading":
+                heading_match = re.match(
+                    r"<h(\d)",
+                    content_html,
+                    re.IGNORECASE,
+                )
+                if heading_match:
+                    level = int(heading_match.group(1))
 
             items.append(
                 DocumentPart(

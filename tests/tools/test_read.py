@@ -604,30 +604,30 @@ class TestGetDocumentParts:
             "data": [
                 {
                     "type": "document_parts",
-                    "id": "heading_MCPT-001",
+                    "id": "proj1/_default/SRS/heading_MCPT-001",
                     "attributes": {
-                        "title": "Introduction",
-                        "level": 1,
-                        "content": {
-                            "type": "text/html",
-                            "value": "<p>This is the intro.</p>",
-                        },
+                        "content": '<h1 id="polarion_wiki macro name=module-workitem;params=id=MCPT-001"></h1>',
+                        "type": "heading",
                     },
                 },
                 {
                     "type": "document_parts",
-                    "id": "workitem_MCPT-002",
+                    "id": "proj1/_default/SRS/workitem_MCPT-002",
                     "attributes": {
-                        "title": "Login Feature",
-                        "level": 0,
-                        "content": {
-                            "type": "text/html",
-                            "value": "<p>Login requirement.</p>",
-                        },
+                        "content": '<div id="polarion_wiki macro name=module-workitem;params=id=MCPT-002"></div>',
+                        "type": "workitem",
+                    },
+                },
+                {
+                    "type": "document_parts",
+                    "id": "proj1/_default/SRS/polarion_1",
+                    "attributes": {
+                        "content": "<p>Normal text content.</p>",
+                        "type": "normal",
                     },
                 },
             ],
-            "meta": {"totalCount": 2},
+            "meta": {"totalCount": 3},
         }
 
         result = await get_document_parts(
@@ -640,21 +640,23 @@ class TestGetDocumentParts:
         )
 
         assert isinstance(result, PaginatedResult)
-        assert len(result.items) == 2
-        assert result.total_count == 2
+        assert len(result.items) == 3
+        assert result.total_count == 3
 
         heading = result.items[0]
         assert isinstance(heading, DocumentPart)
-        assert heading.id == "heading_MCPT-001"
-        assert heading.title == "Introduction"
+        assert heading.id == "proj1/_default/SRS/heading_MCPT-001"
         assert heading.type == "heading"
         assert heading.level == 1
-        assert "<p>" not in heading.content
 
         wi_part = result.items[1]
-        assert wi_part.id == "workitem_MCPT-002"
+        assert wi_part.id == "proj1/_default/SRS/workitem_MCPT-002"
         assert wi_part.type == "workitem"
         assert wi_part.level == 0
+
+        normal_part = result.items[2]
+        assert normal_part.type == "normal"
+        assert normal_part.level == 0
 
     async def test_pagination_params_forwarded(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -674,6 +676,7 @@ class TestGetDocumentParts:
         )
 
         _, kwargs = mock_client.get.call_args
+        assert kwargs["params"]["fields[document_parts]"] == "content,type"
         assert kwargs["params"]["page[size]"] == 10
         assert kwargs["params"]["page[number]"] == 2
 
@@ -702,11 +705,10 @@ class TestGetDocumentParts:
         mock_client.get.return_value = {
             "data": [
                 {
-                    "id": "heading_MCPT-003",
+                    "id": "proj1/_default/Doc/heading_MCPT-003",
                     "attributes": {
-                        "title": "Heading",
-                        "level": 2,
-                        "content": "<p>Plain string content.</p>",
+                        "content": "<h2>Plain string content.</h2>",
+                        "type": "heading",
                     },
                 },
             ],
@@ -723,6 +725,8 @@ class TestGetDocumentParts:
         )
 
         assert len(result.items) == 1
+        assert result.items[0].type == "heading"
+        assert result.items[0].level == 2
         assert "Plain string content" in result.items[0].content
 
 
