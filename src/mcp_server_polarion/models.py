@@ -123,8 +123,11 @@ class DocumentPart(BaseModel):
             "Empty string when the part has no body content."
         ),
     )
-    type: Literal["heading", "workitem"] = Field(
-        description="Part type: 'heading' or 'workitem'.",
+    type: Literal["heading", "workitem", "normal", "toc", "wikiblock"] = Field(
+        description=(
+            "Part type: 'heading', 'workitem', 'normal' (rich text), "
+            "'toc' (table of contents), or 'wikiblock' (wiki macro block)."
+        ),
     )
     level: int = Field(
         description=(
