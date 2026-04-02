@@ -72,8 +72,7 @@ class DocumentSummary(BaseModel):
 
     space_id: str = Field(
         description=(
-            "Space identifier that contains the document"
-            " (e.g. '_default', 'Design')."
+            "Space identifier that contains the document (e.g. '_default', 'Design')."
         ),
     )
     document_name: str = Field(

@@ -305,14 +305,10 @@ async def list_documents(  # noqa: PLR0913
     # Apply filters.
     filtered: list[tuple[str, str]] = sorted(documents)
     if space_filter is not None:
-        filtered = [
-            (s, d) for s, d in filtered if s == space_filter
-        ]
+        filtered = [(s, d) for s, d in filtered if s == space_filter]
     if name_filter is not None:
         name_lower = name_filter.lower()
-        filtered = [
-            (s, d) for s, d in filtered if name_lower in d.lower()
-        ]
+        filtered = [(s, d) for s, d in filtered if name_lower in d.lower()]
 
     total = len(filtered)
 
@@ -321,10 +317,7 @@ async def list_documents(  # noqa: PLR0913
     end = start + page_size
     page_slice = filtered[start:end]
 
-    items = [
-        DocumentSummary(space_id=s, document_name=d)
-        for s, d in page_slice
-    ]
+    items = [DocumentSummary(space_id=s, document_name=d) for s, d in page_slice]
 
     return PaginatedResult[DocumentSummary](
         items=items,
