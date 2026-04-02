@@ -795,7 +795,7 @@ class TestGetDocumentParts:
                     "attributes": {
                         "content": (
                             '<h1 id="polarion_wiki macro'
-                            ' name=module-workitem;'
+                            " name=module-workitem;"
                             'params=id=MCPT-001"></h1>'
                         ),
                         "type": "heading",
@@ -807,7 +807,7 @@ class TestGetDocumentParts:
                     "attributes": {
                         "content": (
                             '<div id="polarion_wiki macro'
-                            ' name=module-workitem;'
+                            " name=module-workitem;"
                             'params=id=MCPT-002"></div>'
                         ),
                         "type": "workitem",
