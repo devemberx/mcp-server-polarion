@@ -370,7 +370,7 @@ async def list_documents(  # noqa: PLR0913
         description=(
             "Optional substring filter for document names "
             "(case-insensitive, client-side). "
-            "E.g. 'SRS' matches 'Software Requirement Specification'."
+            "E.g. 'Requirement' matches 'Software Requirement Specification'."
         ),
     ),
     space_filter: str | None = Field(
