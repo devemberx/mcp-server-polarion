@@ -408,11 +408,11 @@ class TestListDocuments:
         """Binary search discovers document boundaries without scanning every page.
 
         Layout (5 pages total, sorted by module):
-          Page 1: DocA × 100   (page 1 always fetched)
-          Page 2: DocA × 100
-          Page 3: DocA × 50 + DocB × 50  (transition)
-          Page 4: DocB × 100
-          Page 5: DocB × 30   (partial → end)
+          Page 1: DocA x 100   (page 1 always fetched)
+          Page 2: DocA x 100
+          Page 3: DocA x 50 + DocB x 50  (transition)
+          Page 4: DocB x 100
+          Page 5: DocB x 30   (partial -> end)
 
         Binary search from page 1 (last_module=DocA):
           lo=2, hi=5 → mid=3 → DocA+DocB (has_new) → transition_page=3, hi=2
@@ -793,7 +793,11 @@ class TestGetDocumentParts:
                     "type": "document_parts",
                     "id": "proj1/_default/SRS/heading_MCPT-001",
                     "attributes": {
-                        "content": '<h1 id="polarion_wiki macro name=module-workitem;params=id=MCPT-001"></h1>',
+                        "content": (
+                            '<h1 id="polarion_wiki macro'
+                            ' name=module-workitem;'
+                            'params=id=MCPT-001"></h1>'
+                        ),
                         "type": "heading",
                     },
                 },
@@ -801,7 +805,11 @@ class TestGetDocumentParts:
                     "type": "document_parts",
                     "id": "proj1/_default/SRS/workitem_MCPT-002",
                     "attributes": {
-                        "content": '<div id="polarion_wiki macro name=module-workitem;params=id=MCPT-002"></div>',
+                        "content": (
+                            '<div id="polarion_wiki macro'
+                            ' name=module-workitem;'
+                            'params=id=MCPT-002"></div>'
+                        ),
                         "type": "workitem",
                     },
                 },
