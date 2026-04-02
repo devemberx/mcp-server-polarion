@@ -88,9 +88,8 @@ mcp-server-polarion/
 │       │   ├── __init__.py       # Re-exports: html_to_markdown, markdown_to_html, sanitize_html
 │       │   └── html.py           # HTML ↔ Markdown conversion + HTML sanitization
 │       └── tools/                # MCP tool definitions
-│           ├── __init__.py       # Imports read & write to register tools on mcp
-│       │   ├── read.py           # 7 read tools
-│           └── write.py          # 5 write tools
+│           ├── __init__.py       # Imports read to register tools on mcp
+│           └── read.py           # 7 read tools
 └── tests/
     ├── conftest.py               # Shared fixtures (mock client, MCP test client)
     ├── test_models.py            # Pydantic model validation
@@ -103,15 +102,14 @@ mcp-server-polarion/
     │   └── test_html.py          # HTML ↔ Markdown conversion edge cases
     └── tools/
         ├── __init__.py
-│       ├── test_read.py          # 7 read tools
-        └── test_write.py         # 5 write tools + dry_run verification
+        └── test_read.py          # 7 read tools
 ```
 
 ### Import Structure
 
 - `server.py` creates the `mcp = FastMCP(...)` instance.
-- `tools/read.py` and `tools/write.py` import it via `from mcp_server_polarion.server import mcp` to use the `@mcp.tool()` decorator.
-- `tools/__init__.py` runs `import mcp_server_polarion.tools.read` and `import mcp_server_polarion.tools.write` to register all tools.
+- `tools/read.py` imports it via `from mcp_server_polarion.server import mcp` to use the `@mcp.tool()` decorator.
+- `tools/__init__.py` runs `import mcp_server_polarion.tools.read` to register all tools.
 - `server.py` calls `import mcp_server_polarion.tools` at the very bottom of the module (to avoid circular imports).
 - `core/__init__.py` re-exports `PolarionClient`, `PolarionConfig`, and exception classes.
 - `utils/__init__.py` re-exports `html_to_markdown`, `markdown_to_html`, and `sanitize_html`.

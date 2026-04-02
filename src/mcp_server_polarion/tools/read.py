@@ -238,9 +238,7 @@ async def _discover_documents(
 
             # Check monotonic property: does this page have any item
             # whose module differs from ``last_module``?
-            has_new = any(
-                _get_module_id(it) != last_module for it in mid_data
-            )
+            has_new = any(_get_module_id(it) != last_module for it in mid_data)
 
             if has_new:
                 transition_page = mid
@@ -392,6 +390,12 @@ async def list_documents(  # noqa: PLR0913
     to extract unique (space_id, document_name) pairs from the
     ``relationships.module.data.id`` field (format:
     ``projectId/spaceId/documentName``).
+
+    **Performance note:** This tool discovers documents by scanning
+    heading work items across multiple API pages and applying
+    client-side filtering.  For projects with many work items this
+    may be expensive; ``page_number`` controls the result window but
+    does not reduce the number of API calls.
 
     Use ``name_filter`` for client-side substring matching on document
     names, or ``space_filter`` to restrict results to a specific space.
