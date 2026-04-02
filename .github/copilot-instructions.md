@@ -334,7 +334,7 @@ Every tool must have a Google-style docstring with these mandatory sections:
 3. **Args**: Every parameter with type context and example values.
 4. **Returns**: Field descriptions of the returned model.
 5. **Raises**: Every exception the tool may throw.
-6. **Cross-reference other tools**: e.g., "Use `list_spaces` first to discover space IDs."
+6. **Cross-reference other tools**: e.g., "Use `list_documents` first to discover space IDs and document names."
 
 ### Read Tool Rules
 
