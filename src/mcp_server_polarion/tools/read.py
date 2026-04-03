@@ -660,7 +660,7 @@ async def get_document_parts(  # noqa: PLR0913
         response = await client.get(
             path,
             params={
-                "fields[document_parts]": "content,type",
+                "fields[document_parts]": "title,content,type",
                 "page[size]": page_size,
                 "page[number]": page_number,
             },
@@ -727,9 +727,14 @@ async def get_document_parts(  # noqa: PLR0913
                 )
             )
 
+    # Polarion omits meta.totalCount on some document part responses.
+    # Use the seen-item count as a minimum lower bound.
+    doc_total = _extract_total_count(response)
+    doc_total = max(doc_total, (page_number - 1) * page_size + len(items))
+
     return PaginatedResult[DocumentPart](
         items=items,
-        total_count=_extract_total_count(response),
+        total_count=doc_total,
         page=page_number,
         page_size=page_size,
     )
@@ -831,9 +836,14 @@ async def list_work_items(
     data = response.get("data", [])
     items = _parse_work_item_summaries(data)
 
+    # Polarion omits meta.totalCount when a Lucene query is supplied.
+    # Use the seen-item count as a minimum lower bound.
+    wi_total = _extract_total_count(response)
+    wi_total = max(wi_total, (page_number - 1) * page_size + len(items))
+
     return PaginatedResult[WorkItemSummary](
         items=items,
-        total_count=_extract_total_count(response),
+        total_count=wi_total,
         page=page_number,
         page_size=page_size,
     )
@@ -1061,6 +1071,17 @@ def _parse_linked_items(
 ) -> list[LinkedWorkItemSummary]:
     """Parse linked work items from a JSON:API response.
 
+    The Polarion ``linkedworkitems`` / ``backlinkedworkitems`` endpoints
+    return items whose ``id`` has the format::
+
+        {sourceWiId}/{role}/{targetProjectId}/{targetWiId}
+
+    e.g. ``MCPT-9/parent/MCP_Test_Project/MCPT-1``
+
+    For **forward** links we display the *target* (last segment).
+    For **back** links we display the *source* (first segment).
+    The role is always the second segment.
+
     Args:
         response: Decoded JSON:API response from the linked items
             endpoint.
@@ -1081,12 +1102,19 @@ def _parse_linked_items(
         if not isinstance(attrs, dict):
             attrs = {}
 
-        # Extract the linked work item ID.
+        # Raw ID format: "{sourceWiId}/{role}/{targetProjectId}/{targetWiId}"
+        # e.g. "MCPT-9/parent/MCP_Test_Project/MCPT-1"
         raw_id = _safe_str(item.get("id", ""))
-        wi_id = raw_id.split("/", maxsplit=1)[-1] if "/" in raw_id else raw_id
+        id_parts = raw_id.split("/") if raw_id else []
 
-        # Parse role from attributes.
-        role = _safe_str(attrs.get("role", ""))
+        if len(id_parts) >= 4:  # noqa: PLR2004
+            # Forward: show the target (last segment).
+            # Back: show the source (first segment).
+            wi_id = id_parts[-1] if direction == "forward" else id_parts[0]
+            role = id_parts[1]
+        else:
+            wi_id = raw_id
+            role = _safe_str(attrs.get("role", ""))
 
         # Parse suspect flag.
         suspect = bool(attrs.get("suspect", False))

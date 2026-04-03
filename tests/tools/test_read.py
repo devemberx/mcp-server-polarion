@@ -912,7 +912,7 @@ class TestGetDocumentParts:
         )
 
         _, kwargs = mock_client.get.call_args
-        assert kwargs["params"]["fields[document_parts]"] == "content,type"
+        assert kwargs["params"]["fields[document_parts]"] == "title,content,type"
         assert kwargs["params"]["page[size]"] == 10
         assert kwargs["params"]["page[number]"] == 2
 
@@ -964,6 +964,36 @@ class TestGetDocumentParts:
         assert result.items[0].type == "heading"
         assert result.items[0].level == 2
         assert "Plain string content" in result.items[0].content
+
+    async def test_total_count_floor_when_api_returns_zero(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """When Polarion returns totalCount=0 but items exist, use item count as minimum."""
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "id": "proj1/_default/Doc/heading_MCPT-001",
+                    "attributes": {"title": "Intro", "content": "<h1>Intro</h1>", "type": "heading"},
+                },
+                {
+                    "id": "proj1/_default/Doc/workitem_MCPT-002",
+                    "attributes": {"title": "", "content": "", "type": "workitem"},
+                },
+            ],
+            "meta": {"totalCount": 0},  # Polarion quirk
+        }
+
+        result = await get_document_parts(
+            mock_ctx,
+            project_id="proj1",
+            space_id="_default",
+            document_name="Doc",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert len(result.items) == 2
+        assert result.total_count >= 2
 
 
 # ---------------------------------------------------------------------------
@@ -1146,6 +1176,35 @@ class TestListWorkItems:
         assert len(result.items) == 1
         assert result.items[0].id == "MCPT-001"
 
+    async def test_total_count_floor_when_api_returns_zero(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """When Polarion omits totalCount (returns 0), use item count as minimum."""
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "id": "proj1/MCPT-001",
+                    "attributes": {"title": "A", "type": "requirement", "status": "open"},
+                },
+                {
+                    "id": "proj1/MCPT-002",
+                    "attributes": {"title": "B", "type": "requirement", "status": "open"},
+                },
+            ],
+            "meta": {"totalCount": 0},  # Polarion quirk: 0 even when items exist
+        }
+
+        result = await list_work_items(
+            mock_ctx,
+            project_id="proj1",
+            query="type:requirement",
+            page_size=100,
+            page_number=1,
+        )
+
+        # total_count should be at least 2 (the number of returned items)
+        assert result.total_count >= 2
+
 
 # ---------------------------------------------------------------------------
 # get_work_item
@@ -1264,15 +1323,15 @@ class TestGetLinkedWorkItems:
     async def test_merges_forward_and_back_links(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # First call = forward, second = back.
+        # Polarion ID format: "{sourceWiId}/{role}/{projectId}/{targetWiId}"
+        # Forward call: MCPT-001 -> MCPT-010 (parent)
+        # Back call: MCPT-020 -> MCPT-001, MCPT-030 -> MCPT-001
         mock_client.get.side_effect = [
             {
                 "data": [
                     {
-                        "id": "proj1/MCPT-010",
+                        "id": "MCPT-001/parent/proj1/MCPT-010",
                         "attributes": {
-                            "title": "Parent Item",
-                            "role": "parent",
                             "suspect": False,
                         },
                     },
@@ -1281,18 +1340,14 @@ class TestGetLinkedWorkItems:
             {
                 "data": [
                     {
-                        "id": "proj1/MCPT-020",
+                        "id": "MCPT-020/relates_to/proj1/MCPT-001",
                         "attributes": {
-                            "title": "Child Item",
-                            "role": "relates_to",
                             "suspect": True,
                         },
                     },
                     {
-                        "id": "proj1/MCPT-030",
+                        "id": "MCPT-030/verifies/proj1/MCPT-001",
                         "attributes": {
-                            "title": "Verifier",
-                            "role": "verifies",
                             "suspect": False,
                         },
                     },
@@ -1316,13 +1371,16 @@ class TestGetLinkedWorkItems:
         assert len(fwd) == 1
         assert len(back) == 2
 
+        # Forward: target = last segment = MCPT-010, role = second segment = parent
         assert fwd[0].id == "MCPT-010"
         assert fwd[0].role == "parent"
         assert fwd[0].suspect is False
 
+        # Back: source = first segment = MCPT-020, role = second segment = relates_to
         suspects = [i for i in result.items if i.suspect]
         assert len(suspects) == 1
         assert suspects[0].id == "MCPT-020"
+        assert suspects[0].role == "relates_to"
 
     async def test_no_links(self, mock_ctx: MagicMock, mock_client: AsyncMock) -> None:
         mock_client.get.side_effect = [
@@ -1390,23 +1448,29 @@ class TestGetLinkedWorkItems:
         assert calls[0][0][0] == f"{base}/linkedworkitems"
         assert calls[1][0][0] == f"{base}/backlinkedworkitems"
 
-    async def test_strips_project_prefix_from_linked_ids(
+    async def test_parses_polarion_link_id_format(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
+        """Polarion ID format: {sourceWiId}/{role}/{projectId}/{targetWiId}"""
         mock_client.get.side_effect = [
             {
                 "data": [
                     {
-                        "id": "proj1/MCPT-010",
-                        "attributes": {
-                            "title": "Linked",
-                            "role": "parent",
-                            "suspect": False,
-                        },
+                        # Forward link: MCPT-001 --[parent]--> MCPT-010
+                        "id": "MCPT-001/parent/proj1/MCPT-010",
+                        "attributes": {"suspect": False},
                     },
                 ],
             },
-            {"data": []},
+            {
+                "data": [
+                    {
+                        # Back link: MCPT-099 --[child]--> MCPT-001
+                        "id": "MCPT-099/child/proj1/MCPT-001",
+                        "attributes": {"suspect": False},
+                    },
+                ],
+            },
         ]
 
         result = await get_linked_work_items(
@@ -1415,4 +1479,15 @@ class TestGetLinkedWorkItems:
             work_item_id="MCPT-001",
         )
 
-        assert result.items[0].id == "MCPT-010"
+        fwd = result.items[0]  # forward
+        back = result.items[1]  # back
+
+        # Forward: target is last segment
+        assert fwd.direction == "forward"
+        assert fwd.id == "MCPT-010"
+        assert fwd.role == "parent"
+
+        # Back: source is first segment
+        assert back.direction == "back"
+        assert back.id == "MCPT-099"
+        assert back.role == "child"
