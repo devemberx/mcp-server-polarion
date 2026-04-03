@@ -71,25 +71,22 @@ class TestListProjects:
     async def test_returns_projects(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = {
-            "data": [
-                {
-                    "type": "projects",
-                    "id": "proj1",
-                    "attributes": {"name": "Project One"},
-                },
-                {
-                    "type": "projects",
-                    "id": "proj2",
-                    "attributes": {"name": "Project Two"},
-                },
-            ],
-            "meta": {"totalCount": 2},
-        }
+        mock_client.get_all_pages.return_value = [
+            {
+                "type": "projects",
+                "id": "proj1",
+                "attributes": {"name": "Project One"},
+            },
+            {
+                "type": "projects",
+                "id": "proj2",
+                "attributes": {"name": "Project Two"},
+            },
+        ]
 
         result = await list_projects(
             mock_ctx,
-            query=None,
+            name_filter=None,
             page_size=100,
             page_number=1,
         )
@@ -107,14 +104,11 @@ class TestListProjects:
     async def test_empty_projects(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = {
-            "data": [],
-            "meta": {"totalCount": 0},
-        }
+        mock_client.get_all_pages.return_value = []
 
         result = await list_projects(
             mock_ctx,
-            query=None,
+            name_filter=None,
             page_size=100,
             page_number=1,
         )
@@ -125,27 +119,32 @@ class TestListProjects:
     async def test_pagination_params(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = {
-            "data": [],
-            "meta": {"totalCount": 0},
-        }
+        mock_client.get_all_pages.return_value = [
+            {
+                "type": "projects",
+                "id": f"proj{i}",
+                "attributes": {"name": f"Project {i}"},
+            }
+            for i in range(5)
+        ]
 
-        await list_projects(
+        result = await list_projects(
             mock_ctx,
-            query=None,
-            page_size=10,
-            page_number=3,
+            name_filter=None,
+            page_size=2,
+            page_number=2,
         )
 
-        mock_client.get.assert_called_once_with(
-            "/projects",
-            params={"fields[projects]": "id,name", "page[size]": 10, "page[number]": 3},
-        )
+        assert result.total_count == 5
+        assert len(result.items) == 2
+        assert result.page == 2
+        assert result.items[0].id == "proj2"
+        assert result.items[1].id == "proj3"
 
     async def test_auth_error_raises_permission_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.side_effect = PolarionAuthError(
+        mock_client.get_all_pages.side_effect = PolarionAuthError(
             "Unauthorized",
             status_code=401,
         )
@@ -153,7 +152,7 @@ class TestListProjects:
         with pytest.raises(PermissionError, match="POLARION_TOKEN"):
             await list_projects(
                 mock_ctx,
-                query=None,
+                name_filter=None,
                 page_size=100,
                 page_number=1,
             )
@@ -161,7 +160,7 @@ class TestListProjects:
     async def test_generic_error_raises_runtime_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.side_effect = PolarionError(
+        mock_client.get_all_pages.side_effect = PolarionError(
             "Server error",
             status_code=500,
         )
@@ -169,75 +168,117 @@ class TestListProjects:
         with pytest.raises(RuntimeError, match="Failed to list"):
             await list_projects(
                 mock_ctx,
-                query=None,
+                name_filter=None,
                 page_size=100,
                 page_number=1,
             )
 
-    async def test_missing_meta_returns_zero_total(
+    async def test_name_filter_substring_match(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = {"data": []}
+        mock_client.get_all_pages.return_value = [
+            {
+                "type": "projects",
+                "id": "proj1",
+                "attributes": {"name": "ICAS Infotainment Project"},
+            },
+            {
+                "type": "projects",
+                "id": "proj2",
+                "attributes": {"name": "Safety Module"},
+            },
+            {
+                "type": "projects",
+                "id": "proj3",
+                "attributes": {"name": "Infotainment V2"},
+            },
+        ]
 
         result = await list_projects(
             mock_ctx,
-            query=None,
+            name_filter="infotainment",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.total_count == 2
+        assert len(result.items) == 2
+        assert result.items[0].id == "proj1"
+        assert result.items[1].id == "proj3"
+
+    async def test_name_filter_no_match(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get_all_pages.return_value = [
+            {
+                "type": "projects",
+                "id": "proj1",
+                "attributes": {"name": "Project One"},
+            },
+        ]
+
+        result = await list_projects(
+            mock_ctx,
+            name_filter="nonexistent",
             page_size=100,
             page_number=1,
         )
 
         assert result.total_count == 0
+        assert result.items == []
 
-    async def test_query_param_passed_to_api(
+    async def test_name_filter_none_returns_all(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = {
-            "data": [
-                {
-                    "type": "projects",
-                    "id": "proj1",
-                    "attributes": {"name": "Project One"},
-                },
-            ],
-            "meta": {"totalCount": 1},
-        }
+        mock_client.get_all_pages.return_value = [
+            {
+                "type": "projects",
+                "id": "proj1",
+                "attributes": {"name": "Project One"},
+            },
+            {
+                "type": "projects",
+                "id": "proj2",
+                "attributes": {"name": "Project Two"},
+            },
+        ]
 
         result = await list_projects(
             mock_ctx,
-            query="name:proj1",
+            name_filter=None,
             page_size=100,
             page_number=1,
         )
 
-        mock_client.get.assert_called_once_with(
-            "/projects",
-            params={
-                "fields[projects]": "id,name",
-                "page[size]": 100,
-                "page[number]": 1,
-                "query": "name:proj1",
-            },
-        )
-        assert len(result.items) == 1
-        assert result.items[0].id == "proj1"
+        assert result.total_count == 2
+        assert len(result.items) == 2
 
-    async def test_query_none_omits_query_param(
+    async def test_fetches_all_pages(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = {
-            "data": [],
-            "meta": {"totalCount": 0},
-        }
+        mock_client.get_all_pages.return_value = [
+            {
+                "type": "projects",
+                "id": f"proj{i}",
+                "attributes": {"name": f"Project {i}"},
+            }
+            for i in range(150)
+        ]
 
-        await list_projects(
+        result = await list_projects(
             mock_ctx,
-            query=None,
+            name_filter=None,
             page_size=100,
             page_number=1,
         )
 
-        call_params = mock_client.get.call_args[1]["params"]
-        assert "query" not in call_params
+        assert result.total_count == 150
+        assert len(result.items) == 100
+
+        mock_client.get_all_pages.assert_called_once_with(
+            "/projects",
+            params={"fields[projects]": "id,name"},
+        )
 
 
 # ---------------------------------------------------------------------------

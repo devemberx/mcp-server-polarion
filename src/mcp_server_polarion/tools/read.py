@@ -265,11 +265,12 @@ async def _discover_documents(
 @mcp.tool()
 async def list_projects(
     ctx: Context,
-    query: str | None = Field(
+    name_filter: str | None = Field(
         default=None,
         description=(
-            "Optional Lucene query string for filtering projects. "
-            "Examples: 'name:myproject', 'name:*infotainment*'. "
+            "Optional substring filter for project names "
+            "(case-insensitive, client-side). "
+            "E.g. 'infotainment' matches 'ICAS Infotainment Project'. "
             "Omit to list all accessible projects."
         ),
     ),
@@ -288,15 +289,18 @@ async def list_projects(
     """List all accessible Polarion projects.
 
     Returns a paginated list of Polarion projects the authenticated user
-    can access.  Use this as the starting point to discover valid project
-    IDs for other tools.
+    can access.  **Call this tool once** to discover valid project IDs
+    for other tools — use ``name_filter`` to narrow results by name.
 
-    Pass a Lucene ``query`` to search for specific projects by name,
-    or omit it to list all accessible projects.
+    This tool fetches ALL projects from the server and applies
+    client-side filtering, so a single call is always sufficient to
+    find any project by name.
 
     Args:
         ctx: MCP tool context (injected automatically).
-        query: Optional Lucene query string for filtering projects.
+        name_filter: Optional substring filter for project names
+            (case-insensitive).  E.g. 'infotainment' matches
+            'ICAS Infotainment Project'.
         page_size: Number of projects per page (1-100, default 100).
         page_number: Page number to retrieve (1-based, default 1).
 
@@ -304,7 +308,7 @@ async def list_projects(
         PaginatedResult containing ``ProjectSummary`` items with:
         - ``id``: Project identifier.
         - ``name``: Human-readable project name.
-        - ``total_count``: Total number of projects.
+        - ``total_count``: Total number of matching projects.
         - ``page`` / ``page_size``: Current pagination state.
 
     Raises:
@@ -313,17 +317,10 @@ async def list_projects(
         RuntimeError: On unexpected Polarion API errors.
     """
     client = _get_client(ctx)
-    params: dict[str, str | int] = {
-        "fields[projects]": "id,name",
-        "page[size]": page_size,
-        "page[number]": page_number,
-    }
-    if query is not None:
-        params["query"] = query
     try:
-        response = await client.get(
+        all_data = await client.get_all_pages(
             "/projects",
-            params=params,
+            params={"fields[projects]": "id,name"},
         )
     except PolarionAuthError as exc:
         raise PermissionError(
@@ -332,25 +329,33 @@ async def list_projects(
     except PolarionError as exc:
         raise RuntimeError(f"Failed to list projects: {exc.message}") from exc
 
-    data = response.get("data", [])
-    items: list[ProjectSummary] = []
-    if isinstance(data, list):
-        for item in data:
-            if not isinstance(item, dict):
-                continue
-            attrs = item.get("attributes", {})
-            if not isinstance(attrs, dict):
-                attrs = {}
-            items.append(
-                ProjectSummary(
-                    id=_safe_str(item.get("id", "")),
-                    name=_safe_str(attrs.get("name", "")),
-                )
+    all_items: list[ProjectSummary] = []
+    for item in all_data:
+        attrs = item.get("attributes", {})
+        if not isinstance(attrs, dict):
+            attrs = {}
+        all_items.append(
+            ProjectSummary(
+                id=_safe_str(item.get("id", "")),
+                name=_safe_str(attrs.get("name", "")),
             )
+        )
+
+    # Apply client-side name filter.
+    if name_filter is not None:
+        name_lower = name_filter.lower()
+        all_items = [p for p in all_items if name_lower in p.name.lower()]
+
+    total = len(all_items)
+
+    # Manual pagination over the filtered set.
+    start = (page_number - 1) * page_size
+    end = start + page_size
+    page_slice = all_items[start:end]
 
     return PaginatedResult[ProjectSummary](
-        items=items,
-        total_count=_extract_total_count(response),
+        items=page_slice,
+        total_count=total,
         page=page_number,
         page_size=page_size,
     )
@@ -395,6 +400,11 @@ async def list_documents(  # noqa: PLR0913
 ) -> PaginatedResult[DocumentSummary]:
     """List all documents in a Polarion project.
 
+    **Call this tool once** to discover all documents — use
+    ``name_filter`` and ``space_filter`` to narrow results in the same
+    call.  There is no need to call this tool multiple times; it always
+    returns the complete set of documents (after filtering).
+
     Returns space IDs and document names so the LLM can call
     ``get_document`` or ``get_document_parts`` with the correct
     parameters.
@@ -406,19 +416,12 @@ async def list_documents(  # noqa: PLR0913
     ``relationships.module.data.id`` field (format:
     ``projectId/spaceId/documentName``).
 
-    **Performance note:** This tool discovers documents by scanning
-    heading work items across multiple API pages and applying
-    client-side filtering.  For projects with many work items this
-    may be expensive; ``page_number`` controls the result window but
-    does not reduce the number of API calls.
-
-    Use ``name_filter`` for client-side substring matching on document
-    names, or ``space_filter`` to restrict results to a specific space.
-
     Args:
         ctx: MCP tool context (injected automatically).
         project_id: Polarion project ID.
-        name_filter: Optional substring filter for document names.
+        name_filter: Optional substring filter for document names
+            (case-insensitive).  A single call with ``name_filter``
+            is enough to find a document — do not call again without it.
         space_filter: Optional exact Space ID filter.
         page_size: Number of documents per page (1-100, default 100).
         page_number: Page number to retrieve (1-based, default 1).
