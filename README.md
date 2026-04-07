@@ -6,6 +6,30 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for **P
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
+## Prerequisites
+
+This server is distributed as a Python package and requires [**uv**](https://docs.astral.sh/uv/) to run.
+
+**Install uv** (if not already installed):
+
+```bash
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+Or via pip:
+
+```bash
+pip install uv
+```
+
+No other installation is needed — `uvx mcp-server-polarion` downloads and runs the server automatically.
+
+---
+
 ## Setup
 
 ### Environment Variables
