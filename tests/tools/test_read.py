@@ -702,6 +702,38 @@ class TestGetDocument:
 
         assert result.content == ""
 
+    async def test_strips_empty_headings(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": {
+                "attributes": {
+                    "id": "DocH",
+                    "title": "Headings Doc",
+                    "homePageContent": {
+                        "type": "text/html",
+                        "value": (
+                            "<h2></h2>"
+                            "<p>Intro paragraph.</p>"
+                            "<h3></h3>"
+                            "<p>Detail text.</p>"
+                        ),
+                    },
+                },
+            },
+        }
+
+        result = await get_document(
+            mock_ctx,
+            project_id="proj1",
+            space_id="_default",
+            document_name="DocH",
+        )
+
+        assert "##" not in result.content
+        assert "Intro paragraph" in result.content
+        assert "Detail text" in result.content
+
 
 # ---------------------------------------------------------------------------
 # get_document_parts

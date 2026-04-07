@@ -584,21 +584,20 @@ async def get_document(
         ),
     ),
 ) -> DocumentDetail:
-    """Get full details of a Polarion document.
+    """Get a quick overview of a Polarion document.
 
-    Retrieves the title, **complete body content**, and metadata for a
-    specific document in a space.  The returned ``content`` field
-    contains the entire document text (all sections, headings, and
-    descriptions) — it is NOT a summary or excerpt.
+    Retrieves the title, metadata, and **body content** of a document.
+    The ``content`` field contains the home-page HTML converted to
+    Markdown.  Note that Polarion stores **heading text in work-item
+    titles**, not in the document body, so headings may appear without
+    text.  Empty headings are automatically stripped from the output.
 
-    **This tool alone is sufficient for reading, summarising, or
-    analysing a document.**  There is no need to call
-    ``get_document_parts`` afterward unless you specifically need the
-    structural part IDs (e.g. for ``create_document_part`` positioning).
+    Use this tool for a **fast summary or metadata lookup**.  For the
+    full document structure with heading titles and work-item
+    descriptions, use ``get_document_parts`` instead.
 
     Use ``list_documents`` first to discover valid space IDs and
-    document names.  The content is automatically converted from HTML
-    to Markdown for easier consumption.
+    document names.
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -610,7 +609,7 @@ async def get_document(
         DocumentDetail with:
         - ``id``: Document identifier.
         - ``title``: Document title.
-        - ``content``: Complete document body in Markdown (not a summary).
+        - ``content``: Document body in Markdown (empty headings stripped).
         - ``space_id``: Containing space.
         - ``project_id``: Containing project.
 
@@ -661,10 +660,17 @@ async def get_document(
     if isinstance(content_obj, dict):
         content_html = safe_str(content_obj.get("value", ""))
 
+    content_md = html_to_markdown(content_html)
+    # Polarion stores heading text in work-item titles, so the
+    # document body often contains empty headings (e.g. "## \n").
+    # Strip them to reduce noise for the LLM.
+    content_md = re.sub(r"^#{1,6}\s*$", "", content_md, flags=re.MULTILINE)
+    content_md = re.sub(r"\n{3,}", "\n\n", content_md).strip()
+
     return DocumentDetail(
         id=safe_str(attrs.get("id", data.get("id", ""))),
         title=safe_str(attrs.get("title", "")),
-        content=html_to_markdown(content_html),
+        content=content_md,
         space_id=space_id,
         project_id=project_id,
     )
