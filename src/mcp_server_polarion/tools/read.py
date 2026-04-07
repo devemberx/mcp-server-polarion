@@ -469,28 +469,12 @@ async def list_projects(
 
 
 @mcp.tool()
-async def list_documents(  # noqa: PLR0913
+async def list_documents(
     ctx: Context,
     project_id: str = Field(
         description=(
             "Polarion project ID (e.g. 'myproject'). "
             "Use ``list_projects`` to discover valid IDs."
-        ),
-    ),
-    name_filter: str | None = Field(
-        default=None,
-        description=(
-            "Optional substring filter for document names "
-            "(case-insensitive, client-side). "
-            "E.g. 'Requirement' matches 'Software Requirement Specification'."
-        ),
-    ),
-    space_filter: str | None = Field(
-        default=None,
-        description=(
-            "Optional exact-match filter for Space ID "
-            "(e.g. '_default', 'Design'). Only returns documents "
-            "in the specified space."
         ),
     ),
     page_size: int = Field(
@@ -521,14 +505,9 @@ async def list_documents(  # noqa: PLR0913
     ``relationships.module.data.id`` field (format:
     ``projectId/spaceId/documentName``).
 
-    Use ``name_filter`` for client-side substring matching on document
-    names, or ``space_filter`` to restrict results to a specific space.
-
     Args:
         ctx: MCP tool context (injected automatically).
         project_id: Polarion project ID.
-        name_filter: Optional substring filter for document names.
-        space_filter: Optional exact Space ID filter.
         page_size: Number of documents per page (1-100, default 100).
         page_number: Page number to retrieve (1-based, default 1).
 
@@ -563,14 +542,7 @@ async def list_documents(  # noqa: PLR0913
             f"Failed to list documents for project '{project_id}': {exc.message}"
         ) from exc
 
-    # Apply filters.
     filtered: list[tuple[str, str]] = sorted(documents)
-    if isinstance(space_filter, str):
-        filtered = [(s, d) for s, d in filtered if s == space_filter]
-    if isinstance(name_filter, str):
-        name_lower = name_filter.lower()
-        filtered = [(s, d) for s, d in filtered if name_lower in d.lower()]
-
     total = len(filtered)
 
     # Manual pagination over the extracted set.
