@@ -720,6 +720,7 @@ class TestGetDocumentParts:
                     "type": "document_parts",
                     "id": "proj1/_default/SRS/heading_MCPT-001",
                     "attributes": {
+                        "id": "heading_MCPT-001",
                         "content": (
                             '<h1 id="polarion_wiki macro'
                             " name=module-workitem;"
@@ -727,25 +728,96 @@ class TestGetDocumentParts:
                         ),
                         "type": "heading",
                     },
+                    "relationships": {
+                        "nextPart": {
+                            "data": {
+                                "type": "document_parts",
+                                "id": "proj1/_default/SRS/workitem_MCPT-002",
+                            }
+                        },
+                        "workItem": {
+                            "data": {
+                                "type": "workitems",
+                                "id": "proj1/MCPT-001",
+                            }
+                        },
+                    },
                 },
                 {
                     "type": "document_parts",
                     "id": "proj1/_default/SRS/workitem_MCPT-002",
                     "attributes": {
+                        "id": "workitem_MCPT-002",
                         "content": (
                             '<div id="polarion_wiki macro'
                             " name=module-workitem;"
                             'params=id=MCPT-002"></div>'
                         ),
                         "type": "workitem",
+                        "external": True,
+                        "level": 0,
+                        "layout": 0,
+                    },
+                    "relationships": {
+                        "previousPart": {
+                            "data": {
+                                "type": "document_parts",
+                                "id": "proj1/_default/SRS/heading_MCPT-001",
+                            }
+                        },
+                        "nextPart": {
+                            "data": {
+                                "type": "document_parts",
+                                "id": "proj1/_default/SRS/polarion_1",
+                            }
+                        },
+                        "workItem": {
+                            "data": {
+                                "type": "workitems",
+                                "id": "proj1/MCPT-002",
+                            }
+                        },
                     },
                 },
                 {
                     "type": "document_parts",
                     "id": "proj1/_default/SRS/polarion_1",
                     "attributes": {
+                        "id": "polarion_1",
                         "content": "<p>Normal text content.</p>",
                         "type": "normal",
+                    },
+                    "relationships": {
+                        "previousPart": {
+                            "data": {
+                                "type": "document_parts",
+                                "id": "proj1/_default/SRS/workitem_MCPT-002",
+                            }
+                        },
+                    },
+                },
+            ],
+            "included": [
+                {
+                    "type": "workitems",
+                    "id": "proj1/MCPT-001",
+                    "attributes": {
+                        "type": "heading",
+                        "title": "Introduction",
+                        "status": "open",
+                    },
+                },
+                {
+                    "type": "workitems",
+                    "id": "proj1/MCPT-002",
+                    "attributes": {
+                        "type": "requirement",
+                        "title": "Login Feature",
+                        "description": {
+                            "type": "text/html",
+                            "value": "<p>The system shall support login.</p>",
+                        },
+                        "status": "draft",
                     },
                 },
             ],
@@ -770,15 +842,25 @@ class TestGetDocumentParts:
         assert heading.id == "proj1/_default/SRS/heading_MCPT-001"
         assert heading.type == "heading"
         assert heading.level == 1
+        assert heading.title == "Introduction"
+        assert heading.next_part_id == "proj1/_default/SRS/workitem_MCPT-002"
+        assert heading.previous_part_id == ""
 
         wi_part = result.items[1]
         assert wi_part.id == "proj1/_default/SRS/workitem_MCPT-002"
         assert wi_part.type == "workitem"
         assert wi_part.level == 0
+        assert wi_part.title == "Login Feature"
+        assert "login" in wi_part.description.lower()
+        assert wi_part.previous_part_id == "proj1/_default/SRS/heading_MCPT-001"
+        assert wi_part.next_part_id == "proj1/_default/SRS/polarion_1"
 
         normal_part = result.items[2]
         assert normal_part.type == "normal"
         assert normal_part.level == 0
+        assert normal_part.title == ""
+        assert normal_part.previous_part_id == "proj1/_default/SRS/workitem_MCPT-002"
+        assert normal_part.next_part_id == ""
 
     async def test_pagination_params_forwarded(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -798,7 +880,8 @@ class TestGetDocumentParts:
         )
 
         _, kwargs = mock_client.get.call_args
-        assert kwargs["params"]["fields[document_parts]"] == "title,content,type"
+        assert kwargs["params"]["fields[document_parts]"] == "@all"
+        assert kwargs["params"]["include"] == "workItem"
         assert kwargs["params"]["page[size]"] == 10
         assert kwargs["params"]["page[number]"] == 2
 
@@ -829,8 +912,28 @@ class TestGetDocumentParts:
                 {
                     "id": "proj1/_default/Doc/heading_MCPT-003",
                     "attributes": {
+                        "id": "heading_MCPT-003",
                         "content": "<h2>Plain string content.</h2>",
                         "type": "heading",
+                    },
+                    "relationships": {
+                        "workItem": {
+                            "data": {
+                                "type": "workitems",
+                                "id": "proj1/MCPT-003",
+                            }
+                        },
+                    },
+                },
+            ],
+            "included": [
+                {
+                    "type": "workitems",
+                    "id": "proj1/MCPT-003",
+                    "attributes": {
+                        "type": "heading",
+                        "title": "Plain string content.",
+                        "status": "open",
                     },
                 },
             ],
@@ -850,6 +953,7 @@ class TestGetDocumentParts:
         assert result.items[0].type == "heading"
         assert result.items[0].level == 2
         assert "Plain string content" in result.items[0].content
+        assert result.items[0].title == "Plain string content."
 
     async def test_total_count_floor_when_api_returns_zero(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -860,14 +964,18 @@ class TestGetDocumentParts:
                 {
                     "id": "proj1/_default/Doc/heading_MCPT-001",
                     "attributes": {
-                        "title": "Intro",
+                        "id": "heading_MCPT-001",
                         "content": "<h1>Intro</h1>",
                         "type": "heading",
                     },
                 },
                 {
                     "id": "proj1/_default/Doc/workitem_MCPT-002",
-                    "attributes": {"title": "", "content": "", "type": "workitem"},
+                    "attributes": {
+                        "id": "workitem_MCPT-002",
+                        "content": "",
+                        "type": "workitem",
+                    },
                 },
             ],
             "meta": {"totalCount": 0},  # Polarion quirk
@@ -1227,9 +1335,29 @@ class TestGetLinkedWorkItems:
             {
                 "data": [
                     {
-                        "id": "MCPT-001/parent/proj1/MCPT-010",
+                        "id": "proj1/MCPT-001/parent/proj1/MCPT-010",
                         "attributes": {
+                            "role": "parent",
                             "suspect": False,
+                        },
+                        "relationships": {
+                            "workItem": {
+                                "data": {
+                                    "type": "workitems",
+                                    "id": "proj1/MCPT-010",
+                                }
+                            },
+                        },
+                    },
+                ],
+                "included": [
+                    {
+                        "type": "workitems",
+                        "id": "proj1/MCPT-010",
+                        "attributes": {
+                            "title": "Parent Item",
+                            "type": "heading",
+                            "status": "open",
                         },
                     },
                 ],
@@ -1273,9 +1401,10 @@ class TestGetLinkedWorkItems:
         assert len(fwd) == 1
         assert len(back) == 2
 
-        # Forward: target = last segment = MCPT-010, role = parent
+        # Forward: target from relationships.workItem, role from attributes
         assert fwd[0].id == "MCPT-010"
         assert fwd[0].role == "parent"
+        assert fwd[0].title == "Parent Item"
         assert fwd[0].suspect is False
 
         # Back: parsed from workitems query, role = "backlink"
@@ -1350,10 +1479,14 @@ class TestGetLinkedWorkItems:
         assert len(calls) == 2
         base = "/projects/proj1/workitems/MCPT-001"
         assert calls[0][0][0] == f"{base}/linkedworkitems"
-        # Back links use Lucene query instead of backlinkedworkitems
+        # Forward call includes fields and include params
+        fwd_params = calls[0][1]["params"]
+        assert fwd_params["fields[linkedworkitems]"] == "@all"
+        assert fwd_params["include"] == "workItem"
+        # Back links use camelCase Lucene query
         assert calls[1][0][0] == "projects/proj1/workitems"
         back_params = calls[1][1]["params"]
-        assert back_params["query"] == "linkedworkitems:MCPT-001"
+        assert back_params["query"] == "linkedWorkItems:MCPT-001"
 
     async def test_parses_polarion_link_id_format(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1364,8 +1497,27 @@ class TestGetLinkedWorkItems:
                 "data": [
                     {
                         # Forward link: MCPT-001 --[parent]--> MCPT-010
-                        "id": "MCPT-001/parent/proj1/MCPT-010",
-                        "attributes": {"suspect": False},
+                        "id": "proj1/MCPT-001/parent/proj1/MCPT-010",
+                        "attributes": {"role": "parent", "suspect": False},
+                        "relationships": {
+                            "workItem": {
+                                "data": {
+                                    "type": "workitems",
+                                    "id": "proj1/MCPT-010",
+                                }
+                            },
+                        },
+                    },
+                ],
+                "included": [
+                    {
+                        "type": "workitems",
+                        "id": "proj1/MCPT-010",
+                        "attributes": {
+                            "title": "Parent Target",
+                            "type": "heading",
+                            "status": "open",
+                        },
                     },
                 ],
             },
@@ -1392,10 +1544,11 @@ class TestGetLinkedWorkItems:
         fwd = result.items[0]  # forward
         back = result.items[1]  # back
 
-        # Forward: target is last segment
+        # Forward: target from relationships.workItem
         assert fwd.direction == "forward"
         assert fwd.id == "MCPT-010"
         assert fwd.role == "parent"
+        assert fwd.title == "Parent Target"
 
         # Back: parsed from workitems query
         assert back.direction == "back"

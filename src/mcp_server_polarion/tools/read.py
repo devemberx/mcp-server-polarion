@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import re
 from typing import Final, Literal, cast
-from urllib.parse import quote
 
 from fastmcp import Context
 from pydantic import Field
@@ -33,14 +32,19 @@ from mcp_server_polarion.models import (
     WorkItemSummary,
 )
 from mcp_server_polarion.server import mcp
+from mcp_server_polarion.tools._helpers import (
+    DEFAULT_PAGE_SIZE,
+    WI_DETAIL_FIELDS,
+    WI_LIST_FIELDS,
+    build_included_workitem_map,
+    encode_path_segment,
+    extract_relationship_id,
+    extract_total_count,
+    get_client,
+    parse_work_item_summaries,
+    safe_str,
+)
 from mcp_server_polarion.utils import html_to_markdown
-
-# Default page size -- Polarion caps at 100.
-_DEFAULT_PAGE_SIZE: Final[int] = 100
-
-# Sparse fieldset for list/search endpoints.
-_WI_LIST_FIELDS: Final[str] = "title,type,status"
-_WI_DETAIL_FIELDS: Final[str] = "title,description,type,status"
 
 # Valid document part types returned by Polarion.
 type _PartType = Literal["heading", "workitem", "normal", "toc", "wikiblock"]
@@ -49,61 +53,172 @@ _VALID_PART_TYPES: Final[frozenset[str]] = frozenset(
 )
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Read-specific helpers
 # ---------------------------------------------------------------------------
 
 
-def _get_client(ctx: Context) -> PolarionClient:
-    """Extract ``PolarionClient`` from the lifespan context.
+def _parse_document_part(
+    item: object,
+    wi_map: dict[str, dict[str, object]],
+) -> DocumentPart | None:
+    """Parse a single JSON:API document-part resource into a model.
 
     Args:
-        ctx: FastMCP tool context.
+        item: A single resource object from the ``data`` array.
+        wi_map: Included work-item lookup built by
+            ``_build_included_workitem_map``.
 
     Returns:
-        The active ``PolarionClient`` instance.
+        A ``DocumentPart`` instance, or ``None`` if *item* is invalid.
     """
-    lifespan_ctx: dict[str, object] = ctx.request_context.lifespan_context  # type: ignore[union-attr]
-    client = lifespan_ctx["polarion_client"]
-    if not isinstance(client, PolarionClient):  # pragma: no cover
-        msg = "polarion_client is not a PolarionClient instance"
-        raise TypeError(msg)
-    return client
+    if not isinstance(item, dict):
+        return None
+    attrs = item.get("attributes", {})
+    if not isinstance(attrs, dict):
+        attrs = {}
+    part_id = safe_str(item.get("id", ""))
+
+    # Type ------------------------------------------------------------------
+    raw_type = safe_str(attrs.get("type", ""))
+    part_type: _PartType = cast(
+        _PartType,
+        raw_type if raw_type in _VALID_PART_TYPES else "normal",
+    )
+
+    # Content ---------------------------------------------------------------
+    content_html = ""
+    content_obj = attrs.get("content")
+    if isinstance(content_obj, dict):
+        content_html = safe_str(content_obj.get("value", ""))
+    elif isinstance(content_obj, str):
+        content_html = content_obj
+
+    # Heading level from HTML tag (e.g. <h2 …> → 2) ------------------------
+    level = 0
+    if part_type == "heading":
+        heading_match = re.match(r"<h(\d)", content_html, re.IGNORECASE)
+        if heading_match:
+            level = int(heading_match.group(1))
+
+    # Relationships ---------------------------------------------------------
+    rels = item.get("relationships", {})
+    if not isinstance(rels, dict):
+        rels = {}
+
+    next_part_id = extract_relationship_id(rels, "nextPart")
+    previous_part_id = extract_relationship_id(rels, "previousPart")
+
+    # Resolve title & description from the included work item ---------------
+    title = ""
+    description_html = ""
+    wi_full_id = extract_relationship_id(rels, "workItem")
+    if wi_full_id:
+        wi = wi_map.get(wi_full_id, {})
+        wi_attrs = wi.get("attributes", {})
+        if isinstance(wi_attrs, dict):
+            title = safe_str(wi_attrs.get("title", ""))
+            desc_obj = wi_attrs.get("description")
+            if isinstance(desc_obj, dict):
+                description_html = safe_str(desc_obj.get("value", ""))
+            elif isinstance(desc_obj, str):
+                description_html = desc_obj
+
+    return DocumentPart(
+        id=part_id,
+        title=title,
+        content=html_to_markdown(content_html),
+        type=part_type,
+        level=level,
+        description=html_to_markdown(description_html),
+        next_part_id=next_part_id,
+        previous_part_id=previous_part_id,
+    )
 
 
-def _safe_str(value: object) -> str:
-    """Convert a value to ``str``, returning ``""`` for ``None``."""
-    if value is None:
-        return ""
-    return str(value)
+def _parse_linked_items(
+    response: dict[str, object],
+    *,
+    direction: Literal["forward", "back"],
+) -> list[LinkedWorkItemSummary]:
+    """Parse linked work items from a JSON:API response.
 
+    Uses ``attributes.role`` for the link role, ``attributes.suspect``
+    for the suspect flag, and resolves the target work item title from
+    the ``included`` array (populated via ``include=workItem``).
 
-def _extract_total_count(response: dict[str, object]) -> int:
-    """Extract ``meta.totalCount`` from a JSON:API response.
+    The raw ID has the format::
+
+        {projectId}/{sourceWiId}/{role}/{targetProjectId}/{targetWiId}
+
+    e.g. ``MCP_Test_Project/MCPT-9/parent/MCP_Test_Project/MCPT-1``
+
+    The target work item ID is extracted from
+    ``relationships.workItem.data.id``.
 
     Args:
-        response: Decoded JSON:API response.
+        response: Decoded JSON:API response from the linked items
+            endpoint.
+        direction: Link direction ('forward' or 'back').
 
     Returns:
-        The total count, or 0 if the field is missing.
+        List of parsed ``LinkedWorkItemSummary`` instances.
     """
-    meta = response.get("meta")
-    if isinstance(meta, dict):
-        total = meta.get("totalCount", 0)
-        if isinstance(total, int):
-            return total
-    return 0
+    wi_map = build_included_workitem_map(response)
 
+    items: list[LinkedWorkItemSummary] = []
+    data = response.get("data", [])
+    if not isinstance(data, list):
+        return items
 
-def _encode_path_segment(segment: str) -> str:
-    """URL-encode a single path segment (e.g. document name with spaces).
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        attrs = item.get("attributes", {})
+        if not isinstance(attrs, dict):
+            attrs = {}
 
-    Args:
-        segment: Raw path segment string.
+        role = safe_str(attrs.get("role", ""))
+        suspect = bool(attrs.get("suspect", False))
 
-    Returns:
-        URL-encoded segment safe for use in URL paths.
-    """
-    return quote(segment, safe="")
+        # Resolve target WI via relationships.
+        rels = item.get("relationships", {})
+        if not isinstance(rels, dict):
+            rels = {}
+        wi_full_id = extract_relationship_id(rels, "workItem")
+        wi_id = (
+            wi_full_id.split("/", maxsplit=1)[-1] if "/" in wi_full_id else wi_full_id
+        )
+
+        # Resolve title from included work items.
+        title = ""
+        if wi_full_id:
+            wi = wi_map.get(wi_full_id, {})
+            wi_attrs = wi.get("attributes", {})
+            if isinstance(wi_attrs, dict):
+                title = safe_str(wi_attrs.get("title", ""))
+
+        # Fallback: parse from raw ID if relationship data is absent.
+        if not wi_id:
+            raw_id = safe_str(item.get("id", ""))
+            id_parts = raw_id.split("/") if raw_id else []
+            # Format: {projectId}/{sourceWiId}/{role}/{targetProjectId}/{targetWiId}
+            if len(id_parts) >= 5:  # noqa: PLR2004
+                wi_id = id_parts[-1]
+                if not role:
+                    role = id_parts[2]
+            else:
+                wi_id = raw_id
+
+        items.append(
+            LinkedWorkItemSummary(
+                id=wi_id,
+                title=title,
+                role=role,
+                direction=direction,
+                suspect=suspect,
+            )
+        )
+    return items
 
 
 def _extract_document_pair(
@@ -145,14 +260,7 @@ def _get_module_id(item: object) -> str:
     rels = item.get("relationships", {})
     if not isinstance(rels, dict):
         return ""
-    module_rel = rels.get("module", {})
-    if not isinstance(module_rel, dict):
-        return ""
-    mod_data = module_rel.get("data")
-    if not isinstance(mod_data, dict):
-        return ""
-    mod_id = mod_data.get("id", "")
-    return str(mod_id) if isinstance(mod_id, str) else ""
+    return extract_relationship_id(rels, "module")
 
 
 async def _discover_documents(
@@ -179,7 +287,7 @@ async def _discover_documents(
         "fields[workitems]": "module",
         "query": "type:heading",
         "sort": "module",
-        "page[size]": _DEFAULT_PAGE_SIZE,
+        "page[size]": DEFAULT_PAGE_SIZE,
     }
 
     async def _fetch_page(page: int) -> list[object]:
@@ -200,8 +308,8 @@ async def _discover_documents(
     if not isinstance(first_data, list) or not first_data:
         return set()
 
-    total_count = _extract_total_count(first_resp)
-    max_page = max(1, -(-total_count // _DEFAULT_PAGE_SIZE))  # ceil div
+    total_count = extract_total_count(first_resp)
+    max_page = max(1, -(-total_count // DEFAULT_PAGE_SIZE))  # ceil div
 
     documents: set[tuple[str, str]] = set()
     for item in first_data:
@@ -275,7 +383,7 @@ async def list_projects(
         ),
     ),
     page_size: int = Field(
-        default=_DEFAULT_PAGE_SIZE,
+        default=DEFAULT_PAGE_SIZE,
         ge=1,
         le=100,
         description="Number of projects per page (1-100, default 100).",
@@ -317,7 +425,7 @@ async def list_projects(
             lacks permissions.
         RuntimeError: On unexpected Polarion API errors.
     """
-    client = _get_client(ctx)
+    client = get_client(ctx)
     params: dict[str, str | int] = {
         "fields[projects]": "id,name",
         "page[size]": page_size,
@@ -345,12 +453,12 @@ async def list_projects(
                 attrs = {}
             items.append(
                 ProjectSummary(
-                    id=_safe_str(item.get("id", "")),
-                    name=_safe_str(attrs.get("name", "")),
+                    id=safe_str(item.get("id", "")),
+                    name=safe_str(attrs.get("name", "")),
                 )
             )
 
-    total = _extract_total_count(response)
+    total = extract_total_count(response)
     total = max(total, (page_number - 1) * page_size + len(items))
 
     return PaginatedResult[ProjectSummary](
@@ -372,7 +480,7 @@ async def list_documents(
         ),
     ),
     page_size: int = Field(
-        default=_DEFAULT_PAGE_SIZE,
+        default=DEFAULT_PAGE_SIZE,
         ge=1,
         le=100,
         description="Number of documents per page (1-100, default 100).",
@@ -417,7 +525,7 @@ async def list_documents(
         PermissionError: If the token lacks permissions.
         RuntimeError: On unexpected Polarion API errors.
     """
-    client = _get_client(ctx)
+    client = get_client(ctx)
 
     # Binary-search discovery: O(D * log(N/D)) page fetches instead of
     # O(N) linear scanning, where D = unique documents, N = total pages.
@@ -511,11 +619,11 @@ async def get_document(
         PermissionError: If the token lacks permissions.
         RuntimeError: On unexpected Polarion API errors.
     """
-    client = _get_client(ctx)
-    encoded_name = _encode_path_segment(document_name)
+    client = get_client(ctx)
+    encoded_name = encode_path_segment(document_name)
     path = (
         f"/projects/{project_id}"
-        f"/spaces/{_encode_path_segment(space_id)}"
+        f"/spaces/{encode_path_segment(space_id)}"
         f"/documents/{encoded_name}"
     )
 
@@ -551,11 +659,11 @@ async def get_document(
     content_obj = attrs.get("homePageContent", {})
     content_html = ""
     if isinstance(content_obj, dict):
-        content_html = _safe_str(content_obj.get("value", ""))
+        content_html = safe_str(content_obj.get("value", ""))
 
     return DocumentDetail(
-        id=_safe_str(attrs.get("id", data.get("id", ""))),
-        title=_safe_str(attrs.get("title", "")),
+        id=safe_str(attrs.get("id", data.get("id", ""))),
+        title=safe_str(attrs.get("title", "")),
         content=html_to_markdown(content_html),
         space_id=space_id,
         project_id=project_id,
@@ -578,7 +686,7 @@ async def get_document_parts(  # noqa: PLR0913
         description="Document name within the space.",
     ),
     page_size: int = Field(
-        default=_DEFAULT_PAGE_SIZE,
+        default=DEFAULT_PAGE_SIZE,
         ge=1,
         le=100,
         description="Number of parts per page (1-100, default 100).",
@@ -612,21 +720,25 @@ async def get_document_parts(  # noqa: PLR0913
     Returns:
         PaginatedResult containing ``DocumentPart`` items with:
         - ``id``: Part identifier (e.g. 'heading_MCPT-001').
-        - ``title``: Part title or heading text.
-        - ``content``: Body content in Markdown.
-        - ``type``: 'heading' or 'workitem'.
-        - ``level``: Heading level (1-4) or 0 for work items.
+        - ``title``: Part title from the associated work item.
+        - ``content``: Part body content in Markdown.
+        - ``type``: 'heading', 'workitem', 'normal', 'toc',
+          or 'wikiblock'.
+        - ``level``: Heading level (1-4) or 0 for non-headings.
+        - ``description``: Work item description in Markdown.
+        - ``next_part_id``: Full ID of the next part.
+        - ``previous_part_id``: Full ID of the previous part.
 
     Raises:
         ValueError: If the document, space, or project is not found.
         PermissionError: If the token lacks permissions.
         RuntimeError: On unexpected Polarion API errors.
     """
-    client = _get_client(ctx)
-    encoded_name = _encode_path_segment(document_name)
+    client = get_client(ctx)
+    encoded_name = encode_path_segment(document_name)
     path = (
         f"/projects/{project_id}"
-        f"/spaces/{_encode_path_segment(space_id)}"
+        f"/spaces/{encode_path_segment(space_id)}"
         f"/documents/{encoded_name}/parts"
     )
 
@@ -634,7 +746,9 @@ async def get_document_parts(  # noqa: PLR0913
         response = await client.get(
             path,
             params={
-                "fields[document_parts]": "title,content,type",
+                "fields[document_parts]": "@all",
+                "fields[workitems]": WI_DETAIL_FIELDS,
+                "include": "workItem",
                 "page[size]": page_size,
                 "page[number]": page_number,
             },
@@ -654,56 +768,20 @@ async def get_document_parts(  # noqa: PLR0913
             f"Failed to get parts for '{document_name}': {exc.message}"
         ) from exc
 
+    # Build lookup of included work items (keyed by full JSON:API id).
+    wi_map = build_included_workitem_map(response)
+
     data = response.get("data", [])
     items: list[DocumentPart] = []
     if isinstance(data, list):
         for item in data:
-            if not isinstance(item, dict):
-                continue
-            attrs = item.get("attributes", {})
-            if not isinstance(attrs, dict):
-                attrs = {}
-            part_id = _safe_str(item.get("id", ""))
-
-            # Use API's type attribute directly.
-            raw_type = _safe_str(attrs.get("type", ""))
-            part_type: _PartType = cast(
-                _PartType,
-                raw_type if raw_type in _VALID_PART_TYPES else "normal",
-            )
-
-            # Content is returned as a plain HTML string (not a dict).
-            content_html = ""
-            content_obj = attrs.get("content")
-            if isinstance(content_obj, dict):
-                content_html = _safe_str(content_obj.get("value", ""))
-            elif isinstance(content_obj, str):
-                content_html = content_obj
-
-            # Extract heading level from HTML tag (e.g. <h2 …> → 2).
-            level = 0
-            if part_type == "heading":
-                heading_match = re.match(
-                    r"<h(\d)",
-                    content_html,
-                    re.IGNORECASE,
-                )
-                if heading_match:
-                    level = int(heading_match.group(1))
-
-            items.append(
-                DocumentPart(
-                    id=part_id,
-                    title=_safe_str(attrs.get("title", "")),
-                    content=html_to_markdown(content_html),
-                    type=part_type,
-                    level=level,
-                )
-            )
+            part = _parse_document_part(item, wi_map)
+            if part is not None:
+                items.append(part)
 
     # Polarion omits meta.totalCount on some document part responses.
     # Use the seen-item count as a minimum lower bound.
-    doc_total = _extract_total_count(response)
+    doc_total = extract_total_count(response)
     doc_total = max(doc_total, (page_number - 1) * page_size + len(items))
 
     return PaginatedResult[DocumentPart](
@@ -736,7 +814,7 @@ async def list_work_items(
         ),
     ),
     page_size: int = Field(
-        default=_DEFAULT_PAGE_SIZE,
+        default=DEFAULT_PAGE_SIZE,
         ge=1,
         le=100,
         description="Number of work items per page (1-100, default 100).",
@@ -783,9 +861,9 @@ async def list_work_items(
         RuntimeError: On unexpected Polarion API errors (including
             invalid Lucene query syntax).
     """
-    client = _get_client(ctx)
+    client = get_client(ctx)
     params: dict[str, str | int] = {
-        "fields[workitems]": _WI_LIST_FIELDS,
+        "fields[workitems]": WI_LIST_FIELDS,
         "page[size]": page_size,
         "page[number]": page_number,
     }
@@ -809,11 +887,11 @@ async def list_work_items(
         raise RuntimeError(f"Failed to list work items: {exc.message}") from exc
 
     data = response.get("data", [])
-    items = _parse_work_item_summaries(data)
+    items = parse_work_item_summaries(data)
 
     # Polarion omits meta.totalCount when a Lucene query is supplied.
     # Use the seen-item count as a minimum lower bound.
-    wi_total = _extract_total_count(response)
+    wi_total = extract_total_count(response)
     wi_total = max(wi_total, (page_number - 1) * page_size + len(items))
 
     return PaginatedResult[WorkItemSummary](
@@ -863,12 +941,12 @@ async def get_work_item(
         PermissionError: If the token lacks permissions.
         RuntimeError: On unexpected Polarion API errors.
     """
-    client = _get_client(ctx)
+    client = get_client(ctx)
     path = f"/projects/{project_id}/workitems/{work_item_id}"
     try:
         response = await client.get(
             path,
-            params={"fields[workitems]": _WI_DETAIL_FIELDS},
+            params={"fields[workitems]": WI_DETAIL_FIELDS},
         )
     except PolarionNotFoundError as exc:
         raise ValueError(
@@ -896,18 +974,18 @@ async def get_work_item(
     desc_obj = attrs.get("description", {})
     desc_html = ""
     if isinstance(desc_obj, dict):
-        desc_html = _safe_str(desc_obj.get("value", ""))
+        desc_html = safe_str(desc_obj.get("value", ""))
 
     # Extract work item ID from JSON:API id
     # (format: "projectId/WI-001").
-    raw_id = _safe_str(data.get("id", ""))
+    raw_id = safe_str(data.get("id", ""))
     wi_id = raw_id.split("/", maxsplit=1)[-1] if "/" in raw_id else raw_id
 
     return WorkItemDetail(
         id=wi_id or work_item_id,
-        title=_safe_str(attrs.get("title", "")),
-        type=_safe_str(attrs.get("type", "")),
-        status=_safe_str(attrs.get("status", "")),
+        title=safe_str(attrs.get("title", "")),
+        type=safe_str(attrs.get("type", "")),
+        status=safe_str(attrs.get("status", "")),
         description=html_to_markdown(desc_html),
         project_id=project_id,
     )
@@ -954,12 +1032,17 @@ async def get_linked_work_items(
         PermissionError: If the token lacks permissions.
         RuntimeError: On unexpected Polarion API errors.
     """
-    client = _get_client(ctx)
+    client = get_client(ctx)
     base_path = f"/projects/{project_id}/workitems/{work_item_id}"
 
     try:
         forward_response = await client.get(
             f"{base_path}/linkedworkitems",
+            params={
+                "fields[linkedworkitems]": "@all",
+                "fields[workitems]": WI_LIST_FIELDS,
+                "include": "workItem",
+            },
         )
     except PolarionNotFoundError as exc:
         raise ValueError(
@@ -969,13 +1052,11 @@ async def get_linked_work_items(
         ) from exc
     except PolarionAuthError as exc:
         raise PermissionError(
-            "Cannot access linked work items -- check your "
-            "POLARION_TOKEN permissions."
+            "Cannot access linked work items -- check your POLARION_TOKEN permissions."
         ) from exc
     except PolarionError as exc:
         raise RuntimeError(
-            f"Failed to get linked work items for "
-            f"'{work_item_id}': {exc.message}"
+            f"Failed to get linked work items for '{work_item_id}': {exc.message}"
         ) from exc
 
     forward_items = _parse_linked_items(forward_response, direction="forward")
@@ -985,11 +1066,11 @@ async def get_linked_work_items(
         back_response = await client.get(
             f"projects/{project_id}/workitems",
             params={
-                "query": f"linkedworkitems:{work_item_id}",
+                "query": f"linkedWorkItems:{work_item_id}",
                 "fields[workitems]": "title,type,status",
                 "page[size]": 100,
                 "page[number]": 1,
-            }
+            },
         )
 
         back_items = [
@@ -1000,12 +1081,11 @@ async def get_linked_work_items(
                 suspect=False,
                 direction="back",
             )
-            for summary in _parse_work_item_summaries(back_response.get("data", []))
+            for summary in parse_work_item_summaries(back_response.get("data", []))
         ]
     except PolarionError as exc:
         raise RuntimeError(
-            f"Backlink query failed for work item "
-            f"'{work_item_id}': {exc.message}"
+            f"Backlink query failed for work item '{work_item_id}': {exc.message}"
         ) from exc
 
     all_items = forward_items + back_items
@@ -1015,113 +1095,3 @@ async def get_linked_work_items(
         back_count=len(back_items),
         total_count=len(all_items),
     )
-
-
-# ---------------------------------------------------------------------------
-# Parsing helpers
-# ---------------------------------------------------------------------------
-
-
-def _parse_work_item_summaries(
-    data: object,
-) -> list[WorkItemSummary]:
-    """Parse a JSON:API ``data`` array into ``WorkItemSummary`` models.
-
-    Args:
-        data: The ``data`` field from a JSON:API response.
-
-    Returns:
-        List of parsed ``WorkItemSummary`` instances.
-    """
-    items: list[WorkItemSummary] = []
-    if not isinstance(data, list):
-        return items
-
-    for item in data:
-        if not isinstance(item, dict):
-            continue
-        attrs = item.get("attributes", {})
-        if not isinstance(attrs, dict):
-            attrs = {}
-
-        # Extract ID from JSON:API id
-        # (format: "projectId/WI-001").
-        raw_id = _safe_str(item.get("id", ""))
-        wi_id = raw_id.split("/", maxsplit=1)[-1] if "/" in raw_id else raw_id
-
-        items.append(
-            WorkItemSummary(
-                id=wi_id,
-                title=_safe_str(attrs.get("title", "")),
-                type=_safe_str(attrs.get("type", "")),
-                status=_safe_str(attrs.get("status", "")),
-            )
-        )
-    return items
-
-
-def _parse_linked_items(
-    response: dict[str, object],
-    *,
-    direction: Literal["forward", "back"],
-) -> list[LinkedWorkItemSummary]:
-    """Parse linked work items from a JSON:API response.
-
-    The Polarion ``linkedworkitems`` / ``backlinkedworkitems`` endpoints
-    return items whose ``id`` has the format::
-
-        {sourceWiId}/{role}/{targetProjectId}/{targetWiId}
-
-    e.g. ``MCPT-9/parent/MCP_Test_Project/MCPT-1``
-
-    For **forward** links we display the *target* (last segment).
-    For **back** links we display the *source* (first segment).
-    The role is always the second segment.
-
-    Args:
-        response: Decoded JSON:API response from the linked items
-            endpoint.
-        direction: Link direction ('forward' or 'back').
-
-    Returns:
-        List of parsed ``LinkedWorkItemSummary`` instances.
-    """
-    items: list[LinkedWorkItemSummary] = []
-    data = response.get("data", [])
-    if not isinstance(data, list):
-        return items
-
-    for item in data:
-        if not isinstance(item, dict):
-            continue
-        attrs = item.get("attributes", {})
-        if not isinstance(attrs, dict):
-            attrs = {}
-
-        # Raw ID format: "{sourceWiId}/{role}/{targetProjectId}/{targetWiId}"
-        # e.g. "MCPT-9/parent/MCP_Test_Project/MCPT-1"
-        raw_id = _safe_str(item.get("id", ""))
-        id_parts = raw_id.split("/") if raw_id else []
-
-        if len(id_parts) >= 4:  # noqa: PLR2004
-            # Forward: show the target (last segment).
-            # Back: show the source (first segment).
-            wi_id = id_parts[-1] if direction == "forward" else id_parts[0]
-            role = id_parts[1]
-        else:
-            wi_id = raw_id
-            role = _safe_str(attrs.get("role", ""))
-
-        # Parse suspect flag.
-        suspect = bool(attrs.get("suspect", False))
-
-        items.append(
-            LinkedWorkItemSummary(
-                id=wi_id,
-                title=_safe_str(attrs.get("title", "")),
-                role=role,
-                direction=direction,
-                suspect=suspect,
-            )
-        )
-    return items
