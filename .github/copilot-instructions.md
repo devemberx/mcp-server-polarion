@@ -29,7 +29,7 @@ A Model Context Protocol (MCP) server for reading, analyzing, and writing docume
 
 | Aspect | Choice |
 |---|---|
-| Framework | FastMCP 2.0 (`fastmcp>=2.0,<3`) |
+| Framework | FastMCP 3.0 (`fastmcp>=3.0,<4`) |
 | Transport | stdio (`uvx mcp-server-polarion`) |
 | HTTP Client | httpx (async) |
 | HTML Processing | markdownify (HTML→MD) + markdown-it-py (MD→HTML) + BeautifulSoup4 (sanitize) |
@@ -46,7 +46,7 @@ A Model Context Protocol (MCP) server for reading, analyzing, and writing docume
 ## Tooling: `uv`
 
 ```bash
-uv add "fastmcp>=2.0,<3" httpx "beautifulsoup4>=4.12" pydantic "pydantic-settings>=2.0" markdownify markdown-it-py
+uv add "fastmcp>=3.0,<4" httpx "beautifulsoup4>=4.12" pydantic "pydantic-settings>=2.0" markdownify markdown-it-py
 uv add --dev pytest pytest-asyncio respx ruff mypy
 uv run mcp-server-polarion    # local run
 uv run pytest                 # tests
@@ -167,12 +167,20 @@ mcp-server-polarion/
 
 ## Architecture Principles
 
-### MCP Server (FastMCP 2.0)
+### MCP Server (FastMCP 3.0)
 
 - `server.py` creates the `FastMCP` instance and initializes/cleans up `PolarionClient` via a `lifespan` context manager.
-- All tools access the client via `ctx.request_context.lifespan_context["polarion_client"]`.
+- All tools access the client via `ctx.lifespan_context["polarion_client"]`.
 - `__main__.py` only calls `mcp.run(transport="stdio")`.
 - Entry point: `mcp-server-polarion = "mcp_server_polarion.__main__:main"` (pyproject.toml).
+
+#### FastMCP 3.0 Features Used
+
+- **MCP Annotations** — all read tools use `annotations={"readOnlyHint": True}` so MCP clients (Claude, ChatGPT) can skip confirmation prompts. Write tools use `destructiveHint` where appropriate.
+- **Tool Tags** — tools are tagged `{"read"}` or `{"write"}` for server-level visibility control via `mcp.enable(tags=...)` / `mcp.disable(tags=...)`.
+- **Tool Timeout** — all tools set `timeout=60.0` to prevent indefinite hangs on slow Polarion responses.
+- **Decorators return functions** — `@mcp.tool` returns the original function unchanged (not a `FunctionTool` object). Tests call the function directly without `.fn`.
+- **Lifespan backward compatibility** — `@asynccontextmanager` lifespans are fully supported in v3. No migration to `@lifespan` decorator required.
 
 ### core/ — Infrastructure Layer
 
@@ -347,6 +355,8 @@ Every tool must have a Google-style docstring with these mandatory sections:
 - Wrap results in `PaginatedResult[T]` for pagination metadata.
 - Convert HTML descriptions via `html_to_markdown()` before returning.
 - Use sparse fieldsets (e.g., `fields[workitems]=title,description,type,status`).
+- Annotate with `annotations={"readOnlyHint": True}` and `tags={"read"}`.
+- Set `timeout=60.0` on all read tools.
 
 ### Write Tool Rules
 
@@ -357,6 +367,8 @@ Every tool must have a Google-style docstring with these mandatory sections:
 - Sequential write operations must include a 1–2 second delay to account for Polarion cluster propagation delay.
 - `create_work_item`: returns the created Work Item ID. To make it visible in a document, the user must call `create_document_part` separately afterward.
 - `create_document_part`: inserts a Work Item into the Document Body as a Part. Uses the `document_partsListPostRequest` schema with `relationships.workItem` (required) and optional `nextPart`/`previousPart` for positioning. This is the tool that solves the Recycle Bin problem.
+- Annotate with `tags={"write"}` and appropriate `destructiveHint`.
+- Set `timeout=60.0` on all write tools.
 
 ### Error Handling in Tools
 
@@ -374,6 +386,7 @@ Every tool must have a Google-style docstring with these mandatory sections:
 - **asyncio_mode = "auto"**: Set in `pyproject.toml`.
 - Test directories mirror the source structure: `tests/core/`, `tests/utils/`, `tests/tools/`.
 - Test files: `core/test_client.py`, `core/test_config.py`, `utils/test_html.py`, `test_models.py`, `tools/test_read.py`, `tools/test_write.py`.
+- **FastMCP 3.0 decorator behavior**: `@mcp.tool` returns the original function, so tests call `read.list_projects` directly (not `read.list_projects.fn`).
 
 ---
 
@@ -390,6 +403,10 @@ Every tool must have a Google-style docstring with these mandatory sections:
 ```toml
 [project]
 requires-python = ">=3.12"
+dependencies = [
+    "fastmcp>=3.0,<4",
+    ...
+]
 
 [project.scripts]
 mcp-server-polarion = "mcp_server_polarion.__main__:main"
@@ -399,10 +416,10 @@ target-version = "py312"
 line-length = 88
 
 [tool.ruff.lint]
-select = ["E", "W", "F", "I", "UP", "B", "SIM", "ANN"]
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "ANN", "PL", "C4", "PTH", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["ANN"]
+"tests/**" = ["ANN", "PLR"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -410,6 +427,7 @@ strict = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 ```
 

@@ -368,7 +368,11 @@ async def _discover_documents(
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(
+    tags={"read"},
+    timeout=60.0,
+    annotations={"readOnlyHint": True},
+)
 async def list_projects(
     ctx: Context,
     query: str | None = Field(
@@ -472,7 +476,11 @@ async def list_projects(
     )
 
 
-@mcp.tool()
+@mcp.tool(
+    tags={"read"},
+    timeout=300.0,
+    annotations={"readOnlyHint": True},
+)
 async def list_documents(
     ctx: Context,
     project_id: str = Field(
@@ -565,7 +573,11 @@ async def list_documents(
     )
 
 
-@mcp.tool()
+@mcp.tool(
+    tags={"read"},
+    timeout=60.0,
+    annotations={"readOnlyHint": True},
+)
 async def get_document(
     ctx: Context,
     project_id: str = Field(
@@ -677,7 +689,11 @@ async def get_document(
     )
 
 
-@mcp.tool()
+@mcp.tool(
+    tags={"read"},
+    timeout=60.0,
+    annotations={"readOnlyHint": True},
+)
 async def get_document_parts(  # noqa: PLR0913
     ctx: Context,
     project_id: str = Field(
@@ -807,7 +823,11 @@ async def get_document_parts(  # noqa: PLR0913
     )
 
 
-@mcp.tool()
+@mcp.tool(
+    tags={"read"},
+    timeout=60.0,
+    annotations={"readOnlyHint": True},
+)
 async def list_work_items(
     ctx: Context,
     project_id: str = Field(
@@ -922,7 +942,11 @@ async def list_work_items(
     )
 
 
-@mcp.tool()
+@mcp.tool(
+    tags={"read"},
+    timeout=60.0,
+    annotations={"readOnlyHint": True},
+)
 async def get_work_item(
     ctx: Context,
     project_id: str = Field(
@@ -1010,7 +1034,11 @@ async def get_work_item(
     )
 
 
-@mcp.tool()
+@mcp.tool(
+    tags={"read"},
+    timeout=60.0,
+    annotations={"readOnlyHint": True},
+)
 async def get_linked_work_items(
     ctx: Context,
     project_id: str = Field(
