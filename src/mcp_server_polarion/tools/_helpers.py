@@ -72,6 +72,53 @@ def extract_total_count(response: dict[str, object]) -> int:
     return 0
 
 
+def has_links_next(response: dict[str, object]) -> bool:
+    """Check whether the JSON:API response contains a ``links.next`` key.
+
+    Args:
+        response: Decoded JSON:API response.
+
+    Returns:
+        ``True`` if the server indicates a next page exists.
+    """
+    links = response.get("links")
+    if isinstance(links, dict):
+        return "next" in links
+    return False
+
+
+def compute_has_more(
+    response: dict[str, object],
+    total: int,
+    page_number: int,
+    page_size: int,
+    items_count: int,
+) -> bool:
+    """Determine whether more pages exist after the current one.
+
+    Uses ``total`` when it is reliable (> 0).  When ``total`` is 0
+    (Polarion sometimes omits ``meta.totalCount``), falls back to
+    ``links.next`` if present, otherwise to a heuristic based on
+    whether the current page is full.
+
+    Args:
+        response: Decoded JSON:API response (used for ``links.next``).
+        total: Resolved total count (may be 0 if unknown).
+        page_number: Current 1-based page number.
+        page_size: Requested page size.
+        items_count: Number of items returned on this page.
+
+    Returns:
+        ``True`` if additional pages likely exist.
+    """
+    if total > 0:
+        return total > page_number * page_size
+    # totalCount unavailable — prefer links.next, else heuristic.
+    if has_links_next(response):
+        return True
+    return items_count == page_size
+
+
 def encode_path_segment(segment: str) -> str:
     """URL-encode a single path segment (e.g. document name with spaces).
 
@@ -168,10 +215,12 @@ __all__: list[str] = [
     "WI_DETAIL_FIELDS",
     "WI_LIST_FIELDS",
     "build_included_workitem_map",
+    "compute_has_more",
     "encode_path_segment",
     "extract_relationship_id",
     "extract_total_count",
     "get_client",
+    "has_links_next",
     "parse_work_item_summaries",
     "safe_str",
 ]

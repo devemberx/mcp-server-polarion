@@ -37,6 +37,7 @@ from mcp_server_polarion.tools._helpers import (
     WI_DETAIL_FIELDS,
     WI_LIST_FIELDS,
     build_included_workitem_map,
+    compute_has_more,
     encode_path_segment,
     extract_relationship_id,
     extract_total_count,
@@ -129,7 +130,9 @@ def _parse_document_part(
         content=html_to_markdown(content_html),
         type=part_type,
         level=level,
-        description=html_to_markdown(description_html),
+        description=(
+            html_to_markdown(description_html) if part_type == "workitem" else ""
+        ),
         next_part_id=next_part_id,
         previous_part_id=previous_part_id,
     )
@@ -461,17 +464,33 @@ async def list_projects(
         total_count=total,
         page=page_number,
         page_size=page_size,
-        has_more=total > page_number * page_size,
+        has_more=compute_has_more(response, total, page_number, page_size, len(items)),
     )
 
 
 @mcp.tool()
-async def list_documents(
+async def list_documents(  # noqa: PLR0913
     ctx: Context,
     project_id: str = Field(
         description=(
             "Polarion project ID (e.g. 'myproject'). "
             "Use ``list_projects`` to discover valid IDs."
+        ),
+    ),
+    name_filter: str | None = Field(
+        default=None,
+        description=(
+            "Optional substring filter for document names "
+            "(case-insensitive, client-side). "
+            "E.g. 'Requirement' matches 'Software Requirement Specification'."
+        ),
+    ),
+    space_filter: str | None = Field(
+        default=None,
+        description=(
+            "Optional exact-match filter for Space ID "
+            "(e.g. '_default', 'Design'). Only returns documents "
+            "in the specified space."
         ),
     ),
     page_size: int = Field(
@@ -502,9 +521,14 @@ async def list_documents(
     ``relationships.module.data.id`` field (format:
     ``projectId/spaceId/documentName``).
 
+    Use ``name_filter`` for client-side substring matching on document
+    names, or ``space_filter`` to restrict results to a specific space.
+
     Args:
         ctx: MCP tool context (injected automatically).
         project_id: Polarion project ID.
+        name_filter: Optional substring filter for document names.
+        space_filter: Optional exact Space ID filter.
         page_size: Number of documents per page (1-100, default 100).
         page_number: Page number to retrieve (1-based, default 1).
 
@@ -539,7 +563,14 @@ async def list_documents(
             f"Failed to list documents for project '{project_id}': {exc.message}"
         ) from exc
 
+    # Apply filters.
     filtered: list[tuple[str, str]] = sorted(documents)
+    if isinstance(space_filter, str):
+        filtered = [(s, d) for s, d in filtered if s == space_filter]
+    if isinstance(name_filter, str):
+        name_lower = name_filter.lower()
+        filtered = [(s, d) for s, d in filtered if name_lower in d.lower()]
+
     total = len(filtered)
 
     # Manual pagination over the extracted set.
@@ -793,7 +824,9 @@ async def get_document_parts(  # noqa: PLR0913
         total_count=doc_total,
         page=page_number,
         page_size=page_size,
-        has_more=doc_total > page_number * page_size,
+        has_more=compute_has_more(
+            response, doc_total, page_number, page_size, len(items)
+        ),
     )
 
 
@@ -905,7 +938,9 @@ async def list_work_items(
         total_count=wi_total,
         page=page_number,
         page_size=page_size,
-        has_more=wi_total > page_number * page_size,
+        has_more=compute_has_more(
+            response, wi_total, page_number, page_size, len(items)
+        ),
     )
 
 
@@ -1069,26 +1104,46 @@ async def get_linked_work_items(
 
     back_items: list[LinkedWorkItemSummary] = []
     try:
-        back_response = await client.get(
-            f"/projects/{project_id}/workitems",
-            params={
-                "query": f"linkedWorkItems:{work_item_id}",
-                "fields[workitems]": "title,type,status",
-                "page[size]": 100,
-                "page[number]": 1,
-            },
-        )
+        back_page = 1
+        back_total: int | None = None
 
-        back_items = [
-            LinkedWorkItemSummary(
-                id=summary.id,
-                title=summary.title,
-                role="backlink",
-                suspect=False,
-                direction="back",
+        while True:
+            back_response = await client.get(
+                f"/projects/{project_id}/workitems",
+                params={
+                    "query": f"linkedWorkItems:{work_item_id}",
+                    "fields[workitems]": WI_LIST_FIELDS,
+                    "page[size]": DEFAULT_PAGE_SIZE,
+                    "page[number]": back_page,
+                },
             )
-            for summary in parse_work_item_summaries(back_response.get("data", []))
-        ]
+
+            if back_total is None:
+                back_total = extract_total_count(back_response)
+
+            page_summaries = parse_work_item_summaries(
+                back_response.get("data", []),
+            )
+            if not page_summaries:
+                break
+
+            back_items.extend(
+                LinkedWorkItemSummary(
+                    id=summary.id,
+                    title=summary.title,
+                    role="backlink",
+                    suspect=False,
+                    direction="back",
+                )
+                for summary in page_summaries
+            )
+
+            if back_total and len(back_items) >= back_total:
+                break
+            if len(page_summaries) < DEFAULT_PAGE_SIZE:
+                break
+
+            back_page += 1
     except PolarionError as exc:
         raise RuntimeError(
             f"Backlink query failed for work item '{work_item_id}': {exc.message}"
