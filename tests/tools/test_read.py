@@ -1221,9 +1221,8 @@ class TestGetLinkedWorkItems:
     async def test_merges_forward_and_back_links(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # Polarion ID format: "{sourceWiId}/{role}/{projectId}/{targetWiId}"
-        # Forward call: MCPT-001 -> MCPT-010 (parent)
-        # Back call: MCPT-020 -> MCPT-001, MCPT-030 -> MCPT-001
+        # Forward call: MCPT-001 -> MCPT-010 (parent) via linkedworkitems
+        # Back call: MCPT-020, MCPT-030 -> MCPT-001 via Lucene query
         mock_client.get.side_effect = [
             {
                 "data": [
@@ -1238,15 +1237,19 @@ class TestGetLinkedWorkItems:
             {
                 "data": [
                     {
-                        "id": "MCPT-020/relates_to/proj1/MCPT-001",
+                        "id": "proj1/MCPT-020",
                         "attributes": {
-                            "suspect": True,
+                            "title": "Related Item",
+                            "type": "requirement",
+                            "status": "draft",
                         },
                     },
                     {
-                        "id": "MCPT-030/verifies/proj1/MCPT-001",
+                        "id": "proj1/MCPT-030",
                         "attributes": {
-                            "suspect": False,
+                            "title": "Verifier Item",
+                            "type": "testCase",
+                            "status": "approved",
                         },
                     },
                 ],
@@ -1262,6 +1265,7 @@ class TestGetLinkedWorkItems:
         assert isinstance(result, LinkedWorkItemsList)
         assert result.forward_count == 1
         assert result.back_count == 2
+        assert result.total_count == 3
         assert len(result.items) == 3
 
         fwd = [i for i in result.items if i.direction == "forward"]
@@ -1269,16 +1273,17 @@ class TestGetLinkedWorkItems:
         assert len(fwd) == 1
         assert len(back) == 2
 
-        # Forward: target = last segment = MCPT-010, role = second segment = parent
+        # Forward: target = last segment = MCPT-010, role = parent
         assert fwd[0].id == "MCPT-010"
         assert fwd[0].role == "parent"
         assert fwd[0].suspect is False
 
-        # Back: source = first segment = MCPT-020, role = second segment = relates_to
-        suspects = [i for i in result.items if i.suspect]
-        assert len(suspects) == 1
-        assert suspects[0].id == "MCPT-020"
-        assert suspects[0].role == "relates_to"
+        # Back: parsed from workitems query, role = "backlink"
+        back_ids = {i.id for i in back}
+        assert back_ids == {"MCPT-020", "MCPT-030"}
+        for b in back:
+            assert b.role == "backlink"
+            assert b.suspect is False
 
     async def test_no_links(self, mock_ctx: MagicMock, mock_client: AsyncMock) -> None:
         mock_client.get.side_effect = [
@@ -1294,6 +1299,7 @@ class TestGetLinkedWorkItems:
 
         assert result.forward_count == 0
         assert result.back_count == 0
+        assert result.total_count == 0
         assert result.items == []
 
     async def test_not_found_raises_value_error(
@@ -1326,7 +1332,7 @@ class TestGetLinkedWorkItems:
                 work_item_id="MCPT-001",
             )
 
-    async def test_api_calls_both_endpoints(
+    async def test_api_calls_forward_and_backlink_query(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.get.side_effect = [
@@ -1344,12 +1350,15 @@ class TestGetLinkedWorkItems:
         assert len(calls) == 2
         base = "/projects/proj1/workitems/MCPT-001"
         assert calls[0][0][0] == f"{base}/linkedworkitems"
-        assert calls[1][0][0] == f"{base}/backlinkedworkitems"
+        # Back links use Lucene query instead of backlinkedworkitems
+        assert calls[1][0][0] == "projects/proj1/workitems"
+        back_params = calls[1][1]["params"]
+        assert back_params["query"] == "linkedworkitems:MCPT-001"
 
     async def test_parses_polarion_link_id_format(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Polarion ID format: {sourceWiId}/{role}/{projectId}/{targetWiId}"""
+        """Forward: Polarion ID format, Back: workitems query."""
         mock_client.get.side_effect = [
             {
                 "data": [
@@ -1363,9 +1372,12 @@ class TestGetLinkedWorkItems:
             {
                 "data": [
                     {
-                        # Back link: MCPT-099 --[child]--> MCPT-001
-                        "id": "MCPT-099/child/proj1/MCPT-001",
-                        "attributes": {"suspect": False},
+                        "id": "proj1/MCPT-099",
+                        "attributes": {
+                            "title": "Back Item",
+                            "type": "requirement",
+                            "status": "open",
+                        },
                     },
                 ],
             },
@@ -1385,7 +1397,8 @@ class TestGetLinkedWorkItems:
         assert fwd.id == "MCPT-010"
         assert fwd.role == "parent"
 
-        # Back: source is first segment
+        # Back: parsed from workitems query
         assert back.direction == "back"
         assert back.id == "MCPT-099"
-        assert back.role == "child"
+        assert back.role == "backlink"
+        assert back.title == "Back Item"

@@ -193,7 +193,10 @@ class LinkedWorkItemSummary(BaseModel):
         description=("Link role identifier (e.g. 'parent', 'relates_to', 'verifies')."),
     )
     direction: Literal["forward", "back"] = Field(
-        description="Link direction: 'forward' or 'back'.",
+        description=(
+            "'forward' for outgoing links (this WI links to the target). "
+            "'back' for incoming links (the target links to this WI)."
+        )
     )
     suspect: bool = Field(
         description=(
@@ -205,20 +208,24 @@ class LinkedWorkItemSummary(BaseModel):
 
 
 class LinkedWorkItemsList(BaseModel):
-    """Combined forward and back links for a work item.
+    """All links (forward and back) for a work item.
 
-    Returned by ``get_linked_work_items``.  Merges both directions into
-    a single result for complete traceability.
+    Returned by ``get_linked_work_items``.  Merges outgoing and incoming
+    links into a single list for complete traceability.
     """
 
     items: list[LinkedWorkItemSummary] = Field(
-        description="All linked work items (both forward and back links).",
+        description="All linked work items (forward and back).",
+    )
+    total_count: int = Field(
+        default=0,
+        description="Total number of linked work items (forward + back)",
     )
     forward_count: int = Field(
-        description="Number of forward (outgoing) links.",
+        description="Number of outgoing (forward) links.",
     )
     back_count: int = Field(
-        description="Number of back (incoming) links.",
+        description="Number of incoming (back) links.",
     )
 
 

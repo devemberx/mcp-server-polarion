@@ -926,15 +926,14 @@ async def get_linked_work_items(
         ),
     ),
 ) -> LinkedWorkItemsList:
-    """Get all linked work items (forward and back links).
+    """Get all linked work items (forward and back) for a work item.
 
-    Retrieves both forward (outgoing) and back (incoming) links for a
-    work item and merges them into a single result.  This provides
-    complete traceability information.
+    Retrieves both outgoing(forward) and incoming(back) links for a
+    work item.  This provides complete traceability information such as
+    parent, relates_to, verifies, and depends_on relationships.
 
-    Link roles include relationships like ``parent``, ``relates_to``,
-    ``verifies``, ``depends_on``, etc.  The ``suspect`` flag indicates
-    whether the linked item has changed since the link was last reviewed.
+    The ``suspect`` flag indicates whether the linked item has changed
+    since the link was last reviewed.
 
     Use ``list_work_items`` first to discover valid work item IDs.
 
@@ -945,9 +944,10 @@ async def get_linked_work_items(
 
     Returns:
         LinkedWorkItemsList with:
-        - ``items``: All linked work items (both directions).
-        - ``forward_count``: Number of forward links.
-        - ``back_count``: Number of back links.
+        - ``items``: All linked work items (forward and back).
+        - ``forward_count``: Number of outgoing links.
+        - ``back_count``: Number of incoming links.
+        - ``total_count``: Total number of linked items (forward + back).
 
     Raises:
         ValueError: If the work item or project is not found.
@@ -961,9 +961,6 @@ async def get_linked_work_items(
         forward_response = await client.get(
             f"{base_path}/linkedworkitems",
         )
-        back_response = await client.get(
-            f"{base_path}/backlinkedworkitems",
-        )
     except PolarionNotFoundError as exc:
         raise ValueError(
             f"Work item '{work_item_id}' not found in project "
@@ -972,28 +969,51 @@ async def get_linked_work_items(
         ) from exc
     except PolarionAuthError as exc:
         raise PermissionError(
-            "Cannot access linked work items -- check your POLARION_TOKEN permissions."
+            "Cannot access linked work items -- check your "
+            "POLARION_TOKEN permissions."
         ) from exc
     except PolarionError as exc:
         raise RuntimeError(
-            f"Failed to get links for '{work_item_id}': {exc.message}"
+            f"Failed to get linked work items for "
+            f"'{work_item_id}': {exc.message}"
         ) from exc
 
-    forward_items = _parse_linked_items(
-        forward_response,
-        direction="forward",
-    )
-    back_items = _parse_linked_items(
-        back_response,
-        direction="back",
-    )
+    forward_items = _parse_linked_items(forward_response, direction="forward")
+
+    back_items: list[LinkedWorkItemSummary] = []
+    try:
+        back_response = await client.get(
+            f"projects/{project_id}/workitems",
+            params={
+                "query": f"linkedworkitems:{work_item_id}",
+                "fields[workitems]": "title,type,status",
+                "page[size]": 100,
+                "page[number]": 1,
+            }
+        )
+
+        back_items = [
+            LinkedWorkItemSummary(
+                id=summary.id,
+                title=summary.title,
+                role="backlink",
+                suspect=False,
+                direction="back",
+            )
+            for summary in _parse_work_item_summaries(back_response.get("data", []))
+        ]
+    except PolarionError as exc:
+        raise RuntimeError(
+            f"Backlink query failed for work item "
+            f"'{work_item_id}': {exc.message}"
+        ) from exc
 
     all_items = forward_items + back_items
-
     return LinkedWorkItemsList(
         items=all_items,
         forward_count=len(forward_items),
         back_count=len(back_items),
+        total_count=len(all_items),
     )
 
 

@@ -369,10 +369,12 @@ class TestLinkedWorkItemsList:
             ],
             forward_count=1,
             back_count=1,
+            total_count=2,
         )
         assert len(result.items) == 2
         assert result.forward_count == 1
         assert result.back_count == 1
+        assert result.total_count == 2
 
     def test_empty_links(self):
         result = LinkedWorkItemsList(
@@ -381,6 +383,7 @@ class TestLinkedWorkItemsList:
             back_count=0,
         )
         assert result.items == []
+        assert result.total_count == 0
 
 
 # ---------------------------------------------------------------------------
