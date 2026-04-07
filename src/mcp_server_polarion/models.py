@@ -49,6 +49,13 @@ class PaginatedResult[T](BaseModel):
     page_size: int = Field(
         description="Maximum number of items per page.",
     )
+    has_more: bool = Field(
+        default=False,
+        description=(
+            "True when there are more pages after this one. "
+            "Use this to decide whether to fetch the next page."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -111,7 +118,8 @@ class DocumentPart(BaseModel):
 
     id: str = Field(
         description=(
-            "Part identifier (e.g. 'heading_MCPT-001' or 'workitem_MCPT-001')."
+            "Full JSON:API part identifier "
+            "(e.g. 'projectId/spaceId/documentName/heading_MCPT-001')."
         ),
     )
     title: str = Field(
@@ -133,6 +141,30 @@ class DocumentPart(BaseModel):
         description=(
             "Heading level (1-4) for heading parts. "
             "0 for work-item parts that have no heading level."
+        ),
+    )
+    description: str = Field(
+        default="",
+        description=(
+            "Work item description converted to Markdown. "
+            "Only populated for 'workitem'-type parts. "
+            "Empty for headings and other part types."
+        ),
+    )
+    next_part_id: str = Field(
+        default="",
+        description=(
+            "Full ID of the next part in the document order "
+            "(e.g. 'projectId/spaceId/documentName/workitem_MCPT-002'). "
+            "Empty string when this is the last part."
+        ),
+    )
+    previous_part_id: str = Field(
+        default="",
+        description=(
+            "Full ID of the previous part in the document order "
+            "(e.g. 'projectId/spaceId/documentName/heading_MCPT-001'). "
+            "Empty string when this is the first part."
         ),
     )
 
@@ -186,7 +218,10 @@ class LinkedWorkItemSummary(BaseModel):
         description=("Link role identifier (e.g. 'parent', 'relates_to', 'verifies')."),
     )
     direction: Literal["forward", "back"] = Field(
-        description="Link direction: 'forward' or 'back'.",
+        description=(
+            "'forward' for outgoing links (this WI links to the target). "
+            "'back' for incoming links (the target links to this WI)."
+        )
     )
     suspect: bool = Field(
         description=(
@@ -198,20 +233,24 @@ class LinkedWorkItemSummary(BaseModel):
 
 
 class LinkedWorkItemsList(BaseModel):
-    """Combined forward and back links for a work item.
+    """All links (forward and back) for a work item.
 
-    Returned by ``get_linked_work_items``.  Merges both directions into
-    a single result for complete traceability.
+    Returned by ``get_linked_work_items``.  Merges outgoing and incoming
+    links into a single list for complete traceability.
     """
 
     items: list[LinkedWorkItemSummary] = Field(
-        description="All linked work items (both forward and back links).",
+        description="All linked work items (forward and back).",
+    )
+    total_count: int = Field(
+        default=0,
+        description="Total number of linked work items (forward + back)",
     )
     forward_count: int = Field(
-        description="Number of forward (outgoing) links.",
+        description="Number of outgoing (forward) links.",
     )
     back_count: int = Field(
-        description="Number of back (incoming) links.",
+        description="Number of incoming (back) links.",
     )
 
 
