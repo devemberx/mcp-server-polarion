@@ -203,6 +203,9 @@ class TestDocumentPart:
         )
         assert part.type == "heading"
         assert part.level == 1
+        assert part.description == ""
+        assert part.next_part_id == ""
+        assert part.previous_part_id == ""
 
     def test_workitem_part(self):
         part = DocumentPart(
@@ -215,6 +218,21 @@ class TestDocumentPart:
         assert part.type == "workitem"
         assert part.level == 0
 
+    def test_workitem_part_with_all_fields(self):
+        part = DocumentPart(
+            id="workitem_MCPT-042",
+            title="Login Requirement",
+            content="The system **shall** allow login.",
+            type="workitem",
+            level=0,
+            description="Must support SSO.",
+            next_part_id="proj/space/doc/heading_MCPT-043",
+            previous_part_id="proj/space/doc/heading_MCPT-041",
+        )
+        assert part.description == "Must support SSO."
+        assert part.next_part_id == "proj/space/doc/heading_MCPT-043"
+        assert part.previous_part_id == "proj/space/doc/heading_MCPT-041"
+
     def test_serialization(self):
         part = DocumentPart(
             id="heading_MCPT-010",
@@ -226,6 +244,8 @@ class TestDocumentPart:
         data = part.model_dump()
         assert data["id"] == "heading_MCPT-010"
         assert data["level"] == 2
+        assert data["next_part_id"] == ""
+        assert data["previous_part_id"] == ""
 
     def test_invalid_type_rejected(self):
         with pytest.raises(ValidationError):

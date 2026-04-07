@@ -54,7 +54,7 @@ class PaginatedResult[T](BaseModel):
         description=(
             "True when there are more pages after this one. "
             "Use this to decide whether to fetch the next page."
-        )
+        ),
     )
 
 
@@ -140,6 +140,30 @@ class DocumentPart(BaseModel):
         description=(
             "Heading level (1-4) for heading parts. "
             "0 for work-item parts that have no heading level."
+        ),
+    )
+    description: str = Field(
+        default="",
+        description=(
+            "Work item description converted to Markdown. "
+            "Only populated for 'workitem'-type parts. "
+            "Empty for headings and other part types."
+        ),
+    )
+    next_part_id: str = Field(
+        default="",
+        description=(
+            "Full ID of the next part in the document order "
+            "(e.g. 'projectId/spaceId/documentName/workitem_MCPT-002'). "
+            "Empty string when this is the last part."
+        ),
+    )
+    previous_part_id: str = Field(
+        default="",
+        description=(
+            "Full ID of the previous part in the document order "
+            "(e.g. 'projectId/spaceId/documentName/heading_MCPT-001'). "
+            "Empty string when this is the first part."
         ),
     )
 
