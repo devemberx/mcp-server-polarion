@@ -98,6 +98,7 @@ class TestListProjects:
         assert result.total_count == 2
         assert result.page == 1
         assert result.page_size == 100
+        assert result.has_more is False
         p1 = ProjectSummary(id="proj1", name="Project One")
         assert result.items[0] == p1
         p2 = ProjectSummary(id="proj2", name="Project Two")
@@ -120,6 +121,7 @@ class TestListProjects:
 
         assert result.items == []
         assert result.total_count == 0
+        assert result.has_more is False
 
     async def test_pagination_params_forwarded(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -150,6 +152,7 @@ class TestListProjects:
         assert result.total_count == 5
         assert len(result.items) == 2
         assert result.page == 2
+        assert result.has_more is True
         assert result.items[0].id == "proj2"
         assert result.items[1].id == "proj3"
 

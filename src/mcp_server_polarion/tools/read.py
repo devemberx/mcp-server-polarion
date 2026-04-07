@@ -310,6 +310,7 @@ async def list_projects(
         - ``name``: Human-readable project name.
         - ``total_count``: Total number of matching projects.
         - ``page`` / ``page_size``: Current pagination state.
+        - ``has_more``: True if more pages exist.
 
     Raises:
         PermissionError: If the authentication token is invalid or
@@ -357,6 +358,7 @@ async def list_projects(
         total_count=total,
         page=page_number,
         page_size=page_size,
+        has_more=len(items) == page_size,
     )
 
 
@@ -450,6 +452,7 @@ async def list_documents(
         total_count=total,
         page=page_number,
         page_size=page_size,
+        has_more=len(items) == page_size,
     )
 
 
@@ -708,6 +711,7 @@ async def get_document_parts(  # noqa: PLR0913
         total_count=doc_total,
         page=page_number,
         page_size=page_size,
+        has_more=len(items) == page_size,
     )
 
 
@@ -817,6 +821,7 @@ async def list_work_items(
         total_count=wi_total,
         page=page_number,
         page_size=page_size,
+        has_more=len(items) == page_size,
     )
 
 

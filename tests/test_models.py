@@ -44,6 +44,7 @@ class TestPaginatedResult:
         assert result.total_count == 5
         assert result.page == 1
         assert result.page_size == 2
+        assert result.has_more is False
         assert result.items[0].id == "proj1"
 
     def test_with_work_item_summaries(self):
@@ -61,6 +62,27 @@ class TestPaginatedResult:
             page_size=100,
         )
         assert result.items[0].type == "requirement"
+
+    def test_has_more_true(self):
+        result = PaginatedResult[ProjectSummary](
+            items=[
+                ProjectSummary(id="p1", name="P1"),
+            ],
+            total_count=10,
+            page=1,
+            page_size=1,
+            has_more=True,
+        )
+        assert result.has_more is True
+
+    def test_has_more_default_false(self):
+        result = PaginatedResult[ProjectSummary](
+            items=[],
+            total_count=0,
+            page=1,
+            page_size=100,
+        )
+        assert result.has_more is False
 
     def test_empty_page(self):
         result = PaginatedResult[ProjectSummary](

@@ -49,6 +49,13 @@ class PaginatedResult[T](BaseModel):
     page_size: int = Field(
         description="Maximum number of items per page.",
     )
+    has_more: bool = Field(
+        default=False,
+        description=(
+            "True when there are more pages after this one. "
+            "Use this to decide whether to fetch the next page."
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
