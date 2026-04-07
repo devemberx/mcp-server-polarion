@@ -40,8 +40,7 @@ def get_client(ctx: Context) -> PolarionClient:
     Returns:
         The active ``PolarionClient`` instance.
     """
-    lifespan_ctx: dict[str, object] = ctx.request_context.lifespan_context  # type: ignore[union-attr]
-    client = lifespan_ctx["polarion_client"]
+    client = ctx.lifespan_context.get("polarion_client")
     if not isinstance(client, PolarionClient):  # pragma: no cover
         msg = "polarion_client is not a PolarionClient instance"
         raise TypeError(msg)

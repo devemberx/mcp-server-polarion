@@ -26,15 +26,15 @@ from mcp_server_polarion.models import (
 )
 from mcp_server_polarion.tools import read as _read_mod
 
-# Extract the underlying async functions from FunctionTool wrappers
-# so they can be called directly in tests.
-get_document = _read_mod.get_document.fn
-get_document_parts = _read_mod.get_document_parts.fn
-get_linked_work_items = _read_mod.get_linked_work_items.fn
-get_work_item = _read_mod.get_work_item.fn
-list_documents = _read_mod.list_documents.fn
-list_projects = _read_mod.list_projects.fn
-list_work_items = _read_mod.list_work_items.fn
+# In FastMCP 3.0, @mcp.tool returns the original function unchanged
+# (not a FunctionTool wrapper), so we reference them directly.
+get_document = _read_mod.get_document
+get_document_parts = _read_mod.get_document_parts
+get_linked_work_items = _read_mod.get_linked_work_items
+get_work_item = _read_mod.get_work_item
+list_documents = _read_mod.list_documents
+list_projects = _read_mod.list_projects
+list_work_items = _read_mod.list_work_items
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -53,7 +53,7 @@ def mock_client() -> AsyncMock:
 def mock_ctx(mock_client: AsyncMock) -> MagicMock:
     """Return a mock FastMCP Context with the mock client."""
     ctx = MagicMock()
-    ctx.request_context.lifespan_context = {
+    ctx.lifespan_context = {
         "polarion_client": mock_client,
     }
     return ctx
