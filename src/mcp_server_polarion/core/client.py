@@ -9,8 +9,6 @@
   with a maximum of 2 retries.
 * **Write-operation delay** — a configurable pause between sequential
   writes to account for Polarion cluster propagation (~3 s).
-* **Pagination helper** — ``get_all_pages()`` transparently iterates all
-  pages of a list endpoint.
 """
 
 from __future__ import annotations
@@ -229,66 +227,6 @@ class PolarionClient:
         result = await self._request("PATCH", path, json=json)
         await asyncio.sleep(self._write_delay)
         return result
-
-    # -- Pagination helper ---------------------------------------------------
-
-    async def get_all_pages(
-        self,
-        path: str,
-        *,
-        params: dict[str, str | int] | None = None,
-        page_size: int = 100,
-    ) -> list[dict[str, object]]:
-        """Fetch **all** pages of a paginated list endpoint.
-
-        Iterates through pages until the returned ``data`` array is
-        shorter than ``page_size`` or a ``links.next`` key is absent.
-
-        Args:
-            path: URL path relative to the base API URL.
-            params: Additional query parameters (merged with pagination
-                params on each request).
-            page_size: Requested number of items per page.  The Polarion
-                server caps this at 100 items per page; larger values are
-                allowed but will be limited server-side.
-
-        Returns:
-            A flat list of all ``data`` items across every page.
-        """
-        all_items: list[dict[str, object]] = []
-        page_number = 1
-        merged_params: dict[str, str | int] = dict(params) if params else {}
-
-        while True:
-            merged_params["page[size]"] = page_size
-            merged_params["page[number]"] = page_number
-
-            response = await self.get(path, params=merged_params)
-
-            data = response.get("data")
-            if not isinstance(data, list):
-                raise PolarionError(
-                    f"Unexpected response shape from {path}: "
-                    f"'data' field is missing or not a list "
-                    f"(got {type(data).__name__!r}).",
-                    status_code=0,
-                )
-            all_items.extend(data)
-
-            # Prefer ``links.next`` as the authoritative stop signal.  Only
-            # fall back to the partial-page heuristic when the server omits
-            # the ``links`` object entirely, because the server may cap
-            # page sizes below the caller-requested value.
-            links = response.get("links")
-            if isinstance(links, dict):
-                if "next" not in links:
-                    break
-            elif len(data) < page_size:
-                break
-
-            page_number += 1
-
-        return all_items
 
     # -- Internal request engine ---------------------------------------------
 

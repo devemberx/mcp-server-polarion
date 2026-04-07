@@ -46,7 +46,6 @@ def mock_client() -> AsyncMock:
     """Return a mock PolarionClient with async methods."""
     client = AsyncMock(spec=PolarionClient)
     client.get = AsyncMock()
-    client.get_all_pages = AsyncMock()
     return client
 
 
@@ -99,6 +98,7 @@ class TestListProjects:
         assert result.total_count == 2
         assert result.page == 1
         assert result.page_size == 100
+        assert result.has_more is False
         p1 = ProjectSummary(id="proj1", name="Project One")
         assert result.items[0] == p1
         p2 = ProjectSummary(id="proj2", name="Project Two")
@@ -121,26 +121,44 @@ class TestListProjects:
 
         assert result.items == []
         assert result.total_count == 0
+        assert result.has_more is False
 
-    async def test_pagination_params(
+    async def test_pagination_params_forwarded(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.get.return_value = {
-            "data": [],
-            "meta": {"totalCount": 0},
+            "data": [
+                {
+                    "type": "projects",
+                    "id": "proj2",
+                    "attributes": {"name": "Project 2"},
+                },
+                {
+                    "type": "projects",
+                    "id": "proj3",
+                    "attributes": {"name": "Project 3"},
+                },
+            ],
+            "meta": {"totalCount": 5},
         }
 
-        await list_projects(
+        result = await list_projects(
             mock_ctx,
             query=None,
-            page_size=10,
-            page_number=3,
+            page_size=2,
+            page_number=2,
         )
 
-        mock_client.get.assert_called_once_with(
-            "/projects",
-            params={"fields[projects]": "id,name", "page[size]": 10, "page[number]": 3},
-        )
+        assert result.total_count == 5
+        assert len(result.items) == 2
+        assert result.page == 2
+        assert result.has_more is True
+        assert result.items[0].id == "proj2"
+        assert result.items[1].id == "proj3"
+
+        _, kwargs = mock_client.get.call_args
+        assert kwargs["params"]["page[size]"] == 2
+        assert kwargs["params"]["page[number]"] == 2
 
     async def test_auth_error_raises_permission_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -174,54 +192,25 @@ class TestListProjects:
                 page_number=1,
             )
 
-    async def test_missing_meta_returns_zero_total(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {"data": []}
-
-        result = await list_projects(
-            mock_ctx,
-            query=None,
-            page_size=100,
-            page_number=1,
-        )
-
-        assert result.total_count == 0
-
-    async def test_query_param_passed_to_api(
+    async def test_query_param_forwarded(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.get.return_value = {
-            "data": [
-                {
-                    "type": "projects",
-                    "id": "proj1",
-                    "attributes": {"name": "Project One"},
-                },
-            ],
-            "meta": {"totalCount": 1},
+            "data": [],
+            "meta": {"totalCount": 0},
         }
 
-        result = await list_projects(
+        await list_projects(
             mock_ctx,
-            query="name:proj1",
+            query="name:ILCU*",
             page_size=100,
             page_number=1,
         )
 
-        mock_client.get.assert_called_once_with(
-            "/projects",
-            params={
-                "fields[projects]": "id,name",
-                "page[size]": 100,
-                "page[number]": 1,
-                "query": "name:proj1",
-            },
-        )
-        assert len(result.items) == 1
-        assert result.items[0].id == "proj1"
+        _, kwargs = mock_client.get.call_args
+        assert kwargs["params"]["query"] == "name:ILCU*"
 
-    async def test_query_none_omits_query_param(
+    async def test_query_none_omits_param(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.get.return_value = {
@@ -236,8 +225,57 @@ class TestListProjects:
             page_number=1,
         )
 
-        call_params = mock_client.get.call_args[1]["params"]
-        assert "query" not in call_params
+        _, kwargs = mock_client.get.call_args
+        assert "query" not in kwargs["params"]
+
+    async def test_query_returns_matching_items(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "type": "projects",
+                    "id": "proj1",
+                    "attributes": {"name": "ILCU Main"},
+                },
+            ],
+            "meta": {"totalCount": 1},
+        }
+
+        result = await list_projects(
+            mock_ctx,
+            query="name:ILCU*",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert isinstance(result, PaginatedResult)
+        assert len(result.items) == 1
+        assert result.items[0].id == "proj1"
+
+    async def test_total_count_floor_when_api_returns_zero(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """totalCount=0 with items present uses item count."""
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "type": "projects",
+                    "id": "proj1",
+                    "attributes": {"name": "Project One"},
+                },
+            ],
+            "meta": {"totalCount": 0},
+        }
+
+        result = await list_projects(
+            mock_ctx,
+            query=None,
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.total_count >= 1
 
 
 # ---------------------------------------------------------------------------
@@ -293,8 +331,6 @@ class TestListDocuments:
         result = await list_documents(
             mock_ctx,
             project_id="proj1",
-            name_filter=None,
-            space_filter=None,
             page_size=100,
             page_number=1,
         )
@@ -336,8 +372,6 @@ class TestListDocuments:
         result = await list_documents(
             mock_ctx,
             project_id="proj1",
-            name_filter=None,
-            space_filter=None,
             page_size=100,
             page_number=1,
         )
@@ -367,8 +401,6 @@ class TestListDocuments:
         result = await list_documents(
             mock_ctx,
             project_id="proj1",
-            name_filter=None,
-            space_filter=None,
             page_size=2,
             page_number=2,
         )
@@ -393,8 +425,6 @@ class TestListDocuments:
         result = await list_documents(
             mock_ctx,
             project_id="proj1",
-            name_filter=None,
-            space_filter=None,
             page_size=100,
             page_number=1,
         )
@@ -453,8 +483,6 @@ class TestListDocuments:
         result = await list_documents(
             mock_ctx,
             project_id="p",
-            name_filter=None,
-            space_filter=None,
             page_size=100,
             page_number=1,
         )
@@ -490,8 +518,6 @@ class TestListDocuments:
         result = await list_documents(
             mock_ctx,
             project_id="p",
-            name_filter=None,
-            space_filter=None,
             page_size=100,
             page_number=1,
         )
@@ -501,99 +527,6 @@ class TestListDocuments:
         assert names == {"Alpha", "Bravo", "Charlie", "Delta"}
         # Only 1 API call needed (single page).
         assert mock_client.get.call_count == 1
-
-    async def test_name_filter(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        items = [
-            {
-                "relationships": {
-                    "module": {
-                        "data": {
-                            "type": "documents",
-                            "id": "proj1/_default/Software Requirement Specification",
-                        }
-                    }
-                }
-            },
-            {
-                "relationships": {
-                    "module": {
-                        "data": {
-                            "type": "documents",
-                            "id": "proj1/_default/SDD",
-                        }
-                    }
-                }
-            },
-        ]
-        mock_client.get.return_value = {
-            "data": items,
-            "meta": {"totalCount": 2},
-        }
-
-        result = await list_documents(
-            mock_ctx,
-            project_id="proj1",
-            name_filter="SRS",
-            space_filter=None,
-            page_size=100,
-            page_number=1,
-        )
-
-        # "SRS" should not match either document
-        assert result.total_count == 0
-
-        mock_client.get.return_value = {
-            "data": items,
-            "meta": {"totalCount": 2},
-        }
-        result2 = await list_documents(
-            mock_ctx,
-            project_id="proj1",
-            name_filter="Requirement",
-            space_filter=None,
-            page_size=100,
-            page_number=1,
-        )
-
-        assert result2.total_count == 1
-        assert result2.items[0].document_name == "Software Requirement Specification"
-
-    async def test_space_filter(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        items = [
-            {
-                "relationships": {
-                    "module": {
-                        "data": {"type": "documents", "id": "proj1/_default/Doc1"}
-                    }
-                }
-            },
-            {
-                "relationships": {
-                    "module": {"data": {"type": "documents", "id": "proj1/Design/SRS"}}
-                }
-            },
-        ]
-        mock_client.get.return_value = {
-            "data": items,
-            "meta": {"totalCount": 2},
-        }
-
-        result = await list_documents(
-            mock_ctx,
-            project_id="proj1",
-            name_filter=None,
-            space_filter="Design",
-            page_size=100,
-            page_number=1,
-        )
-
-        assert result.total_count == 1
-        assert result.items[0].space_id == "Design"
-        assert result.items[0].document_name == "SRS"
 
     async def test_api_params_include_query_and_sort(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -606,8 +539,6 @@ class TestListDocuments:
         await list_documents(
             mock_ctx,
             project_id="proj1",
-            name_filter=None,
-            space_filter=None,
             page_size=100,
             page_number=1,
         )
@@ -631,8 +562,6 @@ class TestListDocuments:
             await list_documents(
                 mock_ctx,
                 project_id="missing",
-                name_filter=None,
-                space_filter=None,
                 page_size=100,
                 page_number=1,
             )
@@ -646,8 +575,6 @@ class TestListDocuments:
             await list_documents(
                 mock_ctx,
                 project_id="proj1",
-                name_filter=None,
-                space_filter=None,
                 page_size=100,
                 page_number=1,
             )
@@ -775,6 +702,38 @@ class TestGetDocument:
 
         assert result.content == ""
 
+    async def test_strips_empty_headings(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": {
+                "attributes": {
+                    "id": "DocH",
+                    "title": "Headings Doc",
+                    "homePageContent": {
+                        "type": "text/html",
+                        "value": (
+                            "<h2></h2>"
+                            "<p>Intro paragraph.</p>"
+                            "<h3></h3>"
+                            "<p>Detail text.</p>"
+                        ),
+                    },
+                },
+            },
+        }
+
+        result = await get_document(
+            mock_ctx,
+            project_id="proj1",
+            space_id="_default",
+            document_name="DocH",
+        )
+
+        assert "##" not in result.content
+        assert "Intro paragraph" in result.content
+        assert "Detail text" in result.content
+
 
 # ---------------------------------------------------------------------------
 # get_document_parts
@@ -793,6 +752,7 @@ class TestGetDocumentParts:
                     "type": "document_parts",
                     "id": "proj1/_default/SRS/heading_MCPT-001",
                     "attributes": {
+                        "id": "heading_MCPT-001",
                         "content": (
                             '<h1 id="polarion_wiki macro'
                             " name=module-workitem;"
@@ -800,25 +760,96 @@ class TestGetDocumentParts:
                         ),
                         "type": "heading",
                     },
+                    "relationships": {
+                        "nextPart": {
+                            "data": {
+                                "type": "document_parts",
+                                "id": "proj1/_default/SRS/workitem_MCPT-002",
+                            }
+                        },
+                        "workItem": {
+                            "data": {
+                                "type": "workitems",
+                                "id": "proj1/MCPT-001",
+                            }
+                        },
+                    },
                 },
                 {
                     "type": "document_parts",
                     "id": "proj1/_default/SRS/workitem_MCPT-002",
                     "attributes": {
+                        "id": "workitem_MCPT-002",
                         "content": (
                             '<div id="polarion_wiki macro'
                             " name=module-workitem;"
                             'params=id=MCPT-002"></div>'
                         ),
                         "type": "workitem",
+                        "external": True,
+                        "level": 0,
+                        "layout": 0,
+                    },
+                    "relationships": {
+                        "previousPart": {
+                            "data": {
+                                "type": "document_parts",
+                                "id": "proj1/_default/SRS/heading_MCPT-001",
+                            }
+                        },
+                        "nextPart": {
+                            "data": {
+                                "type": "document_parts",
+                                "id": "proj1/_default/SRS/polarion_1",
+                            }
+                        },
+                        "workItem": {
+                            "data": {
+                                "type": "workitems",
+                                "id": "proj1/MCPT-002",
+                            }
+                        },
                     },
                 },
                 {
                     "type": "document_parts",
                     "id": "proj1/_default/SRS/polarion_1",
                     "attributes": {
+                        "id": "polarion_1",
                         "content": "<p>Normal text content.</p>",
                         "type": "normal",
+                    },
+                    "relationships": {
+                        "previousPart": {
+                            "data": {
+                                "type": "document_parts",
+                                "id": "proj1/_default/SRS/workitem_MCPT-002",
+                            }
+                        },
+                    },
+                },
+            ],
+            "included": [
+                {
+                    "type": "workitems",
+                    "id": "proj1/MCPT-001",
+                    "attributes": {
+                        "type": "heading",
+                        "title": "Introduction",
+                        "status": "open",
+                    },
+                },
+                {
+                    "type": "workitems",
+                    "id": "proj1/MCPT-002",
+                    "attributes": {
+                        "type": "requirement",
+                        "title": "Login Feature",
+                        "description": {
+                            "type": "text/html",
+                            "value": "<p>The system shall support login.</p>",
+                        },
+                        "status": "draft",
                     },
                 },
             ],
@@ -843,15 +874,25 @@ class TestGetDocumentParts:
         assert heading.id == "proj1/_default/SRS/heading_MCPT-001"
         assert heading.type == "heading"
         assert heading.level == 1
+        assert heading.title == "Introduction"
+        assert heading.next_part_id == "proj1/_default/SRS/workitem_MCPT-002"
+        assert heading.previous_part_id == ""
 
         wi_part = result.items[1]
         assert wi_part.id == "proj1/_default/SRS/workitem_MCPT-002"
         assert wi_part.type == "workitem"
         assert wi_part.level == 0
+        assert wi_part.title == "Login Feature"
+        assert "login" in wi_part.description.lower()
+        assert wi_part.previous_part_id == "proj1/_default/SRS/heading_MCPT-001"
+        assert wi_part.next_part_id == "proj1/_default/SRS/polarion_1"
 
         normal_part = result.items[2]
         assert normal_part.type == "normal"
         assert normal_part.level == 0
+        assert normal_part.title == ""
+        assert normal_part.previous_part_id == "proj1/_default/SRS/workitem_MCPT-002"
+        assert normal_part.next_part_id == ""
 
     async def test_pagination_params_forwarded(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -871,7 +912,8 @@ class TestGetDocumentParts:
         )
 
         _, kwargs = mock_client.get.call_args
-        assert kwargs["params"]["fields[document_parts]"] == "content,type"
+        assert kwargs["params"]["fields[document_parts]"] == "@all"
+        assert kwargs["params"]["include"] == "workItem"
         assert kwargs["params"]["page[size]"] == 10
         assert kwargs["params"]["page[number]"] == 2
 
@@ -902,8 +944,28 @@ class TestGetDocumentParts:
                 {
                     "id": "proj1/_default/Doc/heading_MCPT-003",
                     "attributes": {
+                        "id": "heading_MCPT-003",
                         "content": "<h2>Plain string content.</h2>",
                         "type": "heading",
+                    },
+                    "relationships": {
+                        "workItem": {
+                            "data": {
+                                "type": "workitems",
+                                "id": "proj1/MCPT-003",
+                            }
+                        },
+                    },
+                },
+            ],
+            "included": [
+                {
+                    "type": "workitems",
+                    "id": "proj1/MCPT-003",
+                    "attributes": {
+                        "type": "heading",
+                        "title": "Plain string content.",
+                        "status": "open",
                     },
                 },
             ],
@@ -923,6 +985,45 @@ class TestGetDocumentParts:
         assert result.items[0].type == "heading"
         assert result.items[0].level == 2
         assert "Plain string content" in result.items[0].content
+        assert result.items[0].title == "Plain string content."
+
+    async def test_total_count_floor_when_api_returns_zero(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """totalCount=0 with items present uses item count."""
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "id": "proj1/_default/Doc/heading_MCPT-001",
+                    "attributes": {
+                        "id": "heading_MCPT-001",
+                        "content": "<h1>Intro</h1>",
+                        "type": "heading",
+                    },
+                },
+                {
+                    "id": "proj1/_default/Doc/workitem_MCPT-002",
+                    "attributes": {
+                        "id": "workitem_MCPT-002",
+                        "content": "",
+                        "type": "workitem",
+                    },
+                },
+            ],
+            "meta": {"totalCount": 0},  # Polarion quirk
+        }
+
+        result = await get_document_parts(
+            mock_ctx,
+            project_id="proj1",
+            space_id="_default",
+            document_name="Doc",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert len(result.items) == 2
+        assert result.total_count >= 2
 
 
 # ---------------------------------------------------------------------------
@@ -1105,6 +1206,43 @@ class TestListWorkItems:
         assert len(result.items) == 1
         assert result.items[0].id == "MCPT-001"
 
+    async def test_total_count_floor_when_api_returns_zero(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """When Polarion omits totalCount (returns 0), use item count as minimum."""
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "id": "proj1/MCPT-001",
+                    "attributes": {
+                        "title": "A",
+                        "type": "requirement",
+                        "status": "open",
+                    },
+                },
+                {
+                    "id": "proj1/MCPT-002",
+                    "attributes": {
+                        "title": "B",
+                        "type": "requirement",
+                        "status": "open",
+                    },
+                },
+            ],
+            "meta": {"totalCount": 0},  # Polarion quirk: 0 even when items exist
+        }
+
+        result = await list_work_items(
+            mock_ctx,
+            project_id="proj1",
+            query="type:requirement",
+            page_size=100,
+            page_number=1,
+        )
+
+        # total_count should be at least 2 (the number of returned items)
+        assert result.total_count >= 2
+
 
 # ---------------------------------------------------------------------------
 # get_work_item
@@ -1223,16 +1361,35 @@ class TestGetLinkedWorkItems:
     async def test_merges_forward_and_back_links(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # First call = forward, second = back.
+        # Forward call: MCPT-001 -> MCPT-010 (parent) via linkedworkitems
+        # Back call: MCPT-020, MCPT-030 -> MCPT-001 via Lucene query
         mock_client.get.side_effect = [
             {
                 "data": [
                     {
+                        "id": "proj1/MCPT-001/parent/proj1/MCPT-010",
+                        "attributes": {
+                            "role": "parent",
+                            "suspect": False,
+                        },
+                        "relationships": {
+                            "workItem": {
+                                "data": {
+                                    "type": "workitems",
+                                    "id": "proj1/MCPT-010",
+                                }
+                            },
+                        },
+                    },
+                ],
+                "included": [
+                    {
+                        "type": "workitems",
                         "id": "proj1/MCPT-010",
                         "attributes": {
                             "title": "Parent Item",
-                            "role": "parent",
-                            "suspect": False,
+                            "type": "heading",
+                            "status": "open",
                         },
                     },
                 ],
@@ -1242,17 +1399,17 @@ class TestGetLinkedWorkItems:
                     {
                         "id": "proj1/MCPT-020",
                         "attributes": {
-                            "title": "Child Item",
-                            "role": "relates_to",
-                            "suspect": True,
+                            "title": "Related Item",
+                            "type": "requirement",
+                            "status": "draft",
                         },
                     },
                     {
                         "id": "proj1/MCPT-030",
                         "attributes": {
-                            "title": "Verifier",
-                            "role": "verifies",
-                            "suspect": False,
+                            "title": "Verifier Item",
+                            "type": "testCase",
+                            "status": "approved",
                         },
                     },
                 ],
@@ -1268,6 +1425,7 @@ class TestGetLinkedWorkItems:
         assert isinstance(result, LinkedWorkItemsList)
         assert result.forward_count == 1
         assert result.back_count == 2
+        assert result.total_count == 3
         assert len(result.items) == 3
 
         fwd = [i for i in result.items if i.direction == "forward"]
@@ -1275,13 +1433,18 @@ class TestGetLinkedWorkItems:
         assert len(fwd) == 1
         assert len(back) == 2
 
+        # Forward: target from relationships.workItem, role from attributes
         assert fwd[0].id == "MCPT-010"
         assert fwd[0].role == "parent"
+        assert fwd[0].title == "Parent Item"
         assert fwd[0].suspect is False
 
-        suspects = [i for i in result.items if i.suspect]
-        assert len(suspects) == 1
-        assert suspects[0].id == "MCPT-020"
+        # Back: parsed from workitems query, role = "backlink"
+        back_ids = {i.id for i in back}
+        assert back_ids == {"MCPT-020", "MCPT-030"}
+        for b in back:
+            assert b.role == "backlink"
+            assert b.suspect is False
 
     async def test_no_links(self, mock_ctx: MagicMock, mock_client: AsyncMock) -> None:
         mock_client.get.side_effect = [
@@ -1297,6 +1460,7 @@ class TestGetLinkedWorkItems:
 
         assert result.forward_count == 0
         assert result.back_count == 0
+        assert result.total_count == 0
         assert result.items == []
 
     async def test_not_found_raises_value_error(
@@ -1329,7 +1493,7 @@ class TestGetLinkedWorkItems:
                 work_item_id="MCPT-001",
             )
 
-    async def test_api_calls_both_endpoints(
+    async def test_api_calls_forward_and_backlink_query(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.get.side_effect = [
@@ -1347,25 +1511,60 @@ class TestGetLinkedWorkItems:
         assert len(calls) == 2
         base = "/projects/proj1/workitems/MCPT-001"
         assert calls[0][0][0] == f"{base}/linkedworkitems"
-        assert calls[1][0][0] == f"{base}/backlinkedworkitems"
+        # Forward call includes fields and include params
+        fwd_params = calls[0][1]["params"]
+        assert fwd_params["fields[linkedworkitems]"] == "@all"
+        assert fwd_params["include"] == "workItem"
+        # Back links use camelCase Lucene query
+        assert calls[1][0][0] == "/projects/proj1/workitems"
+        back_params = calls[1][1]["params"]
+        assert back_params["query"] == "linkedWorkItems:MCPT-001"
 
-    async def test_strips_project_prefix_from_linked_ids(
+    async def test_parses_polarion_link_id_format(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
+        """Forward: Polarion ID format, Back: workitems query."""
         mock_client.get.side_effect = [
             {
                 "data": [
                     {
+                        # Forward link: MCPT-001 --[parent]--> MCPT-010
+                        "id": "proj1/MCPT-001/parent/proj1/MCPT-010",
+                        "attributes": {"role": "parent", "suspect": False},
+                        "relationships": {
+                            "workItem": {
+                                "data": {
+                                    "type": "workitems",
+                                    "id": "proj1/MCPT-010",
+                                }
+                            },
+                        },
+                    },
+                ],
+                "included": [
+                    {
+                        "type": "workitems",
                         "id": "proj1/MCPT-010",
                         "attributes": {
-                            "title": "Linked",
-                            "role": "parent",
-                            "suspect": False,
+                            "title": "Parent Target",
+                            "type": "heading",
+                            "status": "open",
                         },
                     },
                 ],
             },
-            {"data": []},
+            {
+                "data": [
+                    {
+                        "id": "proj1/MCPT-099",
+                        "attributes": {
+                            "title": "Back Item",
+                            "type": "requirement",
+                            "status": "open",
+                        },
+                    },
+                ],
+            },
         ]
 
         result = await get_linked_work_items(
@@ -1374,4 +1573,17 @@ class TestGetLinkedWorkItems:
             work_item_id="MCPT-001",
         )
 
-        assert result.items[0].id == "MCPT-010"
+        fwd = result.items[0]  # forward
+        back = result.items[1]  # back
+
+        # Forward: target from relationships.workItem
+        assert fwd.direction == "forward"
+        assert fwd.id == "MCPT-010"
+        assert fwd.role == "parent"
+        assert fwd.title == "Parent Target"
+
+        # Back: parsed from workitems query
+        assert back.direction == "back"
+        assert back.id == "MCPT-099"
+        assert back.role == "backlink"
+        assert back.title == "Back Item"

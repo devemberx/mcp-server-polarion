@@ -89,6 +89,7 @@ mcp-server-polarion/
 │       │   └── html.py           # HTML ↔ Markdown conversion + HTML sanitization
 │       └── tools/                # MCP tool definitions
 │           ├── __init__.py       # Imports read to register tools on mcp
+│           ├── _helpers.py       # Shared helpers (get_client, safe_str, extract_total_count, etc.)
 │           └── read.py           # 7 read tools
 └── tests/
     ├── conftest.py               # Shared fixtures (mock client, MCP test client)
@@ -109,6 +110,7 @@ mcp-server-polarion/
 
 - `server.py` creates the `mcp = FastMCP(...)` instance.
 - `tools/read.py` imports it via `from mcp_server_polarion.server import mcp` to use the `@mcp.tool()` decorator.
+- `tools/_helpers.py` provides shared helpers used by `tools/read.py` (and future `tools/write.py`).
 - `tools/__init__.py` runs `import mcp_server_polarion.tools.read` to register all tools.
 - `server.py` calls `import mcp_server_polarion.tools` at the very bottom of the module (to avoid circular imports).
 - `core/__init__.py` re-exports `PolarionClient`, `PolarionConfig`, and exception classes.
@@ -118,6 +120,7 @@ mcp-server-polarion/
 - `from mcp_server_polarion.core import PolarionClient, PolarionConfig`
 - `from mcp_server_polarion.core.exceptions import PolarionNotFoundError`
 - `from mcp_server_polarion.utils import html_to_markdown, markdown_to_html`
+- `from mcp_server_polarion.tools._helpers import get_client, safe_str, extract_total_count`
 
 ---
 
@@ -285,8 +288,10 @@ All list endpoints support `page[size]` and `page[number]` (1-based) query param
 - **Space ID and document name are required to access documents** — guide the user to call `list_documents` first in tool docstrings.
 - **`update_work_item` must GET current state first**, then PATCH only the changed fields.
 - **Document Recycle Bin**: Creating a Work Item with a `module` relationship places it in the Document's Recycle Bin — it is NOT visible. After `create_work_item`, call `create_document_part` separately to insert the Work Item into the document body as a visible Part.
-- **`get_linked_work_items`** must fetch both forward links (`linkedworkitems`) and back links (`backlinkedworkitems`) and merge into a single result for complete traceability.
+- **`get_linked_work_items`** fetches forward links via `GET .../linkedworkitems` (with `fields[linkedworkitems]=@all&include=workItem&fields[workitems]=title,type,status` to get role, suspect, and target title) and back links via a **camelCase** Lucene query (`linkedWorkItems:{id}`) on the workitems endpoint. The `backlinkedworkitems` endpoint is **not available** on the target Polarion version.
+- **Linked work item ID format is 5 segments**: `{projectId}/{sourceWiId}/{role}/{targetProjectId}/{targetWiId}` (e.g. `MCP_Test_Project/MCPT-9/parent/MCP_Test_Project/MCPT-1`). Use `attributes.role` for the role and `relationships.workItem.data.id` for the target WI — do NOT parse the raw ID for these values.
 - **URL encoding required** for document names with spaces (e.g., `Software%20Requirement%20Specification`).
+- **`get_document_parts`** uses `fields[document_parts]=@all&include=workItem&fields[workitems]=title,description,type,status` to fetch part attributes, relationships (`nextPart`, `previousPart`, `workItem`), and included work items for title/description resolution.
 - **Document Part ID format**: `heading_MCPT-xxx` or `workitem_MCPT-xxx`.
 - **`document_parts` (underscore)** is the JSON:API resource type name.
 
@@ -300,12 +305,12 @@ All tool inputs and outputs are defined as Pydantic `BaseModel` subclasses. Add 
 
 | Model | Purpose |
 |---|---|
-| `PaginatedResult[T]` | Common response wrapper for all list tools (`items`, `total_count`, `page`, `page_size`) |
+| `PaginatedResult[T]` | Common response wrapper for all list tools (`items`, `total_count`, `page`, `page_size`, `has_more`) |
 | `ProjectSummary` | Item returned by `list_projects` (`id`, `name`) |
 | `DocumentSummary` | Item returned by `list_documents` (`space_id`, `document_name`) |
 | `DocumentPartCreateResult` | Response from `create_document_part` (`created`, `dry_run`, `part_id`, `payload_preview`) |
 | `DocumentDetail` | Response from `get_document` (`id`, `title`, `content`, `space_id`, `project_id`) |
-| `DocumentPart` | Item returned by `get_document_parts` (`id`, `title`, `content`, `type`, `level`) |
+| `DocumentPart` | Item returned by `get_document_parts` (`id`, `title`, `content`, `type`, `level`, `description`, `next_part_id`, `previous_part_id`) |
 | `WorkItemSummary` | Item returned by `list_work_items` (`id`, `title`, `type`, `status`) |
 | `WorkItemDetail` | Response from `get_work_item` — extends `WorkItemSummary` (`description`, `project_id`) |
 | `WorkItemCreateResult` | Response from `create_work_item` (`created`, `dry_run`, `work_item_id`, `payload_preview`) |
@@ -313,7 +318,7 @@ All tool inputs and outputs are defined as Pydantic `BaseModel` subclasses. Add 
 | `CommentResult` | Response from `add_document_comment` (`created`, `dry_run`, `comment_id`, `payload_preview`) |
 | `LinkResult` | Response from `link_work_items` (`created`, `dry_run`, `payload_preview`) |
 | `LinkedWorkItemSummary` | Item returned by `get_linked_work_items` (`id`, `title`, `role`, `direction`, `suspect`) |
-| `LinkedWorkItemsList` | Response from `get_linked_work_items` (`items`, `forward_count`, `back_count`) |
+| `LinkedWorkItemsList` | Response from `get_linked_work_items` (`items`, `forward_count`, `back_count`, `total_count`) |
 
 ### Model Rules
 
