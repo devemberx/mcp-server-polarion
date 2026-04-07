@@ -265,13 +265,13 @@ async def _discover_documents(
 @mcp.tool()
 async def list_projects(
     ctx: Context,
-    name_filter: str | None = Field(
+    query: str | None = Field(
         default=None,
         description=(
-            "Optional substring filter for project names "
-            "(case-insensitive, client-side). "
-            "E.g. 'infotainment' matches 'ICAS Infotainment Project'. "
-            "Omit to list all accessible projects."
+            "Lucene query string for server-side filtering "
+            "(e.g. 'name:ILCU*'). Trailing wildcards are supported; "
+            "leading wildcards are not supported by Polarion. "
+            "Omit to return all accessible projects."
         ),
     ),
     page_size: int = Field(
@@ -286,21 +286,21 @@ async def list_projects(
         description="Page number to retrieve (1-based, default 1).",
     ),
 ) -> PaginatedResult[ProjectSummary]:
-    """List all accessible Polarion projects.
+    """List all accessible Polarion projects, with optional server-side filtering.
 
     Returns a paginated list of Polarion projects the authenticated user
     can access.  **Call this tool once** to discover valid project IDs
-    for other tools — use ``name_filter`` to narrow results by name.
+    for other tools.
 
-    This tool fetches ALL projects from the server and applies
-    client-side filtering, so a single call is always sufficient to
-    find any project by name.
+    When ``query`` is omitted, all projects are fetched. When ``query``
+    is provided, Polarion performs a server-side Lucene search (trailing
+    wildcards supported, e.g. ``name:ILCU*``).
 
     Args:
         ctx: MCP tool context (injected automatically).
-        name_filter: Optional substring filter for project names
-            (case-insensitive).  E.g. 'infotainment' matches
-            'ICAS Infotainment Project'.
+        query: Lucene expression to filter projects on the server
+            (e.g. ``'name:ILCU*'``). Leading wildcards (``*foo*``) are
+            rejected by Polarion with HTTP 400. Omit for no filter.
         page_size: Number of projects per page (1-100, default 100).
         page_number: Page number to retrieve (1-based, default 1).
 
@@ -317,11 +317,15 @@ async def list_projects(
         RuntimeError: On unexpected Polarion API errors.
     """
     client = _get_client(ctx)
+    params: dict[str, str | int] = {
+        "fields[projects]": "id,name",
+        "page[size]": page_size,
+        "page[number]": page_number,
+    }
+    if query is not None:
+        params["query"] = query
     try:
-        all_data = await client.get_all_pages(
-            "/projects",
-            params={"fields[projects]": "id,name"},
-        )
+        response = await client.get("/projects", params=params)
     except PolarionAuthError as exc:
         raise PermissionError(
             "Cannot list projects -- check your POLARION_TOKEN permissions."
@@ -329,32 +333,27 @@ async def list_projects(
     except PolarionError as exc:
         raise RuntimeError(f"Failed to list projects: {exc.message}") from exc
 
-    all_items: list[ProjectSummary] = []
-    for item in all_data:
-        attrs = item.get("attributes", {})
-        if not isinstance(attrs, dict):
-            attrs = {}
-        all_items.append(
-            ProjectSummary(
-                id=_safe_str(item.get("id", "")),
-                name=_safe_str(attrs.get("name", "")),
+    data = response.get("data", [])
+    items: list[ProjectSummary] = []
+    if isinstance(data, list):
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            attrs = item.get("attributes", {})
+            if not isinstance(attrs, dict):
+                attrs = {}
+            items.append(
+                ProjectSummary(
+                    id=_safe_str(item.get("id", "")),
+                    name=_safe_str(attrs.get("name", "")),
+                )
             )
-        )
 
-    # Apply client-side name filter.
-    if name_filter is not None:
-        name_lower = name_filter.lower()
-        all_items = [p for p in all_items if name_lower in p.name.lower()]
-
-    total = len(all_items)
-
-    # Manual pagination over the filtered set.
-    start = (page_number - 1) * page_size
-    end = start + page_size
-    page_slice = all_items[start:end]
+    total = _extract_total_count(response)
+    total = max(total, (page_number - 1) * page_size + len(items))
 
     return PaginatedResult[ProjectSummary](
-        items=page_slice,
+        items=items,
         total_count=total,
         page=page_number,
         page_size=page_size,
@@ -362,28 +361,12 @@ async def list_projects(
 
 
 @mcp.tool()
-async def list_documents(  # noqa: PLR0913
+async def list_documents(
     ctx: Context,
     project_id: str = Field(
         description=(
             "Polarion project ID (e.g. 'myproject'). "
             "Use ``list_projects`` to discover valid IDs."
-        ),
-    ),
-    name_filter: str | None = Field(
-        default=None,
-        description=(
-            "Optional substring filter for document names "
-            "(case-insensitive, client-side). "
-            "E.g. 'Requirement' matches 'Software Requirement Specification'."
-        ),
-    ),
-    space_filter: str | None = Field(
-        default=None,
-        description=(
-            "Optional exact-match filter for Space ID "
-            "(e.g. '_default', 'Design'). Only returns documents "
-            "in the specified space."
         ),
     ),
     page_size: int = Field(
@@ -400,10 +383,9 @@ async def list_documents(  # noqa: PLR0913
 ) -> PaginatedResult[DocumentSummary]:
     """List all documents in a Polarion project.
 
-    **Call this tool once** to discover all documents — use
-    ``name_filter`` and ``space_filter`` to narrow results in the same
-    call.  There is no need to call this tool multiple times; it always
-    returns the complete set of documents (after filtering).
+    **Call this tool once** to discover all documents.  There is no need
+     to call this tool multiple times; it always returns the complete set
+     of documents.
 
     Returns space IDs and document names so the LLM can call
     ``get_document`` or ``get_document_parts`` with the correct
@@ -419,10 +401,6 @@ async def list_documents(  # noqa: PLR0913
     Args:
         ctx: MCP tool context (injected automatically).
         project_id: Polarion project ID.
-        name_filter: Optional substring filter for document names
-            (case-insensitive).  A single call with ``name_filter``
-            is enough to find a document — do not call again without it.
-        space_filter: Optional exact Space ID filter.
         page_size: Number of documents per page (1-100, default 100).
         page_number: Page number to retrieve (1-based, default 1).
 
@@ -457,14 +435,7 @@ async def list_documents(  # noqa: PLR0913
             f"Failed to list documents for project '{project_id}': {exc.message}"
         ) from exc
 
-    # Apply filters.
     filtered: list[tuple[str, str]] = sorted(documents)
-    if space_filter is not None:
-        filtered = [(s, d) for s, d in filtered if s == space_filter]
-    if name_filter is not None:
-        name_lower = name_filter.lower()
-        filtered = [(s, d) for s, d in filtered if name_lower in d.lower()]
-
     total = len(filtered)
 
     # Manual pagination over the extracted set.

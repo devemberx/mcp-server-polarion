@@ -46,7 +46,6 @@ def mock_client() -> AsyncMock:
     """Return a mock PolarionClient with async methods."""
     client = AsyncMock(spec=PolarionClient)
     client.get = AsyncMock()
-    client.get_all_pages = AsyncMock()
     return client
 
 
@@ -71,22 +70,25 @@ class TestListProjects:
     async def test_returns_projects(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get_all_pages.return_value = [
-            {
-                "type": "projects",
-                "id": "proj1",
-                "attributes": {"name": "Project One"},
-            },
-            {
-                "type": "projects",
-                "id": "proj2",
-                "attributes": {"name": "Project Two"},
-            },
-        ]
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "type": "projects",
+                    "id": "proj1",
+                    "attributes": {"name": "Project One"},
+                },
+                {
+                    "type": "projects",
+                    "id": "proj2",
+                    "attributes": {"name": "Project Two"},
+                },
+            ],
+            "meta": {"totalCount": 2},
+        }
 
         result = await list_projects(
             mock_ctx,
-            name_filter=None,
+            query=None,
             page_size=100,
             page_number=1,
         )
@@ -104,11 +106,14 @@ class TestListProjects:
     async def test_empty_projects(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get_all_pages.return_value = []
+        mock_client.get.return_value = {
+            "data": [],
+            "meta": {"totalCount": 0},
+        }
 
         result = await list_projects(
             mock_ctx,
-            name_filter=None,
+            query=None,
             page_size=100,
             page_number=1,
         )
@@ -116,21 +121,28 @@ class TestListProjects:
         assert result.items == []
         assert result.total_count == 0
 
-    async def test_pagination_params(
+    async def test_pagination_params_forwarded(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get_all_pages.return_value = [
-            {
-                "type": "projects",
-                "id": f"proj{i}",
-                "attributes": {"name": f"Project {i}"},
-            }
-            for i in range(5)
-        ]
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "type": "projects",
+                    "id": "proj2",
+                    "attributes": {"name": "Project 2"},
+                },
+                {
+                    "type": "projects",
+                    "id": "proj3",
+                    "attributes": {"name": "Project 3"},
+                },
+            ],
+            "meta": {"totalCount": 5},
+        }
 
         result = await list_projects(
             mock_ctx,
-            name_filter=None,
+            query=None,
             page_size=2,
             page_number=2,
         )
@@ -141,10 +153,14 @@ class TestListProjects:
         assert result.items[0].id == "proj2"
         assert result.items[1].id == "proj3"
 
+        _, kwargs = mock_client.get.call_args
+        assert kwargs["params"]["page[size]"] == 2
+        assert kwargs["params"]["page[number]"] == 2
+
     async def test_auth_error_raises_permission_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get_all_pages.side_effect = PolarionAuthError(
+        mock_client.get.side_effect = PolarionAuthError(
             "Unauthorized",
             status_code=401,
         )
@@ -152,7 +168,7 @@ class TestListProjects:
         with pytest.raises(PermissionError, match="POLARION_TOKEN"):
             await list_projects(
                 mock_ctx,
-                name_filter=None,
+                query=None,
                 page_size=100,
                 page_number=1,
             )
@@ -160,7 +176,7 @@ class TestListProjects:
     async def test_generic_error_raises_runtime_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get_all_pages.side_effect = PolarionError(
+        mock_client.get.side_effect = PolarionError(
             "Server error",
             status_code=500,
         )
@@ -168,117 +184,95 @@ class TestListProjects:
         with pytest.raises(RuntimeError, match="Failed to list"):
             await list_projects(
                 mock_ctx,
-                name_filter=None,
+                query=None,
                 page_size=100,
                 page_number=1,
             )
 
-    async def test_name_filter_substring_match(
+    async def test_query_param_forwarded(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get_all_pages.return_value = [
-            {
-                "type": "projects",
-                "id": "proj1",
-                "attributes": {"name": "ICAS Infotainment Project"},
-            },
-            {
-                "type": "projects",
-                "id": "proj2",
-                "attributes": {"name": "Safety Module"},
-            },
-            {
-                "type": "projects",
-                "id": "proj3",
-                "attributes": {"name": "Infotainment V2"},
-            },
-        ]
+        mock_client.get.return_value = {
+            "data": [],
+            "meta": {"totalCount": 0},
+        }
 
-        result = await list_projects(
+        await list_projects(
             mock_ctx,
-            name_filter="infotainment",
+            query="name:ILCU*",
             page_size=100,
             page_number=1,
         )
 
-        assert result.total_count == 2
-        assert len(result.items) == 2
+        _, kwargs = mock_client.get.call_args
+        assert kwargs["params"]["query"] == "name:ILCU*"
+
+    async def test_query_none_omits_param(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": [],
+            "meta": {"totalCount": 0},
+        }
+
+        await list_projects(
+            mock_ctx,
+            query=None,
+            page_size=100,
+            page_number=1,
+        )
+
+        _, kwargs = mock_client.get.call_args
+        assert "query" not in kwargs["params"]
+
+    async def test_query_returns_matching_items(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "type": "projects",
+                    "id": "proj1",
+                    "attributes": {"name": "ILCU Main"},
+                },
+            ],
+            "meta": {"totalCount": 1},
+        }
+
+        result = await list_projects(
+            mock_ctx,
+            query="name:ILCU*",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert isinstance(result, PaginatedResult)
+        assert len(result.items) == 1
         assert result.items[0].id == "proj1"
-        assert result.items[1].id == "proj3"
 
-    async def test_name_filter_no_match(
+    async def test_total_count_floor_when_api_returns_zero(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get_all_pages.return_value = [
-            {
-                "type": "projects",
-                "id": "proj1",
-                "attributes": {"name": "Project One"},
-            },
-        ]
+        """totalCount=0 with items present uses item count."""
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "type": "projects",
+                    "id": "proj1",
+                    "attributes": {"name": "Project One"},
+                },
+            ],
+            "meta": {"totalCount": 0},
+        }
 
         result = await list_projects(
             mock_ctx,
-            name_filter="nonexistent",
+            query=None,
             page_size=100,
             page_number=1,
         )
 
-        assert result.total_count == 0
-        assert result.items == []
-
-    async def test_name_filter_none_returns_all(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get_all_pages.return_value = [
-            {
-                "type": "projects",
-                "id": "proj1",
-                "attributes": {"name": "Project One"},
-            },
-            {
-                "type": "projects",
-                "id": "proj2",
-                "attributes": {"name": "Project Two"},
-            },
-        ]
-
-        result = await list_projects(
-            mock_ctx,
-            name_filter=None,
-            page_size=100,
-            page_number=1,
-        )
-
-        assert result.total_count == 2
-        assert len(result.items) == 2
-
-    async def test_fetches_all_pages(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get_all_pages.return_value = [
-            {
-                "type": "projects",
-                "id": f"proj{i}",
-                "attributes": {"name": f"Project {i}"},
-            }
-            for i in range(150)
-        ]
-
-        result = await list_projects(
-            mock_ctx,
-            name_filter=None,
-            page_size=100,
-            page_number=1,
-        )
-
-        assert result.total_count == 150
-        assert len(result.items) == 100
-
-        mock_client.get_all_pages.assert_called_once_with(
-            "/projects",
-            params={"fields[projects]": "id,name"},
-        )
+        assert result.total_count >= 1
 
 
 # ---------------------------------------------------------------------------
@@ -334,8 +328,6 @@ class TestListDocuments:
         result = await list_documents(
             mock_ctx,
             project_id="proj1",
-            name_filter=None,
-            space_filter=None,
             page_size=100,
             page_number=1,
         )
@@ -377,8 +369,6 @@ class TestListDocuments:
         result = await list_documents(
             mock_ctx,
             project_id="proj1",
-            name_filter=None,
-            space_filter=None,
             page_size=100,
             page_number=1,
         )
@@ -408,8 +398,6 @@ class TestListDocuments:
         result = await list_documents(
             mock_ctx,
             project_id="proj1",
-            name_filter=None,
-            space_filter=None,
             page_size=2,
             page_number=2,
         )
@@ -434,8 +422,6 @@ class TestListDocuments:
         result = await list_documents(
             mock_ctx,
             project_id="proj1",
-            name_filter=None,
-            space_filter=None,
             page_size=100,
             page_number=1,
         )
@@ -494,8 +480,6 @@ class TestListDocuments:
         result = await list_documents(
             mock_ctx,
             project_id="p",
-            name_filter=None,
-            space_filter=None,
             page_size=100,
             page_number=1,
         )
@@ -531,8 +515,6 @@ class TestListDocuments:
         result = await list_documents(
             mock_ctx,
             project_id="p",
-            name_filter=None,
-            space_filter=None,
             page_size=100,
             page_number=1,
         )
@@ -542,99 +524,6 @@ class TestListDocuments:
         assert names == {"Alpha", "Bravo", "Charlie", "Delta"}
         # Only 1 API call needed (single page).
         assert mock_client.get.call_count == 1
-
-    async def test_name_filter(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        items = [
-            {
-                "relationships": {
-                    "module": {
-                        "data": {
-                            "type": "documents",
-                            "id": "proj1/_default/Software Requirement Specification",
-                        }
-                    }
-                }
-            },
-            {
-                "relationships": {
-                    "module": {
-                        "data": {
-                            "type": "documents",
-                            "id": "proj1/_default/SDD",
-                        }
-                    }
-                }
-            },
-        ]
-        mock_client.get.return_value = {
-            "data": items,
-            "meta": {"totalCount": 2},
-        }
-
-        result = await list_documents(
-            mock_ctx,
-            project_id="proj1",
-            name_filter="SRS",
-            space_filter=None,
-            page_size=100,
-            page_number=1,
-        )
-
-        # "SRS" should not match either document
-        assert result.total_count == 0
-
-        mock_client.get.return_value = {
-            "data": items,
-            "meta": {"totalCount": 2},
-        }
-        result2 = await list_documents(
-            mock_ctx,
-            project_id="proj1",
-            name_filter="Requirement",
-            space_filter=None,
-            page_size=100,
-            page_number=1,
-        )
-
-        assert result2.total_count == 1
-        assert result2.items[0].document_name == "Software Requirement Specification"
-
-    async def test_space_filter(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        items = [
-            {
-                "relationships": {
-                    "module": {
-                        "data": {"type": "documents", "id": "proj1/_default/Doc1"}
-                    }
-                }
-            },
-            {
-                "relationships": {
-                    "module": {"data": {"type": "documents", "id": "proj1/Design/SRS"}}
-                }
-            },
-        ]
-        mock_client.get.return_value = {
-            "data": items,
-            "meta": {"totalCount": 2},
-        }
-
-        result = await list_documents(
-            mock_ctx,
-            project_id="proj1",
-            name_filter=None,
-            space_filter="Design",
-            page_size=100,
-            page_number=1,
-        )
-
-        assert result.total_count == 1
-        assert result.items[0].space_id == "Design"
-        assert result.items[0].document_name == "SRS"
 
     async def test_api_params_include_query_and_sort(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -647,8 +536,6 @@ class TestListDocuments:
         await list_documents(
             mock_ctx,
             project_id="proj1",
-            name_filter=None,
-            space_filter=None,
             page_size=100,
             page_number=1,
         )
@@ -672,8 +559,6 @@ class TestListDocuments:
             await list_documents(
                 mock_ctx,
                 project_id="missing",
-                name_filter=None,
-                space_filter=None,
                 page_size=100,
                 page_number=1,
             )
@@ -687,8 +572,6 @@ class TestListDocuments:
             await list_documents(
                 mock_ctx,
                 project_id="proj1",
-                name_filter=None,
-                space_filter=None,
                 page_size=100,
                 page_number=1,
             )
@@ -968,12 +851,16 @@ class TestGetDocumentParts:
     async def test_total_count_floor_when_api_returns_zero(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """When Polarion returns totalCount=0 but items exist, use item count as minimum."""
+        """totalCount=0 with items present uses item count."""
         mock_client.get.return_value = {
             "data": [
                 {
                     "id": "proj1/_default/Doc/heading_MCPT-001",
-                    "attributes": {"title": "Intro", "content": "<h1>Intro</h1>", "type": "heading"},
+                    "attributes": {
+                        "title": "Intro",
+                        "content": "<h1>Intro</h1>",
+                        "type": "heading",
+                    },
                 },
                 {
                     "id": "proj1/_default/Doc/workitem_MCPT-002",
@@ -1184,11 +1071,19 @@ class TestListWorkItems:
             "data": [
                 {
                     "id": "proj1/MCPT-001",
-                    "attributes": {"title": "A", "type": "requirement", "status": "open"},
+                    "attributes": {
+                        "title": "A",
+                        "type": "requirement",
+                        "status": "open",
+                    },
                 },
                 {
                     "id": "proj1/MCPT-002",
-                    "attributes": {"title": "B", "type": "requirement", "status": "open"},
+                    "attributes": {
+                        "title": "B",
+                        "type": "requirement",
+                        "status": "open",
+                    },
                 },
             ],
             "meta": {"totalCount": 0},  # Polarion quirk: 0 even when items exist
