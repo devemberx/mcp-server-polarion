@@ -118,7 +118,8 @@ class DocumentPart(BaseModel):
 
     id: str = Field(
         description=(
-            "Part identifier (e.g. 'heading_MCPT-001' or 'workitem_MCPT-001')."
+            "Full JSON:API part identifier "
+            "(e.g. 'projectId/spaceId/documentName/heading_MCPT-001')."
         ),
     )
     title: str = Field(

@@ -1516,7 +1516,7 @@ class TestGetLinkedWorkItems:
         assert fwd_params["fields[linkedworkitems]"] == "@all"
         assert fwd_params["include"] == "workItem"
         # Back links use camelCase Lucene query
-        assert calls[1][0][0] == "projects/proj1/workitems"
+        assert calls[1][0][0] == "/projects/proj1/workitems"
         back_params = calls[1][1]["params"]
         assert back_params["query"] == "linkedWorkItems:MCPT-001"
 

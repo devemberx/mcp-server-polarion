@@ -66,7 +66,7 @@ def _parse_document_part(
     Args:
         item: A single resource object from the ``data`` array.
         wi_map: Included work-item lookup built by
-            ``_build_included_workitem_map``.
+            ``build_included_workitem_map``.
 
     Returns:
         A ``DocumentPart`` instance, or ``None`` if *item* is invalid.
@@ -197,17 +197,11 @@ def _parse_linked_items(
             if isinstance(wi_attrs, dict):
                 title = safe_str(wi_attrs.get("title", ""))
 
-        # Fallback: parse from raw ID if relationship data is absent.
+        # Skip items where the target work item cannot be resolved
+        # via the relationships object (per project conventions, we do
+        # not parse the raw linked-work-item ID).
         if not wi_id:
-            raw_id = safe_str(item.get("id", ""))
-            id_parts = raw_id.split("/") if raw_id else []
-            # Format: {projectId}/{sourceWiId}/{role}/{targetProjectId}/{targetWiId}
-            if len(id_parts) >= 5:  # noqa: PLR2004
-                wi_id = id_parts[-1]
-                if not role:
-                    role = id_parts[2]
-            else:
-                wi_id = raw_id
+            continue
 
         items.append(
             LinkedWorkItemSummary(
@@ -459,14 +453,15 @@ async def list_projects(
             )
 
     total = extract_total_count(response)
-    total = max(total, (page_number - 1) * page_size + len(items))
+    if total <= 0 and items:
+        total = (page_number - 1) * page_size + len(items)
 
     return PaginatedResult[ProjectSummary](
         items=items,
         total_count=total,
         page=page_number,
         page_size=page_size,
-        has_more=len(items) == page_size,
+        has_more=total > page_number * page_size,
     )
 
 
@@ -493,9 +488,8 @@ async def list_documents(
 ) -> PaginatedResult[DocumentSummary]:
     """List all documents in a Polarion project.
 
-    **Call this tool once** to discover all documents.  There is no need
-     to call this tool multiple times; it always returns the complete set
-     of documents.
+    Discovers all documents server-side, then returns a paginated
+    subset.  Callers may need multiple pages depending on ``page_size``.
 
     Returns space IDs and document names so the LLM can call
     ``get_document`` or ``get_document_parts`` with the correct
@@ -560,7 +554,7 @@ async def list_documents(
         total_count=total,
         page=page_number,
         page_size=page_size,
-        has_more=len(items) == page_size,
+        has_more=end < total,
     )
 
 
@@ -725,7 +719,8 @@ async def get_document_parts(  # noqa: PLR0913
 
     Returns:
         PaginatedResult containing ``DocumentPart`` items with:
-        - ``id``: Part identifier (e.g. 'heading_MCPT-001').
+        - ``id``: Full JSON:API part identifier
+          (e.g. 'projectId/spaceId/documentName/heading_MCPT-001').
         - ``title``: Part title from the associated work item.
         - ``content``: Part body content in Markdown.
         - ``type``: 'heading', 'workitem', 'normal', 'toc',
@@ -785,17 +780,20 @@ async def get_document_parts(  # noqa: PLR0913
             if part is not None:
                 items.append(part)
 
-    # Polarion omits meta.totalCount on some document part responses.
-    # Use the seen-item count as a minimum lower bound.
+    # Only use the seen-item count as a lower bound when the server did not
+    # provide a usable total and the current page is non-empty. Using the
+    # requested offset for an empty out-of-range page can massively inflate
+    # the reported total_count.
     doc_total = extract_total_count(response)
-    doc_total = max(doc_total, (page_number - 1) * page_size + len(items))
+    if doc_total <= 0 and items:
+        doc_total = (page_number - 1) * page_size + len(items)
 
     return PaginatedResult[DocumentPart](
         items=items,
         total_count=doc_total,
         page=page_number,
         page_size=page_size,
-        has_more=len(items) == page_size,
+        has_more=doc_total > page_number * page_size,
     )
 
 
@@ -895,17 +893,19 @@ async def list_work_items(
     data = response.get("data", [])
     items = parse_work_item_summaries(data)
 
-    # Polarion omits meta.totalCount when a Lucene query is supplied.
-    # Use the seen-item count as a minimum lower bound.
+    # Trust a non-zero API total when present. Only use the seen-item
+    # count as a lower bound when the API total is missing/zero and the
+    # current page actually contains items.
     wi_total = extract_total_count(response)
-    wi_total = max(wi_total, (page_number - 1) * page_size + len(items))
+    if wi_total == 0 and items:
+        wi_total = (page_number - 1) * page_size + len(items)
 
     return PaginatedResult[WorkItemSummary](
         items=items,
         total_count=wi_total,
         page=page_number,
         page_size=page_size,
-        has_more=len(items) == page_size,
+        has_more=wi_total > page_number * page_size,
     )
 
 
@@ -1012,7 +1012,7 @@ async def get_linked_work_items(
 ) -> LinkedWorkItemsList:
     """Get all linked work items (forward and back) for a work item.
 
-    Retrieves both outgoing(forward) and incoming(back) links for a
+    Retrieves both outgoing (forward) and incoming (back) links for a
     work item.  This provides complete traceability information such as
     parent, relates_to, verifies, and depends_on relationships.
 
@@ -1070,7 +1070,7 @@ async def get_linked_work_items(
     back_items: list[LinkedWorkItemSummary] = []
     try:
         back_response = await client.get(
-            f"projects/{project_id}/workitems",
+            f"/projects/{project_id}/workitems",
             params={
                 "query": f"linkedWorkItems:{work_item_id}",
                 "fields[workitems]": "title,type,status",

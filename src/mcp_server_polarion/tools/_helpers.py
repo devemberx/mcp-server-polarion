@@ -1,8 +1,8 @@
 """Shared helpers for MCP tool implementations.
 
 Internal module used by ``tools.read`` (and future ``tools.write``).
-Every function here is intentionally private (``_``-prefixed) to the
-``tools`` package — they are **not** part of the public API.
+The helpers defined here are for internal use within the ``tools``
+package and are **not** part of the public package API.
 """
 
 from __future__ import annotations
