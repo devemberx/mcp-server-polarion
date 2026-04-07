@@ -42,6 +42,7 @@ from mcp_server_polarion.tools._helpers import (
     extract_relationship_id,
     extract_total_count,
     get_client,
+    has_links_next,
     parse_work_item_summaries,
     safe_str,
 )
@@ -394,8 +395,8 @@ async def list_projects(
     """List all accessible Polarion projects, with optional server-side filtering.
 
     Returns a paginated list of Polarion projects the authenticated user
-    can access.  **Call this tool once** to discover valid project IDs
-    for other tools.
+    can access. Use this tool to discover valid project IDs for other
+    tools, and request additional pages when ``has_more`` is ``True``.
 
     When ``query`` is omitted, all projects are fetched. When ``query``
     is provided, Polarion performs a server-side Lucene search (trailing
@@ -455,7 +456,8 @@ async def list_projects(
                 )
             )
 
-    total = extract_total_count(response)
+    raw_total = extract_total_count(response)
+    total = raw_total
     if total <= 0 and items:
         total = (page_number - 1) * page_size + len(items)
 
@@ -464,7 +466,9 @@ async def list_projects(
         total_count=total,
         page=page_number,
         page_size=page_size,
-        has_more=compute_has_more(response, total, page_number, page_size, len(items)),
+        has_more=compute_has_more(
+            response, raw_total, page_number, page_size, len(items)
+        ),
     )
 
 
@@ -787,7 +791,8 @@ async def get_document_parts(  # noqa: PLR0913
     # provide a usable total and the current page is non-empty. Using the
     # requested offset for an empty out-of-range page can massively inflate
     # the reported total_count.
-    doc_total = extract_total_count(response)
+    raw_doc_total = extract_total_count(response)
+    doc_total = raw_doc_total
     if doc_total <= 0 and items:
         doc_total = (page_number - 1) * page_size + len(items)
 
@@ -797,7 +802,7 @@ async def get_document_parts(  # noqa: PLR0913
         page=page_number,
         page_size=page_size,
         has_more=compute_has_more(
-            response, doc_total, page_number, page_size, len(items)
+            response, raw_doc_total, page_number, page_size, len(items)
         ),
     )
 
@@ -901,7 +906,8 @@ async def list_work_items(
     # Trust a non-zero API total when present. Only use the seen-item
     # count as a lower bound when the API total is missing/zero and the
     # current page actually contains items.
-    wi_total = extract_total_count(response)
+    raw_wi_total = extract_total_count(response)
+    wi_total = raw_wi_total
     if wi_total == 0 and items:
         wi_total = (page_number - 1) * page_size + len(items)
 
@@ -911,7 +917,7 @@ async def list_work_items(
         page=page_number,
         page_size=page_size,
         has_more=compute_has_more(
-            response, wi_total, page_number, page_size, len(items)
+            response, raw_wi_total, page_number, page_size, len(items)
         ),
     )
 
@@ -1112,6 +1118,11 @@ async def get_linked_work_items(
 
             if back_total and len(back_items) >= back_total:
                 break
+            # Prefer links.next as authoritative stop signal;
+            # fall back to partial-page heuristic when absent.
+            if has_links_next(back_response):
+                back_page += 1
+                continue
             if len(page_summaries) < DEFAULT_PAGE_SIZE:
                 break
 
