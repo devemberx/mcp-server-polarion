@@ -39,7 +39,8 @@ No other installation is needed — `uvx mcp-server-polarion` downloads and runs
 | `POLARION_URL` | Base URL of your Polarion instance | `https://polarion.example.com` |
 | `POLARION_TOKEN` | Personal Access Token for authentication | `your-personal-access-token` |
 
-### VS Code (GitHub Copilot)
+<details>
+<summary><b>VS Code (GitHub Copilot)</b></summary>
 
 Add to `.vscode/mcp.json`:
 
@@ -59,7 +60,10 @@ Add to `.vscode/mcp.json`:
 }
 ```
 
-### Claude Desktop
+</details>
+
+<details>
+<summary><b>Claude Desktop</b></summary>
 
 Add to `claude_desktop_config.json`:
 
@@ -78,7 +82,10 @@ Add to `claude_desktop_config.json`:
 }
 ```
 
-### Cursor
+</details>
+
+<details>
+<summary><b>Cursor</b></summary>
 
 Add to Cursor MCP settings:
 
@@ -96,6 +103,22 @@ Add to Cursor MCP settings:
   }
 }
 ```
+
+</details>
+
+<details>
+<summary><b>Claude Code</b></summary>
+
+Register via the `claude mcp add` command:
+
+```bash
+claude mcp add mcp-server-polarion \
+  --env POLARION_URL=https://polarion.example.com \
+  --env POLARION_TOKEN=your-personal-access-token \
+  -- uvx mcp-server-polarion
+```
+
+</details>
 
 ## Tools
 
