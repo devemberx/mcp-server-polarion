@@ -72,6 +72,15 @@ class ProjectSummary(BaseModel):
     name: str = Field(
         description="Human-readable project name.",
     )
+    active: bool = Field(
+        default=True,
+        description=(
+            "Whether the project is active. False indicates an archived "
+            "or inactive project that should generally be skipped when "
+            "selecting a target project. Defaults to True if the server "
+            "does not report the flag."
+        ),
+    )
 
 
 class DocumentSummary(BaseModel):
