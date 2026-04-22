@@ -75,12 +75,12 @@ class TestListProjects:
                 {
                     "type": "projects",
                     "id": "proj1",
-                    "attributes": {"name": "Project One"},
+                    "attributes": {"name": "Project One", "active": True},
                 },
                 {
                     "type": "projects",
                     "id": "proj2",
-                    "attributes": {"name": "Project Two"},
+                    "attributes": {"name": "Project Two", "active": False},
                 },
             ],
             "meta": {"totalCount": 2},
@@ -99,10 +99,57 @@ class TestListProjects:
         assert result.page == 1
         assert result.page_size == 100
         assert result.has_more is False
-        p1 = ProjectSummary(id="proj1", name="Project One")
+        p1 = ProjectSummary(id="proj1", name="Project One", active=True)
         assert result.items[0] == p1
-        p2 = ProjectSummary(id="proj2", name="Project Two")
+        p2 = ProjectSummary(id="proj2", name="Project Two", active=False)
         assert result.items[1] == p2
+
+    async def test_active_defaults_true_when_missing(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "type": "projects",
+                    "id": "proj1",
+                    "attributes": {"name": "No Active Field"},
+                },
+                {
+                    "type": "projects",
+                    "id": "proj2",
+                    "attributes": {"name": "Non-bool Active", "active": "yes"},
+                },
+            ],
+            "meta": {"totalCount": 2},
+        }
+
+        result = await list_projects(
+            mock_ctx,
+            query=None,
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.items[0].active is True
+        assert result.items[1].active is True
+
+    async def test_requests_active_field(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": [],
+            "meta": {"totalCount": 0},
+        }
+
+        await list_projects(
+            mock_ctx,
+            query=None,
+            page_size=100,
+            page_number=1,
+        )
+
+        _, kwargs = mock_client.get.call_args
+        assert "active" in kwargs["params"]["fields[projects]"].split(",")
 
     async def test_empty_projects(
         self, mock_ctx: MagicMock, mock_client: AsyncMock

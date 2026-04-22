@@ -418,6 +418,10 @@ async def list_projects(
         PaginatedResult containing ``ProjectSummary`` items with:
         - ``id``: Project identifier.
         - ``name``: Human-readable project name.
+        - ``active``: Whether the project is active (True) or archived
+          (False). Use this to skip archived projects when picking a
+          target. Defaults to True when the server does not report the
+          flag.
         - ``total_count``: Total number of matching projects.
         - ``page`` / ``page_size``: Current pagination state.
         - ``has_more``: True if more pages exist.
@@ -429,7 +433,7 @@ async def list_projects(
     """
     client = get_client(ctx)
     params: dict[str, str | int] = {
-        "fields[projects]": "id,name",
+        "fields[projects]": "id,name,active",
         "page[size]": page_size,
         "page[number]": page_number,
     }
@@ -453,10 +457,13 @@ async def list_projects(
             attrs = item.get("attributes", {})
             if not isinstance(attrs, dict):
                 attrs = {}
+            active_attr = attrs.get("active")
+            active = active_attr if isinstance(active_attr, bool) else True
             items.append(
                 ProjectSummary(
                     id=safe_str(item.get("id", "")),
                     name=safe_str(attrs.get("name", "")),
+                    active=active,
                 )
             )
 
