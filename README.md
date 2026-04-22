@@ -113,8 +113,8 @@ Register via the `claude mcp add` command:
 
 ```bash
 claude mcp add mcp-server-polarion \
-  --env POLARION_URL=https://polarion.example.com \
-  --env POLARION_TOKEN=your-personal-access-token \
+  -e POLARION_URL=https://polarion.example.com \
+  -e POLARION_TOKEN=your-personal-access-token \
   -- uvx mcp-server-polarion
 ```
 
