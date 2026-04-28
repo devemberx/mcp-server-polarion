@@ -770,6 +770,8 @@ class TestGetDocument:
                 "attributes": {
                     "id": "SRS",
                     "title": "Software Requirement Spec",
+                    "type": "req_specification",
+                    "status": "approved",
                     "homePageContent": {
                         "type": "text/html",
                         "value": ("<p>This is the <strong>SRS</strong> document.</p>"),
@@ -783,15 +785,90 @@ class TestGetDocument:
             project_id="proj1",
             space_id="_default",
             document_name="SRS",
+            include_content=True,
         )
 
         assert isinstance(result, DocumentDetail)
         assert result.id == "SRS"
         assert result.title == "Software Requirement Spec"
+        assert result.type == "req_specification"
+        assert result.status == "approved"
         assert "SRS" in result.content
         assert "<p>" not in result.content
         assert result.space_id == "_default"
         assert result.project_id == "proj1"
+
+    async def test_include_content_false_omits_content(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """include_content=False → body skipped, metadata still populated."""
+        mock_client.get.return_value = {
+            "data": {
+                "attributes": {
+                    "id": "SRS",
+                    "title": "SRS",
+                    "type": "req_specification",
+                    "status": "draft",
+                    # Even if the API echoes homePageContent (it shouldn't,
+                    # since we don't request it), the tool must ignore it.
+                    "homePageContent": {
+                        "type": "text/html",
+                        "value": "<p>should be ignored</p>",
+                    },
+                },
+            },
+        }
+
+        result = await get_document(
+            mock_ctx,
+            project_id="proj1",
+            space_id="_default",
+            document_name="SRS",
+            include_content=False,
+        )
+
+        assert result.title == "SRS"
+        assert result.type == "req_specification"
+        assert result.status == "draft"
+        assert result.content == ""
+
+        _, kwargs = mock_client.get.call_args
+        fields = kwargs["params"]["fields[documents]"]
+        assert "title" in fields
+        assert "type" in fields
+        assert "status" in fields
+        assert "homePageContent" not in fields
+
+    async def test_include_content_requests_homepage_field(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """With include_content=True, homePageContent is requested."""
+        mock_client.get.return_value = {
+            "data": {
+                "attributes": {
+                    "title": "Doc",
+                    "type": "generic",
+                    "status": "draft",
+                    "homePageContent": {
+                        "type": "text/html",
+                        "value": "<p>body</p>",
+                    },
+                },
+            },
+        }
+
+        result = await get_document(
+            mock_ctx,
+            project_id="proj1",
+            space_id="_default",
+            document_name="Doc",
+            include_content=True,
+        )
+
+        _, kwargs = mock_client.get.call_args
+        fields = kwargs["params"]["fields[documents]"]
+        assert "homePageContent" in fields
+        assert "body" in result.content
 
     async def test_encodes_document_name_with_spaces(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -833,6 +910,7 @@ class TestGetDocument:
             project_id="proj1",
             space_id="_default",
             document_name="EmptyDoc",
+            include_content=True,
         )
 
         assert result.content == ""
@@ -856,6 +934,7 @@ class TestGetDocument:
     async def test_no_content_field(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
+        """Missing homePageContent → content stays empty even when requested."""
         mock_client.get.return_value = {
             "data": {
                 "attributes": {
@@ -870,6 +949,7 @@ class TestGetDocument:
             project_id="proj1",
             space_id="_default",
             document_name="NoContent",
+            include_content=True,
         )
 
         assert result.content == ""
@@ -900,6 +980,7 @@ class TestGetDocument:
             project_id="proj1",
             space_id="_default",
             document_name="DocH",
+            include_content=True,
         )
 
         assert "##" not in result.content

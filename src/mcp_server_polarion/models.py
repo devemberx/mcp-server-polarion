@@ -102,23 +102,30 @@ class DocumentSummary(BaseModel):
 class DocumentDetail(BaseModel):
     """Full details of a Polarion document returned by ``get_document``."""
 
-    id: str = Field(
-        description="Document identifier within the space.",
-    )
     title: str = Field(
         description="Document title.",
     )
-    content: str = Field(
+    type: str = Field(
+        default="",
         description=(
-            "Full document content (homePageContent) converted to Markdown. "
-            "Empty string when the document has no content."
+            "Document type (e.g. 'req_specification', 'test_specification'). "
+            "Empty string when the server does not report a type."
         ),
     )
-    space_id: str = Field(
-        description="Space that contains this document.",
+    status: str = Field(
+        default="",
+        description=(
+            "Document workflow status (e.g. 'draft', 'approved'). "
+            "Empty string when the server does not report a status."
+        ),
     )
-    project_id: str = Field(
-        description="Project that contains this document.",
+    content: str = Field(
+        default="",
+        description=(
+            "Document body (homePageContent) converted to Markdown. "
+            "Only populated when ``get_document`` is called with "
+            "``include_content=True``; otherwise an empty string."
+        ),
     )
 
 
