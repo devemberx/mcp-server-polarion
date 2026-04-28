@@ -6,6 +6,9 @@ is needed.  The client uses ``write_delay=0`` to avoid sleeping.
 
 from __future__ import annotations
 
+import asyncio
+from unittest.mock import patch
+
 import httpx
 import pytest
 import respx
@@ -438,7 +441,102 @@ class TestRetry:
 
 
 # ---------------------------------------------------------------------------
-# 6. Context-manager & close
+# 6. Rate limiting & serialization
+# ---------------------------------------------------------------------------
+
+
+class TestRateLimiting:
+    """Verify per-second rate limiting and request serialization."""
+
+    async def test_rate_limit_sleep_called_on_fourth_request(self) -> None:
+        """A 4th request within the same second must trigger asyncio.sleep."""
+        sleep_args: list[float] = []
+
+        async def mock_sleep(delay: float) -> None:
+            sleep_args.append(delay)
+
+        with respx.mock(base_url=BASE) as mock:
+            mock.get("/projects").mock(
+                return_value=httpx.Response(200, json={"data": []}),
+            )
+            with patch("mcp_server_polarion.core.client.asyncio.sleep", mock_sleep):
+                async with PolarionClient(
+                    _config(), write_delay=0, rate_limit=3
+                ) as client:
+                    for _ in range(4):
+                        await client.get("/projects")
+
+        # Exactly one rate-limit sleep for the 4th request (no retries, no write delay).
+        assert len(sleep_args) == 1
+        assert 0 < sleep_args[0] <= 1.0
+
+    async def test_within_limit_no_sleep(self) -> None:
+        """3 requests within 1 second must not trigger any rate-limit sleep."""
+        sleep_args: list[float] = []
+
+        async def mock_sleep(delay: float) -> None:
+            sleep_args.append(delay)
+
+        with respx.mock(base_url=BASE) as mock:
+            mock.get("/projects").mock(
+                return_value=httpx.Response(200, json={"data": []}),
+            )
+            with patch("mcp_server_polarion.core.client.asyncio.sleep", mock_sleep):
+                async with PolarionClient(
+                    _config(), write_delay=0, rate_limit=3
+                ) as client:
+                    for _ in range(3):
+                        await client.get("/projects")
+
+        assert sleep_args == []
+
+    async def test_requests_are_serialized(self) -> None:
+        """Concurrent .get() calls must execute sequentially, not in parallel."""
+        execution_order: list[str] = []
+
+        async def ordered_responder(request: httpx.Request) -> httpx.Response:
+            execution_order.append("start")
+            await asyncio.sleep(0.01)
+            execution_order.append("end")
+            return httpx.Response(200, json={"data": []})
+
+        with respx.mock(base_url=BASE) as mock:
+            mock.get("/projects").mock(side_effect=ordered_responder)
+
+            async with PolarionClient(
+                _config(), write_delay=0, rate_limit=10
+            ) as client:
+                await asyncio.gather(
+                    client.get("/projects"),
+                    client.get("/projects"),
+                )
+
+        # start/end pairs must not interleave.
+        assert execution_order == ["start", "end", "start", "end"]
+
+    async def test_rate_limit_zero_disables_limiting(self) -> None:
+        """rate_limit=0 skips rate limiting entirely."""
+        sleep_args: list[float] = []
+
+        async def mock_sleep(delay: float) -> None:
+            sleep_args.append(delay)
+
+        with respx.mock(base_url=BASE) as mock:
+            mock.get("/projects").mock(
+                return_value=httpx.Response(200, json={"data": []}),
+            )
+            with patch("mcp_server_polarion.core.client.asyncio.sleep", mock_sleep):
+                async with PolarionClient(
+                    _config(), write_delay=0, rate_limit=0
+                ) as client:
+                    for _ in range(10):
+                        await client.get("/projects")
+
+        assert sleep_args == []
+
+
+# ---------------------------------------------------------------------------
+# 7. Context-manager & close
 # ---------------------------------------------------------------------------
 
 
@@ -461,7 +559,7 @@ class TestContextManager:
 
 
 # ---------------------------------------------------------------------------
-# 8. Config → base_url wiring
+# 8. Context-manager & close (continued) / Config → base_url wiring
 # ---------------------------------------------------------------------------
 
 

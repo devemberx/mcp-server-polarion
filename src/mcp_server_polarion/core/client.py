@@ -9,11 +9,16 @@
   with a maximum of 2 retries.
 * **Write-operation delay** — a configurable pause between sequential
   writes to account for Polarion cluster propagation (~3 s).
+* **Rate limiting** — at most 3 requests/second (sliding window) to
+  comply with server-side connection restrictions.
+* **Serialized execution** — ``asyncio.Lock`` ensures only one request
+  is in-flight at a time (concurrent requests prohibited by server).
 """
 
 from __future__ import annotations
 
 import asyncio
+import collections
 import logging
 import re
 import types
@@ -38,6 +43,10 @@ _RETRYABLE_STATUS_CODES: Final[frozenset[int]] = frozenset({429, 500, 502, 503, 
 
 # Write-delay configuration -------------------------------------------------
 _WRITE_DELAY_SECONDS: Final[float] = 1.5
+
+# Rate-limit configuration (server restriction: max 3 req/s, no concurrency) -
+_MAX_REQUESTS_PER_SECOND: Final[int] = 3
+_RATE_WINDOW_SECONDS: Final[float] = 1.0
 
 # Timeout configuration ------------------------------------------------------
 _DEFAULT_TIMEOUT_SECONDS: Final[float] = 30.0
@@ -126,9 +135,13 @@ class PolarionClient:
         config: PolarionConfig,
         *,
         write_delay: float = _WRITE_DELAY_SECONDS,
+        rate_limit: int = _MAX_REQUESTS_PER_SECOND,
     ) -> None:
         self.base_url: str = config.base_api_url
         self._write_delay = write_delay
+        self._rate_limit = rate_limit
+        self._request_lock: asyncio.Lock = asyncio.Lock()
+        self._request_timestamps: collections.deque[float] = collections.deque()
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
             headers={
@@ -230,6 +243,41 @@ class PolarionClient:
 
     # -- Internal request engine ---------------------------------------------
 
+    async def _acquire_rate_limit(self) -> None:
+        """Enforce the per-second rate limit using a sliding window.
+
+        Must be called while ``_request_lock`` is held.  Sleeps until a
+        request slot is available when ``_rate_limit`` requests have
+        already been issued within the last ``_RATE_WINDOW_SECONDS``.
+        """
+        if self._rate_limit <= 0:
+            return
+
+        loop = asyncio.get_running_loop()
+        now = loop.time()
+
+        def _evict(ts: float) -> None:
+            while (
+                self._request_timestamps
+                and ts - self._request_timestamps[0] >= _RATE_WINDOW_SECONDS
+            ):
+                self._request_timestamps.popleft()
+
+        _evict(now)
+
+        if len(self._request_timestamps) >= self._rate_limit:
+            wait = _RATE_WINDOW_SECONDS - (now - self._request_timestamps[0])
+            if wait > 0:
+                logger.debug(
+                    "Rate limit (%d req/s) reached — waiting %.3f s.",
+                    self._rate_limit,
+                    wait,
+                )
+                await asyncio.sleep(wait)
+                _evict(loop.time())
+
+        self._request_timestamps.append(loop.time())
+
     async def _request(
         self,
         method: str,
@@ -238,11 +286,13 @@ class PolarionClient:
         params: dict[str, str | int] | None = None,
         json: dict[str, object] | None = None,
     ) -> dict[str, object]:
-        """Execute an HTTP request with retry and error mapping.
+        """Execute an HTTP request with rate limiting, retry, and error mapping.
 
-        Retries up to ``_MAX_RETRIES`` times on transient errors (429,
-        5xx) using exponential backoff.  Non-retryable errors are raised
-        immediately.
+        Acquires ``_request_lock`` to serialize requests (no concurrent
+        in-flight calls) and enforces the per-second rate limit before
+        sending.  Retries up to ``_MAX_RETRIES`` times on transient
+        errors (429, 5xx) using exponential backoff.  Non-retryable
+        errors are raised immediately.
 
         Args:
             method: HTTP method (GET, POST, PATCH).
@@ -259,6 +309,19 @@ class PolarionClient:
             PolarionError: On other non-2xx responses after all retries
                 are exhausted.
         """
+        async with self._request_lock:
+            await self._acquire_rate_limit()
+            return await self._execute_request(method, path, params=params, json=json)
+
+    async def _execute_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, str | int] | None = None,
+        json: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        """Send a single HTTP request with exponential-backoff retry."""
         last_exception: PolarionError | None = None
         backoff = _INITIAL_BACKOFF_SECONDS
 
