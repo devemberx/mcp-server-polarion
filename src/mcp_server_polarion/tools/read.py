@@ -9,6 +9,8 @@ relationships.  Every tool returns Pydantic models -- never raw
 from __future__ import annotations
 
 import re
+import time
+from dataclasses import dataclass
 from typing import Final, Literal, cast
 
 from fastmcp import Context
@@ -261,106 +263,99 @@ def _get_module_id(item: object) -> str:
     return extract_relationship_id(rels, "module")
 
 
+# Document-discovery TTL cache (in-process, keyed by project_id).
+# A short TTL keeps paginated `list_documents` calls cheap while ensuring
+# newly-created documents appear within ~1 minute. Future write tools can
+# invalidate by popping the project_id key.
+_CACHE_TTL_SECONDS: Final[float] = 60.0
+
+
+@dataclass(frozen=True, slots=True)
+class _DocCacheEntry:
+    expires_at: float
+    documents: tuple[tuple[str, str], ...]
+
+
+_documents_cache: dict[str, _DocCacheEntry] = {}
+
+
+def _get_cached_documents(project_id: str) -> list[tuple[str, str]] | None:
+    entry = _documents_cache.get(project_id)
+    if entry is None:
+        return None
+    if time.monotonic() >= entry.expires_at:
+        _documents_cache.pop(project_id, None)
+        return None
+    return list(entry.documents)
+
+
+def _store_cached_documents(
+    project_id: str,
+    documents: list[tuple[str, str]],
+) -> None:
+    _documents_cache[project_id] = _DocCacheEntry(
+        expires_at=time.monotonic() + _CACHE_TTL_SECONDS,
+        documents=tuple(documents),
+    )
+
+
 async def _discover_documents(
     client: PolarionClient,
     project_id: str,
-) -> set[tuple[str, str]]:
-    """Discover all unique (space_id, document_name) pairs via binary search.
+) -> list[tuple[str, str]]:
+    """Discover all unique (space_id, document_name) pairs via linear scan.
 
-    Because heading work items are sorted by ``module``, all headings for the
-    same document are contiguous.  This lets us **binary search** for document
-    transition boundaries rather than scanning every page linearly.
+    Iterates every heading-workitem page (page_size=100) in order and
+    accumulates unique ``module`` relationship IDs into a set. Results
+    are cached for ``_CACHE_TTL_SECONDS`` to amortise the cost across
+    paginated callers.
 
-    Complexity: O(D * log(N / D)) page fetches, where D is the number of
-    unique documents and N is the total number of pages.
+    A linear scan is preferred over binary search because, in practice,
+    each page returns work items belonging to ~1 document (so N ≈ D and
+    binary search wastes log(N) probes per transition).
 
     Args:
         client: Active ``PolarionClient`` instance.
         project_id: Polarion project ID.
 
     Returns:
-        Set of (space_id, document_name) tuples.
+        Sorted list of (space_id, document_name) tuples.
     """
+    cached = _get_cached_documents(project_id)
+    if cached is not None:
+        return cached
+
     base_params: dict[str, str | int] = {
         "fields[workitems]": "module",
         "query": "type:heading",
-        "sort": "module",
         "page[size]": DEFAULT_PAGE_SIZE,
     }
 
-    async def _fetch_page(page: int) -> list[object]:
-        """Fetch a single page and return the ``data`` array."""
-        resp = await client.get(
-            f"/projects/{project_id}/workitems",
-            params={**base_params, "page[number]": page},
-        )
-        data = resp.get("data", [])
-        return data if isinstance(data, list) else []
-
-    # -- Step 1: fetch page 1 to get the total count. --------------------
-    first_resp = await client.get(
-        f"/projects/{project_id}/workitems",
-        params={**base_params, "page[number]": 1},
-    )
-    first_data = first_resp.get("data", [])
-    if not isinstance(first_data, list) or not first_data:
-        return set()
-
-    total_count = extract_total_count(first_resp)
-    max_page = max(1, -(-total_count // DEFAULT_PAGE_SIZE))  # ceil div
-
     documents: set[tuple[str, str]] = set()
-    for item in first_data:
-        _extract_document_pair(item, documents)
+    page_number = 1
 
-    if max_page <= 1:
-        return documents
+    while True:
+        response = await client.get(
+            f"/projects/{project_id}/workitems",
+            params={**base_params, "page[number]": page_number},
+        )
+        data = response.get("data", [])
+        if not isinstance(data, list) or not data:
+            break
 
-    # -- Step 2: binary search for successive document boundaries. -------
-    # ``last_module`` is the module ID of the *last* item on the most
-    # recently processed boundary page.  Because results are sorted,
-    # all items between the current position and the next transition have
-    # the same (or earlier) module.
-    last_module = _get_module_id(first_data[-1])
-    current_page = 1
+        for item in data:
+            _extract_document_pair(item, documents)
 
-    while current_page < max_page:
-        # Binary-search for the first page after ``current_page`` where
-        # at least one item has a module different from ``last_module``.
-        lo, hi = current_page + 1, max_page
-        transition_page = 0
-        transition_data: list[object] = []
+        raw_total = extract_total_count(response)
+        if not compute_has_more(
+            response, raw_total, page_number, DEFAULT_PAGE_SIZE, len(data)
+        ):
+            break
+        page_number += 1
 
-        while lo <= hi:
-            mid = (lo + hi) // 2
-            mid_data = await _fetch_page(mid)
-            if not mid_data:
-                hi = mid - 1
-                continue
-
-            # Collect documents from every probed page (free wins).
-            for item in mid_data:
-                _extract_document_pair(item, documents)
-
-            # Check monotonic property: does this page have any item
-            # whose module differs from ``last_module``?
-            has_new = any(_get_module_id(it) != last_module for it in mid_data)
-
-            if has_new:
-                transition_page = mid
-                transition_data = mid_data
-                hi = mid - 1
-            else:
-                lo = mid + 1
-
-        if transition_page == 0:
-            break  # No more transitions — all documents discovered.
-
-        # Advance to the transition page for the next iteration.
-        current_page = transition_page
-        last_module = _get_module_id(transition_data[-1])
-
-    return documents
+    sorted_docs = sorted(documents)
+    _store_cached_documents(project_id, sorted_docs)
+    return sorted_docs
 
 
 # ---------------------------------------------------------------------------
@@ -543,8 +538,8 @@ async def list_documents(
     """
     client = get_client(ctx)
 
-    # Binary-search discovery: O(D * log(N/D)) page fetches instead of
-    # O(N) linear scanning, where D = unique documents, N = total pages.
+    # Linear scan over heading work items, with a 60s TTL cache keyed by
+    # project_id so paginated callers reuse the same discovery result.
     try:
         documents = await _discover_documents(client, project_id)
     except PolarionNotFoundError as exc:
@@ -561,13 +556,12 @@ async def list_documents(
             f"Failed to list documents for project '{project_id}': {exc.message}"
         ) from exc
 
-    filtered: list[tuple[str, str]] = sorted(documents)
-    total = len(filtered)
+    total = len(documents)
 
-    # Manual pagination over the extracted set.
+    # Manual pagination over the discovered (already sorted) list.
     start = (page_number - 1) * page_size
     end = start + page_size
-    page_slice = filtered[start:end]
+    page_slice = documents[start:end]
 
     items = [DocumentSummary(space_id=s, document_name=d) for s, d in page_slice]
 

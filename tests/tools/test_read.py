@@ -6,6 +6,7 @@ Each tool is tested by calling the async function directly with a mock
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -333,6 +334,17 @@ class TestListProjects:
 class TestListDocuments:
     """Tests for the ``list_documents`` tool."""
 
+    @pytest.fixture(autouse=True)
+    def _clear_doc_cache(self) -> Iterator[None]:
+        """Reset the module-level TTL cache around every test.
+
+        Several tests reuse ``project_id='proj1'``, so without this the
+        first test would poison subsequent tests via cache hits.
+        """
+        _read_mod._documents_cache.clear()
+        yield
+        _read_mod._documents_cache.clear()
+
     async def test_extracts_documents_from_modules(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
@@ -479,29 +491,10 @@ class TestListDocuments:
         assert result.total_count == 0
         assert result.items == []
 
-    async def test_binary_search_skips_pages(
+    async def test_linear_scan_walks_all_pages(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Binary search discovers document boundaries without scanning every page.
-
-        Layout (5 pages total, sorted by module):
-          Page 1: DocA x 100   (page 1 always fetched)
-          Page 2: DocA x 100
-          Page 3: DocA x 50 + DocB x 50  (transition)
-          Page 4: DocB x 100
-          Page 5: DocB x 30   (partial -> end)
-
-        Binary search from page 1 (last_module=DocA):
-          lo=2, hi=5 → mid=3 → DocA+DocB (has_new) → transition_page=3, hi=2
-          lo=2, hi=2 → mid=2 → DocA only → lo=3
-          lo>hi → done, transition_page=3
-        Then from page 3 (last_module=DocB):
-          lo=4, hi=5 → mid=4 → DocB only → lo=5
-          lo=5, hi=5 → mid=5 → DocB only → lo=6
-          lo>hi → done, no transition
-        Total fetches: page 1 + page 3 + page 2 + page 4 + page 5 = 5
-        (but in a larger dataset, most pages would be skipped)
-        """
+        """Linear scan visits every heading page exactly once."""
 
         def _make_item(doc: str) -> dict:
             return {
@@ -512,17 +505,15 @@ class TestListDocuments:
 
         page_data = {
             1: [_make_item("DocA")] * 100,
-            2: [_make_item("DocA")] * 100,
-            3: [_make_item("DocA")] * 50 + [_make_item("DocB")] * 50,
-            4: [_make_item("DocB")] * 100,
-            5: [_make_item("DocB")] * 30,
+            2: [_make_item("DocA")] * 50 + [_make_item("DocB")] * 50,
+            3: [_make_item("DocB")] * 30,
         }
 
-        async def _mock_get(path, *, params=None):
+        async def _mock_get(_path, *, params=None):
             page_num = params["page[number]"]
             return {
                 "data": page_data.get(page_num, []),
-                "meta": {"totalCount": 430},  # 5 pages
+                "meta": {"totalCount": 230},
             }
 
         mock_client.get.side_effect = _mock_get
@@ -537,11 +528,13 @@ class TestListDocuments:
         assert result.total_count == 2
         pairs = {(d.space_id, d.document_name) for d in result.items}
         assert pairs == {("S", "DocA"), ("S", "DocB")}
+        # Page 1, 2, 3 — exactly 3 API calls, no extra probes.
+        assert mock_client.get.call_count == 3
 
-    async def test_binary_search_many_documents_on_few_pages(
+    async def test_linear_scan_stops_on_partial_page(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """When multiple small documents fit on one page, all are discovered."""
+        """A short final page (without totalCount/links.next) ends the loop."""
 
         def _make_item(doc: str) -> dict:
             return {
@@ -550,7 +543,41 @@ class TestListDocuments:
                 }
             }
 
-        # Single page with 4 different documents (sorted).
+        # Page 2 is partial (50 < 100), and totalCount is omitted →
+        # compute_has_more's heuristic must stop the scan.
+        page_data = {
+            1: [_make_item("DocA")] * 100,
+            2: [_make_item("DocB")] * 50,
+        }
+
+        async def _mock_get(_path, *, params=None):
+            page_num = params["page[number]"]
+            return {"data": page_data.get(page_num, [])}
+
+        mock_client.get.side_effect = _mock_get
+
+        result = await list_documents(
+            mock_ctx,
+            project_id="p",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.total_count == 2
+        assert mock_client.get.call_count == 2
+
+    async def test_single_page_uses_one_call(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Multiple documents on a single page → one API call."""
+
+        def _make_item(doc: str) -> dict:
+            return {
+                "relationships": {
+                    "module": {"data": {"type": "documents", "id": f"p/S/{doc}"}}
+                }
+            }
+
         items = (
             [_make_item("Alpha")] * 25
             + [_make_item("Bravo")] * 25
@@ -572,10 +599,106 @@ class TestListDocuments:
         assert result.total_count == 4
         names = {d.document_name for d in result.items}
         assert names == {"Alpha", "Bravo", "Charlie", "Delta"}
-        # Only 1 API call needed (single page).
         assert mock_client.get.call_count == 1
 
-    async def test_api_params_include_query_and_sort(
+    async def test_cache_hit_skips_api_calls(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """A second call with the same project_id is served from cache."""
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "relationships": {
+                        "module": {
+                            "data": {"type": "documents", "id": "proj1/_default/Doc1"}
+                        }
+                    }
+                },
+            ],
+            "meta": {"totalCount": 1},
+        }
+
+        first = await list_documents(
+            mock_ctx, project_id="proj1", page_size=100, page_number=1
+        )
+        calls_after_first = mock_client.get.call_count
+
+        second = await list_documents(
+            mock_ctx, project_id="proj1", page_size=100, page_number=1
+        )
+
+        assert mock_client.get.call_count == calls_after_first
+        assert [(d.space_id, d.document_name) for d in first.items] == [
+            (d.space_id, d.document_name) for d in second.items
+        ]
+
+    async def test_cache_isolated_per_project(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Different project IDs do not share cache entries."""
+
+        async def _mock_get(_path, *, params=None):
+            # Echo project from path? Simpler: return distinct doc per call.
+            return {
+                "data": [
+                    {
+                        "relationships": {
+                            "module": {
+                                "data": {
+                                    "type": "documents",
+                                    "id": f"x/S/Doc{mock_client.get.call_count}",
+                                }
+                            }
+                        }
+                    },
+                ],
+                "meta": {"totalCount": 1},
+            }
+
+        mock_client.get.side_effect = _mock_get
+
+        await list_documents(mock_ctx, project_id="projA", page_size=100, page_number=1)
+        await list_documents(mock_ctx, project_id="projB", page_size=100, page_number=1)
+        # Each project triggered its own fetch — no cross-project cache hit.
+        assert mock_client.get.call_count == 2
+
+    async def test_cache_expires_after_ttl(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """After TTL elapses, the next call re-fetches from the API."""
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "relationships": {
+                        "module": {
+                            "data": {"type": "documents", "id": "proj1/_default/Doc1"}
+                        }
+                    }
+                },
+            ],
+            "meta": {"totalCount": 1},
+        }
+
+        fake_now = [1000.0]
+
+        def _fake_monotonic() -> float:
+            return fake_now[0]
+
+        monkeypatch.setattr(_read_mod.time, "monotonic", _fake_monotonic)
+
+        await list_documents(mock_ctx, project_id="proj1", page_size=100, page_number=1)
+        first_calls = mock_client.get.call_count
+
+        # Advance time past the TTL.
+        fake_now[0] += _read_mod._CACHE_TTL_SECONDS + 1.0
+
+        await list_documents(mock_ctx, project_id="proj1", page_size=100, page_number=1)
+        assert mock_client.get.call_count > first_calls
+
+    async def test_api_params_include_query(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.get.return_value = {
@@ -596,7 +719,9 @@ class TestListDocuments:
             call_args[0][1] if len(call_args[0]) > 1 else {},
         )
         assert params["query"] == "type:heading"
-        assert params["sort"] == "module"
+        # sort=module was dropped — server-side sort cost > client-side dedup
+        # (benchmarked: ~4x slower on cold server cache, equal warm).
+        assert "sort" not in params
 
     async def test_not_found_raises_value_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
