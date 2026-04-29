@@ -232,6 +232,43 @@ class WorkItemSummary(BaseModel):
     status: str = Field(
         description="Work Item workflow status (e.g. 'draft', 'approved').",
     )
+    priority: str = Field(
+        default="",
+        description=(
+            "Polarion priority value as a string (e.g. '90.0'). "
+            "Empty when the server does not report a priority."
+        ),
+    )
+    updated: str = Field(
+        default="",
+        description=(
+            "ISO-8601 timestamp of the last modification "
+            "(e.g. '2026-04-29T10:23:00Z'). Empty when not reported."
+        ),
+    )
+    space_id: str = Field(
+        default="",
+        description=(
+            "Space that contains the document this work item belongs to. "
+            "Empty when the work item is not part of any document."
+        ),
+    )
+    document_name: str = Field(
+        default="",
+        description=(
+            "Name of the document this work item belongs to. "
+            "Empty when the work item is not part of any document. "
+            "Use with ``space_id`` to call ``get_document`` / "
+            "``get_document_parts``."
+        ),
+    )
+    assignee_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Short user IDs of the assignees (e.g. ['alice', 'bob']). "
+            "Empty list when the work item has no assignee."
+        ),
+    )
 
 
 class WorkItemDetail(WorkItemSummary):

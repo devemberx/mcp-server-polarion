@@ -284,6 +284,37 @@ class TestWorkItemSummary:
         assert wi.id == "MCPT-001"
         assert wi.status == "draft"
 
+    def test_default_optional_fields(self):
+        wi = WorkItemSummary(
+            id="MCPT-001",
+            title="Login Feature",
+            type="requirement",
+            status="draft",
+        )
+        assert wi.priority == ""
+        assert wi.updated == ""
+        assert wi.space_id == ""
+        assert wi.document_name == ""
+        assert wi.assignee_ids == []
+
+    def test_full_metadata(self):
+        wi = WorkItemSummary(
+            id="MCPT-042",
+            title="Login Feature",
+            type="requirement",
+            status="approved",
+            priority="90.0",
+            updated="2026-04-29T10:23:00Z",
+            space_id="Design",
+            document_name="Software Requirement Specification",
+            assignee_ids=["alice", "bob"],
+        )
+        assert wi.priority == "90.0"
+        assert wi.updated == "2026-04-29T10:23:00Z"
+        assert wi.space_id == "Design"
+        assert wi.document_name == "Software Requirement Specification"
+        assert wi.assignee_ids == ["alice", "bob"]
+
     def test_various_types(self):
         for wi_type in ("requirement", "task", "testCase", "defect"):
             wi = WorkItemSummary(
@@ -332,6 +363,25 @@ class TestWorkItemDetail:
             project_id="proj1",
         )
         assert detail.description == ""
+
+    def test_inherits_summary_metadata(self):
+        detail = WorkItemDetail(
+            id="MCPT-100",
+            title="Login Feature",
+            type="requirement",
+            status="approved",
+            priority="50.0",
+            updated="2026-04-30T01:00:00Z",
+            space_id="Design",
+            document_name="SRS",
+            assignee_ids=["alice"],
+            description="body",
+            project_id="proj1",
+        )
+        assert detail.priority == "50.0"
+        assert detail.space_id == "Design"
+        assert detail.document_name == "SRS"
+        assert detail.assignee_ids == ["alice"]
 
 
 # ---------------------------------------------------------------------------
