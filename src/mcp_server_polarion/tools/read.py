@@ -39,6 +39,7 @@ from mcp_server_polarion.tools._helpers import (
     WI_DETAIL_FIELDS,
     WI_LIST_FIELDS,
     build_included_workitem_map,
+    build_work_item_summary_kwargs,
     compute_has_more,
     encode_path_segment,
     extract_relationship_id,
@@ -952,9 +953,9 @@ async def list_work_items(
 ) -> PaginatedResult[WorkItemSummary]:
     """List and search work items in a Polarion project.
 
-    Returns a paginated list of work items with basic metadata (title,
-    type, status).  Pass a Lucene ``query`` to filter results, or omit
-    it to list all work items.
+    Returns a paginated list of work items with the metadata most often
+    needed for triage and traceability. Pass a Lucene ``query`` to
+    filter results, or omit it to list all work items.
 
     Common Lucene query examples:
 
@@ -979,6 +980,13 @@ async def list_work_items(
         - ``title``: Work Item title.
         - ``type``: Work Item type (e.g. 'requirement').
         - ``status``: Workflow status (e.g. 'draft').
+        - ``priority``: Priority value as a string (empty when unset).
+        - ``updated``: ISO-8601 timestamp of the last modification.
+        - ``space_id`` / ``document_name``: Document this work item
+          belongs to (both empty when not module-bound). Use with
+          ``get_document`` / ``get_document_parts``.
+        - ``assignee_ids``: Short user IDs of assignees (empty list
+          when unassigned).
 
     Raises:
         ValueError: If the project is not found.
@@ -1067,6 +1075,11 @@ async def get_work_item(
         - ``title``: Work Item title.
         - ``type``: Work Item type.
         - ``status``: Workflow status.
+        - ``priority``: Priority value as a string (empty when unset).
+        - ``updated``: ISO-8601 last-modified timestamp.
+        - ``space_id`` / ``document_name``: Document this work item
+          belongs to (both empty when not module-bound).
+        - ``assignee_ids``: Short user IDs of assignees.
         - ``description``: Full description in Markdown.
         - ``project_id``: Containing project.
 
@@ -1104,22 +1117,17 @@ async def get_work_item(
     if not isinstance(attrs, dict):
         attrs = {}
 
-    # Extract description HTML.
     desc_obj = attrs.get("description", {})
     desc_html = ""
     if isinstance(desc_obj, dict):
         desc_html = safe_str(desc_obj.get("value", ""))
 
-    # Extract work item ID from JSON:API id
-    # (format: "projectId/WI-001").
-    raw_id = safe_str(data.get("id", ""))
-    wi_id = raw_id.split("/", maxsplit=1)[-1] if "/" in raw_id else raw_id
+    summary_kwargs = build_work_item_summary_kwargs(data)
+    if not summary_kwargs["id"]:
+        summary_kwargs["id"] = work_item_id
 
     return WorkItemDetail(
-        id=wi_id or work_item_id,
-        title=safe_str(attrs.get("title", "")),
-        type=safe_str(attrs.get("type", "")),
-        status=safe_str(attrs.get("status", "")),
+        **summary_kwargs,
         description=html_to_markdown(desc_html),
         project_id=project_id,
     )

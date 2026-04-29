@@ -1288,6 +1288,22 @@ class TestListWorkItems:
                         "title": "Login Feature",
                         "type": "requirement",
                         "status": "draft",
+                        "priority": "90.0",
+                        "updated": "2026-04-29T10:23:00Z",
+                    },
+                    "relationships": {
+                        "module": {
+                            "data": {
+                                "type": "documents",
+                                "id": "proj1/Design/Software Requirement Specification",
+                            }
+                        },
+                        "assignee": {
+                            "data": [
+                                {"type": "users", "id": "proj1/alice"},
+                                {"type": "users", "id": "proj1/bob"},
+                            ]
+                        },
                     },
                 },
                 {
@@ -1297,6 +1313,10 @@ class TestListWorkItems:
                         "title": "Logout Feature",
                         "type": "requirement",
                         "status": "approved",
+                    },
+                    "relationships": {
+                        "module": {"data": None},
+                        "assignee": {"data": []},
                     },
                 },
             ],
@@ -1314,9 +1334,23 @@ class TestListWorkItems:
         assert isinstance(result, PaginatedResult)
         assert len(result.items) == 2
         assert result.total_count == 2
-        assert result.items[0].id == "MCPT-001"
-        assert result.items[0].title == "Login Feature"
-        assert result.items[1].id == "MCPT-002"
+
+        first = result.items[0]
+        assert first.id == "MCPT-001"
+        assert first.title == "Login Feature"
+        assert first.priority == "90.0"
+        assert first.updated == "2026-04-29T10:23:00Z"
+        assert first.space_id == "Design"
+        assert first.document_name == "Software Requirement Specification"
+        assert first.assignee_ids == ["alice", "bob"]
+
+        second = result.items[1]
+        assert second.id == "MCPT-002"
+        assert second.priority == ""
+        assert second.updated == ""
+        assert second.space_id == ""
+        assert second.document_name == ""
+        assert second.assignee_ids == []
 
     async def test_sparse_fieldset_requested(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1505,12 +1539,23 @@ class TestGetWorkItem:
                     "title": "Login Feature",
                     "type": "requirement",
                     "status": "draft",
+                    "priority": "75.0",
+                    "updated": "2026-04-29T10:23:00Z",
                     "description": {
                         "type": "text/html",
                         "value": (
                             "<p>User must be able to <strong>log in</strong>.</p>"
                         ),
                     },
+                },
+                "relationships": {
+                    "module": {
+                        "data": {
+                            "type": "documents",
+                            "id": "proj1/Design/SRS",
+                        }
+                    },
+                    "assignee": {"data": [{"type": "users", "id": "proj1/alice"}]},
                 },
             },
         }
@@ -1526,6 +1571,11 @@ class TestGetWorkItem:
         assert result.title == "Login Feature"
         assert result.type == "requirement"
         assert result.status == "draft"
+        assert result.priority == "75.0"
+        assert result.updated == "2026-04-29T10:23:00Z"
+        assert result.space_id == "Design"
+        assert result.document_name == "SRS"
+        assert result.assignee_ids == ["alice"]
         assert "log in" in result.description
         assert "<p>" not in result.description
         assert result.project_id == "proj1"
