@@ -61,6 +61,70 @@ _VALID_PART_TYPES: Final[frozenset[str]] = frozenset(
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True, slots=True)
+class _LinkedWorkItem:
+    """Metadata extracted from an included work-item resource."""
+
+    short_id: str = ""
+    title: str = ""
+    type: str = ""
+    status: str = ""
+    description_html: str = ""
+
+
+def _extract_html_value(field: object) -> str:
+    """Extract the HTML payload from a Polarion text field.
+
+    Polarion serialises rich-text fields either as a dict
+    ``{"type": "text/html", "value": "..."}`` or, in some responses, as
+    a plain string. Both shapes resolve to a string here.
+    """
+    if isinstance(field, dict):
+        return safe_str(field.get("value", ""))
+    if isinstance(field, str):
+        return field
+    return ""
+
+
+def _resolve_heading_level(attrs: dict[str, object]) -> int:
+    """Return the heading level for a heading part.
+
+    Prefers ``attributes.level`` when present, otherwise falls back to
+    parsing the leading ``<hN>`` tag in ``attributes.content``.
+    """
+    attr_level = attrs.get("level")
+    if isinstance(attr_level, int):
+        return attr_level
+    head_html = _extract_html_value(attrs.get("content"))
+    match = re.match(r"<h(\d)", head_html, re.IGNORECASE)
+    return int(match.group(1)) if match else 0
+
+
+def _resolve_linked_work_item(
+    rels: dict[str, object],
+    wi_map: dict[str, dict[str, object]],
+) -> _LinkedWorkItem:
+    """Return metadata for the work item linked from a document part."""
+    wi_full_id = extract_relationship_id(rels, "workItem")
+    if not wi_full_id:
+        return _LinkedWorkItem()
+
+    short_id = (
+        wi_full_id.split("/", maxsplit=1)[-1] if "/" in wi_full_id else wi_full_id
+    )
+    wi_attrs = wi_map.get(wi_full_id, {}).get("attributes", {})
+    if not isinstance(wi_attrs, dict):
+        return _LinkedWorkItem(short_id=short_id)
+
+    return _LinkedWorkItem(
+        short_id=short_id,
+        title=safe_str(wi_attrs.get("title", "")),
+        type=safe_str(wi_attrs.get("type", "")),
+        status=safe_str(wi_attrs.get("status", "")),
+        description_html=_extract_html_value(wi_attrs.get("description")),
+    )
+
+
 def _parse_document_part(
     item: object,
     wi_map: dict[str, dict[str, object]],
@@ -80,64 +144,53 @@ def _parse_document_part(
     attrs = item.get("attributes", {})
     if not isinstance(attrs, dict):
         attrs = {}
-    part_id = safe_str(item.get("id", ""))
 
-    # Type ------------------------------------------------------------------
     raw_type = safe_str(attrs.get("type", ""))
     part_type: _PartType = cast(
         _PartType,
         raw_type if raw_type in _VALID_PART_TYPES else "normal",
     )
 
-    # Content ---------------------------------------------------------------
-    content_html = ""
-    content_obj = attrs.get("content")
-    if isinstance(content_obj, dict):
-        content_html = safe_str(content_obj.get("value", ""))
-    elif isinstance(content_obj, str):
-        content_html = content_obj
+    # Polarion stores heading text in work-item titles and workitem body in
+    # the work-item description, so attributes.content for those types is
+    # either an empty <hN></hN> stub or empty entirely. Skip the conversion
+    # to avoid emitting noise like "#"/"##" or empty strings to the LLM.
+    content_html = (
+        _extract_html_value(attrs.get("content"))
+        if part_type not in {"heading", "workitem"}
+        else ""
+    )
+    level = _resolve_heading_level(attrs) if part_type == "heading" else 0
 
-    # Heading level from HTML tag (e.g. <h2 …> → 2) ------------------------
-    level = 0
-    if part_type == "heading":
-        heading_match = re.match(r"<h(\d)", content_html, re.IGNORECASE)
-        if heading_match:
-            level = int(heading_match.group(1))
-
-    # Relationships ---------------------------------------------------------
     rels = item.get("relationships", {})
     if not isinstance(rels, dict):
         rels = {}
+    linked = _resolve_linked_work_item(rels, wi_map)
 
-    next_part_id = extract_relationship_id(rels, "nextPart")
-    previous_part_id = extract_relationship_id(rels, "previousPart")
+    full_id = safe_str(item.get("id", ""))
+    short_id = full_id.rsplit("/", maxsplit=1)[-1] if "/" in full_id else full_id
 
-    # Resolve title & description from the included work item ---------------
-    title = ""
-    description_html = ""
-    wi_full_id = extract_relationship_id(rels, "workItem")
-    if wi_full_id:
-        wi = wi_map.get(wi_full_id, {})
-        wi_attrs = wi.get("attributes", {})
-        if isinstance(wi_attrs, dict):
-            title = safe_str(wi_attrs.get("title", ""))
-            desc_obj = wi_attrs.get("description")
-            if isinstance(desc_obj, dict):
-                description_html = safe_str(desc_obj.get("value", ""))
-            elif isinstance(desc_obj, str):
-                description_html = desc_obj
+    next_full_id = extract_relationship_id(rels, "nextPart")
+    next_short_id = (
+        next_full_id.rsplit("/", maxsplit=1)[-1]
+        if "/" in next_full_id
+        else next_full_id
+    )
 
     return DocumentPart(
-        id=part_id,
-        title=title,
-        content=html_to_markdown(content_html),
+        id=short_id,
+        title=linked.title,
+        content=html_to_markdown(content_html) if content_html else "",
         type=part_type,
         level=level,
         description=(
-            html_to_markdown(description_html) if part_type == "workitem" else ""
+            html_to_markdown(linked.description_html) if part_type == "workitem" else ""
         ),
-        next_part_id=next_part_id,
-        previous_part_id=previous_part_id,
+        work_item_id=linked.short_id,
+        work_item_type=linked.type,
+        work_item_status=linked.status,
+        external=bool(attrs.get("external", False)),
+        next_part_id=next_short_id,
     )
 
 
@@ -741,12 +794,17 @@ async def get_document_parts(  # noqa: PLR0913
 ) -> PaginatedResult[DocumentPart]:
     """List the structural parts (headings and work items) of a document.
 
-    Returns the ordered list of part IDs, titles, and types that make
-    up a document's body.  Use this tool **only** when you need:
+    Returns the ordered list of part IDs, titles, types, and linked
+    work-item metadata that make up a document's body. Use this tool
+    **only** when you need:
 
-    - Part IDs for positioning with ``create_document_part``
-      (``next_part_id`` / ``previous_part_id``).
+    - Part IDs for positioning with ``create_document_part`` — pass any
+      existing part's ``id`` as ``next_part_id`` (insert before) or
+      ``previous_part_id`` (insert after). Results are returned in
+      document order.
     - The hierarchical structure (heading levels) of the document.
+    - The type/status of work items embedded in the document, without a
+      separate ``get_work_item`` call.
 
     **Do NOT call this tool just to read or summarise a document.**
     ``get_document`` already returns the complete document body.
@@ -761,16 +819,30 @@ async def get_document_parts(  # noqa: PLR0913
 
     Returns:
         PaginatedResult containing ``DocumentPart`` items with:
-        - ``id``: Full JSON:API part identifier
-          (e.g. 'projectId/spaceId/documentName/heading_MCPT-001').
-        - ``title``: Part title from the associated work item.
-        - ``content``: Part body content in Markdown.
+        - ``id``: Short part identifier within the document
+          (e.g. 'heading_MCPT-001', 'workitem_MCPT-042', 'polarion_1').
+          Use as ``next_part_id`` or ``previous_part_id`` when calling
+          ``create_document_part``.
+        - ``title``: Part title (from the linked work item for heading
+          and workitem parts).
+        - ``content``: Part body in Markdown. Empty for 'heading' and
+          'workitem' parts (their text lives in ``title`` / ``level``
+          and ``description`` respectively).
         - ``type``: 'heading', 'workitem', 'normal', 'toc',
           or 'wikiblock'.
         - ``level``: Heading level (1-4) or 0 for non-headings.
-        - ``description``: Work item description in Markdown.
-        - ``next_part_id``: Full ID of the next part.
-        - ``previous_part_id``: Full ID of the previous part.
+        - ``description``: Work-item description in Markdown
+          (workitem parts only).
+        - ``work_item_id``: Short linked work-item ID
+          (e.g. 'MCPT-001'). Use directly with ``get_work_item`` /
+          ``get_linked_work_items``.
+        - ``work_item_type``: Linked work-item type
+          (e.g. 'requirement', 'testCase').
+        - ``work_item_status``: Linked work-item workflow status.
+        - ``external``: True when the part references a work item from
+          another project (re-used / typically read-only).
+        - ``next_part_id``: Short ID of the next part in document order
+          (e.g. 'workitem_MCPT-002'). Empty on the last part.
 
     Raises:
         ValueError: If the document, space, or project is not found.

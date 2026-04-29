@@ -789,14 +789,11 @@ class TestGetDocument:
         )
 
         assert isinstance(result, DocumentDetail)
-        assert result.id == "SRS"
         assert result.title == "Software Requirement Spec"
         assert result.type == "req_specification"
         assert result.status == "approved"
         assert "SRS" in result.content
         assert "<p>" not in result.content
-        assert result.space_id == "_default"
-        assert result.project_id == "proj1"
 
     async def test_include_content_false_omits_content(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1124,27 +1121,39 @@ class TestGetDocumentParts:
 
         heading = result.items[0]
         assert isinstance(heading, DocumentPart)
-        assert heading.id == "proj1/_default/SRS/heading_MCPT-001"
+        assert heading.id == "heading_MCPT-001"
         assert heading.type == "heading"
         assert heading.level == 1
         assert heading.title == "Introduction"
-        assert heading.next_part_id == "proj1/_default/SRS/workitem_MCPT-002"
-        assert heading.previous_part_id == ""
+        assert heading.content == ""
+        assert heading.work_item_id == "MCPT-001"
+        assert heading.work_item_type == "heading"
+        assert heading.work_item_status == "open"
+        assert heading.external is False
+        assert heading.next_part_id == "workitem_MCPT-002"
 
         wi_part = result.items[1]
-        assert wi_part.id == "proj1/_default/SRS/workitem_MCPT-002"
+        assert wi_part.id == "workitem_MCPT-002"
         assert wi_part.type == "workitem"
         assert wi_part.level == 0
         assert wi_part.title == "Login Feature"
+        assert wi_part.content == ""
         assert "login" in wi_part.description.lower()
-        assert wi_part.previous_part_id == "proj1/_default/SRS/heading_MCPT-001"
-        assert wi_part.next_part_id == "proj1/_default/SRS/polarion_1"
+        assert wi_part.work_item_id == "MCPT-002"
+        assert wi_part.work_item_type == "requirement"
+        assert wi_part.work_item_status == "draft"
+        assert wi_part.external is True
+        assert wi_part.next_part_id == "polarion_1"
 
         normal_part = result.items[2]
         assert normal_part.type == "normal"
         assert normal_part.level == 0
         assert normal_part.title == ""
-        assert normal_part.previous_part_id == "proj1/_default/SRS/workitem_MCPT-002"
+        assert "Normal text content" in normal_part.content
+        assert normal_part.work_item_id == ""
+        assert normal_part.work_item_type == ""
+        assert normal_part.work_item_status == ""
+        assert normal_part.external is False
         assert normal_part.next_part_id == ""
 
     async def test_pagination_params_forwarded(
@@ -1191,35 +1200,17 @@ class TestGetDocumentParts:
     async def test_string_content_field(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Plain string content (not dict) is handled."""
+        """Plain string content (not dict) is handled for normal parts."""
         mock_client.get.return_value = {
             "data": [
                 {
-                    "id": "proj1/_default/Doc/heading_MCPT-003",
+                    "id": "proj1/_default/Doc/polarion_42",
                     "attributes": {
-                        "id": "heading_MCPT-003",
-                        "content": "<h2>Plain string content.</h2>",
-                        "type": "heading",
+                        "id": "polarion_42",
+                        "content": "<p>Plain string content.</p>",
+                        "type": "normal",
                     },
-                    "relationships": {
-                        "workItem": {
-                            "data": {
-                                "type": "workitems",
-                                "id": "proj1/MCPT-003",
-                            }
-                        },
-                    },
-                },
-            ],
-            "included": [
-                {
-                    "type": "workitems",
-                    "id": "proj1/MCPT-003",
-                    "attributes": {
-                        "type": "heading",
-                        "title": "Plain string content.",
-                        "status": "open",
-                    },
+                    "relationships": {},
                 },
             ],
             "meta": {"totalCount": 1},
@@ -1235,10 +1226,8 @@ class TestGetDocumentParts:
         )
 
         assert len(result.items) == 1
-        assert result.items[0].type == "heading"
-        assert result.items[0].level == 2
+        assert result.items[0].type == "normal"
         assert "Plain string content" in result.items[0].content
-        assert result.items[0].title == "Plain string content."
 
     async def test_total_count_floor_when_api_returns_zero(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
