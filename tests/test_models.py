@@ -167,32 +167,21 @@ class TestDocumentSummary:
 class TestDocumentDetail:
     def test_valid(self):
         d = DocumentDetail(
-            id="SRS",
             title="Software Requirement Specification",
             content="## Overview\n\nSystem requirements.",
-            space_id="_default",
-            project_id="myproject",
         )
-        assert d.id == "SRS"
         assert d.title == "Software Requirement Specification"
-        assert d.space_id == "_default"
 
     def test_empty_content(self):
         d = DocumentDetail(
-            id="doc1",
             title="Empty Doc",
             content="",
-            space_id="space1",
-            project_id="proj1",
         )
         assert d.content == ""
 
     def test_missing_required_field(self):
         with pytest.raises(ValidationError):
-            DocumentDetail(  # type: ignore[call-arg]
-                id="doc1",
-                title="Missing Fields",
-            )
+            DocumentDetail()  # type: ignore[call-arg]
 
 
 # ---------------------------------------------------------------------------
@@ -213,13 +202,16 @@ class TestDocumentPart:
         assert part.level == 1
         assert part.description == ""
         assert part.next_part_id == ""
-        assert part.previous_part_id == ""
+        assert part.work_item_id == ""
+        assert part.work_item_type == ""
+        assert part.work_item_status == ""
+        assert part.external is False
 
     def test_workitem_part(self):
         part = DocumentPart(
             id="workitem_MCPT-042",
             title="Login Requirement",
-            content="The system **shall** allow login.",
+            content="",
             type="workitem",
             level=0,
         )
@@ -230,22 +222,28 @@ class TestDocumentPart:
         part = DocumentPart(
             id="workitem_MCPT-042",
             title="Login Requirement",
-            content="The system **shall** allow login.",
+            content="",
             type="workitem",
             level=0,
             description="Must support SSO.",
+            work_item_id="MCPT-042",
+            work_item_type="requirement",
+            work_item_status="approved",
+            external=True,
             next_part_id="proj/space/doc/heading_MCPT-043",
-            previous_part_id="proj/space/doc/heading_MCPT-041",
         )
         assert part.description == "Must support SSO."
+        assert part.work_item_id == "MCPT-042"
+        assert part.work_item_type == "requirement"
+        assert part.work_item_status == "approved"
+        assert part.external is True
         assert part.next_part_id == "proj/space/doc/heading_MCPT-043"
-        assert part.previous_part_id == "proj/space/doc/heading_MCPT-041"
 
     def test_serialization(self):
         part = DocumentPart(
             id="heading_MCPT-010",
             title="Scope",
-            content="Project scope.",
+            content="",
             type="heading",
             level=2,
         )
@@ -253,7 +251,11 @@ class TestDocumentPart:
         assert data["id"] == "heading_MCPT-010"
         assert data["level"] == 2
         assert data["next_part_id"] == ""
-        assert data["previous_part_id"] == ""
+        assert data["work_item_id"] == ""
+        assert data["work_item_type"] == ""
+        assert data["work_item_status"] == ""
+        assert data["external"] is False
+        assert "previous_part_id" not in data
 
     def test_invalid_type_rejected(self):
         with pytest.raises(ValidationError):

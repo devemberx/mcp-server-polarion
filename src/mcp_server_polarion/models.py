@@ -134,8 +134,11 @@ class DocumentPart(BaseModel):
 
     id: str = Field(
         description=(
-            "Full JSON:API part identifier "
-            "(e.g. 'projectId/spaceId/documentName/heading_MCPT-001')."
+            "Short part identifier within the document "
+            "(e.g. 'heading_MCPT-001', 'workitem_MCPT-042', 'polarion_1'). "
+            "Use this as ``next_part_id`` (insert before) or "
+            "``previous_part_id`` (insert after) when calling "
+            "``create_document_part``."
         ),
     )
     title: str = Field(
@@ -143,8 +146,10 @@ class DocumentPart(BaseModel):
     )
     content: str = Field(
         description=(
-            "Part body content converted to Markdown. "
-            "Empty string when the part has no body content."
+            "Part body in Markdown. Populated for 'normal', 'toc', and "
+            "'wikiblock' parts. Empty for 'heading' parts (the heading "
+            "text is in ``title`` and the level in ``level``) and for "
+            "'workitem' parts (the body is in ``description``)."
         ),
     )
     type: Literal["heading", "workitem", "normal", "toc", "wikiblock"] = Field(
@@ -167,20 +172,45 @@ class DocumentPart(BaseModel):
             "Empty for headings and other part types."
         ),
     )
+    work_item_id: str = Field(
+        default="",
+        description=(
+            "Short Work Item ID of the linked work item "
+            "(e.g. 'MCPT-001'). Populated for 'workitem' and 'heading' "
+            "parts; empty for other part types. Use this directly with "
+            "``get_work_item`` or ``get_linked_work_items``."
+        ),
+    )
+    work_item_type: str = Field(
+        default="",
+        description=(
+            "Type of the linked work item (e.g. 'requirement', "
+            "'testCase', 'risk'). Populated for 'workitem' and 'heading' "
+            "parts; empty otherwise."
+        ),
+    )
+    work_item_status: str = Field(
+        default="",
+        description=(
+            "Workflow status of the linked work item "
+            "(e.g. 'draft', 'approved'). Populated for 'workitem' and "
+            "'heading' parts; empty otherwise."
+        ),
+    )
+    external: bool = Field(
+        default=False,
+        description=(
+            "True when this part references a work item from another "
+            "project (re-used content). Such parts are typically "
+            "read-only — editing must be done in the source project."
+        ),
+    )
     next_part_id: str = Field(
         default="",
         description=(
-            "Full ID of the next part in the document order "
-            "(e.g. 'projectId/spaceId/documentName/workitem_MCPT-002'). "
+            "Short ID of the next part in document order "
+            "(e.g. 'workitem_MCPT-002'). "
             "Empty string when this is the last part."
-        ),
-    )
-    previous_part_id: str = Field(
-        default="",
-        description=(
-            "Full ID of the previous part in the document order "
-            "(e.g. 'projectId/spaceId/documentName/heading_MCPT-001'). "
-            "Empty string when this is the first part."
         ),
     )
 
