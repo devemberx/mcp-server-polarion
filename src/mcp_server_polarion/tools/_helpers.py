@@ -29,6 +29,7 @@ class WorkItemSummaryKwargs(TypedDict):
     document_name: str
     assignee_ids: list[str]
 
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -37,8 +38,12 @@ class WorkItemSummaryKwargs(TypedDict):
 DEFAULT_PAGE_SIZE: Final[int] = 100
 
 # Sparse fieldsets for list / detail endpoints.
-WI_LIST_FIELDS: Final[str] = "title,type,status,priority,updated"
-WI_DETAIL_FIELDS: Final[str] = "title,description,type,status,priority,updated"
+WI_LIST_FIELDS: Final[str] = "title,type,status,priority,updated,module,assignee"
+WI_DETAIL_FIELDS: Final[str] = (
+    "title,description,type,status,priority,updated,"
+    "created,resolution,severity,outlineNumber,hyperlinks,"
+    "module,assignee,author"
+)
 
 # ---------------------------------------------------------------------------
 # Functions

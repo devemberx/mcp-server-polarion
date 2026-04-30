@@ -26,6 +26,7 @@ from mcp_server_polarion.models import (
     DocumentDetail,
     DocumentPart,
     DocumentSummary,
+    Hyperlink,
     LinkedWorkItemsList,
     LinkedWorkItemSummary,
     PaginatedResult,
@@ -43,6 +44,7 @@ from mcp_server_polarion.tools._helpers import (
     compute_has_more,
     encode_path_segment,
     extract_relationship_id,
+    extract_short_id,
     extract_total_count,
     get_client,
     has_links_next,
@@ -60,6 +62,32 @@ _VALID_PART_TYPES: Final[frozenset[str]] = frozenset(
 # ---------------------------------------------------------------------------
 # Read-specific helpers
 # ---------------------------------------------------------------------------
+
+
+def _parse_hyperlinks(value: object) -> list[Hyperlink]:
+    """Parse the ``attributes.hyperlinks`` field into ``Hyperlink`` models.
+
+    Polarion returns hyperlinks as a list of dicts with ``role``,
+    ``title``, and ``uri`` keys. Entries without a usable ``uri`` are
+    skipped to keep the response signal clean for the LLM.
+    """
+    if not isinstance(value, list):
+        return []
+    links: list[Hyperlink] = []
+    for entry in value:
+        if not isinstance(entry, dict):
+            continue
+        uri = safe_str(entry.get("uri", ""))
+        if not uri:
+            continue
+        links.append(
+            Hyperlink(
+                role=safe_str(entry.get("role", "")),
+                title=safe_str(entry.get("title", "")),
+                uri=uri,
+            )
+        )
+    return links
 
 
 @dataclass(frozen=True, slots=True)
@@ -997,6 +1025,11 @@ async def list_work_items(
     client = get_client(ctx)
     params: dict[str, str | int] = {
         "fields[workitems]": WI_LIST_FIELDS,
+        # Polarion does not inline ``data`` for to-many relationships
+        # unless the resource is included; ``include=assignee`` ensures
+        # ``relationships.assignee.data`` is populated so that
+        # ``assignee_ids`` can be extracted.
+        "include": "assignee",
         "page[size]": page_size,
         "page[number]": page_number,
     }
@@ -1077,9 +1110,19 @@ async def get_work_item(
         - ``status``: Workflow status.
         - ``priority``: Priority value as a string (empty when unset).
         - ``updated``: ISO-8601 last-modified timestamp.
+        - ``created``: ISO-8601 creation timestamp.
         - ``space_id`` / ``document_name``: Document this work item
           belongs to (both empty when not module-bound).
+        - ``outline_number``: Hierarchical position inside the document
+          (e.g. '1.2.3'); empty when not in a document.
         - ``assignee_ids``: Short user IDs of assignees.
+        - ``author_id``: Short user ID of the author.
+        - ``resolution``: Resolution outcome for closed items
+          (e.g. 'fixed', 'wontfix'); empty otherwise.
+        - ``severity``: Severity classification, used for defects
+          (e.g. 'blocker', 'critical'); empty otherwise.
+        - ``hyperlinks``: External hyperlinks as ``Hyperlink`` items
+          with ``role``, ``title``, ``uri`` fields.
         - ``description``: Full description in Markdown.
         - ``project_id``: Containing project.
 
@@ -1093,7 +1136,10 @@ async def get_work_item(
     try:
         response = await client.get(
             path,
-            params={"fields[workitems]": WI_DETAIL_FIELDS},
+            params={
+                "fields[workitems]": WI_DETAIL_FIELDS,
+                "include": "assignee",
+            },
         )
     except PolarionNotFoundError as exc:
         raise ValueError(
@@ -1116,6 +1162,9 @@ async def get_work_item(
     attrs = data.get("attributes", {})
     if not isinstance(attrs, dict):
         attrs = {}
+    rels = data.get("relationships", {})
+    if not isinstance(rels, dict):
+        rels = {}
 
     desc_obj = attrs.get("description", {})
     desc_html = ""
@@ -1130,6 +1179,12 @@ async def get_work_item(
         **summary_kwargs,
         description=html_to_markdown(desc_html),
         project_id=project_id,
+        author_id=extract_short_id(extract_relationship_id(rels, "author")),
+        created=safe_str(attrs.get("created", "")),
+        resolution=safe_str(attrs.get("resolution", "")),
+        severity=safe_str(attrs.get("severity", "")),
+        outline_number=safe_str(attrs.get("outlineNumber", "")),
+        hyperlinks=_parse_hyperlinks(attrs.get("hyperlinks")),
     )
 
 

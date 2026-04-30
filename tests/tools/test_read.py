@@ -1541,6 +1541,16 @@ class TestGetWorkItem:
                     "status": "draft",
                     "priority": "75.0",
                     "updated": "2026-04-29T10:23:00Z",
+                    "created": "2026-04-01T09:00:00Z",
+                    "outlineNumber": "1.2.3",
+                    "hyperlinks": [
+                        {
+                            "role": "ref_ext",
+                            "title": "Spec",
+                            "uri": "https://example.com/spec",
+                        },
+                        {"role": "impl", "title": "", "uri": ""},
+                    ],
                     "description": {
                         "type": "text/html",
                         "value": (
@@ -1556,6 +1566,7 @@ class TestGetWorkItem:
                         }
                     },
                     "assignee": {"data": [{"type": "users", "id": "proj1/alice"}]},
+                    "author": {"data": {"type": "users", "id": "proj1/bob"}},
                 },
             },
         }
@@ -1573,12 +1584,43 @@ class TestGetWorkItem:
         assert result.status == "draft"
         assert result.priority == "75.0"
         assert result.updated == "2026-04-29T10:23:00Z"
+        assert result.created == "2026-04-01T09:00:00Z"
+        assert result.outline_number == "1.2.3"
         assert result.space_id == "Design"
         assert result.document_name == "SRS"
         assert result.assignee_ids == ["alice"]
+        assert result.author_id == "bob"
+        # Entry without uri is skipped.
+        assert len(result.hyperlinks) == 1
+        assert result.hyperlinks[0].role == "ref_ext"
+        assert result.hyperlinks[0].uri == "https://example.com/spec"
         assert "log in" in result.description
         assert "<p>" not in result.description
         assert result.project_id == "proj1"
+
+    async def test_defect_severity_and_open_resolution(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": {
+                "id": "proj1/MCPT-500",
+                "attributes": {
+                    "title": "Login crashes",
+                    "type": "defect",
+                    "status": "open",
+                    "severity": "blocker",
+                },
+            },
+        }
+
+        result = await get_work_item(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT-500",
+        )
+
+        assert result.severity == "blocker"
+        assert result.resolution == ""
 
     async def test_no_description(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1601,6 +1643,13 @@ class TestGetWorkItem:
         )
 
         assert result.description == ""
+        # Default values for new detail-only fields.
+        assert result.author_id == ""
+        assert result.created == ""
+        assert result.severity == ""
+        assert result.resolution == ""
+        assert result.outline_number == ""
+        assert result.hyperlinks == []
 
     async def test_not_found_raises_value_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
