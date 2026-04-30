@@ -50,6 +50,7 @@ from mcp_server_polarion.tools._helpers import (
     has_links_next,
     parse_work_item_summaries,
     safe_str,
+    split_module_id,
 )
 from mcp_server_polarion.utils import html_to_markdown
 
@@ -273,23 +274,31 @@ def _parse_linked_items(
         if not isinstance(rels, dict):
             rels = {}
         wi_full_id = extract_relationship_id(rels, "workItem")
-        wi_id = (
-            wi_full_id.split("/", maxsplit=1)[-1] if "/" in wi_full_id else wi_full_id
-        )
-
-        # Resolve title from included work items.
-        title = ""
-        if wi_full_id:
-            wi = wi_map.get(wi_full_id, {})
-            wi_attrs = wi.get("attributes", {})
-            if isinstance(wi_attrs, dict):
-                title = safe_str(wi_attrs.get("title", ""))
+        wi_id = extract_short_id(wi_full_id)
 
         # Skip items where the target work item cannot be resolved
         # via the relationships object (per project conventions, we do
         # not parse the raw linked-work-item ID).
         if not wi_id:
             continue
+
+        # Resolve title and metadata from the included target work item.
+        title = ""
+        wi_type = ""
+        wi_status = ""
+        space_id = ""
+        document_name = ""
+        wi = wi_map.get(wi_full_id, {})
+        wi_attrs = wi.get("attributes", {})
+        if isinstance(wi_attrs, dict):
+            title = safe_str(wi_attrs.get("title", ""))
+            wi_type = safe_str(wi_attrs.get("type", ""))
+            wi_status = safe_str(wi_attrs.get("status", ""))
+        wi_rels = wi.get("relationships", {})
+        if isinstance(wi_rels, dict):
+            space_id, document_name = split_module_id(
+                extract_relationship_id(wi_rels, "module")
+            )
 
         items.append(
             LinkedWorkItemSummary(
@@ -298,6 +307,10 @@ def _parse_linked_items(
                 role=role,
                 direction=direction,
                 suspect=suspect,
+                type=wi_type,
+                status=wi_status,
+                space_id=space_id,
+                document_name=document_name,
             )
         )
     return items
@@ -1223,7 +1236,23 @@ async def get_linked_work_items(
 
     Returns:
         LinkedWorkItemsList with:
-        - ``items``: All linked work items (forward and back).
+        - ``items``: All linked work items, each ``LinkedWorkItemSummary``
+          carrying:
+
+          * ``id`` / ``title`` — the linked work item.
+          * ``direction`` — 'forward' (this WI links out) or 'back'
+            (the other WI links in).
+          * ``role`` — link role identifier (e.g. 'parent', 'verifies').
+            ``None`` for back-direction links because Polarion's
+            ``linkedWorkItems:`` query does not expose the originating
+            link's role on this server version. To recover the role,
+            call ``get_linked_work_items`` on the source WI and inspect
+            its forward links.
+          * ``suspect`` — whether the link is marked suspect.
+          * ``type`` / ``status`` — linked WI type and workflow status.
+          * ``space_id`` / ``document_name`` — document the linked WI
+            belongs to (both empty when not module-bound).
+
         - ``forward_count``: Number of outgoing links.
         - ``back_count``: Number of incoming links.
         - ``total_count``: Total number of linked items (forward + back).
@@ -1291,9 +1320,15 @@ async def get_linked_work_items(
                 LinkedWorkItemSummary(
                     id=summary.id,
                     title=summary.title,
-                    role="backlink",
-                    suspect=False,
+                    # role unknown — Polarion's ``linkedWorkItems:`` query
+                    # only exposes the source WI list, not the link role.
+                    role=None,
                     direction="back",
+                    suspect=False,
+                    type=summary.type,
+                    status=summary.status,
+                    space_id=summary.space_id,
+                    document_name=summary.document_name,
                 )
                 for summary in page_summaries
             )

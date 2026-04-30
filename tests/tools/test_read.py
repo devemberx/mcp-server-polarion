@@ -1732,6 +1732,14 @@ class TestGetLinkedWorkItems:
                             "type": "heading",
                             "status": "open",
                         },
+                        "relationships": {
+                            "module": {
+                                "data": {
+                                    "type": "documents",
+                                    "id": "proj1/Design/SRS",
+                                }
+                            },
+                        },
                     },
                 ],
             },
@@ -1743,6 +1751,14 @@ class TestGetLinkedWorkItems:
                             "title": "Related Item",
                             "type": "requirement",
                             "status": "draft",
+                        },
+                        "relationships": {
+                            "module": {
+                                "data": {
+                                    "type": "documents",
+                                    "id": "proj1/Requirements/SysRS",
+                                }
+                            },
                         },
                     },
                     {
@@ -1774,18 +1790,32 @@ class TestGetLinkedWorkItems:
         assert len(fwd) == 1
         assert len(back) == 2
 
-        # Forward: target from relationships.workItem, role from attributes
+        # Forward: target metadata extracted from included WI.
         assert fwd[0].id == "MCPT-010"
         assert fwd[0].role == "parent"
         assert fwd[0].title == "Parent Item"
         assert fwd[0].suspect is False
+        assert fwd[0].type == "heading"
+        assert fwd[0].status == "open"
+        assert fwd[0].space_id == "Design"
+        assert fwd[0].document_name == "SRS"
 
-        # Back: parsed from workitems query, role = "backlink"
-        back_ids = {i.id for i in back}
-        assert back_ids == {"MCPT-020", "MCPT-030"}
+        # Back: parsed from workitems query. role is None on this server
+        # version (the originating link role is not exposed).
+        back_by_id = {i.id: i for i in back}
+        assert set(back_by_id) == {"MCPT-020", "MCPT-030"}
         for b in back:
-            assert b.role == "backlink"
+            assert b.role is None
             assert b.suspect is False
+        # Back item with module gets space_id/document_name populated.
+        assert back_by_id["MCPT-020"].type == "requirement"
+        assert back_by_id["MCPT-020"].status == "draft"
+        assert back_by_id["MCPT-020"].space_id == "Requirements"
+        assert back_by_id["MCPT-020"].document_name == "SysRS"
+        # Back item without module → both empty.
+        assert back_by_id["MCPT-030"].type == "testCase"
+        assert back_by_id["MCPT-030"].space_id == ""
+        assert back_by_id["MCPT-030"].document_name == ""
 
     async def test_no_links(self, mock_ctx: MagicMock, mock_client: AsyncMock) -> None:
         mock_client.get.side_effect = [
@@ -1923,8 +1953,9 @@ class TestGetLinkedWorkItems:
         assert fwd.role == "parent"
         assert fwd.title == "Parent Target"
 
-        # Back: parsed from workitems query
+        # Back: parsed from workitems query — role is unknown on this
+        # server version (linkedWorkItems: query does not expose role).
         assert back.direction == "back"
         assert back.id == "MCPT-099"
-        assert back.role == "backlink"
+        assert back.role is None
         assert back.title == "Back Item"
