@@ -72,6 +72,15 @@ class ProjectSummary(BaseModel):
     name: str = Field(
         description="Human-readable project name.",
     )
+    active: bool = Field(
+        default=True,
+        description=(
+            "Whether the project is active. False indicates an archived "
+            "or inactive project that should generally be skipped when "
+            "selecting a target project. Defaults to True if the server "
+            "does not report the flag."
+        ),
+    )
 
 
 class DocumentSummary(BaseModel):
@@ -93,23 +102,30 @@ class DocumentSummary(BaseModel):
 class DocumentDetail(BaseModel):
     """Full details of a Polarion document returned by ``get_document``."""
 
-    id: str = Field(
-        description="Document identifier within the space.",
-    )
     title: str = Field(
         description="Document title.",
     )
-    content: str = Field(
+    type: str = Field(
+        default="",
         description=(
-            "Full document content (homePageContent) converted to Markdown. "
-            "Empty string when the document has no content."
+            "Document type (e.g. 'req_specification', 'test_specification'). "
+            "Empty string when the server does not report a type."
         ),
     )
-    space_id: str = Field(
-        description="Space that contains this document.",
+    status: str = Field(
+        default="",
+        description=(
+            "Document workflow status (e.g. 'draft', 'approved'). "
+            "Empty string when the server does not report a status."
+        ),
     )
-    project_id: str = Field(
-        description="Project that contains this document.",
+    content: str = Field(
+        default="",
+        description=(
+            "Document body (homePageContent) converted to Markdown. "
+            "Only populated when ``get_document`` is called with "
+            "``include_content=True``; otherwise an empty string."
+        ),
     )
 
 
@@ -118,8 +134,11 @@ class DocumentPart(BaseModel):
 
     id: str = Field(
         description=(
-            "Full JSON:API part identifier "
-            "(e.g. 'projectId/spaceId/documentName/heading_MCPT-001')."
+            "Short part identifier within the document "
+            "(e.g. 'heading_MCPT-001', 'workitem_MCPT-042', 'polarion_1'). "
+            "Use this as ``next_part_id`` (insert before) or "
+            "``previous_part_id`` (insert after) when calling "
+            "``create_document_part``."
         ),
     )
     title: str = Field(
@@ -127,8 +146,10 @@ class DocumentPart(BaseModel):
     )
     content: str = Field(
         description=(
-            "Part body content converted to Markdown. "
-            "Empty string when the part has no body content."
+            "Part body in Markdown. Populated for 'normal', 'toc', and "
+            "'wikiblock' parts. Empty for 'heading' parts (the heading "
+            "text is in ``title`` and the level in ``level``) and for "
+            "'workitem' parts (the body is in ``description``)."
         ),
     )
     type: Literal["heading", "workitem", "normal", "toc", "wikiblock"] = Field(
@@ -151,20 +172,45 @@ class DocumentPart(BaseModel):
             "Empty for headings and other part types."
         ),
     )
+    work_item_id: str = Field(
+        default="",
+        description=(
+            "Short Work Item ID of the linked work item "
+            "(e.g. 'MCPT-001'). Populated for 'workitem' and 'heading' "
+            "parts; empty for other part types. Use this directly with "
+            "``get_work_item`` or ``get_linked_work_items``."
+        ),
+    )
+    work_item_type: str = Field(
+        default="",
+        description=(
+            "Type of the linked work item (e.g. 'requirement', "
+            "'testCase', 'risk'). Populated for 'workitem' and 'heading' "
+            "parts; empty otherwise."
+        ),
+    )
+    work_item_status: str = Field(
+        default="",
+        description=(
+            "Workflow status of the linked work item "
+            "(e.g. 'draft', 'approved'). Populated for 'workitem' and "
+            "'heading' parts; empty otherwise."
+        ),
+    )
+    external: bool = Field(
+        default=False,
+        description=(
+            "True when this part references a work item from another "
+            "project (re-used content). Such parts are typically "
+            "read-only — editing must be done in the source project."
+        ),
+    )
     next_part_id: str = Field(
         default="",
         description=(
-            "Full ID of the next part in the document order "
-            "(e.g. 'projectId/spaceId/documentName/workitem_MCPT-002'). "
+            "Short ID of the next part in document order "
+            "(e.g. 'workitem_MCPT-002'). "
             "Empty string when this is the last part."
-        ),
-    )
-    previous_part_id: str = Field(
-        default="",
-        description=(
-            "Full ID of the previous part in the document order "
-            "(e.g. 'projectId/spaceId/documentName/heading_MCPT-001'). "
-            "Empty string when this is the first part."
         ),
     )
 
@@ -186,12 +232,66 @@ class WorkItemSummary(BaseModel):
     status: str = Field(
         description="Work Item workflow status (e.g. 'draft', 'approved').",
     )
+    priority: str = Field(
+        default="",
+        description=(
+            "Polarion priority value as a string (e.g. '90.0'). "
+            "Empty when the server does not report a priority."
+        ),
+    )
+    updated: str = Field(
+        default="",
+        description=(
+            "ISO-8601 timestamp of the last modification "
+            "(e.g. '2026-04-29T10:23:00Z'). Empty when not reported."
+        ),
+    )
+    space_id: str = Field(
+        default="",
+        description=(
+            "Space that contains the document this work item belongs to. "
+            "Empty when the work item is not part of any document."
+        ),
+    )
+    document_name: str = Field(
+        default="",
+        description=(
+            "Name of the document this work item belongs to. "
+            "Empty when the work item is not part of any document. "
+            "Use with ``space_id`` to call ``get_document`` / "
+            "``get_document_parts``."
+        ),
+    )
+    assignee_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Short user IDs of the assignees (e.g. ['alice', 'bob']). "
+            "Empty list when the work item has no assignee."
+        ),
+    )
+
+
+class Hyperlink(BaseModel):
+    """A single external hyperlink attached to a work item."""
+
+    role: str = Field(
+        description=("Hyperlink role identifier (e.g. 'ref_ext', 'implementation')."),
+    )
+    title: str = Field(
+        default="",
+        description="Human-readable link title. Empty when not provided.",
+    )
+    uri: str = Field(
+        description="Target URI of the hyperlink.",
+    )
 
 
 class WorkItemDetail(WorkItemSummary):
     """Full work-item details returned by ``get_work_item``.
 
-    Extends ``WorkItemSummary`` with the description and project context.
+    Extends ``WorkItemSummary`` with the description, project context,
+    and detail-only metadata (authorship, resolution, severity,
+    outline position, external hyperlinks).
     """
 
     description: str = Field(
@@ -202,6 +302,51 @@ class WorkItemDetail(WorkItemSummary):
     )
     project_id: str = Field(
         description="Project that contains this work item.",
+    )
+    author_id: str = Field(
+        default="",
+        description=(
+            "Short user ID of the author (e.g. 'alice'). "
+            "Empty when the server does not report an author."
+        ),
+    )
+    created: str = Field(
+        default="",
+        description=(
+            "ISO-8601 timestamp of the work item creation "
+            "(e.g. '2026-04-29T10:23:00Z'). Empty when not reported."
+        ),
+    )
+    resolution: str = Field(
+        default="",
+        description=(
+            "Resolution outcome for closed/done work items "
+            "(e.g. 'fixed', 'wontfix', 'duplicate'). "
+            "Empty for unresolved or non-closeable items."
+        ),
+    )
+    severity: str = Field(
+        default="",
+        description=(
+            "Severity classification, primarily used for defects "
+            "(e.g. 'blocker', 'critical', 'major'). "
+            "Empty for non-defect types."
+        ),
+    )
+    outline_number: str = Field(
+        default="",
+        description=(
+            "Hierarchical position inside the containing document "
+            "(e.g. '1.2.3'). Empty when the work item is not part of "
+            "a document or has no assigned outline number."
+        ),
+    )
+    hyperlinks: list[Hyperlink] = Field(
+        default_factory=list,
+        description=(
+            "External hyperlinks attached to this work item. "
+            "Empty list when none are set."
+        ),
     )
 
 
@@ -214,8 +359,16 @@ class LinkedWorkItemSummary(BaseModel):
     title: str = Field(
         description="Linked Work Item title.",
     )
-    role: str = Field(
-        description=("Link role identifier (e.g. 'parent', 'relates_to', 'verifies')."),
+    role: str | None = Field(
+        default=None,
+        description=(
+            "Link role identifier (e.g. 'parent', 'relates_to', "
+            "'verifies'). ``None`` for back-direction links because "
+            "Polarion's ``linkedWorkItems:`` query does not expose the "
+            "originating link's role on this server version. May be "
+            "filled in once the ``backlinkedworkitems`` endpoint becomes "
+            "available."
+        ),
     )
     direction: Literal["forward", "back"] = Field(
         description=(
@@ -228,6 +381,36 @@ class LinkedWorkItemSummary(BaseModel):
             "Whether the link is marked as suspect. "
             "Suspect links indicate that the linked item has changed "
             "since the link was last reviewed."
+        ),
+    )
+    type: str = Field(
+        default="",
+        description=(
+            "Type of the linked work item (e.g. 'requirement', "
+            "'testCase'). Empty when the server does not report a type."
+        ),
+    )
+    status: str = Field(
+        default="",
+        description=(
+            "Workflow status of the linked work item "
+            "(e.g. 'draft', 'approved'). Empty when the server does not "
+            "report a status."
+        ),
+    )
+    space_id: str = Field(
+        default="",
+        description=(
+            "Space that contains the document the linked work item "
+            "belongs to. Empty when not module-bound."
+        ),
+    )
+    document_name: str = Field(
+        default="",
+        description=(
+            "Name of the document the linked work item belongs to. "
+            "Empty when not module-bound. Use with ``space_id`` to call "
+            "``get_document`` / ``get_document_parts``."
         ),
     )
 
@@ -383,6 +566,7 @@ __all__: list[str] = [
     "DocumentPart",
     "DocumentPartCreateResult",
     "DocumentSummary",
+    "Hyperlink",
     "JsonValue",
     "LinkResult",
     "LinkedWorkItemSummary",

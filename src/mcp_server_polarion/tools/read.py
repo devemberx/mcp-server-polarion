@@ -9,6 +9,8 @@ relationships.  Every tool returns Pydantic models -- never raw
 from __future__ import annotations
 
 import re
+import time
+from dataclasses import dataclass
 from typing import Final, Literal, cast
 
 from fastmcp import Context
@@ -24,6 +26,7 @@ from mcp_server_polarion.models import (
     DocumentDetail,
     DocumentPart,
     DocumentSummary,
+    Hyperlink,
     LinkedWorkItemsList,
     LinkedWorkItemSummary,
     PaginatedResult,
@@ -37,14 +40,17 @@ from mcp_server_polarion.tools._helpers import (
     WI_DETAIL_FIELDS,
     WI_LIST_FIELDS,
     build_included_workitem_map,
+    build_work_item_summary_kwargs,
     compute_has_more,
     encode_path_segment,
     extract_relationship_id,
+    extract_short_id,
     extract_total_count,
     get_client,
     has_links_next,
     parse_work_item_summaries,
     safe_str,
+    split_module_id,
 )
 from mcp_server_polarion.utils import html_to_markdown
 
@@ -57,6 +63,96 @@ _VALID_PART_TYPES: Final[frozenset[str]] = frozenset(
 # ---------------------------------------------------------------------------
 # Read-specific helpers
 # ---------------------------------------------------------------------------
+
+
+def _parse_hyperlinks(value: object) -> list[Hyperlink]:
+    """Parse the ``attributes.hyperlinks`` field into ``Hyperlink`` models.
+
+    Polarion returns hyperlinks as a list of dicts with ``role``,
+    ``title``, and ``uri`` keys. Entries without a usable ``uri`` are
+    skipped to keep the response signal clean for the LLM.
+    """
+    if not isinstance(value, list):
+        return []
+    links: list[Hyperlink] = []
+    for entry in value:
+        if not isinstance(entry, dict):
+            continue
+        uri = safe_str(entry.get("uri", ""))
+        if not uri:
+            continue
+        links.append(
+            Hyperlink(
+                role=safe_str(entry.get("role", "")),
+                title=safe_str(entry.get("title", "")),
+                uri=uri,
+            )
+        )
+    return links
+
+
+@dataclass(frozen=True, slots=True)
+class _LinkedWorkItem:
+    """Metadata extracted from an included work-item resource."""
+
+    short_id: str = ""
+    title: str = ""
+    type: str = ""
+    status: str = ""
+    description_html: str = ""
+
+
+def _extract_html_value(field: object) -> str:
+    """Extract the HTML payload from a Polarion text field.
+
+    Polarion serialises rich-text fields either as a dict
+    ``{"type": "text/html", "value": "..."}`` or, in some responses, as
+    a plain string. Both shapes resolve to a string here.
+    """
+    if isinstance(field, dict):
+        return safe_str(field.get("value", ""))
+    if isinstance(field, str):
+        return field
+    return ""
+
+
+def _resolve_heading_level(attrs: dict[str, object]) -> int:
+    """Return the heading level for a heading part.
+
+    Prefers ``attributes.level`` when present, otherwise falls back to
+    parsing the leading ``<hN>`` tag in ``attributes.content``.
+    """
+    attr_level = attrs.get("level")
+    if isinstance(attr_level, int):
+        return attr_level
+    head_html = _extract_html_value(attrs.get("content"))
+    match = re.match(r"<h(\d)", head_html, re.IGNORECASE)
+    return int(match.group(1)) if match else 0
+
+
+def _resolve_linked_work_item(
+    rels: dict[str, object],
+    wi_map: dict[str, dict[str, object]],
+) -> _LinkedWorkItem:
+    """Return metadata for the work item linked from a document part."""
+    wi_full_id = extract_relationship_id(rels, "workItem")
+    if not wi_full_id:
+        return _LinkedWorkItem()
+
+    short_id = (
+        wi_full_id.split("/", maxsplit=1)[-1] if "/" in wi_full_id else wi_full_id
+    )
+    wi_attrs = wi_map.get(wi_full_id, {}).get("attributes", {})
+    if not isinstance(wi_attrs, dict):
+        return _LinkedWorkItem(short_id=short_id)
+
+    return _LinkedWorkItem(
+        short_id=short_id,
+        title=safe_str(wi_attrs.get("title", "")),
+        type=safe_str(wi_attrs.get("type", "")),
+        status=safe_str(wi_attrs.get("status", "")),
+        description_html=_extract_html_value(wi_attrs.get("description")),
+    )
 
 
 def _parse_document_part(
@@ -78,64 +174,53 @@ def _parse_document_part(
     attrs = item.get("attributes", {})
     if not isinstance(attrs, dict):
         attrs = {}
-    part_id = safe_str(item.get("id", ""))
 
-    # Type ------------------------------------------------------------------
     raw_type = safe_str(attrs.get("type", ""))
     part_type: _PartType = cast(
         _PartType,
         raw_type if raw_type in _VALID_PART_TYPES else "normal",
     )
 
-    # Content ---------------------------------------------------------------
-    content_html = ""
-    content_obj = attrs.get("content")
-    if isinstance(content_obj, dict):
-        content_html = safe_str(content_obj.get("value", ""))
-    elif isinstance(content_obj, str):
-        content_html = content_obj
+    # Polarion stores heading text in work-item titles and workitem body in
+    # the work-item description, so attributes.content for those types is
+    # either an empty <hN></hN> stub or empty entirely. Skip the conversion
+    # to avoid emitting noise like "#"/"##" or empty strings to the LLM.
+    content_html = (
+        _extract_html_value(attrs.get("content"))
+        if part_type not in {"heading", "workitem"}
+        else ""
+    )
+    level = _resolve_heading_level(attrs) if part_type == "heading" else 0
 
-    # Heading level from HTML tag (e.g. <h2 …> → 2) ------------------------
-    level = 0
-    if part_type == "heading":
-        heading_match = re.match(r"<h(\d)", content_html, re.IGNORECASE)
-        if heading_match:
-            level = int(heading_match.group(1))
-
-    # Relationships ---------------------------------------------------------
     rels = item.get("relationships", {})
     if not isinstance(rels, dict):
         rels = {}
+    linked = _resolve_linked_work_item(rels, wi_map)
 
-    next_part_id = extract_relationship_id(rels, "nextPart")
-    previous_part_id = extract_relationship_id(rels, "previousPart")
+    full_id = safe_str(item.get("id", ""))
+    short_id = full_id.rsplit("/", maxsplit=1)[-1] if "/" in full_id else full_id
 
-    # Resolve title & description from the included work item ---------------
-    title = ""
-    description_html = ""
-    wi_full_id = extract_relationship_id(rels, "workItem")
-    if wi_full_id:
-        wi = wi_map.get(wi_full_id, {})
-        wi_attrs = wi.get("attributes", {})
-        if isinstance(wi_attrs, dict):
-            title = safe_str(wi_attrs.get("title", ""))
-            desc_obj = wi_attrs.get("description")
-            if isinstance(desc_obj, dict):
-                description_html = safe_str(desc_obj.get("value", ""))
-            elif isinstance(desc_obj, str):
-                description_html = desc_obj
+    next_full_id = extract_relationship_id(rels, "nextPart")
+    next_short_id = (
+        next_full_id.rsplit("/", maxsplit=1)[-1]
+        if "/" in next_full_id
+        else next_full_id
+    )
 
     return DocumentPart(
-        id=part_id,
-        title=title,
-        content=html_to_markdown(content_html),
+        id=short_id,
+        title=linked.title,
+        content=html_to_markdown(content_html) if content_html else "",
         type=part_type,
         level=level,
         description=(
-            html_to_markdown(description_html) if part_type == "workitem" else ""
+            html_to_markdown(linked.description_html) if part_type == "workitem" else ""
         ),
-        next_part_id=next_part_id,
-        previous_part_id=previous_part_id,
+        work_item_id=linked.short_id,
+        work_item_type=linked.type,
+        work_item_status=linked.status,
+        external=bool(attrs.get("external", False)),
+        next_part_id=next_short_id,
     )
 
 
@@ -189,23 +274,31 @@ def _parse_linked_items(
         if not isinstance(rels, dict):
             rels = {}
         wi_full_id = extract_relationship_id(rels, "workItem")
-        wi_id = (
-            wi_full_id.split("/", maxsplit=1)[-1] if "/" in wi_full_id else wi_full_id
-        )
-
-        # Resolve title from included work items.
-        title = ""
-        if wi_full_id:
-            wi = wi_map.get(wi_full_id, {})
-            wi_attrs = wi.get("attributes", {})
-            if isinstance(wi_attrs, dict):
-                title = safe_str(wi_attrs.get("title", ""))
+        wi_id = extract_short_id(wi_full_id)
 
         # Skip items where the target work item cannot be resolved
         # via the relationships object (per project conventions, we do
         # not parse the raw linked-work-item ID).
         if not wi_id:
             continue
+
+        # Resolve title and metadata from the included target work item.
+        title = ""
+        wi_type = ""
+        wi_status = ""
+        space_id = ""
+        document_name = ""
+        wi = wi_map.get(wi_full_id, {})
+        wi_attrs = wi.get("attributes", {})
+        if isinstance(wi_attrs, dict):
+            title = safe_str(wi_attrs.get("title", ""))
+            wi_type = safe_str(wi_attrs.get("type", ""))
+            wi_status = safe_str(wi_attrs.get("status", ""))
+        wi_rels = wi.get("relationships", {})
+        if isinstance(wi_rels, dict):
+            space_id, document_name = split_module_id(
+                extract_relationship_id(wi_rels, "module")
+            )
 
         items.append(
             LinkedWorkItemSummary(
@@ -214,6 +307,10 @@ def _parse_linked_items(
                 role=role,
                 direction=direction,
                 suspect=suspect,
+                type=wi_type,
+                status=wi_status,
+                space_id=space_id,
+                document_name=document_name,
             )
         )
     return items
@@ -261,106 +358,99 @@ def _get_module_id(item: object) -> str:
     return extract_relationship_id(rels, "module")
 
 
+# Document-discovery TTL cache (in-process, keyed by project_id).
+# A short TTL keeps paginated `list_documents` calls cheap while ensuring
+# newly-created documents appear within ~1 minute. Future write tools can
+# invalidate by popping the project_id key.
+_CACHE_TTL_SECONDS: Final[float] = 60.0
+
+
+@dataclass(frozen=True, slots=True)
+class _DocCacheEntry:
+    expires_at: float
+    documents: tuple[tuple[str, str], ...]
+
+
+_documents_cache: dict[str, _DocCacheEntry] = {}
+
+
+def _get_cached_documents(project_id: str) -> list[tuple[str, str]] | None:
+    entry = _documents_cache.get(project_id)
+    if entry is None:
+        return None
+    if time.monotonic() >= entry.expires_at:
+        _documents_cache.pop(project_id, None)
+        return None
+    return list(entry.documents)
+
+
+def _store_cached_documents(
+    project_id: str,
+    documents: list[tuple[str, str]],
+) -> None:
+    _documents_cache[project_id] = _DocCacheEntry(
+        expires_at=time.monotonic() + _CACHE_TTL_SECONDS,
+        documents=tuple(documents),
+    )
+
+
 async def _discover_documents(
     client: PolarionClient,
     project_id: str,
-) -> set[tuple[str, str]]:
-    """Discover all unique (space_id, document_name) pairs via binary search.
+) -> list[tuple[str, str]]:
+    """Discover all unique (space_id, document_name) pairs via linear scan.
 
-    Because heading work items are sorted by ``module``, all headings for the
-    same document are contiguous.  This lets us **binary search** for document
-    transition boundaries rather than scanning every page linearly.
+    Iterates every heading-workitem page (page_size=100) in order and
+    accumulates unique ``module`` relationship IDs into a set. Results
+    are cached for ``_CACHE_TTL_SECONDS`` to amortise the cost across
+    paginated callers.
 
-    Complexity: O(D * log(N / D)) page fetches, where D is the number of
-    unique documents and N is the total number of pages.
+    A linear scan is preferred over binary search because, in practice,
+    each page returns work items belonging to ~1 document (so N ≈ D and
+    binary search wastes log(N) probes per transition).
 
     Args:
         client: Active ``PolarionClient`` instance.
         project_id: Polarion project ID.
 
     Returns:
-        Set of (space_id, document_name) tuples.
+        Sorted list of (space_id, document_name) tuples.
     """
+    cached = _get_cached_documents(project_id)
+    if cached is not None:
+        return cached
+
     base_params: dict[str, str | int] = {
         "fields[workitems]": "module",
         "query": "type:heading",
-        "sort": "module",
         "page[size]": DEFAULT_PAGE_SIZE,
     }
 
-    async def _fetch_page(page: int) -> list[object]:
-        """Fetch a single page and return the ``data`` array."""
-        resp = await client.get(
-            f"/projects/{project_id}/workitems",
-            params={**base_params, "page[number]": page},
-        )
-        data = resp.get("data", [])
-        return data if isinstance(data, list) else []
-
-    # -- Step 1: fetch page 1 to get the total count. --------------------
-    first_resp = await client.get(
-        f"/projects/{project_id}/workitems",
-        params={**base_params, "page[number]": 1},
-    )
-    first_data = first_resp.get("data", [])
-    if not isinstance(first_data, list) or not first_data:
-        return set()
-
-    total_count = extract_total_count(first_resp)
-    max_page = max(1, -(-total_count // DEFAULT_PAGE_SIZE))  # ceil div
-
     documents: set[tuple[str, str]] = set()
-    for item in first_data:
-        _extract_document_pair(item, documents)
+    page_number = 1
 
-    if max_page <= 1:
-        return documents
+    while True:
+        response = await client.get(
+            f"/projects/{project_id}/workitems",
+            params={**base_params, "page[number]": page_number},
+        )
+        data = response.get("data", [])
+        if not isinstance(data, list) or not data:
+            break
 
-    # -- Step 2: binary search for successive document boundaries. -------
-    # ``last_module`` is the module ID of the *last* item on the most
-    # recently processed boundary page.  Because results are sorted,
-    # all items between the current position and the next transition have
-    # the same (or earlier) module.
-    last_module = _get_module_id(first_data[-1])
-    current_page = 1
+        for item in data:
+            _extract_document_pair(item, documents)
 
-    while current_page < max_page:
-        # Binary-search for the first page after ``current_page`` where
-        # at least one item has a module different from ``last_module``.
-        lo, hi = current_page + 1, max_page
-        transition_page = 0
-        transition_data: list[object] = []
+        raw_total = extract_total_count(response)
+        if not compute_has_more(
+            response, raw_total, page_number, DEFAULT_PAGE_SIZE, len(data)
+        ):
+            break
+        page_number += 1
 
-        while lo <= hi:
-            mid = (lo + hi) // 2
-            mid_data = await _fetch_page(mid)
-            if not mid_data:
-                hi = mid - 1
-                continue
-
-            # Collect documents from every probed page (free wins).
-            for item in mid_data:
-                _extract_document_pair(item, documents)
-
-            # Check monotonic property: does this page have any item
-            # whose module differs from ``last_module``?
-            has_new = any(_get_module_id(it) != last_module for it in mid_data)
-
-            if has_new:
-                transition_page = mid
-                transition_data = mid_data
-                hi = mid - 1
-            else:
-                lo = mid + 1
-
-        if transition_page == 0:
-            break  # No more transitions — all documents discovered.
-
-        # Advance to the transition page for the next iteration.
-        current_page = transition_page
-        last_module = _get_module_id(transition_data[-1])
-
-    return documents
+    sorted_docs = sorted(documents)
+    _store_cached_documents(project_id, sorted_docs)
+    return sorted_docs
 
 
 # ---------------------------------------------------------------------------
@@ -418,6 +508,10 @@ async def list_projects(
         PaginatedResult containing ``ProjectSummary`` items with:
         - ``id``: Project identifier.
         - ``name``: Human-readable project name.
+        - ``active``: Whether the project is active (True) or archived
+          (False). Use this to skip archived projects when picking a
+          target. Defaults to True when the server does not report the
+          flag.
         - ``total_count``: Total number of matching projects.
         - ``page`` / ``page_size``: Current pagination state.
         - ``has_more``: True if more pages exist.
@@ -429,7 +523,7 @@ async def list_projects(
     """
     client = get_client(ctx)
     params: dict[str, str | int] = {
-        "fields[projects]": "id,name",
+        "fields[projects]": "id,name,active",
         "page[size]": page_size,
         "page[number]": page_number,
     }
@@ -453,10 +547,13 @@ async def list_projects(
             attrs = item.get("attributes", {})
             if not isinstance(attrs, dict):
                 attrs = {}
+            active_attr = attrs.get("active")
+            active = active_attr if isinstance(active_attr, bool) else True
             items.append(
                 ProjectSummary(
                     id=safe_str(item.get("id", "")),
                     name=safe_str(attrs.get("name", "")),
+                    active=active,
                 )
             )
 
@@ -536,8 +633,8 @@ async def list_documents(
     """
     client = get_client(ctx)
 
-    # Binary-search discovery: O(D * log(N/D)) page fetches instead of
-    # O(N) linear scanning, where D = unique documents, N = total pages.
+    # Linear scan over heading work items, with a 60s TTL cache keyed by
+    # project_id so paginated callers reuse the same discovery result.
     try:
         documents = await _discover_documents(client, project_id)
     except PolarionNotFoundError as exc:
@@ -554,13 +651,12 @@ async def list_documents(
             f"Failed to list documents for project '{project_id}': {exc.message}"
         ) from exc
 
-    filtered: list[tuple[str, str]] = sorted(documents)
-    total = len(filtered)
+    total = len(documents)
 
-    # Manual pagination over the extracted set.
+    # Manual pagination over the discovered (already sorted) list.
     start = (page_number - 1) * page_size
     end = start + page_size
-    page_slice = filtered[start:end]
+    page_slice = documents[start:end]
 
     items = [DocumentSummary(space_id=s, document_name=d) for s, d in page_slice]
 
@@ -596,18 +692,28 @@ async def get_document(
             "Spaces in the name are handled automatically."
         ),
     ),
+    include_content: bool = Field(
+        default=False,
+        description=(
+            "When True, also fetch and return the document's homePageContent "
+            "as Markdown in the ``content`` field. Off by default because "
+            "homePageContent can be large (tens of KB) and most callers only "
+            "need metadata. Note: Polarion stores actual document body in "
+            "work-item titles/descriptions — use ``get_document_parts`` for "
+            "the structured body."
+        ),
+    ),
 ) -> DocumentDetail:
-    """Get a quick overview of a Polarion document.
+    """Get metadata for a Polarion document.
 
-    Retrieves the title, metadata, and **body content** of a document.
-    The ``content`` field contains the home-page HTML converted to
-    Markdown.  Note that Polarion stores **heading text in work-item
-    titles**, not in the document body, so headings may appear without
-    text.  Empty headings are automatically stripped from the output.
+    Returns the document's title, type, and workflow status. By default
+    the ``content`` field is empty; set ``include_content=True`` to also
+    fetch ``homePageContent`` (converted to Markdown). Empty headings
+    inside the home-page content are stripped automatically.
 
-    Use this tool for a **fast summary or metadata lookup**.  For the
-    full document structure with heading titles and work-item
-    descriptions, use ``get_document_parts`` instead.
+    Polarion stores **heading text in work-item titles**, not in
+    ``homePageContent``. For the structured body of a document, call
+    ``get_document_parts`` — this tool is for fast metadata lookup.
 
     Use ``list_documents`` first to discover valid space IDs and
     document names.
@@ -617,14 +723,17 @@ async def get_document(
         project_id: Polarion project ID.
         space_id: Space ID containing the document.
         document_name: Document name within the space.
+        include_content: When True, also return the homePageContent
+            converted to Markdown. Default False to keep the response
+            small.
 
     Returns:
         DocumentDetail with:
-        - ``id``: Document identifier.
         - ``title``: Document title.
-        - ``content``: Document body in Markdown (empty headings stripped).
-        - ``space_id``: Containing space.
-        - ``project_id``: Containing project.
+        - ``type``: Document type (e.g. 'req_specification').
+        - ``status``: Workflow status (e.g. 'draft').
+        - ``content``: Document body in Markdown — only populated when
+        - ``include_content=True``, otherwise empty.
 
     Raises:
         ValueError: If the document, space, or project is not found.
@@ -639,10 +748,14 @@ async def get_document(
         f"/documents/{encoded_name}"
     )
 
+    fields = "title,type,status"
+    if include_content:
+        fields = f"{fields},homePageContent"
+
     try:
         response = await client.get(
             path,
-            params={"fields[documents]": "title,homePageContent"},
+            params={"fields[documents]": fields},
         )
     except PolarionNotFoundError as exc:
         raise ValueError(
@@ -666,26 +779,27 @@ async def get_document(
     if not isinstance(attrs, dict):
         attrs = {}
 
-    # homePageContent is always HTML:
-    # { "type": "text/html", "value": "<p>...</p>" }
-    content_obj = attrs.get("homePageContent", {})
-    content_html = ""
-    if isinstance(content_obj, dict):
-        content_html = safe_str(content_obj.get("value", ""))
+    content_md = ""
+    if include_content:
+        # homePageContent is always HTML:
+        # { "type": "text/html", "value": "<p>...</p>" }
+        content_obj = attrs.get("homePageContent", {})
+        content_html = ""
+        if isinstance(content_obj, dict):
+            content_html = safe_str(content_obj.get("value", ""))
 
-    content_md = html_to_markdown(content_html)
-    # Polarion stores heading text in work-item titles, so the
-    # document body often contains empty headings (e.g. "## \n").
-    # Strip them to reduce noise for the LLM.
-    content_md = re.sub(r"^#{1,6}\s*$", "", content_md, flags=re.MULTILINE)
-    content_md = re.sub(r"\n{3,}", "\n\n", content_md).strip()
+        content_md = html_to_markdown(content_html)
+        # Polarion stores heading text in work-item titles, so the
+        # document body often contains empty headings (e.g. "## \n").
+        # Strip them to reduce noise for the LLM.
+        content_md = re.sub(r"^#{1,6}\s*$", "", content_md, flags=re.MULTILINE)
+        content_md = re.sub(r"\n{3,}", "\n\n", content_md).strip()
 
     return DocumentDetail(
-        id=safe_str(attrs.get("id", data.get("id", ""))),
         title=safe_str(attrs.get("title", "")),
+        type=safe_str(attrs.get("type", "")),
+        status=safe_str(attrs.get("status", "")),
         content=content_md,
-        space_id=space_id,
-        project_id=project_id,
     )
 
 
@@ -722,12 +836,17 @@ async def get_document_parts(  # noqa: PLR0913
 ) -> PaginatedResult[DocumentPart]:
     """List the structural parts (headings and work items) of a document.
 
-    Returns the ordered list of part IDs, titles, and types that make
-    up a document's body.  Use this tool **only** when you need:
+    Returns the ordered list of part IDs, titles, types, and linked
+    work-item metadata that make up a document's body. Use this tool
+    **only** when you need:
 
-    - Part IDs for positioning with ``create_document_part``
-      (``next_part_id`` / ``previous_part_id``).
+    - Part IDs for positioning with ``create_document_part`` — pass any
+      existing part's ``id`` as ``next_part_id`` (insert before) or
+      ``previous_part_id`` (insert after). Results are returned in
+      document order.
     - The hierarchical structure (heading levels) of the document.
+    - The type/status of work items embedded in the document, without a
+      separate ``get_work_item`` call.
 
     **Do NOT call this tool just to read or summarise a document.**
     ``get_document`` already returns the complete document body.
@@ -742,16 +861,30 @@ async def get_document_parts(  # noqa: PLR0913
 
     Returns:
         PaginatedResult containing ``DocumentPart`` items with:
-        - ``id``: Full JSON:API part identifier
-          (e.g. 'projectId/spaceId/documentName/heading_MCPT-001').
-        - ``title``: Part title from the associated work item.
-        - ``content``: Part body content in Markdown.
+        - ``id``: Short part identifier within the document
+          (e.g. 'heading_MCPT-001', 'workitem_MCPT-042', 'polarion_1').
+          Use as ``next_part_id`` or ``previous_part_id`` when calling
+          ``create_document_part``.
+        - ``title``: Part title (from the linked work item for heading
+          and workitem parts).
+        - ``content``: Part body in Markdown. Empty for 'heading' and
+          'workitem' parts (their text lives in ``title`` / ``level``
+          and ``description`` respectively).
         - ``type``: 'heading', 'workitem', 'normal', 'toc',
           or 'wikiblock'.
         - ``level``: Heading level (1-4) or 0 for non-headings.
-        - ``description``: Work item description in Markdown.
-        - ``next_part_id``: Full ID of the next part.
-        - ``previous_part_id``: Full ID of the previous part.
+        - ``description``: Work-item description in Markdown
+          (workitem parts only).
+        - ``work_item_id``: Short linked work-item ID
+          (e.g. 'MCPT-001'). Use directly with ``get_work_item`` /
+          ``get_linked_work_items``.
+        - ``work_item_type``: Linked work-item type
+          (e.g. 'requirement', 'testCase').
+        - ``work_item_status``: Linked work-item workflow status.
+        - ``external``: True when the part references a work item from
+          another project (re-used / typically read-only).
+        - ``next_part_id``: Short ID of the next part in document order
+          (e.g. 'workitem_MCPT-002'). Empty on the last part.
 
     Raises:
         ValueError: If the document, space, or project is not found.
@@ -861,9 +994,9 @@ async def list_work_items(
 ) -> PaginatedResult[WorkItemSummary]:
     """List and search work items in a Polarion project.
 
-    Returns a paginated list of work items with basic metadata (title,
-    type, status).  Pass a Lucene ``query`` to filter results, or omit
-    it to list all work items.
+    Returns a paginated list of work items with the metadata most often
+    needed for triage and traceability. Pass a Lucene ``query`` to
+    filter results, or omit it to list all work items.
 
     Common Lucene query examples:
 
@@ -888,6 +1021,13 @@ async def list_work_items(
         - ``title``: Work Item title.
         - ``type``: Work Item type (e.g. 'requirement').
         - ``status``: Workflow status (e.g. 'draft').
+        - ``priority``: Priority value as a string (empty when unset).
+        - ``updated``: ISO-8601 timestamp of the last modification.
+        - ``space_id`` / ``document_name``: Document this work item
+          belongs to (both empty when not module-bound). Use with
+          ``get_document`` / ``get_document_parts``.
+        - ``assignee_ids``: Short user IDs of assignees (empty list
+          when unassigned).
 
     Raises:
         ValueError: If the project is not found.
@@ -898,6 +1038,11 @@ async def list_work_items(
     client = get_client(ctx)
     params: dict[str, str | int] = {
         "fields[workitems]": WI_LIST_FIELDS,
+        # Polarion does not inline ``data`` for to-many relationships
+        # unless the resource is included; ``include=assignee`` ensures
+        # ``relationships.assignee.data`` is populated so that
+        # ``assignee_ids`` can be extracted.
+        "include": "assignee",
         "page[size]": page_size,
         "page[number]": page_number,
     }
@@ -976,6 +1121,21 @@ async def get_work_item(
         - ``title``: Work Item title.
         - ``type``: Work Item type.
         - ``status``: Workflow status.
+        - ``priority``: Priority value as a string (empty when unset).
+        - ``updated``: ISO-8601 last-modified timestamp.
+        - ``created``: ISO-8601 creation timestamp.
+        - ``space_id`` / ``document_name``: Document this work item
+          belongs to (both empty when not module-bound).
+        - ``outline_number``: Hierarchical position inside the document
+          (e.g. '1.2.3'); empty when not in a document.
+        - ``assignee_ids``: Short user IDs of assignees.
+        - ``author_id``: Short user ID of the author.
+        - ``resolution``: Resolution outcome for closed items
+          (e.g. 'fixed', 'wontfix'); empty otherwise.
+        - ``severity``: Severity classification, used for defects
+          (e.g. 'blocker', 'critical'); empty otherwise.
+        - ``hyperlinks``: External hyperlinks as ``Hyperlink`` items
+          with ``role``, ``title``, ``uri`` fields.
         - ``description``: Full description in Markdown.
         - ``project_id``: Containing project.
 
@@ -989,7 +1149,10 @@ async def get_work_item(
     try:
         response = await client.get(
             path,
-            params={"fields[workitems]": WI_DETAIL_FIELDS},
+            params={
+                "fields[workitems]": WI_DETAIL_FIELDS,
+                "include": "assignee",
+            },
         )
     except PolarionNotFoundError as exc:
         raise ValueError(
@@ -1012,25 +1175,29 @@ async def get_work_item(
     attrs = data.get("attributes", {})
     if not isinstance(attrs, dict):
         attrs = {}
+    rels = data.get("relationships", {})
+    if not isinstance(rels, dict):
+        rels = {}
 
-    # Extract description HTML.
     desc_obj = attrs.get("description", {})
     desc_html = ""
     if isinstance(desc_obj, dict):
         desc_html = safe_str(desc_obj.get("value", ""))
 
-    # Extract work item ID from JSON:API id
-    # (format: "projectId/WI-001").
-    raw_id = safe_str(data.get("id", ""))
-    wi_id = raw_id.split("/", maxsplit=1)[-1] if "/" in raw_id else raw_id
+    summary_kwargs = build_work_item_summary_kwargs(data)
+    if not summary_kwargs["id"]:
+        summary_kwargs["id"] = work_item_id
 
     return WorkItemDetail(
-        id=wi_id or work_item_id,
-        title=safe_str(attrs.get("title", "")),
-        type=safe_str(attrs.get("type", "")),
-        status=safe_str(attrs.get("status", "")),
+        **summary_kwargs,
         description=html_to_markdown(desc_html),
         project_id=project_id,
+        author_id=extract_short_id(extract_relationship_id(rels, "author")),
+        created=safe_str(attrs.get("created", "")),
+        resolution=safe_str(attrs.get("resolution", "")),
+        severity=safe_str(attrs.get("severity", "")),
+        outline_number=safe_str(attrs.get("outlineNumber", "")),
+        hyperlinks=_parse_hyperlinks(attrs.get("hyperlinks")),
     )
 
 
@@ -1069,7 +1236,23 @@ async def get_linked_work_items(
 
     Returns:
         LinkedWorkItemsList with:
-        - ``items``: All linked work items (forward and back).
+        - ``items``: All linked work items, each ``LinkedWorkItemSummary``
+          carrying:
+
+          * ``id`` / ``title`` — the linked work item.
+          * ``direction`` — 'forward' (this WI links out) or 'back'
+            (the other WI links in).
+          * ``role`` — link role identifier (e.g. 'parent', 'verifies').
+            ``None`` for back-direction links because Polarion's
+            ``linkedWorkItems:`` query does not expose the originating
+            link's role on this server version. To recover the role,
+            call ``get_linked_work_items`` on the source WI and inspect
+            its forward links.
+          * ``suspect`` — whether the link is marked suspect.
+          * ``type`` / ``status`` — linked WI type and workflow status.
+          * ``space_id`` / ``document_name`` — document the linked WI
+            belongs to (both empty when not module-bound).
+
         - ``forward_count``: Number of outgoing links.
         - ``back_count``: Number of incoming links.
         - ``total_count``: Total number of linked items (forward + back).
@@ -1137,9 +1320,15 @@ async def get_linked_work_items(
                 LinkedWorkItemSummary(
                     id=summary.id,
                     title=summary.title,
-                    role="backlink",
-                    suspect=False,
+                    # role unknown — Polarion's ``linkedWorkItems:`` query
+                    # only exposes the source WI list, not the link role.
+                    role=None,
                     direction="back",
+                    suspect=False,
+                    type=summary.type,
+                    status=summary.status,
+                    space_id=summary.space_id,
+                    document_name=summary.document_name,
                 )
                 for summary in page_summaries
             )

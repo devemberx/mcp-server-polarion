@@ -7,13 +7,28 @@ package and are **not** part of the public package API.
 
 from __future__ import annotations
 
-from typing import Final
+from typing import Final, TypedDict
 from urllib.parse import quote
 
 from fastmcp import Context
 
 from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.models import WorkItemSummary
+
+
+class WorkItemSummaryKwargs(TypedDict):
+    """Kwargs shape produced by ``build_work_item_summary_kwargs``."""
+
+    id: str
+    title: str
+    type: str
+    status: str
+    priority: str
+    updated: str
+    space_id: str
+    document_name: str
+    assignee_ids: list[str]
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -23,8 +38,12 @@ from mcp_server_polarion.models import WorkItemSummary
 DEFAULT_PAGE_SIZE: Final[int] = 100
 
 # Sparse fieldsets for list / detail endpoints.
-WI_LIST_FIELDS: Final[str] = "title,type,status"
-WI_DETAIL_FIELDS: Final[str] = "title,description,type,status"
+WI_LIST_FIELDS: Final[str] = "title,type,status,priority,updated,module,assignee"
+WI_DETAIL_FIELDS: Final[str] = (
+    "title,description,type,status,priority,updated,"
+    "created,resolution,severity,outlineNumber,hyperlinks,"
+    "module,assignee,author"
+)
 
 # ---------------------------------------------------------------------------
 # Functions
@@ -179,6 +198,105 @@ def extract_relationship_id(
     return ""
 
 
+def extract_relationship_ids(
+    rels: dict[str, object],
+    rel_name: str,
+) -> list[str]:
+    """Extract the ``data[].id`` list of a to-many relationship.
+
+    Args:
+        rels: The ``relationships`` dict of a JSON:API resource.
+        rel_name: Relationship key (e.g. ``'assignee'``).
+
+    Returns:
+        List of related resource IDs in declaration order. Empty list
+        when the relationship is absent or its data array is empty.
+    """
+    rel = rels.get(rel_name, {})
+    if not isinstance(rel, dict):
+        return []
+    data = rel.get("data")
+    if not isinstance(data, list):
+        return []
+    ids: list[str] = []
+    for entry in data:
+        if isinstance(entry, dict):
+            entry_id = safe_str(entry.get("id", ""))
+            if entry_id:
+                ids.append(entry_id)
+    return ids
+
+
+def split_module_id(module_full_id: str) -> tuple[str, str]:
+    """Split a module relationship ID into (space_id, document_name).
+
+    The Polarion module ID has the format
+    ``{projectId}/{spaceId}/{documentName}`` where ``documentName`` may
+    itself contain ``/`` segments. Returns ``("", "")`` when the ID does
+    not have at least three segments.
+    """
+    if not module_full_id:
+        return ("", "")
+    parts = module_full_id.split("/", 2)
+    expected_segments = 3
+    if len(parts) < expected_segments:
+        return ("", "")
+    return (parts[1], parts[2])
+
+
+def extract_short_id(full_id: str) -> str:
+    """Strip the project / path prefix from a JSON:API ID.
+
+    For ``"projectId/MCPT-001"`` returns ``"MCPT-001"``.
+    For ``"alice"`` (no slashes) returns ``"alice"`` unchanged.
+    """
+    if "/" not in full_id:
+        return full_id
+    return full_id.rsplit("/", maxsplit=1)[-1]
+
+
+def build_work_item_summary_kwargs(
+    item: dict[str, object],
+) -> WorkItemSummaryKwargs:
+    """Extract ``WorkItemSummary`` kwargs from a single JSON:API resource.
+
+    Centralises the attribute + relationship parsing used by both list
+    and detail endpoints so that ``WorkItemDetail`` stays a strict
+    superset of ``WorkItemSummary``.
+
+    Args:
+        item: A single JSON:API resource object (``data`` element).
+
+    Returns:
+        Dict suitable for ``WorkItemSummary(**kwargs)`` /
+        ``WorkItemDetail(**kwargs, description=..., project_id=...)``.
+    """
+    attrs = item.get("attributes", {})
+    if not isinstance(attrs, dict):
+        attrs = {}
+    rels = item.get("relationships", {})
+    if not isinstance(rels, dict):
+        rels = {}
+
+    module_id = extract_relationship_id(rels, "module")
+    space_id, document_name = split_module_id(module_id)
+    assignee_ids = [
+        extract_short_id(uid) for uid in extract_relationship_ids(rels, "assignee")
+    ]
+
+    return {
+        "id": extract_short_id(safe_str(item.get("id", ""))),
+        "title": safe_str(attrs.get("title", "")),
+        "type": safe_str(attrs.get("type", "")),
+        "status": safe_str(attrs.get("status", "")),
+        "priority": safe_str(attrs.get("priority", "")),
+        "updated": safe_str(attrs.get("updated", "")),
+        "space_id": space_id,
+        "document_name": document_name,
+        "assignee_ids": assignee_ids,
+    }
+
+
 def parse_work_item_summaries(
     data: object,
 ) -> list[WorkItemSummary]:
@@ -197,23 +315,7 @@ def parse_work_item_summaries(
     for item in data:
         if not isinstance(item, dict):
             continue
-        attrs = item.get("attributes", {})
-        if not isinstance(attrs, dict):
-            attrs = {}
-
-        # Extract ID from JSON:API id
-        # (format: "projectId/WI-001").
-        raw_id = safe_str(item.get("id", ""))
-        wi_id = raw_id.split("/", maxsplit=1)[-1] if "/" in raw_id else raw_id
-
-        items.append(
-            WorkItemSummary(
-                id=wi_id,
-                title=safe_str(attrs.get("title", "")),
-                type=safe_str(attrs.get("type", "")),
-                status=safe_str(attrs.get("status", "")),
-            )
-        )
+        items.append(WorkItemSummary(**build_work_item_summary_kwargs(item)))
     return items
 
 
@@ -222,12 +324,16 @@ __all__: list[str] = [
     "WI_DETAIL_FIELDS",
     "WI_LIST_FIELDS",
     "build_included_workitem_map",
+    "build_work_item_summary_kwargs",
     "compute_has_more",
     "encode_path_segment",
     "extract_relationship_id",
+    "extract_relationship_ids",
+    "extract_short_id",
     "extract_total_count",
     "get_client",
     "has_links_next",
     "parse_work_item_summaries",
     "safe_str",
+    "split_module_id",
 ]

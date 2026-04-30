@@ -6,6 +6,7 @@ Each tool is tested by calling the async function directly with a mock
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -75,12 +76,12 @@ class TestListProjects:
                 {
                     "type": "projects",
                     "id": "proj1",
-                    "attributes": {"name": "Project One"},
+                    "attributes": {"name": "Project One", "active": True},
                 },
                 {
                     "type": "projects",
                     "id": "proj2",
-                    "attributes": {"name": "Project Two"},
+                    "attributes": {"name": "Project Two", "active": False},
                 },
             ],
             "meta": {"totalCount": 2},
@@ -99,10 +100,57 @@ class TestListProjects:
         assert result.page == 1
         assert result.page_size == 100
         assert result.has_more is False
-        p1 = ProjectSummary(id="proj1", name="Project One")
+        p1 = ProjectSummary(id="proj1", name="Project One", active=True)
         assert result.items[0] == p1
-        p2 = ProjectSummary(id="proj2", name="Project Two")
+        p2 = ProjectSummary(id="proj2", name="Project Two", active=False)
         assert result.items[1] == p2
+
+    async def test_active_defaults_true_when_missing(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "type": "projects",
+                    "id": "proj1",
+                    "attributes": {"name": "No Active Field"},
+                },
+                {
+                    "type": "projects",
+                    "id": "proj2",
+                    "attributes": {"name": "Non-bool Active", "active": "yes"},
+                },
+            ],
+            "meta": {"totalCount": 2},
+        }
+
+        result = await list_projects(
+            mock_ctx,
+            query=None,
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.items[0].active is True
+        assert result.items[1].active is True
+
+    async def test_requests_active_field(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": [],
+            "meta": {"totalCount": 0},
+        }
+
+        await list_projects(
+            mock_ctx,
+            query=None,
+            page_size=100,
+            page_number=1,
+        )
+
+        _, kwargs = mock_client.get.call_args
+        assert "active" in kwargs["params"]["fields[projects]"].split(",")
 
     async def test_empty_projects(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -286,6 +334,17 @@ class TestListProjects:
 class TestListDocuments:
     """Tests for the ``list_documents`` tool."""
 
+    @pytest.fixture(autouse=True)
+    def _clear_doc_cache(self) -> Iterator[None]:
+        """Reset the module-level TTL cache around every test.
+
+        Several tests reuse ``project_id='proj1'``, so without this the
+        first test would poison subsequent tests via cache hits.
+        """
+        _read_mod._documents_cache.clear()
+        yield
+        _read_mod._documents_cache.clear()
+
     async def test_extracts_documents_from_modules(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
@@ -432,29 +491,10 @@ class TestListDocuments:
         assert result.total_count == 0
         assert result.items == []
 
-    async def test_binary_search_skips_pages(
+    async def test_linear_scan_walks_all_pages(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Binary search discovers document boundaries without scanning every page.
-
-        Layout (5 pages total, sorted by module):
-          Page 1: DocA x 100   (page 1 always fetched)
-          Page 2: DocA x 100
-          Page 3: DocA x 50 + DocB x 50  (transition)
-          Page 4: DocB x 100
-          Page 5: DocB x 30   (partial -> end)
-
-        Binary search from page 1 (last_module=DocA):
-          lo=2, hi=5 → mid=3 → DocA+DocB (has_new) → transition_page=3, hi=2
-          lo=2, hi=2 → mid=2 → DocA only → lo=3
-          lo>hi → done, transition_page=3
-        Then from page 3 (last_module=DocB):
-          lo=4, hi=5 → mid=4 → DocB only → lo=5
-          lo=5, hi=5 → mid=5 → DocB only → lo=6
-          lo>hi → done, no transition
-        Total fetches: page 1 + page 3 + page 2 + page 4 + page 5 = 5
-        (but in a larger dataset, most pages would be skipped)
-        """
+        """Linear scan visits every heading page exactly once."""
 
         def _make_item(doc: str) -> dict:
             return {
@@ -465,17 +505,15 @@ class TestListDocuments:
 
         page_data = {
             1: [_make_item("DocA")] * 100,
-            2: [_make_item("DocA")] * 100,
-            3: [_make_item("DocA")] * 50 + [_make_item("DocB")] * 50,
-            4: [_make_item("DocB")] * 100,
-            5: [_make_item("DocB")] * 30,
+            2: [_make_item("DocA")] * 50 + [_make_item("DocB")] * 50,
+            3: [_make_item("DocB")] * 30,
         }
 
-        async def _mock_get(path, *, params=None):
+        async def _mock_get(_path, *, params=None):
             page_num = params["page[number]"]
             return {
                 "data": page_data.get(page_num, []),
-                "meta": {"totalCount": 430},  # 5 pages
+                "meta": {"totalCount": 230},
             }
 
         mock_client.get.side_effect = _mock_get
@@ -490,11 +528,13 @@ class TestListDocuments:
         assert result.total_count == 2
         pairs = {(d.space_id, d.document_name) for d in result.items}
         assert pairs == {("S", "DocA"), ("S", "DocB")}
+        # Page 1, 2, 3 — exactly 3 API calls, no extra probes.
+        assert mock_client.get.call_count == 3
 
-    async def test_binary_search_many_documents_on_few_pages(
+    async def test_linear_scan_stops_on_partial_page(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """When multiple small documents fit on one page, all are discovered."""
+        """A short final page (without totalCount/links.next) ends the loop."""
 
         def _make_item(doc: str) -> dict:
             return {
@@ -503,7 +543,41 @@ class TestListDocuments:
                 }
             }
 
-        # Single page with 4 different documents (sorted).
+        # Page 2 is partial (50 < 100), and totalCount is omitted →
+        # compute_has_more's heuristic must stop the scan.
+        page_data = {
+            1: [_make_item("DocA")] * 100,
+            2: [_make_item("DocB")] * 50,
+        }
+
+        async def _mock_get(_path, *, params=None):
+            page_num = params["page[number]"]
+            return {"data": page_data.get(page_num, [])}
+
+        mock_client.get.side_effect = _mock_get
+
+        result = await list_documents(
+            mock_ctx,
+            project_id="p",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.total_count == 2
+        assert mock_client.get.call_count == 2
+
+    async def test_single_page_uses_one_call(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Multiple documents on a single page → one API call."""
+
+        def _make_item(doc: str) -> dict:
+            return {
+                "relationships": {
+                    "module": {"data": {"type": "documents", "id": f"p/S/{doc}"}}
+                }
+            }
+
         items = (
             [_make_item("Alpha")] * 25
             + [_make_item("Bravo")] * 25
@@ -525,10 +599,106 @@ class TestListDocuments:
         assert result.total_count == 4
         names = {d.document_name for d in result.items}
         assert names == {"Alpha", "Bravo", "Charlie", "Delta"}
-        # Only 1 API call needed (single page).
         assert mock_client.get.call_count == 1
 
-    async def test_api_params_include_query_and_sort(
+    async def test_cache_hit_skips_api_calls(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """A second call with the same project_id is served from cache."""
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "relationships": {
+                        "module": {
+                            "data": {"type": "documents", "id": "proj1/_default/Doc1"}
+                        }
+                    }
+                },
+            ],
+            "meta": {"totalCount": 1},
+        }
+
+        first = await list_documents(
+            mock_ctx, project_id="proj1", page_size=100, page_number=1
+        )
+        calls_after_first = mock_client.get.call_count
+
+        second = await list_documents(
+            mock_ctx, project_id="proj1", page_size=100, page_number=1
+        )
+
+        assert mock_client.get.call_count == calls_after_first
+        assert [(d.space_id, d.document_name) for d in first.items] == [
+            (d.space_id, d.document_name) for d in second.items
+        ]
+
+    async def test_cache_isolated_per_project(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Different project IDs do not share cache entries."""
+
+        async def _mock_get(_path, *, params=None):
+            # Echo project from path? Simpler: return distinct doc per call.
+            return {
+                "data": [
+                    {
+                        "relationships": {
+                            "module": {
+                                "data": {
+                                    "type": "documents",
+                                    "id": f"x/S/Doc{mock_client.get.call_count}",
+                                }
+                            }
+                        }
+                    },
+                ],
+                "meta": {"totalCount": 1},
+            }
+
+        mock_client.get.side_effect = _mock_get
+
+        await list_documents(mock_ctx, project_id="projA", page_size=100, page_number=1)
+        await list_documents(mock_ctx, project_id="projB", page_size=100, page_number=1)
+        # Each project triggered its own fetch — no cross-project cache hit.
+        assert mock_client.get.call_count == 2
+
+    async def test_cache_expires_after_ttl(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """After TTL elapses, the next call re-fetches from the API."""
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "relationships": {
+                        "module": {
+                            "data": {"type": "documents", "id": "proj1/_default/Doc1"}
+                        }
+                    }
+                },
+            ],
+            "meta": {"totalCount": 1},
+        }
+
+        fake_now = [1000.0]
+
+        def _fake_monotonic() -> float:
+            return fake_now[0]
+
+        monkeypatch.setattr(_read_mod.time, "monotonic", _fake_monotonic)
+
+        await list_documents(mock_ctx, project_id="proj1", page_size=100, page_number=1)
+        first_calls = mock_client.get.call_count
+
+        # Advance time past the TTL.
+        fake_now[0] += _read_mod._CACHE_TTL_SECONDS + 1.0
+
+        await list_documents(mock_ctx, project_id="proj1", page_size=100, page_number=1)
+        assert mock_client.get.call_count > first_calls
+
+    async def test_api_params_include_query(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.get.return_value = {
@@ -549,7 +719,9 @@ class TestListDocuments:
             call_args[0][1] if len(call_args[0]) > 1 else {},
         )
         assert params["query"] == "type:heading"
-        assert params["sort"] == "module"
+        # sort=module was dropped — server-side sort cost > client-side dedup
+        # (benchmarked: ~4x slower on cold server cache, equal warm).
+        assert "sort" not in params
 
     async def test_not_found_raises_value_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -598,6 +770,8 @@ class TestGetDocument:
                 "attributes": {
                     "id": "SRS",
                     "title": "Software Requirement Spec",
+                    "type": "req_specification",
+                    "status": "approved",
                     "homePageContent": {
                         "type": "text/html",
                         "value": ("<p>This is the <strong>SRS</strong> document.</p>"),
@@ -611,15 +785,87 @@ class TestGetDocument:
             project_id="proj1",
             space_id="_default",
             document_name="SRS",
+            include_content=True,
         )
 
         assert isinstance(result, DocumentDetail)
-        assert result.id == "SRS"
         assert result.title == "Software Requirement Spec"
+        assert result.type == "req_specification"
+        assert result.status == "approved"
         assert "SRS" in result.content
         assert "<p>" not in result.content
-        assert result.space_id == "_default"
-        assert result.project_id == "proj1"
+
+    async def test_include_content_false_omits_content(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """include_content=False → body skipped, metadata still populated."""
+        mock_client.get.return_value = {
+            "data": {
+                "attributes": {
+                    "id": "SRS",
+                    "title": "SRS",
+                    "type": "req_specification",
+                    "status": "draft",
+                    # Even if the API echoes homePageContent (it shouldn't,
+                    # since we don't request it), the tool must ignore it.
+                    "homePageContent": {
+                        "type": "text/html",
+                        "value": "<p>should be ignored</p>",
+                    },
+                },
+            },
+        }
+
+        result = await get_document(
+            mock_ctx,
+            project_id="proj1",
+            space_id="_default",
+            document_name="SRS",
+            include_content=False,
+        )
+
+        assert result.title == "SRS"
+        assert result.type == "req_specification"
+        assert result.status == "draft"
+        assert result.content == ""
+
+        _, kwargs = mock_client.get.call_args
+        fields = kwargs["params"]["fields[documents]"]
+        assert "title" in fields
+        assert "type" in fields
+        assert "status" in fields
+        assert "homePageContent" not in fields
+
+    async def test_include_content_requests_homepage_field(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """With include_content=True, homePageContent is requested."""
+        mock_client.get.return_value = {
+            "data": {
+                "attributes": {
+                    "title": "Doc",
+                    "type": "generic",
+                    "status": "draft",
+                    "homePageContent": {
+                        "type": "text/html",
+                        "value": "<p>body</p>",
+                    },
+                },
+            },
+        }
+
+        result = await get_document(
+            mock_ctx,
+            project_id="proj1",
+            space_id="_default",
+            document_name="Doc",
+            include_content=True,
+        )
+
+        _, kwargs = mock_client.get.call_args
+        fields = kwargs["params"]["fields[documents]"]
+        assert "homePageContent" in fields
+        assert "body" in result.content
 
     async def test_encodes_document_name_with_spaces(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -661,6 +907,7 @@ class TestGetDocument:
             project_id="proj1",
             space_id="_default",
             document_name="EmptyDoc",
+            include_content=True,
         )
 
         assert result.content == ""
@@ -684,6 +931,7 @@ class TestGetDocument:
     async def test_no_content_field(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
+        """Missing homePageContent → content stays empty even when requested."""
         mock_client.get.return_value = {
             "data": {
                 "attributes": {
@@ -698,6 +946,7 @@ class TestGetDocument:
             project_id="proj1",
             space_id="_default",
             document_name="NoContent",
+            include_content=True,
         )
 
         assert result.content == ""
@@ -728,6 +977,7 @@ class TestGetDocument:
             project_id="proj1",
             space_id="_default",
             document_name="DocH",
+            include_content=True,
         )
 
         assert "##" not in result.content
@@ -871,27 +1121,39 @@ class TestGetDocumentParts:
 
         heading = result.items[0]
         assert isinstance(heading, DocumentPart)
-        assert heading.id == "proj1/_default/SRS/heading_MCPT-001"
+        assert heading.id == "heading_MCPT-001"
         assert heading.type == "heading"
         assert heading.level == 1
         assert heading.title == "Introduction"
-        assert heading.next_part_id == "proj1/_default/SRS/workitem_MCPT-002"
-        assert heading.previous_part_id == ""
+        assert heading.content == ""
+        assert heading.work_item_id == "MCPT-001"
+        assert heading.work_item_type == "heading"
+        assert heading.work_item_status == "open"
+        assert heading.external is False
+        assert heading.next_part_id == "workitem_MCPT-002"
 
         wi_part = result.items[1]
-        assert wi_part.id == "proj1/_default/SRS/workitem_MCPT-002"
+        assert wi_part.id == "workitem_MCPT-002"
         assert wi_part.type == "workitem"
         assert wi_part.level == 0
         assert wi_part.title == "Login Feature"
+        assert wi_part.content == ""
         assert "login" in wi_part.description.lower()
-        assert wi_part.previous_part_id == "proj1/_default/SRS/heading_MCPT-001"
-        assert wi_part.next_part_id == "proj1/_default/SRS/polarion_1"
+        assert wi_part.work_item_id == "MCPT-002"
+        assert wi_part.work_item_type == "requirement"
+        assert wi_part.work_item_status == "draft"
+        assert wi_part.external is True
+        assert wi_part.next_part_id == "polarion_1"
 
         normal_part = result.items[2]
         assert normal_part.type == "normal"
         assert normal_part.level == 0
         assert normal_part.title == ""
-        assert normal_part.previous_part_id == "proj1/_default/SRS/workitem_MCPT-002"
+        assert "Normal text content" in normal_part.content
+        assert normal_part.work_item_id == ""
+        assert normal_part.work_item_type == ""
+        assert normal_part.work_item_status == ""
+        assert normal_part.external is False
         assert normal_part.next_part_id == ""
 
     async def test_pagination_params_forwarded(
@@ -938,35 +1200,17 @@ class TestGetDocumentParts:
     async def test_string_content_field(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Plain string content (not dict) is handled."""
+        """Plain string content (not dict) is handled for normal parts."""
         mock_client.get.return_value = {
             "data": [
                 {
-                    "id": "proj1/_default/Doc/heading_MCPT-003",
+                    "id": "proj1/_default/Doc/polarion_42",
                     "attributes": {
-                        "id": "heading_MCPT-003",
-                        "content": "<h2>Plain string content.</h2>",
-                        "type": "heading",
+                        "id": "polarion_42",
+                        "content": "<p>Plain string content.</p>",
+                        "type": "normal",
                     },
-                    "relationships": {
-                        "workItem": {
-                            "data": {
-                                "type": "workitems",
-                                "id": "proj1/MCPT-003",
-                            }
-                        },
-                    },
-                },
-            ],
-            "included": [
-                {
-                    "type": "workitems",
-                    "id": "proj1/MCPT-003",
-                    "attributes": {
-                        "type": "heading",
-                        "title": "Plain string content.",
-                        "status": "open",
-                    },
+                    "relationships": {},
                 },
             ],
             "meta": {"totalCount": 1},
@@ -982,10 +1226,8 @@ class TestGetDocumentParts:
         )
 
         assert len(result.items) == 1
-        assert result.items[0].type == "heading"
-        assert result.items[0].level == 2
+        assert result.items[0].type == "normal"
         assert "Plain string content" in result.items[0].content
-        assert result.items[0].title == "Plain string content."
 
     async def test_total_count_floor_when_api_returns_zero(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1046,6 +1288,22 @@ class TestListWorkItems:
                         "title": "Login Feature",
                         "type": "requirement",
                         "status": "draft",
+                        "priority": "90.0",
+                        "updated": "2026-04-29T10:23:00Z",
+                    },
+                    "relationships": {
+                        "module": {
+                            "data": {
+                                "type": "documents",
+                                "id": "proj1/Design/Software Requirement Specification",
+                            }
+                        },
+                        "assignee": {
+                            "data": [
+                                {"type": "users", "id": "proj1/alice"},
+                                {"type": "users", "id": "proj1/bob"},
+                            ]
+                        },
                     },
                 },
                 {
@@ -1055,6 +1313,10 @@ class TestListWorkItems:
                         "title": "Logout Feature",
                         "type": "requirement",
                         "status": "approved",
+                    },
+                    "relationships": {
+                        "module": {"data": None},
+                        "assignee": {"data": []},
                     },
                 },
             ],
@@ -1072,9 +1334,23 @@ class TestListWorkItems:
         assert isinstance(result, PaginatedResult)
         assert len(result.items) == 2
         assert result.total_count == 2
-        assert result.items[0].id == "MCPT-001"
-        assert result.items[0].title == "Login Feature"
-        assert result.items[1].id == "MCPT-002"
+
+        first = result.items[0]
+        assert first.id == "MCPT-001"
+        assert first.title == "Login Feature"
+        assert first.priority == "90.0"
+        assert first.updated == "2026-04-29T10:23:00Z"
+        assert first.space_id == "Design"
+        assert first.document_name == "Software Requirement Specification"
+        assert first.assignee_ids == ["alice", "bob"]
+
+        second = result.items[1]
+        assert second.id == "MCPT-002"
+        assert second.priority == ""
+        assert second.updated == ""
+        assert second.space_id == ""
+        assert second.document_name == ""
+        assert second.assignee_ids == []
 
     async def test_sparse_fieldset_requested(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1263,12 +1539,34 @@ class TestGetWorkItem:
                     "title": "Login Feature",
                     "type": "requirement",
                     "status": "draft",
+                    "priority": "75.0",
+                    "updated": "2026-04-29T10:23:00Z",
+                    "created": "2026-04-01T09:00:00Z",
+                    "outlineNumber": "1.2.3",
+                    "hyperlinks": [
+                        {
+                            "role": "ref_ext",
+                            "title": "Spec",
+                            "uri": "https://example.com/spec",
+                        },
+                        {"role": "impl", "title": "", "uri": ""},
+                    ],
                     "description": {
                         "type": "text/html",
                         "value": (
                             "<p>User must be able to <strong>log in</strong>.</p>"
                         ),
                     },
+                },
+                "relationships": {
+                    "module": {
+                        "data": {
+                            "type": "documents",
+                            "id": "proj1/Design/SRS",
+                        }
+                    },
+                    "assignee": {"data": [{"type": "users", "id": "proj1/alice"}]},
+                    "author": {"data": {"type": "users", "id": "proj1/bob"}},
                 },
             },
         }
@@ -1284,9 +1582,45 @@ class TestGetWorkItem:
         assert result.title == "Login Feature"
         assert result.type == "requirement"
         assert result.status == "draft"
+        assert result.priority == "75.0"
+        assert result.updated == "2026-04-29T10:23:00Z"
+        assert result.created == "2026-04-01T09:00:00Z"
+        assert result.outline_number == "1.2.3"
+        assert result.space_id == "Design"
+        assert result.document_name == "SRS"
+        assert result.assignee_ids == ["alice"]
+        assert result.author_id == "bob"
+        # Entry without uri is skipped.
+        assert len(result.hyperlinks) == 1
+        assert result.hyperlinks[0].role == "ref_ext"
+        assert result.hyperlinks[0].uri == "https://example.com/spec"
         assert "log in" in result.description
         assert "<p>" not in result.description
         assert result.project_id == "proj1"
+
+    async def test_defect_severity_and_open_resolution(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": {
+                "id": "proj1/MCPT-500",
+                "attributes": {
+                    "title": "Login crashes",
+                    "type": "defect",
+                    "status": "open",
+                    "severity": "blocker",
+                },
+            },
+        }
+
+        result = await get_work_item(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT-500",
+        )
+
+        assert result.severity == "blocker"
+        assert result.resolution == ""
 
     async def test_no_description(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1309,6 +1643,13 @@ class TestGetWorkItem:
         )
 
         assert result.description == ""
+        # Default values for new detail-only fields.
+        assert result.author_id == ""
+        assert result.created == ""
+        assert result.severity == ""
+        assert result.resolution == ""
+        assert result.outline_number == ""
+        assert result.hyperlinks == []
 
     async def test_not_found_raises_value_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1391,6 +1732,14 @@ class TestGetLinkedWorkItems:
                             "type": "heading",
                             "status": "open",
                         },
+                        "relationships": {
+                            "module": {
+                                "data": {
+                                    "type": "documents",
+                                    "id": "proj1/Design/SRS",
+                                }
+                            },
+                        },
                     },
                 ],
             },
@@ -1402,6 +1751,14 @@ class TestGetLinkedWorkItems:
                             "title": "Related Item",
                             "type": "requirement",
                             "status": "draft",
+                        },
+                        "relationships": {
+                            "module": {
+                                "data": {
+                                    "type": "documents",
+                                    "id": "proj1/Requirements/SysRS",
+                                }
+                            },
                         },
                     },
                     {
@@ -1433,18 +1790,32 @@ class TestGetLinkedWorkItems:
         assert len(fwd) == 1
         assert len(back) == 2
 
-        # Forward: target from relationships.workItem, role from attributes
+        # Forward: target metadata extracted from included WI.
         assert fwd[0].id == "MCPT-010"
         assert fwd[0].role == "parent"
         assert fwd[0].title == "Parent Item"
         assert fwd[0].suspect is False
+        assert fwd[0].type == "heading"
+        assert fwd[0].status == "open"
+        assert fwd[0].space_id == "Design"
+        assert fwd[0].document_name == "SRS"
 
-        # Back: parsed from workitems query, role = "backlink"
-        back_ids = {i.id for i in back}
-        assert back_ids == {"MCPT-020", "MCPT-030"}
+        # Back: parsed from workitems query. role is None on this server
+        # version (the originating link role is not exposed).
+        back_by_id = {i.id: i for i in back}
+        assert set(back_by_id) == {"MCPT-020", "MCPT-030"}
         for b in back:
-            assert b.role == "backlink"
+            assert b.role is None
             assert b.suspect is False
+        # Back item with module gets space_id/document_name populated.
+        assert back_by_id["MCPT-020"].type == "requirement"
+        assert back_by_id["MCPT-020"].status == "draft"
+        assert back_by_id["MCPT-020"].space_id == "Requirements"
+        assert back_by_id["MCPT-020"].document_name == "SysRS"
+        # Back item without module → both empty.
+        assert back_by_id["MCPT-030"].type == "testCase"
+        assert back_by_id["MCPT-030"].space_id == ""
+        assert back_by_id["MCPT-030"].document_name == ""
 
     async def test_no_links(self, mock_ctx: MagicMock, mock_client: AsyncMock) -> None:
         mock_client.get.side_effect = [
@@ -1582,8 +1953,9 @@ class TestGetLinkedWorkItems:
         assert fwd.role == "parent"
         assert fwd.title == "Parent Target"
 
-        # Back: parsed from workitems query
+        # Back: parsed from workitems query — role is unknown on this
+        # server version (linkedWorkItems: query does not expose role).
         assert back.direction == "back"
         assert back.id == "MCPT-099"
-        assert back.role == "backlink"
+        assert back.role is None
         assert back.title == "Back Item"

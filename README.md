@@ -113,8 +113,8 @@ Register via the `claude mcp add` command:
 
 ```bash
 claude mcp add mcp-server-polarion \
-  --env POLARION_URL=https://polarion.example.com \
-  --env POLARION_TOKEN=your-personal-access-token \
+  -e POLARION_URL=https://polarion.example.com \
+  -e POLARION_TOKEN=your-personal-access-token \
   -- uvx mcp-server-polarion
 ```
 
@@ -127,10 +127,10 @@ claude mcp add mcp-server-polarion \
 | `list_projects` | List all accessible Polarion projects (supports Lucene query filtering) |
 | `list_documents` | List documents in a project (with optional name/space filtering) |
 | `get_document` | Get full document content in Markdown |
-| `get_document_parts` | List structural parts (headings, work items) with part IDs |
-| `list_work_items` | Search work items with Lucene queries (e.g. `type:requirement`) |
-| `get_work_item` | Get full work item details including description in Markdown |
-| `get_linked_work_items` | Get all forward and back links for traceability |
+| `get_document_parts` | List structural parts with linked work item metadata (type, status, `external` flag) |
+| `list_work_items` | Search work items with Lucene queries; results include priority, last-modified time, owning document, and assignees |
+| `get_work_item` | Get full work item details (description, author, created/updated timestamps, severity, resolution, outline number, hyperlinks) |
+| `get_linked_work_items` | Get forward and back links with each linked item's type, status, and owning document for traceability analysis |
 
 All list tools support pagination via `page_size` (1–100) and `page_number` parameters.
 

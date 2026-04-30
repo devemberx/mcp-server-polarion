@@ -11,6 +11,7 @@ from mcp_server_polarion.models import (
     DocumentPart,
     DocumentPartCreateResult,
     DocumentSummary,
+    Hyperlink,
     LinkedWorkItemsList,
     LinkedWorkItemSummary,
     LinkResult,
@@ -123,6 +124,14 @@ class TestProjectSummary:
         assert p.id == "myproject"
         assert p.name == "My Project"
 
+    def test_active_defaults_true(self):
+        p = ProjectSummary(id="myproject", name="My Project")
+        assert p.active is True
+
+    def test_active_explicit_false(self):
+        p = ProjectSummary(id="archived", name="Old Project", active=False)
+        assert p.active is False
+
     def test_missing_id(self):
         with pytest.raises(ValidationError):
             ProjectSummary(name="No ID")  # type: ignore[call-arg]
@@ -159,32 +168,21 @@ class TestDocumentSummary:
 class TestDocumentDetail:
     def test_valid(self):
         d = DocumentDetail(
-            id="SRS",
             title="Software Requirement Specification",
             content="## Overview\n\nSystem requirements.",
-            space_id="_default",
-            project_id="myproject",
         )
-        assert d.id == "SRS"
         assert d.title == "Software Requirement Specification"
-        assert d.space_id == "_default"
 
     def test_empty_content(self):
         d = DocumentDetail(
-            id="doc1",
             title="Empty Doc",
             content="",
-            space_id="space1",
-            project_id="proj1",
         )
         assert d.content == ""
 
     def test_missing_required_field(self):
         with pytest.raises(ValidationError):
-            DocumentDetail(  # type: ignore[call-arg]
-                id="doc1",
-                title="Missing Fields",
-            )
+            DocumentDetail()  # type: ignore[call-arg]
 
 
 # ---------------------------------------------------------------------------
@@ -205,13 +203,16 @@ class TestDocumentPart:
         assert part.level == 1
         assert part.description == ""
         assert part.next_part_id == ""
-        assert part.previous_part_id == ""
+        assert part.work_item_id == ""
+        assert part.work_item_type == ""
+        assert part.work_item_status == ""
+        assert part.external is False
 
     def test_workitem_part(self):
         part = DocumentPart(
             id="workitem_MCPT-042",
             title="Login Requirement",
-            content="The system **shall** allow login.",
+            content="",
             type="workitem",
             level=0,
         )
@@ -222,22 +223,28 @@ class TestDocumentPart:
         part = DocumentPart(
             id="workitem_MCPT-042",
             title="Login Requirement",
-            content="The system **shall** allow login.",
+            content="",
             type="workitem",
             level=0,
             description="Must support SSO.",
+            work_item_id="MCPT-042",
+            work_item_type="requirement",
+            work_item_status="approved",
+            external=True,
             next_part_id="proj/space/doc/heading_MCPT-043",
-            previous_part_id="proj/space/doc/heading_MCPT-041",
         )
         assert part.description == "Must support SSO."
+        assert part.work_item_id == "MCPT-042"
+        assert part.work_item_type == "requirement"
+        assert part.work_item_status == "approved"
+        assert part.external is True
         assert part.next_part_id == "proj/space/doc/heading_MCPT-043"
-        assert part.previous_part_id == "proj/space/doc/heading_MCPT-041"
 
     def test_serialization(self):
         part = DocumentPart(
             id="heading_MCPT-010",
             title="Scope",
-            content="Project scope.",
+            content="",
             type="heading",
             level=2,
         )
@@ -245,7 +252,11 @@ class TestDocumentPart:
         assert data["id"] == "heading_MCPT-010"
         assert data["level"] == 2
         assert data["next_part_id"] == ""
-        assert data["previous_part_id"] == ""
+        assert data["work_item_id"] == ""
+        assert data["work_item_type"] == ""
+        assert data["work_item_status"] == ""
+        assert data["external"] is False
+        assert "previous_part_id" not in data
 
     def test_invalid_type_rejected(self):
         with pytest.raises(ValidationError):
@@ -273,6 +284,37 @@ class TestWorkItemSummary:
         )
         assert wi.id == "MCPT-001"
         assert wi.status == "draft"
+
+    def test_default_optional_fields(self):
+        wi = WorkItemSummary(
+            id="MCPT-001",
+            title="Login Feature",
+            type="requirement",
+            status="draft",
+        )
+        assert wi.priority == ""
+        assert wi.updated == ""
+        assert wi.space_id == ""
+        assert wi.document_name == ""
+        assert wi.assignee_ids == []
+
+    def test_full_metadata(self):
+        wi = WorkItemSummary(
+            id="MCPT-042",
+            title="Login Feature",
+            type="requirement",
+            status="approved",
+            priority="90.0",
+            updated="2026-04-29T10:23:00Z",
+            space_id="Design",
+            document_name="Software Requirement Specification",
+            assignee_ids=["alice", "bob"],
+        )
+        assert wi.priority == "90.0"
+        assert wi.updated == "2026-04-29T10:23:00Z"
+        assert wi.space_id == "Design"
+        assert wi.document_name == "Software Requirement Specification"
+        assert wi.assignee_ids == ["alice", "bob"]
 
     def test_various_types(self):
         for wi_type in ("requirement", "task", "testCase", "defect"):
@@ -323,6 +365,91 @@ class TestWorkItemDetail:
         )
         assert detail.description == ""
 
+    def test_inherits_summary_metadata(self):
+        detail = WorkItemDetail(
+            id="MCPT-100",
+            title="Login Feature",
+            type="requirement",
+            status="approved",
+            priority="50.0",
+            updated="2026-04-30T01:00:00Z",
+            space_id="Design",
+            document_name="SRS",
+            assignee_ids=["alice"],
+            description="body",
+            project_id="proj1",
+        )
+        assert detail.priority == "50.0"
+        assert detail.space_id == "Design"
+        assert detail.document_name == "SRS"
+        assert detail.assignee_ids == ["alice"]
+
+    def test_detail_default_optional_fields(self):
+        detail = WorkItemDetail(
+            id="MCPT-001",
+            title="Minimal",
+            type="task",
+            status="open",
+            description="",
+            project_id="proj1",
+        )
+        assert detail.author_id == ""
+        assert detail.created == ""
+        assert detail.resolution == ""
+        assert detail.severity == ""
+        assert detail.outline_number == ""
+        assert detail.hyperlinks == []
+
+    def test_detail_specific_fields(self):
+        detail = WorkItemDetail(
+            id="MCPT-200",
+            title="Login Bug",
+            type="defect",
+            status="closed",
+            description="repro steps",
+            project_id="proj1",
+            author_id="alice",
+            created="2026-04-01T09:00:00Z",
+            resolution="fixed",
+            severity="blocker",
+            outline_number="2.3.1",
+            hyperlinks=[
+                Hyperlink(role="ref_ext", title="Spec", uri="https://example.com"),
+            ],
+        )
+        assert detail.author_id == "alice"
+        assert detail.created == "2026-04-01T09:00:00Z"
+        assert detail.resolution == "fixed"
+        assert detail.severity == "blocker"
+        assert detail.outline_number == "2.3.1"
+        assert len(detail.hyperlinks) == 1
+        assert detail.hyperlinks[0].uri == "https://example.com"
+
+
+# ---------------------------------------------------------------------------
+# Hyperlink
+# ---------------------------------------------------------------------------
+
+
+class TestHyperlink:
+    def test_valid(self):
+        link = Hyperlink(
+            role="ref_ext",
+            title="Reference Spec",
+            uri="https://example.com/spec",
+        )
+        assert link.role == "ref_ext"
+        assert link.title == "Reference Spec"
+        assert link.uri == "https://example.com/spec"
+
+    def test_default_title(self):
+        link = Hyperlink(role="ref_ext", uri="https://example.com")
+        assert link.title == ""
+
+    def test_missing_uri_rejected(self):
+        with pytest.raises(ValidationError):
+            Hyperlink(role="ref_ext")  # type: ignore[call-arg]
+
 
 # ---------------------------------------------------------------------------
 # LinkedWorkItemSummary
@@ -361,6 +488,36 @@ class TestLinkedWorkItemSummary:
                 direction="sideways",
                 suspect=False,
             )
+
+    def test_role_defaults_none_and_metadata_defaults_empty(self):
+        link = LinkedWorkItemSummary(
+            id="MCPT-005",
+            title="Minimal",
+            direction="back",
+            suspect=False,
+        )
+        assert link.role is None
+        assert link.type == ""
+        assert link.status == ""
+        assert link.space_id == ""
+        assert link.document_name == ""
+
+    def test_full_metadata(self):
+        link = LinkedWorkItemSummary(
+            id="MCPT-006",
+            title="Login Feature",
+            role="verifies",
+            direction="forward",
+            suspect=False,
+            type="testCase",
+            status="passed",
+            space_id="Design",
+            document_name="Software Test Case Specification",
+        )
+        assert link.type == "testCase"
+        assert link.status == "passed"
+        assert link.space_id == "Design"
+        assert link.document_name == "Software Test Case Specification"
 
 
 # ---------------------------------------------------------------------------
