@@ -271,10 +271,27 @@ class WorkItemSummary(BaseModel):
     )
 
 
+class Hyperlink(BaseModel):
+    """A single external hyperlink attached to a work item."""
+
+    role: str = Field(
+        description=("Hyperlink role identifier (e.g. 'ref_ext', 'implementation')."),
+    )
+    title: str = Field(
+        default="",
+        description="Human-readable link title. Empty when not provided.",
+    )
+    uri: str = Field(
+        description="Target URI of the hyperlink.",
+    )
+
+
 class WorkItemDetail(WorkItemSummary):
     """Full work-item details returned by ``get_work_item``.
 
-    Extends ``WorkItemSummary`` with the description and project context.
+    Extends ``WorkItemSummary`` with the description, project context,
+    and detail-only metadata (authorship, resolution, severity,
+    outline position, external hyperlinks).
     """
 
     description: str = Field(
@@ -285,6 +302,51 @@ class WorkItemDetail(WorkItemSummary):
     )
     project_id: str = Field(
         description="Project that contains this work item.",
+    )
+    author_id: str = Field(
+        default="",
+        description=(
+            "Short user ID of the author (e.g. 'alice'). "
+            "Empty when the server does not report an author."
+        ),
+    )
+    created: str = Field(
+        default="",
+        description=(
+            "ISO-8601 timestamp of the work item creation "
+            "(e.g. '2026-04-29T10:23:00Z'). Empty when not reported."
+        ),
+    )
+    resolution: str = Field(
+        default="",
+        description=(
+            "Resolution outcome for closed/done work items "
+            "(e.g. 'fixed', 'wontfix', 'duplicate'). "
+            "Empty for unresolved or non-closeable items."
+        ),
+    )
+    severity: str = Field(
+        default="",
+        description=(
+            "Severity classification, primarily used for defects "
+            "(e.g. 'blocker', 'critical', 'major'). "
+            "Empty for non-defect types."
+        ),
+    )
+    outline_number: str = Field(
+        default="",
+        description=(
+            "Hierarchical position inside the containing document "
+            "(e.g. '1.2.3'). Empty when the work item is not part of "
+            "a document or has no assigned outline number."
+        ),
+    )
+    hyperlinks: list[Hyperlink] = Field(
+        default_factory=list,
+        description=(
+            "External hyperlinks attached to this work item. "
+            "Empty list when none are set."
+        ),
     )
 
 
@@ -466,6 +528,7 @@ __all__: list[str] = [
     "DocumentPart",
     "DocumentPartCreateResult",
     "DocumentSummary",
+    "Hyperlink",
     "JsonValue",
     "LinkResult",
     "LinkedWorkItemSummary",

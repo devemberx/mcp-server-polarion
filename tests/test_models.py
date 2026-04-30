@@ -11,6 +11,7 @@ from mcp_server_polarion.models import (
     DocumentPart,
     DocumentPartCreateResult,
     DocumentSummary,
+    Hyperlink,
     LinkedWorkItemsList,
     LinkedWorkItemSummary,
     LinkResult,
@@ -382,6 +383,72 @@ class TestWorkItemDetail:
         assert detail.space_id == "Design"
         assert detail.document_name == "SRS"
         assert detail.assignee_ids == ["alice"]
+
+    def test_detail_default_optional_fields(self):
+        detail = WorkItemDetail(
+            id="MCPT-001",
+            title="Minimal",
+            type="task",
+            status="open",
+            description="",
+            project_id="proj1",
+        )
+        assert detail.author_id == ""
+        assert detail.created == ""
+        assert detail.resolution == ""
+        assert detail.severity == ""
+        assert detail.outline_number == ""
+        assert detail.hyperlinks == []
+
+    def test_detail_specific_fields(self):
+        detail = WorkItemDetail(
+            id="MCPT-200",
+            title="Login Bug",
+            type="defect",
+            status="closed",
+            description="repro steps",
+            project_id="proj1",
+            author_id="alice",
+            created="2026-04-01T09:00:00Z",
+            resolution="fixed",
+            severity="blocker",
+            outline_number="2.3.1",
+            hyperlinks=[
+                Hyperlink(role="ref_ext", title="Spec", uri="https://example.com"),
+            ],
+        )
+        assert detail.author_id == "alice"
+        assert detail.created == "2026-04-01T09:00:00Z"
+        assert detail.resolution == "fixed"
+        assert detail.severity == "blocker"
+        assert detail.outline_number == "2.3.1"
+        assert len(detail.hyperlinks) == 1
+        assert detail.hyperlinks[0].uri == "https://example.com"
+
+
+# ---------------------------------------------------------------------------
+# Hyperlink
+# ---------------------------------------------------------------------------
+
+
+class TestHyperlink:
+    def test_valid(self):
+        link = Hyperlink(
+            role="ref_ext",
+            title="Reference Spec",
+            uri="https://example.com/spec",
+        )
+        assert link.role == "ref_ext"
+        assert link.title == "Reference Spec"
+        assert link.uri == "https://example.com/spec"
+
+    def test_default_title(self):
+        link = Hyperlink(role="ref_ext", uri="https://example.com")
+        assert link.title == ""
+
+    def test_missing_uri_rejected(self):
+        with pytest.raises(ValidationError):
+            Hyperlink(role="ref_ext")  # type: ignore[call-arg]
 
 
 # ---------------------------------------------------------------------------
