@@ -359,8 +359,16 @@ class LinkedWorkItemSummary(BaseModel):
     title: str = Field(
         description="Linked Work Item title.",
     )
-    role: str = Field(
-        description=("Link role identifier (e.g. 'parent', 'relates_to', 'verifies')."),
+    role: str | None = Field(
+        default=None,
+        description=(
+            "Link role identifier (e.g. 'parent', 'relates_to', "
+            "'verifies'). ``None`` for back-direction links because "
+            "Polarion's ``linkedWorkItems:`` query does not expose the "
+            "originating link's role on this server version. May be "
+            "filled in once the ``backlinkedworkitems`` endpoint becomes "
+            "available."
+        ),
     )
     direction: Literal["forward", "back"] = Field(
         description=(
@@ -373,6 +381,36 @@ class LinkedWorkItemSummary(BaseModel):
             "Whether the link is marked as suspect. "
             "Suspect links indicate that the linked item has changed "
             "since the link was last reviewed."
+        ),
+    )
+    type: str = Field(
+        default="",
+        description=(
+            "Type of the linked work item (e.g. 'requirement', "
+            "'testCase'). Empty when the server does not report a type."
+        ),
+    )
+    status: str = Field(
+        default="",
+        description=(
+            "Workflow status of the linked work item "
+            "(e.g. 'draft', 'approved'). Empty when the server does not "
+            "report a status."
+        ),
+    )
+    space_id: str = Field(
+        default="",
+        description=(
+            "Space that contains the document the linked work item "
+            "belongs to. Empty when not module-bound."
+        ),
+    )
+    document_name: str = Field(
+        default="",
+        description=(
+            "Name of the document the linked work item belongs to. "
+            "Empty when not module-bound. Use with ``space_id`` to call "
+            "``get_document`` / ``get_document_parts``."
         ),
     )
 

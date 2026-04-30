@@ -489,6 +489,36 @@ class TestLinkedWorkItemSummary:
                 suspect=False,
             )
 
+    def test_role_defaults_none_and_metadata_defaults_empty(self):
+        link = LinkedWorkItemSummary(
+            id="MCPT-005",
+            title="Minimal",
+            direction="back",
+            suspect=False,
+        )
+        assert link.role is None
+        assert link.type == ""
+        assert link.status == ""
+        assert link.space_id == ""
+        assert link.document_name == ""
+
+    def test_full_metadata(self):
+        link = LinkedWorkItemSummary(
+            id="MCPT-006",
+            title="Login Feature",
+            role="verifies",
+            direction="forward",
+            suspect=False,
+            type="testCase",
+            status="passed",
+            space_id="Design",
+            document_name="Software Test Case Specification",
+        )
+        assert link.type == "testCase"
+        assert link.status == "passed"
+        assert link.space_id == "Design"
+        assert link.document_name == "Software Test Case Specification"
+
 
 # ---------------------------------------------------------------------------
 # LinkedWorkItemsList
