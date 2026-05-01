@@ -684,6 +684,28 @@ class TestBuildMoveToDocumentPayload:
         assert payload["targetDocument"] == "MyProj/Design/Folder/Sub Doc"
         assert payload["previousPart"] == "MyProj/Design/Folder/Sub Doc/workitem_MCPT-2"
 
+    def test_helper_rejects_neither_position(self) -> None:
+        # Defensive guard: the tool layer validates first, but a future
+        # direct caller must not be able to produce a ".../None" literal.
+        with pytest.raises(ValueError, match="exactly one"):
+            _build_move_to_document_payload(
+                project_id="MyProj",
+                target_space_id="S",
+                target_document_name="D",
+                previous_part_id=None,
+                next_part_id=None,
+            )
+
+    def test_helper_rejects_both_positions(self) -> None:
+        with pytest.raises(ValueError, match="exactly one"):
+            _build_move_to_document_payload(
+                project_id="MyProj",
+                target_space_id="S",
+                target_document_name="D",
+                previous_part_id="workitem_MCPT-2",
+                next_part_id="workitem_MCPT-3",
+            )
+
 
 # ---------------------------------------------------------------------------
 # move_work_item_to_document — position validation

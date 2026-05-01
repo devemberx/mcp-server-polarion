@@ -129,8 +129,18 @@ def _build_move_to_document_payload(
 
     Note: this endpoint is NOT JSON:API — the body is a flat object
     with ``targetDocument``, plus exactly one of ``previousPart`` or
-    ``nextPart``. Caller is responsible for the position invariant.
+    ``nextPart``. The tool layer validates the exactly-one invariant
+    before calling this helper, but we re-check here so a future
+    direct caller cannot accidentally produce a ``".../None"``
+    literal-string payload.
     """
+    if (previous_part_id is None) == (next_part_id is None):
+        msg = (
+            "_build_move_to_document_payload requires exactly one of "
+            "previous_part_id or next_part_id to be set."
+        )
+        raise ValueError(msg)
+
     target_doc = f"{project_id}/{target_space_id}/{target_document_name}"
     payload: dict[str, JsonValue] = {"targetDocument": target_doc}
     if previous_part_id is not None:
