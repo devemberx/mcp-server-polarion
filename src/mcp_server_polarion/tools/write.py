@@ -405,9 +405,17 @@ async def move_work_item_to_document(  # noqa: PLR0913
       of the document (its ``space_id`` / ``document_name`` will reflect
       the target), not an external reference.
     - Inserts a corresponding document part at the position specified
-      by ``previous_part_id`` or ``next_part_id``.
-    - Works for ALL work-item types including 'heading' (the older
-      ``/parts`` create endpoint refuses to create heading parts).
+      by ``previous_part_id`` or ``next_part_id`` and assigns the work
+      item a proper ``outline_number``.
+    - Works for all NON-heading work-item types.
+
+    LIMITATION: this Polarion server version rejects heading-type work
+    items with HTTP 400 ("Cannot move headings"). Headings appear to be
+    locked into the document that originally created them and cannot be
+    relocated via the API. If you need a heading inside a particular
+    document, the heading must be created inside that document at
+    work-item creation time (a future ``module_id`` parameter on
+    ``create_work_item`` is the planned path).
 
     Prerequisite: the work item must already exist. Use
     ``create_work_item`` first to create a free-floating work item.
