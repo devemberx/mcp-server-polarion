@@ -138,7 +138,7 @@ class DocumentPart(BaseModel):
             "(e.g. 'heading_MCPT-001', 'workitem_MCPT-042', 'polarion_1'). "
             "Use this as ``next_part_id`` (insert before) or "
             "``previous_part_id`` (insert after) when calling "
-            "``create_document_part``."
+            "``move_work_item_to_document``."
         ),
     )
     title: str = Field(

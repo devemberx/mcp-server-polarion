@@ -840,10 +840,10 @@ async def get_document_parts(  # noqa: PLR0913
     work-item metadata that make up a document's body. Use this tool
     **only** when you need:
 
-    - Part IDs for positioning with ``create_document_part`` — pass any
-      existing part's ``id`` as ``next_part_id`` (insert before) or
-      ``previous_part_id`` (insert after). Results are returned in
-      document order.
+    - Part IDs for positioning with ``move_work_item_to_document`` —
+      pass any existing part's ``id`` as ``next_part_id`` (insert
+      before) or ``previous_part_id`` (insert after). Results are
+      returned in document order.
     - The hierarchical structure (heading levels) of the document.
     - The type/status of work items embedded in the document, without a
       separate ``get_work_item`` call.
@@ -864,7 +864,7 @@ async def get_document_parts(  # noqa: PLR0913
         - ``id``: Short part identifier within the document
           (e.g. 'heading_MCPT-001', 'workitem_MCPT-042', 'polarion_1').
           Use as ``next_part_id`` or ``previous_part_id`` when calling
-          ``create_document_part``.
+          ``move_work_item_to_document``.
         - ``title``: Part title (from the linked work item for heading
           and workitem parts).
         - ``content``: Part body in Markdown. Empty for 'heading' and

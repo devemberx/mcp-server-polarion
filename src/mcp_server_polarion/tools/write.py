@@ -244,9 +244,8 @@ async def create_work_item(  # noqa: PLR0913
     Builds a JSON:API ``POST /projects/{projectId}/workitems`` request
     from the supplied fields, optionally previewing the payload with
     ``dry_run=True``.  The created work item is *not* attached to any
-    document — for document-bound work items, use a future
-    ``create_document_part`` tool that uses the ``/parts`` endpoint and
-    supports outline positioning.
+    document — to place it inside a document at a specific outline
+    position, follow up with ``move_work_item_to_document``.
 
     Description handling: ``description`` is treated as Markdown,
     converted via ``markdown_to_html`` (CommonMark + GFM tables), and
