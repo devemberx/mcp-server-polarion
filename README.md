@@ -1,6 +1,6 @@
 # mcp-server-polarion
 
-A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for **Polarion ALM**. Lets AI assistants read documents, work items, and traceability links directly from your Polarion instance.
+A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for **Polarion ALM**. Lets AI assistants read documents, work items, and traceability links — and create new work items — directly from your Polarion instance.
 
 [![PyPI](https://img.shields.io/pypi/v/mcp-server-polarion)](https://pypi.org/project/mcp-server-polarion/)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/)
@@ -122,6 +122,8 @@ claude mcp add mcp-server-polarion \
 
 ## Tools
 
+### Read
+
 | Tool | Description |
 |---|---|
 | `list_projects` | List all accessible Polarion projects (supports Lucene query filtering) |
@@ -134,6 +136,12 @@ claude mcp add mcp-server-polarion \
 
 All list tools support pagination via `page_size` (1–100) and `page_number` parameters.
 
+### Write
+
+| Tool | Description |
+|---|---|
+| `create_work_item` | Create a new work item (`project_id`, `title`, `type` required; `description` accepted as Markdown and converted to sanitized HTML; supports optional `status`, `priority`, `severity`, `assignee_ids`, `due_date`, `initial_estimate`, `hyperlinks`; `dry_run=True` previews the JSON:API payload without calling Polarion) |
+
 ## Example Prompts
 
 > "List all projects in Polarion"
@@ -145,6 +153,8 @@ All list tools support pagination via `page_size` (1–100) and `page_number` pa
 > "Find all approved requirements in project MCPT"
 
 > "What work items are linked to MCPT-001?"
+
+> "Create a task in project MCPT titled 'Refactor authentication module'"
 
 ## License
 
