@@ -7,10 +7,12 @@ injected via a mock ``Context``.
 
 from __future__ import annotations
 
-from typing import cast
+import inspect
+from typing import Annotated, cast, get_type_hints
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from pydantic import TypeAdapter, ValidationError
 
 from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.core.exceptions import (
@@ -579,3 +581,41 @@ class TestCreateWorkItemResponseParsing:
                 hyperlinks=None,
                 dry_run=False,
             )
+
+
+# ---------------------------------------------------------------------------
+# create_work_item — Pydantic Field constraints
+# ---------------------------------------------------------------------------
+
+
+class TestCreateWorkItemFieldValidation:
+    """Verify ``min_length=1`` constraints attached to required parameters.
+
+    FastMCP enforces these via JSON Schema at the MCP protocol layer
+    before the tool function is invoked; calling the function directly
+    in unit tests bypasses that gate. To prove the constraint is wired
+    correctly, we rebuild a ``TypeAdapter`` from each parameter's
+    annotation + ``FieldInfo`` and assert the constraint actually
+    rejects bad input at the schema layer.
+    """
+
+    @staticmethod
+    def _adapter_for(param_name: str) -> TypeAdapter[object]:
+        hints = get_type_hints(create_work_item)
+        sig = inspect.signature(create_work_item)
+        field_info = sig.parameters[param_name].default
+        return TypeAdapter(Annotated[hints[param_name], field_info])
+
+    def test_title_rejects_empty_string(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("title").validate_python("")
+
+    def test_title_accepts_non_empty(self) -> None:
+        assert self._adapter_for("title").validate_python("hello") == "hello"
+
+    def test_type_rejects_empty_string(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("type").validate_python("")
+
+    def test_type_accepts_non_empty(self) -> None:
+        assert self._adapter_for("type").validate_python("task") == "task"
