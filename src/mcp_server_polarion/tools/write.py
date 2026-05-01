@@ -1,10 +1,10 @@
 """Write MCP tools for Polarion ALM.
 
-Currently provides ``create_work_item``.  All write tools follow the
-strict patterns documented in ``CLAUDE.md``: they convert Markdown
-input to sanitized HTML, build minimal JSON:API payloads (skipping
-unset fields rather than sending empty values), and map domain
-exceptions to user-facing ones at the tool layer.
+Currently provides ``create_work_item`` and ``move_work_item_to_document``.
+All write tools follow the strict patterns documented in ``CLAUDE.md``:
+they convert Markdown input to sanitized HTML, build minimal request
+payloads (skipping unset fields rather than sending empty values), and
+map domain exceptions to user-facing ones at the tool layer.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from mcp_server_polarion.models import (
     Hyperlink,
     JsonValue,
     WorkItemCreateResult,
+    WorkItemMoveResult,
 )
 from mcp_server_polarion.server import mcp
 from mcp_server_polarion.tools._helpers import (
@@ -114,6 +115,29 @@ def _extract_created_id(response: dict[str, object]) -> str | None:
     if not full_id:
         return None
     return extract_short_id(full_id)
+
+
+def _build_move_to_document_payload(
+    *,
+    project_id: str,
+    target_space_id: str,
+    target_document_name: str,
+    previous_part_id: str | None,
+    next_part_id: str | None,
+) -> dict[str, JsonValue]:
+    """Build the request body for the ``moveToDocument`` action endpoint.
+
+    Note: this endpoint is NOT JSON:API — the body is a flat object
+    with ``targetDocument``, plus exactly one of ``previousPart`` or
+    ``nextPart``. Caller is responsible for the position invariant.
+    """
+    target_doc = f"{project_id}/{target_space_id}/{target_document_name}"
+    payload: dict[str, JsonValue] = {"targetDocument": target_doc}
+    if previous_part_id is not None:
+        payload["previousPart"] = f"{target_doc}/{previous_part_id}"
+    else:
+        payload["nextPart"] = f"{target_doc}/{next_part_id}"
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -313,5 +337,171 @@ async def create_work_item(  # noqa: PLR0913
         created=True,
         dry_run=False,
         work_item_id=new_id,
+        payload_preview=None,
+    )
+
+
+@mcp.tool(tags={"write"}, timeout=60.0)
+async def move_work_item_to_document(  # noqa: PLR0913
+    ctx: Context,
+    project_id: str = Field(
+        description=(
+            "Polarion project ID containing the work item being moved. "
+            "Use ``list_projects`` to discover valid IDs."
+        ),
+    ),
+    work_item_id: str = Field(
+        min_length=1,
+        description=(
+            "Short ID of an EXISTING work item to move into the target "
+            "document (e.g. 'MCPT-042'). Use ``create_work_item`` first "
+            "if the work item does not yet exist."
+        ),
+    ),
+    target_space_id: str = Field(
+        min_length=1,
+        description=(
+            "Space ID of the target document. Use '_default' for the "
+            "default space. Discover with ``list_documents``."
+        ),
+    ),
+    target_document_name: str = Field(
+        min_length=1,
+        description=("Name of the target document within ``target_space_id``."),
+    ),
+    previous_part_id: str | None = Field(
+        default=None,
+        description=(
+            "Short part ID (e.g. 'workitem_MCPT-001', 'heading_MCPT-005') "
+            "to insert the work item AFTER. Discover existing part IDs "
+            "with ``get_document_parts``. Mutually exclusive with "
+            "``next_part_id``; exactly one must be provided."
+        ),
+    ),
+    next_part_id: str | None = Field(
+        default=None,
+        description=(
+            "Short part ID to insert the work item BEFORE. Discover "
+            "existing part IDs with ``get_document_parts``. Mutually "
+            "exclusive with ``previous_part_id``; exactly one must be "
+            "provided."
+        ),
+    ),
+    dry_run: bool = Field(
+        default=False,
+        description=(
+            "When True, build and return the request payload preview "
+            "without calling Polarion."
+        ),
+    ),
+) -> WorkItemMoveResult:
+    """Move a work item into a Polarion document at a specific outline position.
+
+    Calls Polarion's ``moveToDocument`` action endpoint
+    (``POST /projects/{p}/workitems/{wi}/actions/moveToDocument``) which:
+
+    - Updates the work item's ``module`` relationship to point at the
+      target document. After the move, the work item is a NATIVE member
+      of the document (its ``space_id`` / ``document_name`` will reflect
+      the target), not an external reference.
+    - Inserts a corresponding document part at the position specified
+      by ``previous_part_id`` or ``next_part_id``.
+    - Works for ALL work-item types including 'heading' (the older
+      ``/parts`` create endpoint refuses to create heading parts).
+
+    Prerequisite: the work item must already exist. Use
+    ``create_work_item`` first to create a free-floating work item.
+    Note that if the work item is already attached to a different
+    document, this tool detaches it from the source — the operation is
+    a true move, not a copy.
+
+    Position is specified by exactly ONE of ``previous_part_id``
+    (insert AFTER that part) or ``next_part_id`` (insert BEFORE that
+    part). Discover existing part IDs by calling ``get_document_parts``
+    on the target document; pass the short ID
+    (e.g. 'workitem_MCPT-001', 'heading_MCPT-005', 'polarion_1')
+    unchanged.
+
+    Args:
+        ctx: MCP tool context (injected automatically).
+        project_id: Project containing the work item to move.
+        work_item_id: Short ID of an existing work item.
+        target_space_id: Space ID of the target document.
+        target_document_name: Name of the target document.
+        previous_part_id: Insert AFTER this part. Mutually exclusive
+            with ``next_part_id``.
+        next_part_id: Insert BEFORE this part. Mutually exclusive with
+            ``previous_part_id``.
+        dry_run: When True, return payload preview without calling
+            Polarion. Defaults to False.
+
+    Returns:
+        WorkItemMoveResult with:
+        - ``moved``: True on a successful real move, False when
+          ``dry_run=True``.
+        - ``dry_run``: Echo of the dry_run flag.
+        - ``payload_preview``: The request body. Populated on dry-run;
+          None after a successful real move. The Polarion server
+          returns 204 No Content on success, so no part ID is
+          included; call ``get_document_parts`` on the target document
+          if you need the new part's ID.
+
+    Raises:
+        ValueError: If neither or both of ``previous_part_id`` and
+            ``next_part_id`` are provided, or if the work item, target
+            document, or referenced part is not found.
+        PermissionError: If the token lacks permissions to modify the
+            work item or the target document.
+        RuntimeError: On other Polarion API errors.
+    """
+    if (previous_part_id is None) == (next_part_id is None):
+        raise ValueError(
+            "Exactly one of previous_part_id or next_part_id must be "
+            "provided. Use previous_part_id to insert AFTER an existing "
+            "part, or next_part_id to insert BEFORE an existing part. "
+            "Discover existing part IDs with `get_document_parts`."
+        )
+
+    payload = _build_move_to_document_payload(
+        project_id=project_id,
+        target_space_id=target_space_id,
+        target_document_name=target_document_name,
+        previous_part_id=previous_part_id,
+        next_part_id=next_part_id,
+    )
+
+    if dry_run:
+        return WorkItemMoveResult(
+            moved=False,
+            dry_run=True,
+            payload_preview=payload,
+        )
+
+    client = get_client(ctx)
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/workitems/{encode_path_segment(work_item_id)}"
+        "/actions/moveToDocument"
+    )
+    try:
+        await client.post(path, json=cast(dict[str, object], payload))
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot move work item -- check your POLARION_TOKEN permissions."
+        ) from exc
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Work item '{work_item_id}' (project '{project_id}') or "
+            f"target document '{target_document_name}' (space "
+            f"'{target_space_id}') or referenced part not found. "
+            "Verify with `get_work_item`, `list_documents`, and "
+            "`get_document_parts`."
+        ) from exc
+    except PolarionError as exc:
+        raise RuntimeError(f"Failed to move work item: {exc.message}") from exc
+
+    return WorkItemMoveResult(
+        moved=True,
+        dry_run=False,
         payload_preview=None,
     )

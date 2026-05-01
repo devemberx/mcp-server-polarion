@@ -20,12 +20,18 @@ from mcp_server_polarion.core.exceptions import (
     PolarionError,
     PolarionNotFoundError,
 )
-from mcp_server_polarion.models import Hyperlink, WorkItemCreateResult
+from mcp_server_polarion.models import (
+    Hyperlink,
+    WorkItemCreateResult,
+    WorkItemMoveResult,
+)
 from mcp_server_polarion.tools import write as _write_mod
 
 # In FastMCP 3.0, @mcp.tool returns the original function unchanged
 # (not a FunctionTool wrapper), so we reference them directly.
 create_work_item = _write_mod.create_work_item
+move_work_item_to_document = _write_mod.move_work_item_to_document
+_build_move_to_document_payload = _write_mod._build_move_to_document_payload
 _build_work_item_payload = _write_mod._build_work_item_payload
 _extract_created_id = _write_mod._extract_created_id
 
@@ -619,3 +625,334 @@ class TestCreateWorkItemFieldValidation:
 
     def test_type_accepts_non_empty(self) -> None:
         assert self._adapter_for("type").validate_python("task") == "task"
+
+
+# ===========================================================================
+# move_work_item_to_document
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# _build_move_to_document_payload
+# ---------------------------------------------------------------------------
+
+
+class TestBuildMoveToDocumentPayload:
+    """Tests for the private ``_build_move_to_document_payload`` helper."""
+
+    def test_minimal_payload_with_previous_part(self) -> None:
+        payload = _build_move_to_document_payload(
+            project_id="MyProj",
+            target_space_id="Requirements",
+            target_document_name="SRS",
+            previous_part_id="workitem_MCPT-001",
+            next_part_id=None,
+        )
+
+        # NOT JSON:API — flat object with two top-level keys.
+        assert payload == {
+            "targetDocument": "MyProj/Requirements/SRS",
+            "previousPart": "MyProj/Requirements/SRS/workitem_MCPT-001",
+        }
+
+    def test_minimal_payload_with_next_part(self) -> None:
+        payload = _build_move_to_document_payload(
+            project_id="MyProj",
+            target_space_id="_default",
+            target_document_name="My Doc",
+            previous_part_id=None,
+            next_part_id="heading_MCPT-9",
+        )
+
+        assert payload == {
+            "targetDocument": "MyProj/_default/My Doc",
+            "nextPart": "MyProj/_default/My Doc/heading_MCPT-9",
+        }
+        # previousPart and nextPart are mutually exclusive in the body.
+        assert "previousPart" not in payload
+
+    def test_document_name_with_slashes_preserved_verbatim(self) -> None:
+        # JSON body IDs must NOT be URL-encoded — only URL paths are.
+        payload = _build_move_to_document_payload(
+            project_id="MyProj",
+            target_space_id="Design",
+            target_document_name="Folder/Sub Doc",
+            previous_part_id="workitem_MCPT-2",
+            next_part_id=None,
+        )
+
+        assert payload["targetDocument"] == "MyProj/Design/Folder/Sub Doc"
+        assert payload["previousPart"] == "MyProj/Design/Folder/Sub Doc/workitem_MCPT-2"
+
+
+# ---------------------------------------------------------------------------
+# move_work_item_to_document — position validation
+# ---------------------------------------------------------------------------
+
+
+class TestMoveWorkItemToDocumentPositionValidation:
+    """Tests for the exactly-one-of-position rule."""
+
+    async def test_neither_position_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        with pytest.raises(ValueError, match="Exactly one"):
+            await move_work_item_to_document(
+                mock_ctx,
+                project_id="MyProj",
+                work_item_id="MCPT-1",
+                target_space_id="S",
+                target_document_name="D",
+                previous_part_id=None,
+                next_part_id=None,
+                dry_run=False,
+            )
+        mock_client.post.assert_not_called()
+
+    async def test_both_positions_raise_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        with pytest.raises(ValueError, match="Exactly one"):
+            await move_work_item_to_document(
+                mock_ctx,
+                project_id="MyProj",
+                work_item_id="MCPT-1",
+                target_space_id="S",
+                target_document_name="D",
+                previous_part_id="workitem_MCPT-2",
+                next_part_id="workitem_MCPT-3",
+                dry_run=False,
+            )
+        mock_client.post.assert_not_called()
+
+    async def test_previous_only_passes_validation(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        result = await move_work_item_to_document(
+            mock_ctx,
+            project_id="MyProj",
+            work_item_id="MCPT-1",
+            target_space_id="S",
+            target_document_name="D",
+            previous_part_id="workitem_MCPT-2",
+            next_part_id=None,
+            dry_run=True,
+        )
+        assert result.dry_run is True
+
+    async def test_next_only_passes_validation(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        result = await move_work_item_to_document(
+            mock_ctx,
+            project_id="MyProj",
+            work_item_id="MCPT-1",
+            target_space_id="S",
+            target_document_name="D",
+            previous_part_id=None,
+            next_part_id="workitem_MCPT-2",
+            dry_run=True,
+        )
+        assert result.dry_run is True
+
+
+# ---------------------------------------------------------------------------
+# move_work_item_to_document — dry run
+# ---------------------------------------------------------------------------
+
+
+class TestMoveWorkItemToDocumentDryRun:
+    """Tests for ``move_work_item_to_document`` with ``dry_run=True``."""
+
+    async def test_dry_run_returns_payload_without_calling_post(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        result = await move_work_item_to_document(
+            mock_ctx,
+            project_id="MyProj",
+            work_item_id="MCPT-42",
+            target_space_id="Requirements",
+            target_document_name="SRS",
+            previous_part_id="workitem_MCPT-1",
+            next_part_id=None,
+            dry_run=True,
+        )
+
+        mock_client.post.assert_not_called()
+        assert isinstance(result, WorkItemMoveResult)
+        assert result.moved is False
+        assert result.dry_run is True
+        assert result.payload_preview is not None
+        assert isinstance(result.payload_preview, dict)
+        assert result.payload_preview["targetDocument"] == "MyProj/Requirements/SRS"
+
+
+# ---------------------------------------------------------------------------
+# move_work_item_to_document — happy path
+# ---------------------------------------------------------------------------
+
+
+class TestMoveWorkItemToDocumentHappyPath:
+    """Tests for a successful ``move_work_item_to_document`` call."""
+
+    async def test_returns_moved_true_on_204(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # client.post returns {} on 204 No Content.
+        mock_client.post.return_value = {}
+
+        result = await move_work_item_to_document(
+            mock_ctx,
+            project_id="MyProj",
+            work_item_id="MCPT-42",
+            target_space_id="Requirements",
+            target_document_name="SRS",
+            previous_part_id="workitem_MCPT-1",
+            next_part_id=None,
+            dry_run=False,
+        )
+
+        assert isinstance(result, WorkItemMoveResult)
+        assert result.moved is True
+        assert result.dry_run is False
+        assert result.payload_preview is None
+
+    async def test_post_called_with_correct_path_and_body(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {}
+
+        await move_work_item_to_document(
+            mock_ctx,
+            project_id="MyProj",
+            work_item_id="MCPT-42",
+            target_space_id="Requirements",
+            target_document_name="My Doc",
+            previous_part_id="workitem_MCPT-1",
+            next_part_id=None,
+            dry_run=False,
+        )
+
+        args, kwargs = mock_client.post.call_args
+        # Path uses the WI ID, with URL-encoded segments.
+        expected_path = "/projects/MyProj/workitems/MCPT-42/actions/moveToDocument"
+        assert args == (expected_path,)
+        body = kwargs["json"]
+        assert body == {
+            "targetDocument": "MyProj/Requirements/My Doc",
+            "previousPart": "MyProj/Requirements/My Doc/workitem_MCPT-1",
+        }
+
+    async def test_path_url_encodes_special_chars_in_project_id(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Defensive: ensure encode_path_segment is applied to project_id
+        # path segment.
+        mock_client.post.return_value = {}
+
+        await move_work_item_to_document(
+            mock_ctx,
+            project_id="My Proj",
+            work_item_id="MCPT-1",
+            target_space_id="S",
+            target_document_name="D",
+            previous_part_id="workitem_MCPT-2",
+            next_part_id=None,
+            dry_run=False,
+        )
+
+        args, _ = mock_client.post.call_args
+        assert args == ("/projects/My%20Proj/workitems/MCPT-1/actions/moveToDocument",)
+
+
+# ---------------------------------------------------------------------------
+# move_work_item_to_document — error mapping
+# ---------------------------------------------------------------------------
+
+
+class TestMoveWorkItemToDocumentErrorMapping:
+    """Tests that domain exceptions are mapped at the tool layer."""
+
+    async def test_401_raises_permission_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.side_effect = PolarionAuthError("auth", status_code=401)
+
+        with pytest.raises(PermissionError):
+            await move_work_item_to_document(
+                mock_ctx,
+                project_id="MyProj",
+                work_item_id="MCPT-1",
+                target_space_id="S",
+                target_document_name="D",
+                previous_part_id="workitem_MCPT-2",
+                next_part_id=None,
+                dry_run=False,
+            )
+
+    async def test_404_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.side_effect = PolarionNotFoundError(
+            "not found", status_code=404
+        )
+
+        with pytest.raises(ValueError, match="not found"):
+            await move_work_item_to_document(
+                mock_ctx,
+                project_id="MyProj",
+                work_item_id="MCPT-ghost",
+                target_space_id="S",
+                target_document_name="D",
+                previous_part_id="workitem_MCPT-2",
+                next_part_id=None,
+                dry_run=False,
+            )
+
+    async def test_other_error_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.side_effect = PolarionError("boom", status_code=500)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            await move_work_item_to_document(
+                mock_ctx,
+                project_id="MyProj",
+                work_item_id="MCPT-1",
+                target_space_id="S",
+                target_document_name="D",
+                previous_part_id="workitem_MCPT-2",
+                next_part_id=None,
+                dry_run=False,
+            )
+
+
+# ---------------------------------------------------------------------------
+# move_work_item_to_document — Pydantic Field constraints
+# ---------------------------------------------------------------------------
+
+
+class TestMoveWorkItemToDocumentFieldValidation:
+    """Verify ``min_length=1`` constraints attached to required parameters."""
+
+    @staticmethod
+    def _adapter_for(param_name: str) -> TypeAdapter[object]:
+        hints = get_type_hints(move_work_item_to_document)
+        sig = inspect.signature(move_work_item_to_document)
+        field_info = sig.parameters[param_name].default
+        return TypeAdapter(Annotated[hints[param_name], field_info])
+
+    def test_work_item_id_rejects_empty_string(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("work_item_id").validate_python("")
+
+    def test_target_space_id_rejects_empty_string(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("target_space_id").validate_python("")
+
+    def test_target_document_name_rejects_empty_string(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("target_document_name").validate_python("")
+
+    def test_work_item_id_accepts_non_empty(self) -> None:
+        assert self._adapter_for("work_item_id").validate_python("MCPT-1") == "MCPT-1"

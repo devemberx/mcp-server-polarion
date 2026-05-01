@@ -560,6 +560,27 @@ class DocumentPartCreateResult(BaseModel):
     )
 
 
+class WorkItemMoveResult(BaseModel):
+    """Result of a ``move_work_item_to_document`` operation."""
+
+    moved: bool = Field(
+        description=(
+            "True if the work item was actually moved into the target "
+            "document. False when dry_run is True."
+        ),
+    )
+    dry_run: bool = Field(
+        description="Whether this was a dry-run (preview only, no mutation).",
+    )
+    payload_preview: dict[str, JsonValue] | None = Field(
+        description=(
+            "Request payload that was (or would be) sent. "
+            "Usually populated for dry-run previews and may be None "
+            "after a successful real operation."
+        ),
+    )
+
+
 __all__: list[str] = [
     "CommentResult",
     "DocumentDetail",
@@ -575,6 +596,7 @@ __all__: list[str] = [
     "ProjectSummary",
     "WorkItemCreateResult",
     "WorkItemDetail",
+    "WorkItemMoveResult",
     "WorkItemSummary",
     "WorkItemUpdateResult",
 ]

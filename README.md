@@ -141,6 +141,7 @@ All list tools support pagination via `page_size` (1–100) and `page_number` pa
 | Tool | Description |
 |---|---|
 | `create_work_item` | Create a new work item (`project_id`, `title`, `type` required; `description` accepted as Markdown and converted to sanitized HTML; supports optional `status`, `priority`, `severity`, `assignee_ids`, `due_date`, `initial_estimate`, `hyperlinks`; `dry_run=True` previews the JSON:API payload without calling Polarion) |
+| `move_work_item_to_document` | Move an existing work item into a Polarion document at a specific outline position (`project_id`, `work_item_id`, `target_space_id`, `target_document_name` required; position via exactly one of `previous_part_id`/`next_part_id`; works for all work-item types including headings; `dry_run` supported) |
 
 ## Example Prompts
 
@@ -155,6 +156,8 @@ All list tools support pagination via `page_size` (1–100) and `page_number` pa
 > "What work items are linked to MCPT-001?"
 
 > "Create a task in project MCPT titled 'Refactor authentication module'"
+
+> "Move work item MCPT-042 into the SRS document right after MCPT-001"
 
 ## License
 
