@@ -160,7 +160,10 @@ async def create_work_item(  # noqa: PLR0913
         default=None,
         description=(
             "Priority value as a string (e.g. '50.0'). "
-            "Free-form; Polarion validates server-side."
+            "WARNING: this Polarion server version silently coerces "
+            "unrecognised values to the project default. Inspect an "
+            "existing work item with ``get_work_item`` to discover the "
+            "project's actual priority values before relying on this."
         ),
     ),
     severity: str | None = Field(
@@ -217,10 +220,13 @@ async def create_work_item(  # noqa: PLR0913
     ``{"type": "text/html", "value": "..."}``. Dangerous link schemes
     such as ``javascript:`` are stripped automatically.
 
-    Free-form fields (``status``, ``priority``, ``severity``) are
-    validated by Polarion server-side. If you're unsure of the allowed
-    values for the project, inspect an existing work item with
-    ``get_work_item`` and reuse its values.
+    Free-form fields (``type``, ``status``, ``priority``, ``severity``)
+    are NOT strictly validated by this Polarion server version.
+    Unrecognised ``priority`` values are silently coerced to the project
+    default; arbitrary ``type`` strings are stored verbatim (which can
+    create "ghost" work-item types that won't appear in any project
+    schema). Always inspect an existing work item with ``get_work_item``
+    and reuse its values to avoid corrupting the project's enum space.
 
     Args:
         ctx: MCP tool context (injected automatically).
