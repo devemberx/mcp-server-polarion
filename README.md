@@ -140,7 +140,7 @@ All list tools support pagination via `page_size` (1–100) and `page_number` pa
 
 | Tool | Description |
 |---|---|
-| `create_work_item` | Create a new work item |
+| `create_work_item` | Create a new work item, optionally appending it to a document at creation time |
 | `move_work_item_to_document` | Move an existing work item into a Polarion document at a specific outline position |
 
 ## Example Prompts
@@ -156,6 +156,8 @@ All list tools support pagination via `page_size` (1–100) and `page_number` pa
 > "What work items are linked to MCPT-001?"
 
 > "Create a task in project MCPT titled 'Refactor authentication module'"
+
+> "Create a requirement titled 'OAuth login' inside the SRS document of project MCPT"
 
 > "Move work item MCPT-042 to the appropriate section of the SRS document."
 

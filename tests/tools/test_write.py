@@ -79,6 +79,9 @@ class TestBuildWorkItemPayload:
             due_date=None,
             initial_estimate=None,
             hyperlinks=None,
+            project_id="MyProj",
+            space_id=None,
+            document_name=None,
         )
 
         assert payload == {
@@ -107,6 +110,9 @@ class TestBuildWorkItemPayload:
             due_date="",
             initial_estimate=None,
             hyperlinks=[],
+            project_id="MyProj",
+            space_id=None,
+            document_name=None,
         )
 
         item = cast(list[dict[str, object]], payload["data"])[0]
@@ -127,6 +133,9 @@ class TestBuildWorkItemPayload:
             due_date=None,
             initial_estimate=None,
             hyperlinks=None,
+            project_id="MyProj",
+            space_id=None,
+            document_name=None,
         )
 
         item = cast(list[dict[str, object]], payload["data"])[0]
@@ -148,6 +157,9 @@ class TestBuildWorkItemPayload:
             due_date=None,
             initial_estimate=None,
             hyperlinks=None,
+            project_id="MyProj",
+            space_id=None,
+            document_name=None,
         )
 
         item = cast(list[dict[str, object]], payload["data"])[0]
@@ -174,6 +186,9 @@ class TestBuildWorkItemPayload:
                 Hyperlink(role="ref_ext", title="Spec", uri="https://example.com"),
                 Hyperlink(role="implementation", uri="https://example.com/code"),
             ],
+            project_id="MyProj",
+            space_id=None,
+            document_name=None,
         )
 
         item = cast(list[dict[str, object]], payload["data"])[0]
@@ -203,6 +218,9 @@ class TestBuildWorkItemPayload:
             due_date="2026-05-31",
             initial_estimate="5 1/2d",
             hyperlinks=None,
+            project_id="MyProj",
+            space_id=None,
+            document_name=None,
         )
 
         item = cast(list[dict[str, object]], payload["data"])[0]
@@ -212,6 +230,96 @@ class TestBuildWorkItemPayload:
         assert attrs["severity"] == "major"
         assert attrs["dueDate"] == "2026-05-31"
         assert attrs["initialEstimate"] == "5 1/2d"
+
+    def test_module_relationship_attached_when_space_and_doc_set(self) -> None:
+        payload = _build_work_item_payload(
+            title="x",
+            type="task",
+            description_html="",
+            status=None,
+            priority=None,
+            severity=None,
+            assignee_ids=None,
+            due_date=None,
+            initial_estimate=None,
+            hyperlinks=None,
+            project_id="MyProj",
+            space_id="Requirements",
+            document_name="SRS",
+        )
+
+        item = cast(list[dict[str, object]], payload["data"])[0]
+        rels = cast(dict[str, object], item["relationships"])
+        assert rels["module"] == {
+            "data": {"type": "documents", "id": "MyProj/Requirements/SRS"}
+        }
+
+    def test_module_skipped_when_both_space_and_doc_are_none(self) -> None:
+        payload = _build_work_item_payload(
+            title="x",
+            type="task",
+            description_html="",
+            status=None,
+            priority=None,
+            severity=None,
+            assignee_ids=None,
+            due_date=None,
+            initial_estimate=None,
+            hyperlinks=None,
+            project_id="MyProj",
+            space_id=None,
+            document_name=None,
+        )
+
+        item = cast(list[dict[str, object]], payload["data"])[0]
+        assert "relationships" not in item
+
+    def test_module_id_preserves_slashes_in_document_name(self) -> None:
+        # JSON body IDs must NOT be URL-encoded — only URL paths are.
+        payload = _build_work_item_payload(
+            title="x",
+            type="task",
+            description_html="",
+            status=None,
+            priority=None,
+            severity=None,
+            assignee_ids=None,
+            due_date=None,
+            initial_estimate=None,
+            hyperlinks=None,
+            project_id="MyProj",
+            space_id="Design",
+            document_name="Folder/Sub Doc",
+        )
+
+        item = cast(list[dict[str, object]], payload["data"])[0]
+        rels = cast(dict[str, object], item["relationships"])
+        module_data = cast(
+            dict[str, object], cast(dict[str, object], rels["module"])["data"]
+        )
+        assert module_data["id"] == "MyProj/Design/Folder/Sub Doc"
+
+    def test_module_and_assignee_can_coexist(self) -> None:
+        payload = _build_work_item_payload(
+            title="x",
+            type="task",
+            description_html="",
+            status=None,
+            priority=None,
+            severity=None,
+            assignee_ids=["alice"],
+            due_date=None,
+            initial_estimate=None,
+            hyperlinks=None,
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+        )
+
+        item = cast(list[dict[str, object]], payload["data"])[0]
+        rels = cast(dict[str, object], item["relationships"])
+        assert "assignee" in rels
+        assert "module" in rels
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +382,8 @@ class TestCreateWorkItemDryRun:
             due_date=None,
             initial_estimate=None,
             hyperlinks=None,
+            space_id=None,
+            document_name=None,
             dry_run=True,
         )
 
@@ -324,6 +434,8 @@ class TestCreateWorkItemHappyPath:
             due_date=None,
             initial_estimate=None,
             hyperlinks=None,
+            space_id=None,
+            document_name=None,
             dry_run=False,
         )
 
@@ -353,6 +465,8 @@ class TestCreateWorkItemHappyPath:
             due_date=None,
             initial_estimate=None,
             hyperlinks=None,
+            space_id=None,
+            document_name=None,
             dry_run=False,
         )
 
@@ -387,6 +501,8 @@ class TestCreateWorkItemHappyPath:
             due_date=None,
             initial_estimate=None,
             hyperlinks=None,
+            space_id=None,
+            document_name=None,
             dry_run=False,
         )
 
@@ -426,6 +542,8 @@ class TestCreateWorkItemHappyPath:
             due_date=None,
             initial_estimate=None,
             hyperlinks=None,
+            space_id=None,
+            document_name=None,
             dry_run=False,
         )
 
@@ -435,6 +553,138 @@ class TestCreateWorkItemHappyPath:
         # sanitize_html should let one through.
         assert 'href="javascript:' not in desc_html
         assert "href='javascript:" not in desc_html
+
+    async def test_module_relationship_in_posted_body(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {
+            "data": [{"type": "workitems", "id": "MyProj/MCPT-99"}]
+        }
+
+        await create_work_item(
+            mock_ctx,
+            project_id="MyProj",
+            title="t",
+            type="requirement",
+            description=None,
+            status=None,
+            priority=None,
+            severity=None,
+            assignee_ids=None,
+            due_date=None,
+            initial_estimate=None,
+            hyperlinks=None,
+            space_id="Requirements",
+            document_name="SRS",
+            dry_run=False,
+        )
+
+        body = mock_client.post.call_args.kwargs["json"]
+        rels = body["data"][0]["relationships"]
+        assert rels["module"] == {
+            "data": {"type": "documents", "id": "MyProj/Requirements/SRS"}
+        }
+
+
+# ---------------------------------------------------------------------------
+# create_work_item — module pairing
+# ---------------------------------------------------------------------------
+
+
+class TestCreateWorkItemModulePairing:
+    """``space_id`` and ``document_name`` must be provided together."""
+
+    async def test_only_space_id_raises(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        with pytest.raises(ValueError, match="must be provided together"):
+            await create_work_item(
+                mock_ctx,
+                project_id="MyProj",
+                title="t",
+                type="task",
+                description=None,
+                status=None,
+                priority=None,
+                severity=None,
+                assignee_ids=None,
+                due_date=None,
+                initial_estimate=None,
+                hyperlinks=None,
+                space_id="Requirements",
+                document_name=None,
+                dry_run=True,
+            )
+        mock_client.post.assert_not_called()
+
+    async def test_only_document_name_raises(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        with pytest.raises(ValueError, match="must be provided together"):
+            await create_work_item(
+                mock_ctx,
+                project_id="MyProj",
+                title="t",
+                type="task",
+                description=None,
+                status=None,
+                priority=None,
+                severity=None,
+                assignee_ids=None,
+                due_date=None,
+                initial_estimate=None,
+                hyperlinks=None,
+                space_id=None,
+                document_name="SRS",
+                dry_run=True,
+            )
+        mock_client.post.assert_not_called()
+
+    async def test_both_set_passes_validation(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        result = await create_work_item(
+            mock_ctx,
+            project_id="MyProj",
+            title="t",
+            type="task",
+            description=None,
+            status=None,
+            priority=None,
+            severity=None,
+            assignee_ids=None,
+            due_date=None,
+            initial_estimate=None,
+            hyperlinks=None,
+            space_id="Requirements",
+            document_name="SRS",
+            dry_run=True,
+        )
+        assert result.dry_run is True
+        mock_client.post.assert_not_called()
+
+    async def test_both_unset_passes_validation(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        result = await create_work_item(
+            mock_ctx,
+            project_id="MyProj",
+            title="t",
+            type="task",
+            description=None,
+            status=None,
+            priority=None,
+            severity=None,
+            assignee_ids=None,
+            due_date=None,
+            initial_estimate=None,
+            hyperlinks=None,
+            space_id=None,
+            document_name=None,
+            dry_run=True,
+        )
+        assert result.dry_run is True
+        mock_client.post.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -464,6 +714,8 @@ class TestCreateWorkItemErrorMapping:
                 due_date=None,
                 initial_estimate=None,
                 hyperlinks=None,
+                space_id=None,
+                document_name=None,
                 dry_run=False,
             )
 
@@ -488,6 +740,36 @@ class TestCreateWorkItemErrorMapping:
                 due_date=None,
                 initial_estimate=None,
                 hyperlinks=None,
+                space_id=None,
+                document_name=None,
+                dry_run=False,
+            )
+
+    async def test_404_with_module_includes_document_in_message(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # When space_id/document_name are set, the error message must
+        # also mention the document so callers know which lookup failed.
+        mock_client.post.side_effect = PolarionNotFoundError(
+            "not found", status_code=404
+        )
+
+        with pytest.raises(ValueError, match="Requirements/SRS"):
+            await create_work_item(
+                mock_ctx,
+                project_id="MyProj",
+                title="t",
+                type="task",
+                description=None,
+                status=None,
+                priority=None,
+                severity=None,
+                assignee_ids=None,
+                due_date=None,
+                initial_estimate=None,
+                hyperlinks=None,
+                space_id="Requirements",
+                document_name="SRS",
                 dry_run=False,
             )
 
@@ -510,6 +792,8 @@ class TestCreateWorkItemErrorMapping:
                 due_date=None,
                 initial_estimate=None,
                 hyperlinks=None,
+                space_id=None,
+                document_name=None,
                 dry_run=False,
             )
 
@@ -541,6 +825,8 @@ class TestCreateWorkItemResponseParsing:
                 due_date=None,
                 initial_estimate=None,
                 hyperlinks=None,
+                space_id=None,
+                document_name=None,
                 dry_run=False,
             )
 
@@ -563,6 +849,8 @@ class TestCreateWorkItemResponseParsing:
                 due_date=None,
                 initial_estimate=None,
                 hyperlinks=None,
+                space_id=None,
+                document_name=None,
                 dry_run=False,
             )
 
@@ -585,6 +873,8 @@ class TestCreateWorkItemResponseParsing:
                 due_date=None,
                 initial_estimate=None,
                 hyperlinks=None,
+                space_id=None,
+                document_name=None,
                 dry_run=False,
             )
 
@@ -625,6 +915,12 @@ class TestCreateWorkItemFieldValidation:
 
     def test_type_accepts_non_empty(self) -> None:
         assert self._adapter_for("type").validate_python("task") == "task"
+
+    def test_space_id_accepts_none(self) -> None:
+        assert self._adapter_for("space_id").validate_python(None) is None
+
+    def test_document_name_accepts_none(self) -> None:
+        assert self._adapter_for("document_name").validate_python(None) is None
 
 
 # ===========================================================================

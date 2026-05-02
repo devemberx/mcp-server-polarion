@@ -51,12 +51,20 @@ def _build_work_item_payload(  # noqa: PLR0913
     due_date: str | None,
     initial_estimate: str | None,
     hyperlinks: list[Hyperlink] | None,
+    project_id: str,
+    space_id: str | None,
+    document_name: str | None,
 ) -> dict[str, JsonValue]:
     """Build the JSON:API request body for ``POST /projects/{p}/workitems``.
 
     Only attaches keys for values that are explicitly set — ``None``,
     empty strings, and empty lists are skipped so we never overwrite
     Polarion defaults with empty values on creation.
+
+    When both ``space_id`` and ``document_name`` are provided, attaches
+    a ``module`` to-one relationship pointing at the target document so
+    Polarion appends the new work item to that document. Pairing of
+    space_id/document_name is enforced by the tool layer.
     """
     attributes: dict[str, JsonValue] = {
         "title": title,
@@ -86,6 +94,13 @@ def _build_work_item_payload(  # noqa: PLR0913
     if assignee_ids:
         relationships["assignee"] = {
             "data": [{"type": "users", "id": uid} for uid in assignee_ids]
+        }
+    if space_id is not None and document_name is not None:
+        relationships["module"] = {
+            "data": {
+                "type": "documents",
+                "id": f"{project_id}/{space_id}/{document_name}",
+            }
         }
 
     item: dict[str, JsonValue] = {
@@ -230,6 +245,27 @@ async def create_work_item(  # noqa: PLR0913
             "Each must specify ``role`` and ``uri``; ``title`` is optional."
         ),
     ),
+    space_id: str | None = Field(
+        default=None,
+        description=(
+            "Space ID of the document to insert this work item into "
+            "(e.g. '_default', 'Requirements'). When provided together "
+            "with ``document_name``, the work item is created INSIDE the "
+            "document and appended at the end. Discover with "
+            "``list_documents``. Mutually paired with ``document_name``: "
+            "either both are set or both are None."
+        ),
+    ),
+    document_name: str | None = Field(
+        default=None,
+        description=(
+            "Document name within ``space_id`` (e.g. 'Software Requirement "
+            "Specification'). When provided together with ``space_id``, "
+            "the new work item is appended to that document. Discover with "
+            "``list_documents``. For precise positioning within the "
+            "document, follow up with ``move_work_item_to_document``."
+        ),
+    ),
     dry_run: bool = Field(
         default=False,
         description=(
@@ -243,9 +279,11 @@ async def create_work_item(  # noqa: PLR0913
 
     Builds a JSON:API ``POST /projects/{projectId}/workitems`` request
     from the supplied fields, optionally previewing the payload with
-    ``dry_run=True``.  The created work item is *not* attached to any
-    document — to place it inside a document at a specific outline
-    position, follow up with ``move_work_item_to_document``.
+    ``dry_run=True``. By default the work item is *not* attached to any
+    document; pass ``space_id`` + ``document_name`` to append it
+    directly to a document at creation time, or follow up with
+    ``move_work_item_to_document`` to place it at a specific outline
+    position.
 
     Description handling: ``description`` is treated as Markdown,
     converted via ``markdown_to_html`` (CommonMark + GFM tables), and
@@ -274,6 +312,13 @@ async def create_work_item(  # noqa: PLR0913
         due_date: Optional ISO-8601 date 'YYYY-MM-DD'.
         initial_estimate: Optional Polarion duration string.
         hyperlinks: Optional list of ``Hyperlink`` objects.
+        space_id: Optional space ID of the document to attach this
+            work item to. Must be provided together with
+            ``document_name``.
+        document_name: Optional document name within ``space_id``.
+            Must be provided together with ``space_id``. The new work
+            item is appended to the end of the document; for precise
+            positioning use ``move_work_item_to_document`` afterward.
         dry_run: When True, return payload preview without calling
             Polarion. Defaults to False.
 
@@ -288,12 +333,22 @@ async def create_work_item(  # noqa: PLR0913
           dry-run; None after a successful real create.
 
     Raises:
-        ValueError: If the project ID is not found.
+        ValueError: If only one of ``space_id`` / ``document_name`` is
+            provided (they must be paired), or if the project /
+            document is not found.
         PermissionError: If the token lacks permissions to create work
             items in the project.
         RuntimeError: On other Polarion API errors, or if Polarion
             accepts the request but returns no work-item ID.
     """
+    if (space_id is None) != (document_name is None):
+        raise ValueError(
+            "space_id and document_name must be provided together. "
+            "Set both to attach the new work item to a document, or "
+            "leave both unset to create a free-floating work item. "
+            "Use `list_documents` to discover valid space/document IDs."
+        )
+
     description_html = (
         sanitize_html(markdown_to_html(description)) if description else ""
     )
@@ -309,6 +364,9 @@ async def create_work_item(  # noqa: PLR0913
         due_date=due_date,
         initial_estimate=initial_estimate,
         hyperlinks=hyperlinks,
+        project_id=project_id,
+        space_id=space_id,
+        document_name=document_name,
     )
 
     if dry_run:
@@ -328,9 +386,12 @@ async def create_work_item(  # noqa: PLR0913
             "Cannot create work item -- check your POLARION_TOKEN permissions."
         ) from exc
     except PolarionNotFoundError as exc:
+        doc_hint = (
+            f" or document '{space_id}/{document_name}'" if space_id is not None else ""
+        )
         raise ValueError(
-            f"Project '{project_id}' not found. "
-            "Use `list_projects` to discover valid project IDs."
+            f"Project '{project_id}'{doc_hint} not found. "
+            "Use `list_projects` and `list_documents` to discover valid IDs."
         ) from exc
     except PolarionError as exc:
         raise RuntimeError(f"Failed to create work item: {exc.message}") from exc
