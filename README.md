@@ -1,6 +1,6 @@
 # mcp-server-polarion
 
-A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for **Polarion ALM**. Lets AI assistants read documents, work items, and traceability links — and create new work items — directly from your Polarion instance.
+A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for **Polarion ALM**. Lets AI assistants read documents, work items, and traceability links — and create, update, and reorganize work items — directly from your Polarion instance.
 
 [![PyPI](https://img.shields.io/pypi/v/mcp-server-polarion)](https://pypi.org/project/mcp-server-polarion/)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/)
@@ -141,6 +141,7 @@ All list tools support pagination via `page_size` (1–100) and `page_number` pa
 | Tool | Description |
 |---|---|
 | `create_work_item` | Create a new work item |
+| `update_work_item` | Update an existing work item |
 | `move_work_item_to_document` | Move an existing work item into a Polarion document at a specific outline position |
 
 ## Example Prompts
@@ -156,6 +157,8 @@ All list tools support pagination via `page_size` (1–100) and `page_number` pa
 > "What work items are linked to MCPT-001?"
 
 > "Create a task in project MCPT titled 'Refactor authentication module'"
+
+> "Update MCPT-042's status to approved and bump priority to 90."
 
 > "Move work item MCPT-042 to the appropriate section of the SRS document."
 
