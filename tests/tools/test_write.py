@@ -1215,17 +1215,50 @@ class TestUpdateWorkItemValidation:
         mock_client.patch.assert_not_called()
         mock_client.get.assert_not_called()
 
-    async def test_workflow_action_alone_passes_validation(
+    async def test_workflow_action_alone_raises_value_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # workflow_action is enough on its own — no body field required.
+        # Polarion rejects PATCH bodies with no attributes/relationships,
+        # so workflow_action / change_type_to must be paired with at
+        # least one body field. Catch this at the tool layer.
+        with pytest.raises(ValueError, match="at least one body field"):
+            await _call_update(mock_ctx, workflow_action="close")
+        mock_client.patch.assert_not_called()
+        mock_client.get.assert_not_called()
+
+    async def test_change_type_to_alone_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        with pytest.raises(ValueError, match="at least one body field"):
+            await _call_update(mock_ctx, change_type_to="defect")
+        mock_client.patch.assert_not_called()
+
+    async def test_workflow_action_alone_dry_run_also_rejected(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Dry-run is rejected too — the payload that *would* be sent is
+        # invalid, so previewing it gives no useful signal.
+        with pytest.raises(ValueError, match="at least one body field"):
+            await _call_update(mock_ctx, workflow_action="close", dry_run=True)
+
+    async def test_workflow_action_with_title_passes(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Pairing the action with any body field satisfies Polarion.
+        mock_client.patch.return_value = {}
+        mock_client.get.return_value = _make_get_response()
+
         result = await _call_update(
             mock_ctx,
             workflow_action="close",
-            dry_run=True,
+            title="closing this WI",
         )
-        assert result.dry_run is True
-        assert result.changes == {"workflow_action": "close"}
+
+        assert result.updated is True
+        patch_path = mock_client.patch.call_args.args[0]
+        assert patch_path == "/projects/MyProj/workitems/MCPT-1?workflowAction=close"
+        body = mock_client.patch.call_args.kwargs["json"]
+        assert body["data"]["attributes"]["title"] == "closing this WI"
 
 
 # ---------------------------------------------------------------------------
@@ -1384,10 +1417,12 @@ class TestUpdateWorkItemHappyPath:
     async def test_workflow_action_appended_as_query_param(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
+        # workflow_action must be paired with a body field (see
+        # TestUpdateWorkItemValidation). Pair it with a title here.
         mock_client.patch.return_value = {}
         mock_client.get.return_value = _make_get_response()
 
-        await _call_update(mock_ctx, workflow_action="close")
+        await _call_update(mock_ctx, workflow_action="close", title="t")
 
         patch_path = mock_client.patch.call_args.args[0]
         assert patch_path == "/projects/MyProj/workitems/MCPT-1?workflowAction=close"
@@ -1402,7 +1437,7 @@ class TestUpdateWorkItemHappyPath:
         mock_client.patch.return_value = {}
         mock_client.get.return_value = _make_get_response()
 
-        await _call_update(mock_ctx, change_type_to="task")
+        await _call_update(mock_ctx, change_type_to="task", title="t")
 
         patch_path = mock_client.patch.call_args.args[0]
         assert patch_path == "/projects/MyProj/workitems/MCPT-1?changeTypeTo=task"

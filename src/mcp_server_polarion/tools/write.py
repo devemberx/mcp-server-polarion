@@ -513,7 +513,12 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
             "'close', 'reopen'). Workflow actions run the project's "
             "transition rules (which may set resolution, validate "
             "required fields, etc.) — prefer this over editing ``status`` "
-            "directly when you want a real state transition."
+            "directly when you want a real state transition. "
+            "Action IDs are project-specific; if the supplied ID is not "
+            "configured for this project, Polarion responds with HTTP 400 "
+            "'workflow action not found'. Must be paired with at least "
+            "one body field (e.g. title) — Polarion rejects PATCH bodies "
+            "with no attributes or relationships."
         ),
     ),
     change_type_to: str | None = Field(
@@ -521,7 +526,11 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
         description=(
             "When set, changes the work item's type as part of the update "
             "(sent as the ``changeTypeTo`` query parameter). Use sparingly "
-            "— type changes can invalidate type-specific fields."
+            "— type changes can invalidate type-specific fields and "
+            "RESET the workflow status to the new type's initial state "
+            "(observed: 'approved' task → defect → 'open'). Must be "
+            "paired with at least one body field for the same reason as "
+            "``workflow_action``."
         ),
     ),
     dry_run: bool = Field(
@@ -561,7 +570,12 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     Workflow transitions: prefer ``workflow_action`` (e.g. 'close',
     'reopen') over editing ``status`` directly. Workflow actions run
     Polarion's project-defined transition rules, while a raw ``status``
-    edit bypasses them.
+    edit bypasses them. ``workflow_action`` and ``change_type_to`` MUST
+    be paired with at least one body field — Polarion rejects PATCH
+    bodies that have neither ``attributes`` nor ``relationships`` (HTTP
+    400 "At least one of the members is required"). When the only
+    intent is to trigger a transition, pair it with a no-op echo
+    (e.g. ``title=<existing title>``) or any other valid body field.
 
     Free-form fields (``status``, ``priority``, ``severity``,
     ``resolution``) are NOT strictly validated by this Polarion server
@@ -603,8 +617,9 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
           dry-run; None after a successful real update.
 
     Raises:
-        ValueError: If no mutating fields are provided, or if the work
-            item / project is not found.
+        ValueError: If no mutating fields are provided; if
+            ``workflow_action`` / ``change_type_to`` is supplied without
+            any body field; or if the work item / project is not found.
         PermissionError: If the token lacks permissions to update the
             work item.
         RuntimeError: On other Polarion API errors.
@@ -663,6 +678,21 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
         hyperlinks=hyperlinks,
         assignee_ids=assignee_ids,
     )
+
+    # Polarion's PATCH endpoint rejects bodies with neither attributes
+    # nor relationships ("At least one of the members is required"),
+    # even when only the workflowAction / changeTypeTo query params are
+    # used. Catch this at the tool layer with an actionable message
+    # rather than letting Polarion 400.
+    payload_data = cast(dict[str, JsonValue], payload["data"])
+    if "attributes" not in payload_data and "relationships" not in payload_data:
+        raise ValueError(
+            "Polarion's PATCH endpoint requires at least one body field "
+            "(attribute or relationship) even when triggering "
+            "workflow_action or change_type_to. Pair the action with one "
+            "of: title, description, status, priority, severity, due_date, "
+            "initial_estimate, resolution, hyperlinks, or assignee_ids."
+        )
 
     if dry_run:
         return WorkItemUpdateResult(
