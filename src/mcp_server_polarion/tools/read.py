@@ -26,7 +26,6 @@ from mcp_server_polarion.models import (
     DocumentDetail,
     DocumentPart,
     DocumentSummary,
-    Hyperlink,
     LinkedWorkItemsList,
     LinkedWorkItemSummary,
     PaginatedResult,
@@ -40,7 +39,6 @@ from mcp_server_polarion.tools._helpers import (
     WI_DETAIL_FIELDS,
     WI_LIST_FIELDS,
     build_included_workitem_map,
-    build_work_item_summary_kwargs,
     compute_has_more,
     encode_path_segment,
     extract_relationship_id,
@@ -48,6 +46,7 @@ from mcp_server_polarion.tools._helpers import (
     extract_total_count,
     get_client,
     has_links_next,
+    parse_work_item_detail,
     parse_work_item_summaries,
     safe_str,
     split_module_id,
@@ -63,32 +62,6 @@ _VALID_PART_TYPES: Final[frozenset[str]] = frozenset(
 # ---------------------------------------------------------------------------
 # Read-specific helpers
 # ---------------------------------------------------------------------------
-
-
-def _parse_hyperlinks(value: object) -> list[Hyperlink]:
-    """Parse the ``attributes.hyperlinks`` field into ``Hyperlink`` models.
-
-    Polarion returns hyperlinks as a list of dicts with ``role``,
-    ``title``, and ``uri`` keys. Entries without a usable ``uri`` are
-    skipped to keep the response signal clean for the LLM.
-    """
-    if not isinstance(value, list):
-        return []
-    links: list[Hyperlink] = []
-    for entry in value:
-        if not isinstance(entry, dict):
-            continue
-        uri = safe_str(entry.get("uri", ""))
-        if not uri:
-            continue
-        links.append(
-            Hyperlink(
-                role=safe_str(entry.get("role", "")),
-                title=safe_str(entry.get("title", "")),
-                uri=uri,
-            )
-        )
-    return links
 
 
 @dataclass(frozen=True, slots=True)
@@ -1172,32 +1145,11 @@ async def get_work_item(
     data = response.get("data", {})
     if not isinstance(data, dict):
         data = {}
-    attrs = data.get("attributes", {})
-    if not isinstance(attrs, dict):
-        attrs = {}
-    rels = data.get("relationships", {})
-    if not isinstance(rels, dict):
-        rels = {}
 
-    desc_obj = attrs.get("description", {})
-    desc_html = ""
-    if isinstance(desc_obj, dict):
-        desc_html = safe_str(desc_obj.get("value", ""))
-
-    summary_kwargs = build_work_item_summary_kwargs(data)
-    if not summary_kwargs["id"]:
-        summary_kwargs["id"] = work_item_id
-
-    return WorkItemDetail(
-        **summary_kwargs,
-        description=html_to_markdown(desc_html),
+    return parse_work_item_detail(
+        data,
         project_id=project_id,
-        author_id=extract_short_id(extract_relationship_id(rels, "author")),
-        created=safe_str(attrs.get("created", "")),
-        resolution=safe_str(attrs.get("resolution", "")),
-        severity=safe_str(attrs.get("severity", "")),
-        outline_number=safe_str(attrs.get("outlineNumber", "")),
-        hyperlinks=_parse_hyperlinks(attrs.get("hyperlinks")),
+        fallback_id=work_item_id,
     )
 
 

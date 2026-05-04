@@ -24,6 +24,7 @@ from mcp_server_polarion.models import (
     Hyperlink,
     WorkItemCreateResult,
     WorkItemMoveResult,
+    WorkItemUpdateResult,
 )
 from mcp_server_polarion.tools import write as _write_mod
 
@@ -31,7 +32,9 @@ from mcp_server_polarion.tools import write as _write_mod
 # (not a FunctionTool wrapper), so we reference them directly.
 create_work_item = _write_mod.create_work_item
 move_work_item_to_document = _write_mod.move_work_item_to_document
+update_work_item = _write_mod.update_work_item
 _build_move_to_document_payload = _write_mod._build_move_to_document_payload
+_build_update_work_item_payload = _write_mod._build_update_work_item_payload
 _build_work_item_payload = _write_mod._build_work_item_payload
 _extract_created_id = _write_mod._extract_created_id
 
@@ -46,6 +49,8 @@ def mock_client() -> AsyncMock:
     """Return a mock PolarionClient with async methods."""
     client = AsyncMock(spec=PolarionClient)
     client.post = AsyncMock()
+    client.patch = AsyncMock()
+    client.get = AsyncMock()
     return client
 
 
@@ -975,6 +980,554 @@ class TestMoveWorkItemToDocumentFieldValidation:
     def test_target_document_name_rejects_empty_string(self) -> None:
         with pytest.raises(ValidationError):
             self._adapter_for("target_document_name").validate_python("")
+
+    def test_work_item_id_accepts_non_empty(self) -> None:
+        assert self._adapter_for("work_item_id").validate_python("MCPT-1") == "MCPT-1"
+
+
+# ===========================================================================
+# update_work_item
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# _build_update_work_item_payload
+# ---------------------------------------------------------------------------
+
+
+class TestBuildUpdateWorkItemPayload:
+    """Tests for the private ``_build_update_work_item_payload`` helper."""
+
+    def test_minimal_payload_with_only_title(self) -> None:
+        payload = _build_update_work_item_payload(
+            project_id="MyProj",
+            work_item_id="MCPT-1",
+            title="New title",
+            description_html=None,
+            status=None,
+            priority=None,
+            severity=None,
+            due_date=None,
+            initial_estimate=None,
+            resolution=None,
+            hyperlinks=None,
+            assignee_ids=None,
+        )
+
+        # PATCH body wraps `data` as a single object, not a list.
+        assert payload == {
+            "data": {
+                "type": "workitems",
+                "id": "MyProj/MCPT-1",
+                "attributes": {"title": "New title"},
+            }
+        }
+        item = cast(dict[str, object], payload["data"])
+        assert "relationships" not in item
+
+    def test_id_is_project_slash_work_item_id(self) -> None:
+        payload = _build_update_work_item_payload(
+            project_id="proj",
+            work_item_id="MCPT-99",
+            title="x",
+            description_html=None,
+            status=None,
+            priority=None,
+            severity=None,
+            due_date=None,
+            initial_estimate=None,
+            resolution=None,
+            hyperlinks=None,
+            assignee_ids=None,
+        )
+
+        item = cast(dict[str, object], payload["data"])
+        assert item["id"] == "proj/MCPT-99"
+
+    def test_skips_none_and_empty_string_fields(self) -> None:
+        payload = _build_update_work_item_payload(
+            project_id="MyProj",
+            work_item_id="MCPT-1",
+            title=None,
+            description_html="",
+            status="",
+            priority=None,
+            severity="",
+            due_date="",
+            initial_estimate=None,
+            resolution="",
+            hyperlinks=[],
+            assignee_ids=[],
+        )
+
+        # No attributes, no relationships — just the resource header.
+        item = cast(dict[str, object], payload["data"])
+        assert item == {"type": "workitems", "id": "MyProj/MCPT-1"}
+
+    def test_includes_description_block(self) -> None:
+        payload = _build_update_work_item_payload(
+            project_id="MyProj",
+            work_item_id="MCPT-1",
+            title=None,
+            description_html="<p>hi</p>",
+            status=None,
+            priority=None,
+            severity=None,
+            due_date=None,
+            initial_estimate=None,
+            resolution=None,
+            hyperlinks=None,
+            assignee_ids=None,
+        )
+
+        item = cast(dict[str, object], payload["data"])
+        attrs = cast(dict[str, object], item["attributes"])
+        assert attrs["description"] == {
+            "type": "text/html",
+            "value": "<p>hi</p>",
+        }
+
+    def test_assignee_ids_become_to_many_users_relationship(self) -> None:
+        payload = _build_update_work_item_payload(
+            project_id="MyProj",
+            work_item_id="MCPT-1",
+            title=None,
+            description_html=None,
+            status=None,
+            priority=None,
+            severity=None,
+            due_date=None,
+            initial_estimate=None,
+            resolution=None,
+            hyperlinks=None,
+            assignee_ids=["alice", "bob"],
+        )
+
+        item = cast(dict[str, object], payload["data"])
+        rels = cast(dict[str, object], item["relationships"])
+        assert rels["assignee"] == {
+            "data": [
+                {"type": "users", "id": "alice"},
+                {"type": "users", "id": "bob"},
+            ]
+        }
+
+    def test_hyperlinks_serialise_role_title_uri(self) -> None:
+        payload = _build_update_work_item_payload(
+            project_id="MyProj",
+            work_item_id="MCPT-1",
+            title=None,
+            description_html=None,
+            status=None,
+            priority=None,
+            severity=None,
+            due_date=None,
+            initial_estimate=None,
+            resolution=None,
+            hyperlinks=[
+                Hyperlink(role="ref_ext", title="Spec", uri="https://example.com"),
+            ],
+            assignee_ids=None,
+        )
+
+        item = cast(dict[str, object], payload["data"])
+        attrs = cast(dict[str, object], item["attributes"])
+        assert attrs["hyperlinks"] == [
+            {"role": "ref_ext", "title": "Spec", "uri": "https://example.com"},
+        ]
+
+    def test_all_optional_attrs_included_when_set(self) -> None:
+        payload = _build_update_work_item_payload(
+            project_id="MyProj",
+            work_item_id="MCPT-1",
+            title="t",
+            description_html=None,
+            status="open",
+            priority="50.0",
+            severity="major",
+            due_date="2026-05-31",
+            initial_estimate="5 1/2d",
+            resolution="fixed",
+            hyperlinks=None,
+            assignee_ids=None,
+        )
+
+        item = cast(dict[str, object], payload["data"])
+        attrs = cast(dict[str, object], item["attributes"])
+        assert attrs["title"] == "t"
+        assert attrs["status"] == "open"
+        assert attrs["priority"] == "50.0"
+        assert attrs["severity"] == "major"
+        assert attrs["dueDate"] == "2026-05-31"
+        assert attrs["initialEstimate"] == "5 1/2d"
+        assert attrs["resolution"] == "fixed"
+
+
+# ---------------------------------------------------------------------------
+# update_work_item — shared helpers for tool-level tests
+# ---------------------------------------------------------------------------
+
+
+async def _call_update(
+    mock_ctx: MagicMock, **overrides: object
+) -> WorkItemUpdateResult:
+    """Call ``update_work_item`` with safe defaults.
+
+    The tool's ``Field(...)`` defaults stay as ``FieldInfo`` objects when
+    invoked outside FastMCP, so every parameter must be passed
+    explicitly. This helper supplies plain Python defaults; tests
+    override only the parameters they care about.
+    """
+    defaults: dict[str, object] = {
+        "project_id": "MyProj",
+        "work_item_id": "MCPT-1",
+        "title": None,
+        "description": None,
+        "status": None,
+        "priority": None,
+        "severity": None,
+        "due_date": None,
+        "initial_estimate": None,
+        "resolution": None,
+        "hyperlinks": None,
+        "assignee_ids": None,
+        "workflow_action": None,
+        "change_type_to": None,
+        "dry_run": False,
+    }
+    defaults.update(overrides)
+    return await update_work_item(mock_ctx, **defaults)
+
+
+# ---------------------------------------------------------------------------
+# update_work_item — at-least-one-field validation
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateWorkItemValidation:
+    """Tests for the at-least-one-field guard in ``update_work_item``."""
+
+    async def test_no_fields_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        with pytest.raises(ValueError, match="Nothing to update"):
+            await _call_update(mock_ctx)
+        mock_client.patch.assert_not_called()
+        mock_client.get.assert_not_called()
+
+    async def test_workflow_action_alone_passes_validation(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # workflow_action is enough on its own — no body field required.
+        result = await _call_update(
+            mock_ctx,
+            workflow_action="close",
+            dry_run=True,
+        )
+        assert result.dry_run is True
+        assert result.changes == {"workflow_action": "close"}
+
+
+# ---------------------------------------------------------------------------
+# update_work_item — dry run
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateWorkItemDryRun:
+    """Tests for ``update_work_item`` with ``dry_run=True``."""
+
+    async def test_dry_run_does_not_call_polarion(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        result = await _call_update(
+            mock_ctx,
+            title="New title",
+            dry_run=True,
+        )
+
+        mock_client.patch.assert_not_called()
+        mock_client.get.assert_not_called()
+        assert isinstance(result, WorkItemUpdateResult)
+        assert result.updated is False
+        assert result.dry_run is True
+        assert result.current is None
+        assert result.changes == {"title": "New title"}
+        # payload_preview is populated on dry-run (mirrors create_work_item).
+        assert result.payload_preview is not None
+        item = cast(dict[str, object], result.payload_preview["data"])
+        assert item["id"] == "MyProj/MCPT-1"
+        attrs = cast(dict[str, object], item["attributes"])
+        assert attrs == {"title": "New title"}
+
+    async def test_changes_uses_python_typed_values_not_json_api_shape(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # description in `changes` is the original Markdown; the
+        # JSON:API HTML wrapping happens only in the wire payload preview.
+        result = await _call_update(
+            mock_ctx,
+            description="**bold**",
+            assignee_ids=["alice"],
+            dry_run=True,
+        )
+
+        assert result.changes == {
+            "description": "**bold**",
+            "assignee_ids": ["alice"],
+        }
+        # The wire-shaped preview holds the HTML-wrapped description.
+        assert result.payload_preview is not None
+        item = cast(dict[str, object], result.payload_preview["data"])
+        attrs = cast(dict[str, object], item["attributes"])
+        desc = cast(dict[str, object], attrs["description"])
+        assert desc["type"] == "text/html"
+
+
+# ---------------------------------------------------------------------------
+# update_work_item — happy path
+# ---------------------------------------------------------------------------
+
+
+def _make_get_response(
+    *,
+    work_item_id: str = "MCPT-1",
+    project_id: str = "MyProj",
+    title: str = "after",
+    status: str = "open",
+    description_html: str = "",
+    assignee_ids: list[str] | None = None,
+) -> dict[str, object]:
+    """Build a minimal JSON:API GET response for the follow-up fetch."""
+    rels: dict[str, object] = {}
+    if assignee_ids is not None:
+        rels["assignee"] = {
+            "data": [{"type": "users", "id": uid} for uid in assignee_ids]
+        }
+    attrs: dict[str, object] = {
+        "title": title,
+        "type": "task",
+        "status": status,
+        "priority": "50.0",
+        "updated": "2026-05-04T10:00:00Z",
+    }
+    if description_html:
+        attrs["description"] = {"type": "text/html", "value": description_html}
+    return {
+        "data": {
+            "type": "workitems",
+            "id": f"{project_id}/{work_item_id}",
+            "attributes": attrs,
+            "relationships": rels,
+        }
+    }
+
+
+class TestUpdateWorkItemHappyPath:
+    """Tests for a successful ``update_work_item`` call."""
+
+    async def test_returns_updated_with_post_update_state(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # PATCH returns {} on 204; GET returns the post-update detail.
+        mock_client.patch.return_value = {}
+        mock_client.get.return_value = _make_get_response(title="after")
+
+        result = await _call_update(mock_ctx, title="after")
+
+        assert isinstance(result, WorkItemUpdateResult)
+        assert result.updated is True
+        assert result.dry_run is False
+        assert result.current is not None
+        assert result.current.title == "after"
+        assert result.changes == {"title": "after"}
+        assert result.payload_preview is None
+
+    async def test_patch_called_with_correct_path_and_body(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.return_value = {}
+        mock_client.get.return_value = _make_get_response()
+
+        await _call_update(
+            mock_ctx,
+            work_item_id="MCPT-42",
+            status="open",
+            assignee_ids=["alice"],
+        )
+
+        args, kwargs = mock_client.patch.call_args
+        assert args == ("/projects/MyProj/workitems/MCPT-42",)
+        body = kwargs["json"]
+        item = body["data"]
+        assert item["type"] == "workitems"
+        assert item["id"] == "MyProj/MCPT-42"
+        assert item["attributes"]["status"] == "open"
+        assert item["relationships"]["assignee"]["data"] == [
+            {"type": "users", "id": "alice"}
+        ]
+
+    async def test_followup_get_called_with_detail_fields(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.return_value = {}
+        mock_client.get.return_value = _make_get_response()
+
+        await _call_update(mock_ctx, title="t")
+
+        args, kwargs = mock_client.get.call_args
+        assert args == ("/projects/MyProj/workitems/MCPT-1",)
+        params = kwargs["params"]
+        assert params["include"] == "assignee"
+        assert "title" in params["fields[workitems]"]
+        assert "description" in params["fields[workitems]"]
+
+    async def test_workflow_action_appended_as_query_param(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.return_value = {}
+        mock_client.get.return_value = _make_get_response()
+
+        await _call_update(mock_ctx, workflow_action="close")
+
+        patch_path = mock_client.patch.call_args.args[0]
+        assert patch_path == "/projects/MyProj/workitems/MCPT-1?workflowAction=close"
+        # Follow-up GET uses the base path (no query) so we always read
+        # the canonical detail view.
+        get_path = mock_client.get.call_args.args[0]
+        assert get_path == "/projects/MyProj/workitems/MCPT-1"
+
+    async def test_change_type_to_appended_as_query_param(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.return_value = {}
+        mock_client.get.return_value = _make_get_response()
+
+        await _call_update(mock_ctx, change_type_to="task")
+
+        patch_path = mock_client.patch.call_args.args[0]
+        assert patch_path == "/projects/MyProj/workitems/MCPT-1?changeTypeTo=task"
+
+    async def test_description_is_converted_and_sanitized(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.return_value = {}
+        mock_client.get.return_value = _make_get_response()
+
+        await _call_update(
+            mock_ctx,
+            description="**bold** [link](https://example.com)",
+        )
+
+        body = mock_client.patch.call_args.kwargs["json"]
+        desc = body["data"]["attributes"]["description"]
+        assert desc["type"] == "text/html"
+        assert "<strong>bold</strong>" in desc["value"]
+        assert 'href="https://example.com"' in desc["value"]
+
+    async def test_description_strips_dangerous_link_schemes(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.return_value = {}
+        mock_client.get.return_value = _make_get_response()
+
+        await _call_update(
+            mock_ctx,
+            description="[click](javascript:alert(1))",
+        )
+
+        body = mock_client.patch.call_args.kwargs["json"]
+        desc_html = body["data"]["attributes"]["description"]["value"]
+        assert 'href="javascript:' not in desc_html
+        assert "href='javascript:" not in desc_html
+
+    async def test_path_url_encodes_special_chars(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.return_value = {}
+        mock_client.get.return_value = _make_get_response()
+
+        await _call_update(mock_ctx, project_id="My Proj", title="t")
+
+        assert (
+            mock_client.patch.call_args.args[0]
+            == "/projects/My%20Proj/workitems/MCPT-1"
+        )
+
+
+# ---------------------------------------------------------------------------
+# update_work_item — error mapping
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateWorkItemErrorMapping:
+    """Tests that domain exceptions are mapped at the tool layer."""
+
+    async def test_patch_401_raises_permission_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.side_effect = PolarionAuthError("auth", status_code=401)
+
+        with pytest.raises(PermissionError):
+            await _call_update(mock_ctx, title="t")
+        mock_client.get.assert_not_called()
+
+    async def test_patch_404_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.side_effect = PolarionNotFoundError(
+            "not found", status_code=404
+        )
+
+        with pytest.raises(ValueError, match="not found"):
+            await _call_update(mock_ctx, work_item_id="ghost", title="t")
+
+    async def test_patch_other_error_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.side_effect = PolarionError("boom", status_code=500)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            await _call_update(mock_ctx, title="t")
+
+    async def test_followup_get_404_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # PATCH succeeds, but the follow-up GET 404s — surface it the
+        # same way (very rare race; mostly defensive).
+        mock_client.patch.return_value = {}
+        mock_client.get.side_effect = PolarionNotFoundError(
+            "not found", status_code=404
+        )
+
+        with pytest.raises(ValueError, match="not found"):
+            await _call_update(mock_ctx, title="t")
+
+
+# ---------------------------------------------------------------------------
+# update_work_item — Pydantic Field constraints
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateWorkItemFieldValidation:
+    """Verify ``min_length=1`` constraints attached to required parameters."""
+
+    @staticmethod
+    def _adapter_for(param_name: str) -> TypeAdapter[object]:
+        hints = get_type_hints(update_work_item)
+        sig = inspect.signature(update_work_item)
+        field_info = sig.parameters[param_name].default
+        return TypeAdapter(Annotated[hints[param_name], field_info])
+
+    def test_project_id_rejects_empty_string(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("project_id").validate_python("")
+
+    def test_work_item_id_rejects_empty_string(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("work_item_id").validate_python("")
+
+    def test_project_id_accepts_non_empty(self) -> None:
+        assert self._adapter_for("project_id").validate_python("p") == "p"
 
     def test_work_item_id_accepts_non_empty(self) -> None:
         assert self._adapter_for("work_item_id").validate_python("MCPT-1") == "MCPT-1"
