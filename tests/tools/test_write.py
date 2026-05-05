@@ -21,6 +21,7 @@ from mcp_server_polarion.core.exceptions import (
     PolarionNotFoundError,
 )
 from mcp_server_polarion.models import (
+    DocumentUpdateResult,
     Hyperlink,
     WorkItemCreateResult,
     WorkItemMoveResult,
@@ -32,8 +33,10 @@ from mcp_server_polarion.tools import write as _write_mod
 # (not a FunctionTool wrapper), so we reference them directly.
 create_work_item = _write_mod.create_work_item
 move_work_item_to_document = _write_mod.move_work_item_to_document
+update_document = _write_mod.update_document
 update_work_item = _write_mod.update_work_item
 _build_move_to_document_payload = _write_mod._build_move_to_document_payload
+_build_update_document_payload = _write_mod._build_update_document_payload
 _build_update_work_item_payload = _write_mod._build_update_work_item_payload
 _build_work_item_payload = _write_mod._build_work_item_payload
 _extract_created_id = _write_mod._extract_created_id
@@ -1566,3 +1569,294 @@ class TestUpdateWorkItemFieldValidation:
 
     def test_work_item_id_accepts_non_empty(self) -> None:
         assert self._adapter_for("work_item_id").validate_python("MCPT-1") == "MCPT-1"
+
+
+# ===========================================================================
+# update_document
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# _build_update_document_payload
+# ---------------------------------------------------------------------------
+
+
+class TestBuildUpdateDocumentPayload:
+    """Tests for the private ``_build_update_document_payload`` helper."""
+
+    def test_basic_payload_shape(self) -> None:
+        payload = _build_update_document_payload(
+            project_id="MyProj",
+            space_id="Requirements",
+            document_name="SRS",
+            body_html="<h1>Hi</h1>",
+        )
+
+        # data must be a single dict (PATCH-shape), NOT a list.
+        assert payload == {
+            "data": {
+                "type": "documents",
+                "id": "MyProj/Requirements/SRS",
+                "attributes": {
+                    "homePageContent": {
+                        "type": "text/html",
+                        "value": "<h1>Hi</h1>",
+                    }
+                },
+            }
+        }
+        assert isinstance(payload["data"], dict)
+
+    def test_document_name_with_slashes_preserved_verbatim(self) -> None:
+        # JSON body IDs must NOT be URL-encoded.
+        payload = _build_update_document_payload(
+            project_id="MyProj",
+            space_id="Design",
+            document_name="Folder/Sub Doc",
+            body_html="<p>x</p>",
+        )
+
+        data = cast(dict[str, object], payload["data"])
+        assert data["id"] == "MyProj/Design/Folder/Sub Doc"
+
+    def test_empty_body_produces_valid_payload(self) -> None:
+        payload = _build_update_document_payload(
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            body_html="",
+        )
+
+        data = cast(dict[str, object], payload["data"])
+        attrs = cast(dict[str, object], data["attributes"])
+        hpc = cast(dict[str, object], attrs["homePageContent"])
+        assert hpc == {"type": "text/html", "value": ""}
+
+
+# ---------------------------------------------------------------------------
+# update_document — dry run
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateDocumentDryRun:
+    """Tests for ``update_document`` with ``dry_run=True``."""
+
+    async def test_dry_run_returns_payload_without_calling_patch(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        result = await update_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="Requirements",
+            document_name="SRS",
+            content="# Title",
+            dry_run=True,
+        )
+
+        mock_client.patch.assert_not_called()
+        assert isinstance(result, DocumentUpdateResult)
+        assert result.updated is False
+        assert result.dry_run is True
+        assert result.payload_preview is not None
+        assert isinstance(result.payload_preview, dict)
+        # data is a single dict, not a list.
+        data = cast(dict[str, object], result.payload_preview["data"])
+        assert data["type"] == "documents"
+
+
+# ---------------------------------------------------------------------------
+# update_document — happy path
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateDocumentHappyPath:
+    """Tests for a successful ``update_document`` call."""
+
+    async def test_returns_updated_true_on_204(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # client.patch returns {} on 204 No Content.
+        mock_client.patch.return_value = {}
+
+        result = await update_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="Requirements",
+            document_name="SRS",
+            content="# Title",
+            dry_run=False,
+        )
+
+        assert isinstance(result, DocumentUpdateResult)
+        assert result.updated is True
+        assert result.dry_run is False
+        assert result.payload_preview is None
+
+    async def test_patch_called_with_correct_path_and_body(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.return_value = {}
+
+        await update_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="Requirements",
+            document_name="My Doc",
+            content="# Title",
+            dry_run=False,
+        )
+
+        args, kwargs = mock_client.patch.call_args
+        # URL-encoded path segments.
+        expected_path = "/projects/MyProj/spaces/Requirements/documents/My%20Doc"
+        assert args == (expected_path,)
+        body = kwargs["json"]
+        # data is a single dict (PATCH-shape).
+        assert isinstance(body["data"], dict)
+        assert body["data"]["id"] == "MyProj/Requirements/My Doc"
+
+    async def test_markdown_converted_to_html(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.return_value = {}
+
+        await update_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            content="# Section\n\n**bold**",
+            dry_run=False,
+        )
+
+        _, kwargs = mock_client.patch.call_args
+        value = kwargs["json"]["data"]["attributes"]["homePageContent"]["value"]
+        assert "<h1>Section</h1>" in value
+        assert "<strong>bold</strong>" in value
+
+    async def test_empty_content_sends_empty_body_html(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Empty content is valid (full replace with empty body); the
+        # caller is responsible for understanding this clears the
+        # document. Verifies the tool does not reject empty input.
+        mock_client.patch.return_value = {}
+
+        result = await update_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            content="",
+            dry_run=False,
+        )
+
+        assert result.updated is True
+        _, kwargs = mock_client.patch.call_args
+        value = kwargs["json"]["data"]["attributes"]["homePageContent"]["value"]
+        assert value == ""
+
+    async def test_dangerous_link_schemes_stripped(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.return_value = {}
+
+        await update_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            content="[click](javascript:alert(1))",
+            dry_run=False,
+        )
+
+        _, kwargs = mock_client.patch.call_args
+        value = kwargs["json"]["data"]["attributes"]["homePageContent"]["value"]
+        assert 'href="javascript:' not in value
+        assert "href='javascript:" not in value
+
+
+# ---------------------------------------------------------------------------
+# update_document — error mapping
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateDocumentErrorMapping:
+    """Tests that domain exceptions are mapped at the tool layer."""
+
+    async def test_401_raises_permission_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.side_effect = PolarionAuthError("auth", status_code=401)
+
+        with pytest.raises(PermissionError):
+            await update_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="S",
+                document_name="D",
+                content="x",
+                dry_run=False,
+            )
+
+    async def test_404_raises_value_error_with_doc_in_message(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.side_effect = PolarionNotFoundError(
+            "not found", status_code=404
+        )
+
+        with pytest.raises(ValueError, match="ghost-doc") as exc_info:
+            await update_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="ghost-space",
+                document_name="ghost-doc",
+                content="x",
+                dry_run=False,
+            )
+        assert "ghost-space" in str(exc_info.value)
+
+    async def test_other_error_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.side_effect = PolarionError("boom", status_code=500)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            await update_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="S",
+                document_name="D",
+                content="x",
+                dry_run=False,
+            )
+
+
+# ---------------------------------------------------------------------------
+# update_document — Pydantic Field constraints
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateDocumentFieldValidation:
+    """Verify ``min_length=1`` constraints attached to required parameters."""
+
+    @staticmethod
+    def _adapter_for(param_name: str) -> TypeAdapter[object]:
+        hints = get_type_hints(update_document)
+        sig = inspect.signature(update_document)
+        field_info = sig.parameters[param_name].default
+        return TypeAdapter(Annotated[hints[param_name], field_info])
+
+    def test_space_id_rejects_empty_string(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("space_id").validate_python("")
+
+    def test_document_name_rejects_empty_string(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("document_name").validate_python("")
+
+    def test_content_accepts_empty_string(self) -> None:
+        # No min_length on content -- empty body is intentionally
+        # allowed (full replace clears the document).
+        assert self._adapter_for("content").validate_python("") == ""

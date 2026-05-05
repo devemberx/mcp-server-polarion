@@ -1,11 +1,11 @@
 """Write MCP tools for Polarion ALM.
 
-Currently provides ``create_work_item``, ``update_work_item``, and
-``move_work_item_to_document``. All write tools follow the strict
-patterns documented in ``CLAUDE.md``: they convert Markdown input to
-sanitized HTML, build minimal request payloads (skipping unset fields
-rather than sending empty values), and map domain exceptions to
-user-facing ones at the tool layer.
+Currently provides ``create_work_item``, ``update_work_item``,
+``move_work_item_to_document``, and ``update_document``. All write
+tools follow the strict patterns documented in ``CLAUDE.md``: they
+convert Markdown input to sanitized HTML, build minimal request
+payloads (skipping unset fields rather than sending empty values),
+and map domain exceptions to user-facing ones at the tool layer.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from mcp_server_polarion.core.exceptions import (
     PolarionNotFoundError,
 )
 from mcp_server_polarion.models import (
+    DocumentUpdateResult,
     Hyperlink,
     JsonValue,
     WorkItemCreateResult,
@@ -220,6 +221,36 @@ def _build_move_to_document_payload(
     else:
         payload["nextPart"] = f"{target_doc}/{next_part_id}"
     return payload
+
+
+def _build_update_document_payload(
+    *,
+    project_id: str,
+    space_id: str,
+    document_name: str,
+    body_html: str,
+) -> dict[str, JsonValue]:
+    """Build the JSON:API request body for ``PATCH .../documents/{d}``.
+
+    Note: ``data`` is a single resource object (NOT a list) -- mirrors
+    the PATCH-shape used by ``_build_update_work_item_payload`` and
+    differs from POST-style helpers that wrap in ``[...]``. The
+    document ID is a 3-segment string ``{project}/{space}/{document}``
+    that must NOT be URL-encoded; URL encoding only applies to path
+    segments, not JSON body values.
+    """
+    return {
+        "data": {
+            "type": "documents",
+            "id": f"{project_id}/{space_id}/{document_name}",
+            "attributes": {
+                "homePageContent": {
+                    "type": "text/html",
+                    "value": body_html,
+                }
+            },
+        }
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -923,6 +954,155 @@ async def move_work_item_to_document(  # noqa: PLR0913
 
     return WorkItemMoveResult(
         moved=True,
+        dry_run=False,
+        payload_preview=None,
+    )
+
+
+@mcp.tool(tags={"write"}, timeout=60.0)
+async def update_document(  # noqa: PLR0913
+    ctx: Context,
+    project_id: str = Field(
+        description=("Polarion project ID. Use ``list_projects`` to discover."),
+    ),
+    space_id: str = Field(
+        min_length=1,
+        description=(
+            "Space ID (use '_default' for the default space). "
+            "Use ``list_documents`` to discover."
+        ),
+    ),
+    document_name: str = Field(
+        min_length=1,
+        description=(
+            "Document name within ``space_id``. Spaces and other special "
+            "characters in the name are URL-encoded automatically."
+        ),
+    ),
+    content: str = Field(
+        description=(
+            "FULL new document body in Markdown. Replaces the entire "
+            "current ``homePageContent`` -- any existing body content "
+            "not present here is removed. To append rather than "
+            "replace, first call ``get_document(include_content=True)`` "
+            "and concatenate to the returned Markdown (see CAUTION "
+            "below about round-trip data loss)."
+        ),
+    ),
+    dry_run: bool = Field(
+        default=False,
+        description=(
+            "When True, build and return the JSON:API payload preview "
+            "without calling Polarion."
+        ),
+    ),
+) -> DocumentUpdateResult:
+    """Replace a Polarion document's body with the supplied Markdown.
+
+    Sends a JSON:API ``PATCH /projects/{p}/spaces/{s}/documents/{d}``
+    that overwrites ``attributes.homePageContent`` with the Markdown
+    converted to Polarion-safe HTML. This is the canonical document-
+    body write path on the Polarion REST API: the server parses the
+    new HTML on save and auto-creates heading work items from inline
+    ``<h1>``..``<h4>`` tags, sets each new WI's ``module``
+    relationship, computes ``outline_number``, and re-derives the
+    ``parts`` view. The convenience wrappers (``/parts`` POST and
+    ``moveToDocument``) edit ``homePageContent`` internally and
+    impose extra restrictions; this tool is the underlying primitive.
+
+    FULL REPLACE -- this is destructive: any current body content not
+    present in ``content`` is removed. To append, first call
+    ``get_document(include_content=True)`` and concatenate to the
+    returned Markdown before passing to ``update_document``.
+
+    CAUTION -- ``get_document`` -> ``update_document`` round-trip can
+    lose data:
+
+    - ``get_document`` strips empty heading lines (``^#{1,6}\\s*$``)
+      from the returned Markdown because Polarion stores heading text
+      in the heading WI's ``title`` field, not inside the body HTML.
+      Round-tripping through Markdown therefore drops every heading
+      placeholder; sending the result back via ``update_document``
+      replaces those headings with nothing.
+    - Polarion-specific WI placeholder fragments (e.g.
+      ``<div data-id="MCPT-N"/>``) are sanitized away before the
+      Markdown is built; embedding existing work items as document
+      parts is not possible from Markdown input. Use
+      ``move_work_item_to_document`` for non-heading WI insertion.
+
+    Safe usage patterns: (a) freshly authoring a short document,
+    (b) writing heading-free plain text, (c) intentionally replacing
+    the body with new content from scratch. AVOID using this tool to
+    edit a document with many existing headings or embedded WI
+    references unless data loss is acceptable.
+
+    Removing an ``<h1>`` line from a subsequent ``update_document``
+    call removes the corresponding part but leaves the heading WI as
+    an orphan (still ``module``-linked, no ``outline_number``).
+    Cleanup of orphan heading WIs is not currently exposed.
+
+    Args:
+        ctx: MCP tool context (injected automatically).
+        project_id: Polarion project ID.
+        space_id: Space ID containing the document.
+        document_name: Document name within ``space_id``.
+        content: Full new document body in Markdown.
+        dry_run: When True, return payload preview without calling
+            Polarion. Defaults to False.
+
+    Returns:
+        DocumentUpdateResult with:
+        - ``updated``: True on a successful real update, False when
+          ``dry_run=True``.
+        - ``dry_run``: Echo of the dry_run flag.
+        - ``payload_preview``: The JSON:API request body. Populated
+          on dry-run; None after a successful real update.
+
+    Raises:
+        ValueError: If the project, space, or document is not found.
+        PermissionError: If the token lacks permissions to update the
+            document.
+        RuntimeError: On other Polarion API errors.
+    """
+    body_html = sanitize_html(markdown_to_html(content)) if content else ""
+
+    payload = _build_update_document_payload(
+        project_id=project_id,
+        space_id=space_id,
+        document_name=document_name,
+        body_html=body_html,
+    )
+
+    if dry_run:
+        return DocumentUpdateResult(
+            updated=False,
+            dry_run=True,
+            payload_preview=payload,
+        )
+
+    client = get_client(ctx)
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/spaces/{encode_path_segment(space_id)}"
+        f"/documents/{encode_path_segment(document_name)}"
+    )
+    try:
+        await client.patch(path, json=cast(dict[str, object], payload))
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot update document -- check your POLARION_TOKEN permissions."
+        ) from exc
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Document '{document_name}' (space '{space_id}', "
+            f"project '{project_id}') not found. "
+            "Use `list_documents` to discover valid IDs."
+        ) from exc
+    except PolarionError as exc:
+        raise RuntimeError(f"Failed to update document: {exc.message}") from exc
+
+    return DocumentUpdateResult(
+        updated=True,
         dry_run=False,
         payload_preview=None,
     )
