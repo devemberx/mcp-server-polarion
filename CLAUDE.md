@@ -101,14 +101,24 @@ The newer Polarion endpoint that exposes back-links with their original role is 
 
 Polarion does NOT strictly validate `type`, `status`, `priority`, or `severity` strings on create. Unrecognised values are silently coerced (`priority="not_a_number"` → project default) or stored verbatim (`type="not_a_real_type"` → ghost type). Use a `Literal[...]` annotation on the Pydantic Field for closed sets where the docstring claim of validation matters; otherwise add a WARNING to the field description. Discovered during PR #10 e2e against `MCP_Test_Project`.
 
-### Heading work items are server-locked
+### Heading work items are server-locked for create/move (but PATCH works)
 
 Polarion rejects all API attempts to create or relocate heading parts:
 - `POST .../documents/{d}/parts` with `type="heading"` → 400 "Creation of heading Parts is not supported"
 - `POST .../documents/{d}/parts` attaching a heading WI as `type="workitem"` → 400 "Cannot add external Work Item of type Heading"
 - `POST .../actions/moveToDocument` for a heading WI → 400 "Cannot move headings"
 
-Headings appear immovable once Polarion creates them. The planned workaround is to create the heading WI inside the target document at creation time via the `module` relationship on `create_work_item` (a future `module_id` parameter — see PR #11 discussion).
+However, **`PATCH /workitems/{wi}` IS allowed on heading WIs** — `update_work_item` can edit a heading's attributes (title, priority, etc.) just like any other work item (verified in PR #13 e2e against `MCPT-1`). The lock is specific to creation/relocation; in-place updates of an existing heading are unrestricted.
+
+Headings appear immovable once Polarion creates them. The planned workaround for placement is to create the heading WI inside the target document at creation time via the `module` relationship on `create_work_item` (a future `module_id` parameter — see PR #11 discussion).
+
+### `PATCH /workitems/{wi}` requires a non-empty body
+
+Polarion rejects PATCH bodies that have neither `attributes` nor `relationships` ("At least one of the members is required: 'attributes, relationships'"), even when only the `workflowAction` / `changeTypeTo` query parameter is set. Action-only transitions therefore must be paired with at least one body field. `update_work_item` validates this at the tool layer (raises `ValueError`) so the caller gets an actionable message instead of a Polarion 400. Discovered during PR #13 e2e against `MCP_Test_Project`.
+
+### `changeTypeTo` resets the workflow status
+
+Setting `changeTypeTo` on `update_work_item` resets the work item's `status` to the new type's initial workflow state — observed in PR #13 e2e: `task` (status=`approved`) → `defect` produces a defect with status=`open`. The docstring warns about this; callers that need to preserve the prior status must re-apply it in a follow-up `update_work_item` call.
 
 ## Server-Side Constraints (informational)
 

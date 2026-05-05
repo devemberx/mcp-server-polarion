@@ -1,15 +1,17 @@
 """Write MCP tools for Polarion ALM.
 
-Currently provides ``create_work_item`` and ``move_work_item_to_document``.
-All write tools follow the strict patterns documented in ``CLAUDE.md``:
-they convert Markdown input to sanitized HTML, build minimal request
-payloads (skipping unset fields rather than sending empty values), and
-map domain exceptions to user-facing ones at the tool layer.
+Currently provides ``create_work_item``, ``update_work_item``, and
+``move_work_item_to_document``. All write tools follow the strict
+patterns documented in ``CLAUDE.md``: they convert Markdown input to
+sanitized HTML, build minimal request payloads (skipping unset fields
+rather than sending empty values), and map domain exceptions to
+user-facing ones at the tool layer.
 """
 
 from __future__ import annotations
 
 from typing import cast
+from urllib.parse import urlencode
 
 from fastmcp import Context
 from pydantic import Field
@@ -24,12 +26,15 @@ from mcp_server_polarion.models import (
     JsonValue,
     WorkItemCreateResult,
     WorkItemMoveResult,
+    WorkItemUpdateResult,
 )
 from mcp_server_polarion.server import mcp
 from mcp_server_polarion.tools._helpers import (
+    WI_DETAIL_FIELDS,
     encode_path_segment,
     extract_short_id,
     get_client,
+    parse_work_item_detail,
     safe_str,
 )
 from mcp_server_polarion.utils import markdown_to_html, sanitize_html
@@ -115,6 +120,73 @@ def _extract_created_id(response: dict[str, object]) -> str | None:
     if not full_id:
         return None
     return extract_short_id(full_id)
+
+
+def _build_update_work_item_payload(  # noqa: PLR0913
+    *,
+    project_id: str,
+    work_item_id: str,
+    title: str | None,
+    description_html: str | None,
+    status: str | None,
+    priority: str | None,
+    severity: str | None,
+    due_date: str | None,
+    initial_estimate: str | None,
+    resolution: str | None,
+    hyperlinks: list[Hyperlink] | None,
+    assignee_ids: list[str] | None,
+) -> dict[str, JsonValue]:
+    """Build the JSON:API request body for ``PATCH /projects/{p}/workitems/{wi}``.
+
+    Mirrors ``_build_work_item_payload`` but produces a PATCH-shaped body:
+    ``data`` is a single resource object (not a list), with a required
+    ``id`` of the form ``"{project_id}/{work_item_id}"``. Only attaches
+    keys for values that are explicitly set — ``None``, empty strings,
+    and empty lists are skipped so we never overwrite Polarion attributes
+    with empty values on update.
+    """
+    attributes: dict[str, JsonValue] = {}
+    if title:
+        attributes["title"] = title
+    if description_html:
+        attributes["description"] = {
+            "type": "text/html",
+            "value": description_html,
+        }
+    if status:
+        attributes["status"] = status
+    if priority:
+        attributes["priority"] = priority
+    if severity:
+        attributes["severity"] = severity
+    if due_date:
+        attributes["dueDate"] = due_date
+    if initial_estimate:
+        attributes["initialEstimate"] = initial_estimate
+    if resolution:
+        attributes["resolution"] = resolution
+    if hyperlinks:
+        attributes["hyperlinks"] = [
+            {"role": h.role, "title": h.title, "uri": h.uri} for h in hyperlinks
+        ]
+
+    relationships: dict[str, JsonValue] = {}
+    if assignee_ids:
+        relationships["assignee"] = {
+            "data": [{"type": "users", "id": uid} for uid in assignee_ids]
+        }
+
+    item: dict[str, JsonValue] = {
+        "type": "workitems",
+        "id": f"{project_id}/{work_item_id}",
+    }
+    if attributes:
+        item["attributes"] = attributes
+    if relationships:
+        item["relationships"] = relationships
+
+    return {"data": item}
 
 
 def _build_move_to_document_payload(
@@ -346,6 +418,338 @@ async def create_work_item(  # noqa: PLR0913
         created=True,
         dry_run=False,
         work_item_id=new_id,
+        payload_preview=None,
+    )
+
+
+@mcp.tool(tags={"write"}, timeout=60.0)
+async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
+    ctx: Context,
+    project_id: str = Field(
+        min_length=1,
+        description=(
+            "Polarion project ID containing the work item to update. "
+            "Use ``list_projects`` to discover valid IDs."
+        ),
+    ),
+    work_item_id: str = Field(
+        min_length=1,
+        description=(
+            "Short ID of an EXISTING work item to update (e.g. 'MCPT-042'). "
+            "Use ``get_work_item`` or ``list_work_items`` to confirm the ID."
+        ),
+    ),
+    title: str | None = Field(
+        default=None,
+        description=("New work item title. Pass None (or omit) to leave unchanged."),
+    ),
+    description: str | None = Field(
+        default=None,
+        description=(
+            "New Markdown body. Converted to Polarion-safe HTML on write. "
+            "Pass None (or omit) to leave the description unchanged. "
+            "Note: empty string also leaves the field unchanged in v1 — "
+            "there is no way to clear an existing description via this tool."
+        ),
+    ),
+    status: str | None = Field(
+        default=None,
+        description=(
+            "New workflow status. To trigger a workflow transition with "
+            "side effects (e.g. setting resolution), prefer "
+            "``workflow_action`` over a raw status update."
+        ),
+    ),
+    priority: str | None = Field(
+        default=None,
+        description=(
+            "New priority value as a string (e.g. '50.0'). "
+            "WARNING: this Polarion server version silently coerces "
+            "unrecognised values to the project default."
+        ),
+    ),
+    severity: str | None = Field(
+        default=None,
+        description="New severity classification (e.g. 'major', 'critical').",
+    ),
+    due_date: str | None = Field(
+        default=None,
+        description="New due date in ISO-8601 format 'YYYY-MM-DD'.",
+    ),
+    initial_estimate: str | None = Field(
+        default=None,
+        description="New Polarion duration string, e.g. '5 1/2d', '1w 2d'.",
+    ),
+    resolution: str | None = Field(
+        default=None,
+        description=(
+            "New resolution outcome (e.g. 'fixed', 'wontfix'). Typically "
+            "set as part of closing a work item; consider using "
+            "``workflow_action`` instead so the project's workflow rules "
+            "apply."
+        ),
+    ),
+    hyperlinks: list[Hyperlink] | None = Field(  # noqa: B008
+        default=None,
+        description=(
+            "REPLACES the work item's hyperlink list. Pass the full new "
+            "list (not a delta). Pass None (or omit) to leave hyperlinks "
+            "unchanged."
+        ),
+    ),
+    assignee_ids: list[str] | None = Field(  # noqa: B008
+        default=None,
+        description=(
+            "REPLACES the assignee list with these short user IDs "
+            "(e.g. ['alice', 'bob']). Pass None (or omit) to leave "
+            "assignees unchanged."
+        ),
+    ),
+    workflow_action: str | None = Field(
+        default=None,
+        description=(
+            "Polarion workflow action ID to trigger as part of the update "
+            "(sent as the ``workflowAction`` query parameter, e.g. "
+            "'close', 'reopen'). Workflow actions run the project's "
+            "transition rules (which may set resolution, validate "
+            "required fields, etc.) — prefer this over editing ``status`` "
+            "directly when you want a real state transition. "
+            "Action IDs are project-specific; if the supplied ID is not "
+            "configured for this project, Polarion responds with HTTP 400 "
+            "'workflow action not found'. Must be paired with at least "
+            "one body field (e.g. title) — Polarion rejects PATCH bodies "
+            "with no attributes or relationships."
+        ),
+    ),
+    change_type_to: str | None = Field(
+        default=None,
+        description=(
+            "When set, changes the work item's type as part of the update "
+            "(sent as the ``changeTypeTo`` query parameter). Use sparingly "
+            "— type changes can invalidate type-specific fields and "
+            "RESET the workflow status to the new type's initial state "
+            "(observed: 'approved' task → defect → 'open'). Must be "
+            "paired with at least one body field for the same reason as "
+            "``workflow_action``."
+        ),
+    ),
+    dry_run: bool = Field(
+        default=False,
+        description=(
+            "When True, build the JSON:API payload and return it via "
+            "``payload_preview`` (plus a flat ``changes`` summary) "
+            "without calling Polarion. Useful for verifying the request "
+            "shape before committing."
+        ),
+    ),
+) -> WorkItemUpdateResult:
+    """Update an existing Polarion work item.
+
+    Builds a JSON:API ``PATCH /projects/{projectId}/workitems/{workItemId}``
+    request from the supplied fields, optionally previewing it with
+    ``dry_run=True``. After the PATCH succeeds (Polarion returns 204
+    No Content), this tool issues a follow-up ``GET`` and returns the
+    fresh ``WorkItemDetail`` as ``current`` so the caller can confirm
+    the change applied.
+
+    Field semantics: ``None`` (or omitted) leaves the corresponding
+    field unchanged. Empty string and empty list are also treated as
+    "leave unchanged" — there is no way to clear an existing field
+    value via this tool in v1. To actually change a field, pass a
+    non-empty value.
+
+    Description handling: ``description`` is treated as Markdown,
+    converted via ``markdown_to_html`` (CommonMark + GFM tables), and
+    sanitized via ``sanitize_html`` before being stored as
+    ``{"type": "text/html", "value": "..."}``.
+
+    Replace-all semantics: when ``hyperlinks`` or ``assignee_ids`` is
+    provided, it REPLACES the work item's existing list — pass the full
+    new list, not a delta.
+
+    Workflow transitions: prefer ``workflow_action`` (e.g. 'close',
+    'reopen') over editing ``status`` directly. Workflow actions run
+    Polarion's project-defined transition rules, while a raw ``status``
+    edit bypasses them. ``workflow_action`` and ``change_type_to`` MUST
+    be paired with at least one body field — Polarion rejects PATCH
+    bodies that have neither ``attributes`` nor ``relationships`` (HTTP
+    400 "At least one of the members is required"). When the only
+    intent is to trigger a transition, pair it with a no-op echo
+    (e.g. ``title=<existing title>``) or any other valid body field.
+
+    Free-form fields (``status``, ``priority``, ``severity``,
+    ``resolution``) are NOT strictly validated by this Polarion server
+    version — unrecognised values are silently coerced or stored verbatim.
+    Inspect existing work items with ``get_work_item`` and reuse their
+    values to avoid corrupting the project's enum space.
+
+    Args:
+        ctx: MCP tool context (injected automatically).
+        project_id: Polarion project ID.
+        work_item_id: Short ID of the work item to update.
+        title: Optional new title.
+        description: Optional new Markdown body.
+        status: Optional new workflow status.
+        priority: Optional new priority string.
+        severity: Optional new severity.
+        due_date: Optional new ISO-8601 date 'YYYY-MM-DD'.
+        initial_estimate: Optional new Polarion duration string.
+        resolution: Optional new resolution outcome.
+        hyperlinks: Optional REPLACEMENT hyperlink list.
+        assignee_ids: Optional REPLACEMENT assignee list.
+        workflow_action: Optional workflow action ID
+            (``workflowAction`` query parameter).
+        change_type_to: Optional new work-item type
+            (``changeTypeTo`` query parameter).
+        dry_run: When True, return preview without calling Polarion.
+
+    Returns:
+        WorkItemUpdateResult with:
+        - ``updated``: True on a successful real update, False when
+          ``dry_run=True``.
+        - ``dry_run``: Echo of the dry_run flag.
+        - ``current``: Post-update ``WorkItemDetail`` fetched after the
+          PATCH succeeds. None on dry-run.
+        - ``changes``: Map of tool parameter names to the new values
+          included in the PATCH (Python-typed, not JSON:API-shaped).
+          Excludes parameters that were left unchanged.
+        - ``payload_preview``: The JSON:API request body. Populated on
+          dry-run; None after a successful real update.
+
+    Raises:
+        ValueError: If no mutating fields are provided; if
+            ``workflow_action`` / ``change_type_to`` is supplied without
+            any body field; or if the work item / project is not found.
+        PermissionError: If the token lacks permissions to update the
+            work item.
+        RuntimeError: On other Polarion API errors.
+    """
+    changes: dict[str, JsonValue] = {}
+    if title:
+        changes["title"] = title
+    if description:
+        changes["description"] = description
+    if status:
+        changes["status"] = status
+    if priority:
+        changes["priority"] = priority
+    if severity:
+        changes["severity"] = severity
+    if due_date:
+        changes["due_date"] = due_date
+    if initial_estimate:
+        changes["initial_estimate"] = initial_estimate
+    if resolution:
+        changes["resolution"] = resolution
+    if hyperlinks:
+        changes["hyperlinks"] = [
+            {"role": h.role, "title": h.title, "uri": h.uri} for h in hyperlinks
+        ]
+    if assignee_ids:
+        changes["assignee_ids"] = list(assignee_ids)
+    if workflow_action:
+        changes["workflow_action"] = workflow_action
+    if change_type_to:
+        changes["change_type_to"] = change_type_to
+
+    if not changes:
+        raise ValueError(
+            "Nothing to update -- pass at least one of title, description, "
+            "status, priority, severity, due_date, initial_estimate, "
+            "resolution, hyperlinks, assignee_ids, workflow_action, or "
+            "change_type_to."
+        )
+
+    description_html = (
+        sanitize_html(markdown_to_html(description)) if description else None
+    )
+
+    payload = _build_update_work_item_payload(
+        project_id=project_id,
+        work_item_id=work_item_id,
+        title=title,
+        description_html=description_html,
+        status=status,
+        priority=priority,
+        severity=severity,
+        due_date=due_date,
+        initial_estimate=initial_estimate,
+        resolution=resolution,
+        hyperlinks=hyperlinks,
+        assignee_ids=assignee_ids,
+    )
+
+    # Polarion's PATCH endpoint rejects bodies with neither attributes
+    # nor relationships ("At least one of the members is required"),
+    # even when only the workflowAction / changeTypeTo query params are
+    # used. Catch this at the tool layer with an actionable message
+    # rather than letting Polarion 400.
+    payload_data = cast(dict[str, JsonValue], payload["data"])
+    if "attributes" not in payload_data and "relationships" not in payload_data:
+        raise ValueError(
+            "Polarion's PATCH endpoint requires at least one body field "
+            "(attribute or relationship) even when triggering "
+            "workflow_action or change_type_to. Pair the action with one "
+            "of: title, description, status, priority, severity, due_date, "
+            "initial_estimate, resolution, hyperlinks, or assignee_ids."
+        )
+
+    if dry_run:
+        return WorkItemUpdateResult(
+            updated=False,
+            dry_run=True,
+            current=None,
+            changes=changes,
+            payload_preview=payload,
+        )
+
+    client = get_client(ctx)
+    base_path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/workitems/{encode_path_segment(work_item_id)}"
+    )
+    query_params: dict[str, str] = {}
+    if workflow_action:
+        query_params["workflowAction"] = workflow_action
+    if change_type_to:
+        query_params["changeTypeTo"] = change_type_to
+    patch_path = f"{base_path}?{urlencode(query_params)}" if query_params else base_path
+
+    try:
+        await client.patch(patch_path, json=cast(dict[str, object], payload))
+        response = await client.get(
+            base_path,
+            params={
+                "fields[workitems]": WI_DETAIL_FIELDS,
+                "include": "assignee",
+            },
+        )
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot update work item -- check your POLARION_TOKEN permissions."
+        ) from exc
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Work item '{work_item_id}' in project '{project_id}' not found. "
+            "Use `list_work_items` to discover valid IDs."
+        ) from exc
+    except PolarionError as exc:
+        raise RuntimeError(f"Failed to update work item: {exc.message}") from exc
+
+    data = response.get("data", {})
+    if not isinstance(data, dict):
+        data = {}
+    current = parse_work_item_detail(
+        data,
+        project_id=project_id,
+        fallback_id=work_item_id,
+    )
+
+    return WorkItemUpdateResult(
+        updated=True,
+        dry_run=False,
+        current=current,
+        changes=changes,
         payload_preview=None,
     )
 

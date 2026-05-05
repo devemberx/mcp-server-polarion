@@ -480,12 +480,20 @@ class WorkItemUpdateResult(BaseModel):
     )
     current: WorkItemDetail | None = Field(
         description=(
-            "Current state of the work item before the update. "
-            "Included so the LLM can verify what changed."
+            "Post-update state of the work item, fetched after the PATCH "
+            "succeeds. Included so the LLM can verify the change applied. "
+            "None on dry-run."
         ),
     )
     changes: dict[str, JsonValue] = Field(
         description="Map of field names to their new values in the PATCH payload.",
+    )
+    payload_preview: dict[str, JsonValue] | None = Field(
+        description=(
+            "JSON:API request payload that was (or would be) sent. "
+            "Usually populated for dry-run previews and may be None "
+            "after a successful real operation."
+        ),
     )
 
 

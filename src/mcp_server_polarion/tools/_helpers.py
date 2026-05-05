@@ -13,7 +13,8 @@ from urllib.parse import quote
 from fastmcp import Context
 
 from mcp_server_polarion.core.client import PolarionClient
-from mcp_server_polarion.models import WorkItemSummary
+from mcp_server_polarion.models import Hyperlink, WorkItemDetail, WorkItemSummary
+from mcp_server_polarion.utils import html_to_markdown
 
 
 class WorkItemSummaryKwargs(TypedDict):
@@ -297,6 +298,84 @@ def build_work_item_summary_kwargs(
     }
 
 
+def parse_hyperlinks(value: object) -> list[Hyperlink]:
+    """Parse the ``attributes.hyperlinks`` field into ``Hyperlink`` models.
+
+    Polarion returns hyperlinks as a list of dicts with ``role``,
+    ``title``, and ``uri`` keys. Entries without a usable ``uri`` are
+    skipped to keep the response signal clean for the LLM.
+    """
+    if not isinstance(value, list):
+        return []
+    links: list[Hyperlink] = []
+    for entry in value:
+        if not isinstance(entry, dict):
+            continue
+        uri = safe_str(entry.get("uri", ""))
+        if not uri:
+            continue
+        links.append(
+            Hyperlink(
+                role=safe_str(entry.get("role", "")),
+                title=safe_str(entry.get("title", "")),
+                uri=uri,
+            )
+        )
+    return links
+
+
+def parse_work_item_detail(
+    item: dict[str, object],
+    *,
+    project_id: str,
+    fallback_id: str = "",
+) -> WorkItemDetail:
+    """Parse a single JSON:API work-item resource into a ``WorkItemDetail``.
+
+    Shared by ``get_work_item`` and ``update_work_item`` (which issues a
+    follow-up GET after the PATCH succeeds). Expects the resource to
+    have been fetched with ``fields[workitems]=WI_DETAIL_FIELDS`` and
+    ``include=assignee`` so that ``relationships.assignee.data`` is
+    populated.
+
+    Args:
+        item: A single JSON:API resource object (the ``data`` element).
+        project_id: Project that contains this work item.
+        fallback_id: Used as ``WorkItemDetail.id`` when ``item.id`` is
+            missing. Pass the caller-supplied work-item ID.
+
+    Returns:
+        A fully-populated ``WorkItemDetail`` model.
+    """
+    attrs = item.get("attributes", {})
+    if not isinstance(attrs, dict):
+        attrs = {}
+    rels = item.get("relationships", {})
+    if not isinstance(rels, dict):
+        rels = {}
+
+    desc_obj = attrs.get("description", {})
+    desc_html = ""
+    if isinstance(desc_obj, dict):
+        desc_html = safe_str(desc_obj.get("value", ""))
+
+    summary_kwargs = build_work_item_summary_kwargs(item)
+    if not summary_kwargs["id"]:
+        summary_kwargs["id"] = fallback_id
+
+    return WorkItemDetail(
+        **summary_kwargs,
+        description=html_to_markdown(desc_html),
+        project_id=project_id,
+        author_id=extract_short_id(extract_relationship_id(rels, "author")),
+        created=safe_str(attrs.get("created", "")),
+        resolution=safe_str(attrs.get("resolution", "")),
+        severity=safe_str(attrs.get("severity", "")),
+        outline_number=safe_str(attrs.get("outlineNumber", "")),
+        hyperlinks=parse_hyperlinks(attrs.get("hyperlinks")),
+    )
+
+
 def parse_work_item_summaries(
     data: object,
 ) -> list[WorkItemSummary]:
@@ -333,6 +412,8 @@ __all__: list[str] = [
     "extract_total_count",
     "get_client",
     "has_links_next",
+    "parse_hyperlinks",
+    "parse_work_item_detail",
     "parse_work_item_summaries",
     "safe_str",
     "split_module_id",

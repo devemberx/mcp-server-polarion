@@ -617,11 +617,13 @@ class TestWorkItemUpdateResult:
             dry_run=False,
             current=current,
             changes={"title": "New Title"},
+            payload_preview=None,
         )
         assert result.updated is True
         assert result.current is not None
         assert result.current.title == "Old Title"
         assert result.changes["title"] == "New Title"
+        assert result.payload_preview is None
 
     def test_dry_run(self):
         result = WorkItemUpdateResult(
@@ -629,9 +631,17 @@ class TestWorkItemUpdateResult:
             dry_run=True,
             current=None,
             changes={"status": "approved"},
+            payload_preview={
+                "data": {
+                    "type": "workitems",
+                    "id": "proj1/MCPT-001",
+                    "attributes": {"status": "approved"},
+                }
+            },
         )
         assert result.updated is False
         assert result.dry_run is True
+        assert result.payload_preview is not None
 
 
 # ---------------------------------------------------------------------------
@@ -800,6 +810,7 @@ class TestCrossModelIntegration:
                 project_id="proj1",
             ),
             changes={"title": "After", "status": "approved"},
+            payload_preview=None,
         )
         dumped = result.model_dump()
         assert dumped["current"]["title"] == "Before"
