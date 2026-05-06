@@ -589,12 +589,33 @@ class WorkItemMoveResult(BaseModel):
     )
 
 
+class DocumentUpdateResult(BaseModel):
+    """Result of an ``update_document`` operation."""
+
+    updated: bool = Field(
+        description=(
+            "True if the document metadata was actually patched. "
+            "False when dry_run is True."
+        ),
+    )
+    dry_run: bool = Field(
+        description="Whether this was a dry-run (preview only, no mutation).",
+    )
+    payload_preview: dict[str, JsonValue] | None = Field(
+        description=(
+            "JSON:API request payload that was (or would be) sent. "
+            "Populated for dry-run; None after a successful real update."
+        ),
+    )
+
+
 __all__: list[str] = [
     "CommentResult",
     "DocumentDetail",
     "DocumentPart",
     "DocumentPartCreateResult",
     "DocumentSummary",
+    "DocumentUpdateResult",
     "Hyperlink",
     "JsonValue",
     "LinkResult",

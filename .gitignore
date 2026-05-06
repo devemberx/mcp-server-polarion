@@ -43,3 +43,6 @@ Thumbs.db
 
 # MCP configuration
 .mcp.json
+
+# Claude configuration
+.claude/

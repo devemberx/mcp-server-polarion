@@ -143,6 +143,7 @@ All list tools support pagination via `page_size` (1–100) and `page_number` pa
 | `create_work_item` | Create a new work item |
 | `update_work_item` | Update an existing work item |
 | `move_work_item_to_document` | Move an existing work item into a Polarion document at a specific outline position |
+| `update_document` | Update a document's metadata (title / status / type) and optionally apply a workflow action; body is preserved |
 
 ## Example Prompts
 
@@ -161,6 +162,8 @@ All list tools support pagination via `page_size` (1–100) and `page_number` pa
 > "Update MCPT-042's status to approved and bump priority to 90."
 
 > "Move work item MCPT-042 to the appropriate section of the SRS document."
+
+> "Mark the SRS document of project MCPT as approved."
 
 ## License
 

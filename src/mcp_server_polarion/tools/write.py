@@ -1,11 +1,11 @@
 """Write MCP tools for Polarion ALM.
 
-Currently provides ``create_work_item``, ``update_work_item``, and
-``move_work_item_to_document``. All write tools follow the strict
-patterns documented in ``CLAUDE.md``: they convert Markdown input to
-sanitized HTML, build minimal request payloads (skipping unset fields
-rather than sending empty values), and map domain exceptions to
-user-facing ones at the tool layer.
+Currently provides ``create_work_item``, ``update_work_item``,
+``move_work_item_to_document``, and ``update_document``. All write
+tools follow the strict patterns documented in ``CLAUDE.md``: they
+convert Markdown input to sanitized HTML, build minimal request
+payloads (skipping unset fields rather than sending empty values),
+and map domain exceptions to user-facing ones at the tool layer.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from mcp_server_polarion.core.exceptions import (
     PolarionNotFoundError,
 )
 from mcp_server_polarion.models import (
+    DocumentUpdateResult,
     Hyperlink,
     JsonValue,
     WorkItemCreateResult,
@@ -220,6 +221,48 @@ def _build_move_to_document_payload(
     else:
         payload["nextPart"] = f"{target_doc}/{next_part_id}"
     return payload
+
+
+def _build_update_document_payload(  # noqa: PLR0913
+    *,
+    project_id: str,
+    space_id: str,
+    document_name: str,
+    title: str | None,
+    status: str | None,
+    type: str | None,
+) -> dict[str, JsonValue]:
+    """Build the JSON:API request body for ``PATCH .../documents/{d}``.
+
+    Mirrors ``_build_update_work_item_payload``'s PATCH shape: ``data`` is
+    a single resource object (NOT a list) with a required ``id`` of the
+    form ``"{project_id}/{space_id}/{document_name}"``. Only attaches
+    keys for values that are explicitly set -- ``None`` values are
+    skipped so JSON:API omit-preserve takes effect (the server keeps
+    the existing server-side value).
+
+    NOTE: ``homePageContent`` is intentionally NOT exposed here. Body
+    edits go through dedicated part-creation tools (e.g. a future
+    ``create_document_parts``) so that ``update_document`` cannot
+    accidentally wipe a document's body via the lossy Markdown
+    round-trip.
+    """
+    attributes: dict[str, JsonValue] = {}
+    if title is not None:
+        attributes["title"] = title
+    if status is not None:
+        attributes["status"] = status
+    if type is not None:
+        attributes["type"] = type
+
+    item: dict[str, JsonValue] = {
+        "type": "documents",
+        "id": f"{project_id}/{space_id}/{document_name}",
+    }
+    if attributes:
+        item["attributes"] = attributes
+
+    return {"data": item}
 
 
 # ---------------------------------------------------------------------------
@@ -923,6 +966,190 @@ async def move_work_item_to_document(  # noqa: PLR0913
 
     return WorkItemMoveResult(
         moved=True,
+        dry_run=False,
+        payload_preview=None,
+    )
+
+
+@mcp.tool(tags={"write"}, timeout=60.0)
+async def update_document(  # noqa: PLR0913
+    ctx: Context,
+    project_id: str = Field(
+        description="Polarion project ID. Use ``list_projects`` to discover.",
+    ),
+    space_id: str = Field(
+        min_length=1,
+        description=(
+            "Space ID (use '_default' for the default space). "
+            "Use ``list_documents`` to discover."
+        ),
+    ),
+    document_name: str = Field(
+        min_length=1,
+        description=(
+            "Document name within ``space_id``. Spaces and other special "
+            "characters in the name are URL-encoded automatically."
+        ),
+    ),
+    title: str | None = Field(
+        default=None,
+        description=(
+            "New document title. Omit (or set None) to leave the title "
+            "unchanged via JSON:API omit-preserve semantics. Pass an "
+            "empty string to clear the title (the empty value IS sent "
+            "to Polarion -- only ``None`` skips the field)."
+        ),
+    ),
+    status: str | None = Field(
+        default=None,
+        description=(
+            "New workflow status (e.g. 'draft', 'approved'). Omit to "
+            "leave unchanged. Prefer ``workflow_action`` for status "
+            "transitions so the project's workflow rules are honoured; "
+            "a direct status edit bypasses them."
+        ),
+    ),
+    type: str | None = Field(
+        default=None,
+        description=(
+            "New document type (e.g. 'req_specification'). Omit to leave unchanged."
+        ),
+    ),
+    workflow_action: str | None = Field(
+        default=None,
+        description=(
+            "Optional workflow action ID to apply (e.g. 'approve', "
+            "'close'). Sent as the ``workflowAction`` query parameter; "
+            "respects the project's workflow rules. Polarion rejects "
+            "PATCH bodies with no ``attributes``, so ``workflow_action`` "
+            "MUST be paired with at least one of ``title``/``status``/"
+            "``type`` -- this is enforced at the tool layer."
+        ),
+    ),
+    dry_run: bool = Field(
+        default=False,
+        description=(
+            "When True, build and return the JSON:API payload preview "
+            "without calling Polarion."
+        ),
+    ),
+) -> DocumentUpdateResult:
+    """Update a Polarion document's metadata (title / status / type).
+
+    Sends ``PATCH /projects/{p}/spaces/{s}/documents/{d}`` with only
+    the metadata attributes the caller explicitly set. JSON:API
+    omit-preserve semantics apply: any field NOT included in the
+    request is left untouched server-side -- this tool can never
+    accidentally clear the document body or other unrelated fields.
+
+    Body edits are deliberately not supported: ``homePageContent`` is
+    not exposed here because Markdown round-trips through
+    ``get_document`` are lossy (empty heading placeholders are
+    stripped, Polarion-specific WI fragments are sanitized away).
+    Use the dedicated part-creation tools instead -- e.g.
+    ``move_work_item_to_document`` to embed an existing work item, or
+    a future ``create_document_parts`` for new headings / normal
+    text parts.
+
+    Workflow transitions: prefer ``workflow_action`` (e.g. 'approve',
+    'close') over a raw ``status`` update so the project's workflow
+    rules are evaluated. Polarion rejects PATCH bodies that contain
+    neither attributes nor relationships (HTTP 400 "At least one of
+    the members is required"); ``workflow_action`` therefore MUST be
+    accompanied by at least one of ``title`` / ``status`` / ``type``.
+    Calling with no fields set at all is rejected at the tool layer.
+
+    Unlike ``update_work_item``, this tool does NOT follow up with a
+    GET to return the post-update document state -- the result only
+    confirms the PATCH succeeded. Call ``get_document`` afterwards if
+    you need the refreshed document attributes.
+
+    Args:
+        ctx: MCP tool context (injected automatically).
+        project_id: Polarion project ID.
+        space_id: Space ID containing the document.
+        document_name: Document name within ``space_id``.
+        title: Optional new title.
+        status: Optional new workflow status.
+        type: Optional new document type.
+        workflow_action: Optional workflow action ID. Must be paired
+            with at least one attribute field.
+        dry_run: When True, return payload preview without calling
+            Polarion. Defaults to False.
+
+    Returns:
+        DocumentUpdateResult with:
+        - ``updated``: True on a successful real update, False when
+          ``dry_run=True``.
+        - ``dry_run``: Echo of the dry_run flag.
+        - ``payload_preview``: The JSON:API request body. Populated
+          on dry-run; None after a successful real update.
+
+    Raises:
+        ValueError: If no fields are provided, if ``workflow_action``
+            is supplied without any attribute field, or if the
+            project / space / document is not found.
+        PermissionError: If the token lacks permissions to update the
+            document.
+        RuntimeError: On other Polarion API errors.
+    """
+    has_attrs = title is not None or status is not None or type is not None
+    if not has_attrs and not workflow_action:
+        raise ValueError(
+            "update_document requires at least one of: title, status, "
+            "type, or workflow_action."
+        )
+    if not has_attrs and workflow_action:
+        raise ValueError(
+            "workflow_action alone is not supported -- Polarion rejects "
+            "PATCH bodies with no attributes. Pair workflow_action with "
+            "at least one of title, status, or type."
+        )
+
+    payload = _build_update_document_payload(
+        project_id=project_id,
+        space_id=space_id,
+        document_name=document_name,
+        title=title,
+        status=status,
+        type=type,
+    )
+
+    if dry_run:
+        return DocumentUpdateResult(
+            updated=False,
+            dry_run=True,
+            payload_preview=payload,
+        )
+
+    client = get_client(ctx)
+    base_path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/spaces/{encode_path_segment(space_id)}"
+        f"/documents/{encode_path_segment(document_name)}"
+    )
+    query_params: dict[str, str] = {}
+    if workflow_action:
+        query_params["workflowAction"] = workflow_action
+    patch_path = f"{base_path}?{urlencode(query_params)}" if query_params else base_path
+
+    try:
+        await client.patch(patch_path, json=cast(dict[str, object], payload))
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot update document -- check your POLARION_TOKEN permissions."
+        ) from exc
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Document '{document_name}' (space '{space_id}', "
+            f"project '{project_id}') not found. "
+            "Use `list_documents` to discover valid IDs."
+        ) from exc
+    except PolarionError as exc:
+        raise RuntimeError(f"Failed to update document: {exc.message}") from exc
+
+    return DocumentUpdateResult(
+        updated=True,
         dry_run=False,
         payload_preview=None,
     )
