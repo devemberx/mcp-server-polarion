@@ -40,6 +40,7 @@
 - Body:
   - Must follow a blank line after the subject.
   - Must contain exactly 2 bullet points.
+  - Each bullet must fit on a SINGLE line (max ~120 chars). Move longer rationale to the PR description.
   - Focus on Why and How.
 
 # 4. Correct/Incorrect Examples (DO NOT DEVIATE):

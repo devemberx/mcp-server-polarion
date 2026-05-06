@@ -88,6 +88,6 @@ The deployed Polarion server enforces **≤3 API calls/second** and **no concurr
 
 ## Repo Conventions
 
-- **Commits**: `.vscode/git_commit_guide.md` — `type(scope): subject` (lowercase imperative ≤50 chars, no period) + blank line + exactly 2 bullets (Why + What). Types: `feat|fix|docs|refactor|perf|test|ci|chore`. Common scopes: `tool|server|transport|config|deps|utils|model|project|meta|git`.
+- **Commits**: `.vscode/git_commit_guide.md` — `type(scope): subject` (lowercase imperative ≤50 chars, no period) + blank line + exactly 2 bullets (Why + What), **each bullet a single line ≤~120 chars** — move longer rationale to the PR body. Types: `feat|fix|docs|refactor|perf|test|ci|chore`. Common scopes: `tool|server|transport|config|deps|utils|model|project|meta|git`.
 - **PRs**: `.github/pull_request_template.md` — fill Summary, Type-of-Change, Changes, Testing (esp. `dry_run` for write tools), Golden Rule Compliance.
 - **Force push** allowed on feature branches only after explicit user authorization. Never force-push to `main`.
