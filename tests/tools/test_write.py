@@ -1584,28 +1584,76 @@ class TestUpdateWorkItemFieldValidation:
 class TestBuildUpdateDocumentPayload:
     """Tests for the private ``_build_update_document_payload`` helper."""
 
-    def test_basic_payload_shape(self) -> None:
+    def test_only_set_fields_appear_in_attributes(self) -> None:
+        # Skip-None semantics: omitted fields are not serialized so
+        # JSON:API omit-preserve takes effect server-side.
         payload = _build_update_document_payload(
             project_id="MyProj",
             space_id="Requirements",
             document_name="SRS",
-            body_html="<h1>Hi</h1>",
+            title="New Title",
+            status=None,
+            type=None,
         )
 
-        # data must be a single dict (PATCH-shape), NOT a list.
+        # data is a single dict (PATCH-shape), NOT a list.
         assert payload == {
             "data": {
                 "type": "documents",
                 "id": "MyProj/Requirements/SRS",
-                "attributes": {
-                    "homePageContent": {
-                        "type": "text/html",
-                        "value": "<h1>Hi</h1>",
-                    }
-                },
+                "attributes": {"title": "New Title"},
             }
         }
         assert isinstance(payload["data"], dict)
+
+    def test_all_three_fields_serialised_when_set(self) -> None:
+        payload = _build_update_document_payload(
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title="T",
+            status="approved",
+            type="req_specification",
+        )
+
+        data = cast(dict[str, object], payload["data"])
+        attrs = cast(dict[str, object], data["attributes"])
+        assert attrs == {
+            "title": "T",
+            "status": "approved",
+            "type": "req_specification",
+        }
+
+    def test_no_attributes_when_all_fields_are_none(self) -> None:
+        # Helper produces a body with no ``attributes`` key when every
+        # field is None. The tool layer rejects this case before
+        # reaching the helper, but a future direct caller should not
+        # silently emit an empty PATCH body.
+        payload = _build_update_document_payload(
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title=None,
+            status=None,
+            type=None,
+        )
+
+        data = cast(dict[str, object], payload["data"])
+        assert "attributes" not in data
+        assert data["id"] == "MyProj/S/D"
+
+    def test_homepagecontent_not_emitted_under_any_input(self) -> None:
+        # Body editing was intentionally removed from update_document.
+        payload = _build_update_document_payload(
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title="T",
+            status="approved",
+            type="generic",
+        )
+        body_str = repr(payload)
+        assert "homePageContent" not in body_str
 
     def test_document_name_with_slashes_preserved_verbatim(self) -> None:
         # JSON body IDs must NOT be URL-encoded.
@@ -1613,24 +1661,73 @@ class TestBuildUpdateDocumentPayload:
             project_id="MyProj",
             space_id="Design",
             document_name="Folder/Sub Doc",
-            body_html="<p>x</p>",
+            title="t",
+            status=None,
+            type=None,
         )
 
         data = cast(dict[str, object], payload["data"])
         assert data["id"] == "MyProj/Design/Folder/Sub Doc"
 
-    def test_empty_body_produces_valid_payload(self) -> None:
-        payload = _build_update_document_payload(
+
+# ---------------------------------------------------------------------------
+# update_document — at-least-one-field validation
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateDocumentValidation:
+    """Tool-layer validation that protects against empty / no-op PATCHes."""
+
+    async def test_no_fields_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        with pytest.raises(ValueError, match="at least one"):
+            await update_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="S",
+                document_name="D",
+                title=None,
+                status=None,
+                type=None,
+                workflow_action=None,
+                dry_run=True,
+            )
+        mock_client.patch.assert_not_called()
+
+    async def test_workflow_action_alone_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        with pytest.raises(ValueError, match="workflow_action alone"):
+            await update_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="S",
+                document_name="D",
+                title=None,
+                status=None,
+                type=None,
+                workflow_action="approve",
+                dry_run=True,
+            )
+        mock_client.patch.assert_not_called()
+
+    async def test_workflow_action_with_status_passes(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # workflow_action paired with at least one attribute is OK.
+        result = await update_document(
+            mock_ctx,
             project_id="MyProj",
             space_id="S",
             document_name="D",
-            body_html="",
+            title=None,
+            status="approved",
+            type=None,
+            workflow_action="approve",
+            dry_run=True,
         )
-
-        data = cast(dict[str, object], payload["data"])
-        attrs = cast(dict[str, object], data["attributes"])
-        hpc = cast(dict[str, object], attrs["homePageContent"])
-        assert hpc == {"type": "text/html", "value": ""}
+        assert result.dry_run is True
 
 
 # ---------------------------------------------------------------------------
@@ -1649,7 +1746,10 @@ class TestUpdateDocumentDryRun:
             project_id="MyProj",
             space_id="Requirements",
             document_name="SRS",
-            content="# Title",
+            title="New Title",
+            status=None,
+            type=None,
+            workflow_action=None,
             dry_run=True,
         )
 
@@ -1658,10 +1758,10 @@ class TestUpdateDocumentDryRun:
         assert result.updated is False
         assert result.dry_run is True
         assert result.payload_preview is not None
-        assert isinstance(result.payload_preview, dict)
-        # data is a single dict, not a list.
         data = cast(dict[str, object], result.payload_preview["data"])
         assert data["type"] == "documents"
+        attrs = cast(dict[str, object], data["attributes"])
+        assert attrs == {"title": "New Title"}
 
 
 # ---------------------------------------------------------------------------
@@ -1675,7 +1775,6 @@ class TestUpdateDocumentHappyPath:
     async def test_returns_updated_true_on_204(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # client.patch returns {} on 204 No Content.
         mock_client.patch.return_value = {}
 
         result = await update_document(
@@ -1683,7 +1782,10 @@ class TestUpdateDocumentHappyPath:
             project_id="MyProj",
             space_id="Requirements",
             document_name="SRS",
-            content="# Title",
+            title="New Title",
+            status=None,
+            type=None,
+            workflow_action=None,
             dry_run=False,
         )
 
@@ -1702,20 +1804,22 @@ class TestUpdateDocumentHappyPath:
             project_id="MyProj",
             space_id="Requirements",
             document_name="My Doc",
-            content="# Title",
+            title="T",
+            status=None,
+            type=None,
+            workflow_action=None,
             dry_run=False,
         )
 
         args, kwargs = mock_client.patch.call_args
-        # URL-encoded path segments.
         expected_path = "/projects/MyProj/spaces/Requirements/documents/My%20Doc"
         assert args == (expected_path,)
         body = kwargs["json"]
-        # data is a single dict (PATCH-shape).
         assert isinstance(body["data"], dict)
         assert body["data"]["id"] == "MyProj/Requirements/My Doc"
+        assert body["data"]["attributes"] == {"title": "T"}
 
-    async def test_markdown_converted_to_html(
+    async def test_workflow_action_appended_as_query_param(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.patch.return_value = {}
@@ -1725,40 +1829,22 @@ class TestUpdateDocumentHappyPath:
             project_id="MyProj",
             space_id="S",
             document_name="D",
-            content="# Section\n\n**bold**",
+            title=None,
+            status="approved",
+            type=None,
+            workflow_action="approve",
             dry_run=False,
         )
 
-        _, kwargs = mock_client.patch.call_args
-        value = kwargs["json"]["data"]["attributes"]["homePageContent"]["value"]
-        assert "<h1>Section</h1>" in value
-        assert "<strong>bold</strong>" in value
+        args, _ = mock_client.patch.call_args
+        path = args[0]
+        assert path.startswith("/projects/MyProj/spaces/S/documents/D")
+        assert "workflowAction=approve" in path
 
-    async def test_empty_content_sends_empty_body_html(
+    async def test_homepagecontent_never_in_request_body(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # Empty content is valid (full replace with empty body); the
-        # caller is responsible for understanding this clears the
-        # document. Verifies the tool does not reject empty input.
-        mock_client.patch.return_value = {}
-
-        result = await update_document(
-            mock_ctx,
-            project_id="MyProj",
-            space_id="S",
-            document_name="D",
-            content="",
-            dry_run=False,
-        )
-
-        assert result.updated is True
-        _, kwargs = mock_client.patch.call_args
-        value = kwargs["json"]["data"]["attributes"]["homePageContent"]["value"]
-        assert value == ""
-
-    async def test_dangerous_link_schemes_stripped(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
+        # Sanity: regardless of inputs, body editing is not exposed.
         mock_client.patch.return_value = {}
 
         await update_document(
@@ -1766,14 +1852,16 @@ class TestUpdateDocumentHappyPath:
             project_id="MyProj",
             space_id="S",
             document_name="D",
-            content="[click](javascript:alert(1))",
+            title="T",
+            status="approved",
+            type="generic",
+            workflow_action=None,
             dry_run=False,
         )
 
         _, kwargs = mock_client.patch.call_args
-        value = kwargs["json"]["data"]["attributes"]["homePageContent"]["value"]
-        assert 'href="javascript:' not in value
-        assert "href='javascript:" not in value
+        body_str = repr(kwargs["json"])
+        assert "homePageContent" not in body_str
 
 
 # ---------------------------------------------------------------------------
@@ -1795,7 +1883,10 @@ class TestUpdateDocumentErrorMapping:
                 project_id="MyProj",
                 space_id="S",
                 document_name="D",
-                content="x",
+                title="t",
+                status=None,
+                type=None,
+                workflow_action=None,
                 dry_run=False,
             )
 
@@ -1812,7 +1903,10 @@ class TestUpdateDocumentErrorMapping:
                 project_id="MyProj",
                 space_id="ghost-space",
                 document_name="ghost-doc",
-                content="x",
+                title="t",
+                status=None,
+                type=None,
+                workflow_action=None,
                 dry_run=False,
             )
         assert "ghost-space" in str(exc_info.value)
@@ -1828,7 +1922,10 @@ class TestUpdateDocumentErrorMapping:
                 project_id="MyProj",
                 space_id="S",
                 document_name="D",
-                content="x",
+                title="t",
+                status=None,
+                type=None,
+                workflow_action=None,
                 dry_run=False,
             )
 
@@ -1839,7 +1936,7 @@ class TestUpdateDocumentErrorMapping:
 
 
 class TestUpdateDocumentFieldValidation:
-    """Verify ``min_length=1`` constraints attached to required parameters."""
+    """Verify ``min_length=1`` constraints on required path parameters."""
 
     @staticmethod
     def _adapter_for(param_name: str) -> TypeAdapter[object]:
@@ -1856,7 +1953,6 @@ class TestUpdateDocumentFieldValidation:
         with pytest.raises(ValidationError):
             self._adapter_for("document_name").validate_python("")
 
-    def test_content_accepts_empty_string(self) -> None:
-        # No min_length on content -- empty body is intentionally
-        # allowed (full replace clears the document).
-        assert self._adapter_for("content").validate_python("") == ""
+    def test_optional_metadata_fields_accept_none(self) -> None:
+        for name in ("title", "status", "type", "workflow_action"):
+            assert self._adapter_for(name).validate_python(None) is None
