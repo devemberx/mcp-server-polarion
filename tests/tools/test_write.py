@@ -1863,6 +1863,77 @@ class TestUpdateDocumentHappyPath:
         body_str = repr(kwargs["json"])
         assert "homePageContent" not in body_str
 
+    async def test_explicit_empty_title_is_serialized(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # ``title=""`` differs from ``title=None``: the empty string
+        # passes the at-least-one check and IS sent in attributes,
+        # clearing the title server-side.
+        mock_client.patch.return_value = {}
+
+        await update_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title="",
+            status=None,
+            type=None,
+            workflow_action=None,
+            dry_run=False,
+        )
+
+        _, kwargs = mock_client.patch.call_args
+        attrs = kwargs["json"]["data"]["attributes"]
+        assert attrs == {"title": ""}
+
+    async def test_path_url_encodes_special_chars_in_space_id(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.return_value = {}
+
+        await update_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="My Space",
+            document_name="D",
+            title="t",
+            status=None,
+            type=None,
+            workflow_action=None,
+            dry_run=False,
+        )
+
+        args, _ = mock_client.patch.call_args
+        assert args == ("/projects/MyProj/spaces/My%20Space/documents/D",)
+
+    async def test_workflow_action_url_encoded_when_special(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # urlencode is responsible for escaping action IDs that contain
+        # whitespace or other reserved chars; this locks the contract.
+        mock_client.patch.return_value = {}
+
+        await update_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title=None,
+            status="approved",
+            type=None,
+            workflow_action="needs review",
+            dry_run=False,
+        )
+
+        args, _ = mock_client.patch.call_args
+        path = args[0]
+        # Space in action ID -> "+" or "%20"; both are valid URL
+        # encodings and Polarion accepts either.
+        assert "workflowAction=needs+review" in path or (
+            "workflowAction=needs%20review" in path
+        )
+
 
 # ---------------------------------------------------------------------------
 # update_document — error mapping
