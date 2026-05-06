@@ -995,7 +995,9 @@ async def update_document(  # noqa: PLR0913
         default=None,
         description=(
             "New document title. Omit (or set None) to leave the title "
-            "unchanged via JSON:API omit-preserve semantics."
+            "unchanged via JSON:API omit-preserve semantics. Pass an "
+            "empty string to clear the title (the empty value IS sent "
+            "to Polarion -- only ``None`` skips the field)."
         ),
     ),
     status: str | None = Field(
@@ -1056,6 +1058,11 @@ async def update_document(  # noqa: PLR0913
     the members is required"); ``workflow_action`` therefore MUST be
     accompanied by at least one of ``title`` / ``status`` / ``type``.
     Calling with no fields set at all is rejected at the tool layer.
+
+    Unlike ``update_work_item``, this tool does NOT follow up with a
+    GET to return the post-update document state -- the result only
+    confirms the PATCH succeeded. Call ``get_document`` afterwards if
+    you need the refreshed document attributes.
 
     Args:
         ctx: MCP tool context (injected automatically).

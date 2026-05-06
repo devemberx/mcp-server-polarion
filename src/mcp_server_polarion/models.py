@@ -594,7 +594,7 @@ class DocumentUpdateResult(BaseModel):
 
     updated: bool = Field(
         description=(
-            "True if the document body was actually replaced. "
+            "True if the document metadata was actually patched. "
             "False when dry_run is True."
         ),
     )
