@@ -2060,7 +2060,7 @@ class TestWriteToolAnnotations:
                 "create_work_item",
                 {
                     "readOnlyHint": False,
-                    "destructiveHint": True,
+                    "destructiveHint": False,
                     "idempotentHint": False,
                     "openWorldHint": True,
                 },
@@ -2079,7 +2079,7 @@ class TestWriteToolAnnotations:
                 {
                     "readOnlyHint": False,
                     "destructiveHint": True,
-                    "idempotentHint": True,
+                    "idempotentHint": False,
                     "openWorldHint": True,
                 },
             ),
