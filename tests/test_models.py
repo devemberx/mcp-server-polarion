@@ -12,7 +12,6 @@ from mcp_server_polarion.models import (
     DocumentPartCreateResult,
     DocumentSummary,
     Hyperlink,
-    LinkedWorkItemsList,
     LinkedWorkItemSummary,
     LinkResult,
     PaginatedResult,
@@ -521,49 +520,6 @@ class TestLinkedWorkItemSummary:
 
 
 # ---------------------------------------------------------------------------
-# LinkedWorkItemsList
-# ---------------------------------------------------------------------------
-
-
-class TestLinkedWorkItemsList:
-    def test_merged_links(self):
-        result = LinkedWorkItemsList(
-            items=[
-                LinkedWorkItemSummary(
-                    id="MCPT-002",
-                    title="Child",
-                    role="parent",
-                    direction="forward",
-                    suspect=False,
-                ),
-                LinkedWorkItemSummary(
-                    id="MCPT-003",
-                    title="Verifier",
-                    role="verifies",
-                    direction="back",
-                    suspect=True,
-                ),
-            ],
-            forward_count=1,
-            back_count=1,
-            total_count=2,
-        )
-        assert len(result.items) == 2
-        assert result.forward_count == 1
-        assert result.back_count == 1
-        assert result.total_count == 2
-
-    def test_empty_links(self):
-        result = LinkedWorkItemsList(
-            items=[],
-            forward_count=0,
-            back_count=0,
-        )
-        assert result.items == []
-        assert result.total_count == 0
-
-
-# ---------------------------------------------------------------------------
 # WorkItemCreateResult
 # ---------------------------------------------------------------------------
 
@@ -826,7 +782,6 @@ class TestCrossModelIntegration:
             WorkItemSummary,
             WorkItemDetail,
             LinkedWorkItemSummary,
-            LinkedWorkItemsList,
             WorkItemCreateResult,
             WorkItemUpdateResult,
             CommentResult,

@@ -58,7 +58,17 @@ Polarion does not inline `data` for to-many relationships (e.g. `assignee`) — 
 
 ### `/backlinkedworkitems` is NOT supported on this server
 
-`get_linked_work_items` falls back to a `query=linkedWorkItems:{wi}` search, which loses role information. Back-direction items return with `role=None` (intentional — do not reintroduce the legacy `"backlink"` placeholder; `None` is an explicit "unknown" signal).
+`get_linked_work_items` accepts a `direction: Literal["forward", "back"]` parameter and returns `PaginatedResult[LinkedWorkItemSummary]` for one direction per call. Forward links are read from `/projects/{p}/workitems/{wi}/linkedworkitems`; back links fall back to a `query=linkedWorkItems:{wi}` search, which loses role information — back-direction items return with `role=None` (intentional — do not reintroduce the legacy `"backlink"` placeholder; `None` is an explicit "unknown" signal). Callers needing both directions issue two calls.
+
+### Document content search — pick the right tool
+
+Polarion Lucene does NOT index `description`, so `list_work_items` cannot filter by body text. Route content searches by scope:
+
+| Goal | Tool | Notes |
+|---|---|---|
+| Find WIs by metadata (title/type/status) | `list_work_items` | Lucene query against `title`, `type`, `status`, etc. — not `description`. |
+| Read or scan a single document body in one shot | `get_document(include_content=True)` | Returns full `homePageContent` Markdown — no pagination. Heading text lives in WI titles, not here. |
+| Search inside a document including each embedded WI's body | `get_document_parts` | Each `workitem` part already carries `description` as Markdown — **no follow-up `get_work_item` call needed** when scanning bodies. Iterate pages and match `description` / `content` / `title`. |
 
 ### Server-side validation is lenient on enum-like fields
 

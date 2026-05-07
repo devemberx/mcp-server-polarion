@@ -270,7 +270,19 @@ def _build_update_document_payload(  # noqa: PLR0913
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool(tags={"write"}, timeout=60.0)
+@mcp.tool(
+    tags={"write"},
+    timeout=60.0,
+    annotations={
+        # Pure additive operation per MCP spec — creates a new WI without
+        # mutating existing data, so destructiveHint is False. Not idempotent
+        # because retrying with the same input creates a duplicate.
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    },
+)
 async def create_work_item(  # noqa: PLR0913
     ctx: Context,
     project_id: str = Field(
@@ -465,7 +477,16 @@ async def create_work_item(  # noqa: PLR0913
     )
 
 
-@mcp.tool(tags={"write"}, timeout=60.0)
+@mcp.tool(
+    tags={"write"},
+    timeout=60.0,
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
 async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     ctx: Context,
     project_id: str = Field(
@@ -797,7 +818,20 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     )
 
 
-@mcp.tool(tags={"write"}, timeout=60.0)
+@mcp.tool(
+    tags={"write"},
+    timeout=60.0,
+    annotations={
+        # idempotentHint=False: the moveToDocument action endpoint is not
+        # verified to be safe on repeat — a second call against an already-
+        # moved WI may 400 instead of no-opping (per Polarion's heading-move
+        # behaviour, see CLAUDE.md). Conservative until confirmed.
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    },
+)
 async def move_work_item_to_document(  # noqa: PLR0913
     ctx: Context,
     project_id: str = Field(
@@ -971,7 +1005,16 @@ async def move_work_item_to_document(  # noqa: PLR0913
     )
 
 
-@mcp.tool(tags={"write"}, timeout=60.0)
+@mcp.tool(
+    tags={"write"},
+    timeout=60.0,
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
 async def update_document(  # noqa: PLR0913
     ctx: Context,
     project_id: str = Field(

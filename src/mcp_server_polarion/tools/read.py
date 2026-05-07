@@ -26,7 +26,6 @@ from mcp_server_polarion.models import (
     DocumentDetail,
     DocumentPart,
     DocumentSummary,
-    LinkedWorkItemsList,
     LinkedWorkItemSummary,
     PaginatedResult,
     ProjectSummary,
@@ -45,11 +44,11 @@ from mcp_server_polarion.tools._helpers import (
     extract_short_id,
     extract_total_count,
     get_client,
-    has_links_next,
     parse_work_item_detail,
     parse_work_item_summaries,
     safe_str,
     split_module_id,
+    summary_to_back_linked,
 )
 from mcp_server_polarion.utils import html_to_markdown
 
@@ -677,16 +676,30 @@ async def get_document(
         ),
     ),
 ) -> DocumentDetail:
-    """Get metadata for a Polarion document.
+    """Get metadata (and optionally the body) for a Polarion document.
 
     Returns the document's title, type, and workflow status. By default
     the ``content`` field is empty; set ``include_content=True`` to also
     fetch ``homePageContent`` (converted to Markdown). Empty headings
     inside the home-page content are stripped automatically.
 
+    **When to use which document tool**:
+
+    - Need the document body in one shot to scan/search for keywords?
+      Call this tool with ``include_content=True`` — a single request,
+      no pagination, returns the full Markdown body. This is the
+      preferred entry point for "find X in this document" workflows.
+    - Need the structured part list (heading levels, work-item IDs,
+      embedded work-item descriptions)? Use ``get_document_parts``.
+      Each ``workitem`` part already includes its ``description`` in
+      Markdown, so no follow-up ``get_work_item`` call is required.
+    - Just need title/type/status? Leave ``include_content=False``
+      (default) to keep the response small.
+
     Polarion stores **heading text in work-item titles**, not in
-    ``homePageContent``. For the structured body of a document, call
-    ``get_document_parts`` — this tool is for fast metadata lookup.
+    ``homePageContent``, so the home-page Markdown contains the
+    inline rich-text body but not the heading wording — pair with
+    ``get_document_parts`` when the heading text matters.
 
     Use ``list_documents`` first to discover valid space IDs and
     document names.
@@ -809,20 +822,34 @@ async def get_document_parts(  # noqa: PLR0913
 ) -> PaginatedResult[DocumentPart]:
     """List the structural parts (headings and work items) of a document.
 
+    **Do NOT call this tool just to read or summarise a document body.**
+    For one-shot body retrieval prefer ``get_document(include_content=True)``
+    — it returns the full ``homePageContent`` Markdown in a single
+    request without paging.
+
     Returns the ordered list of part IDs, titles, types, and linked
     work-item metadata that make up a document's body. Use this tool
-    **only** when you need:
+    when you need:
 
     - Part IDs for positioning with ``move_work_item_to_document`` —
       pass any existing part's ``id`` as ``next_part_id`` (insert
       before) or ``previous_part_id`` (insert after). Results are
       returned in document order.
     - The hierarchical structure (heading levels) of the document.
-    - The type/status of work items embedded in the document, without a
-      separate ``get_work_item`` call.
+    - **Work-item descriptions inline**: each ``workitem`` part already
+      includes its ``description`` field as Markdown, so a follow-up
+      ``get_work_item`` call is **not needed** when scanning bodies.
+      Iterate pages and match against ``description`` / ``content`` /
+      ``title`` to search content within a document.
+    - The type/status of work items embedded in the document.
 
-    **Do NOT call this tool just to read or summarise a document.**
-    ``get_document`` already returns the complete document body.
+    **Choosing between the document tools**:
+
+    - For a one-shot keyword search across the document body without
+      pagination, prefer ``get_document(include_content=True)`` —
+      faster when the document fits in one response.
+    - Use this tool when you need per-work-item descriptions, the
+      ordered part list, or part IDs for moves.
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -979,7 +1006,20 @@ async def list_work_items(
     - ``title:SRS*`` — trailing wildcard (leading wildcards not supported)
     - ``type:testCase AND status:draft`` — draft test cases
 
-    Use ``get_work_item`` for full details including the description.
+    **Searching work-item bodies (description) is NOT supported here.**
+    Polarion's Lucene index does not cover the ``description`` field, so
+    you cannot filter by body text via ``query=``. For content search,
+    pick the right document-scoped tool instead:
+
+    - Single-document body search (one shot, no pagination) →
+      ``get_document(include_content=True)`` returns the entire
+      ``homePageContent`` as Markdown.
+    - Document-scoped search that also covers each embedded
+      work-item's ``description`` → iterate ``get_document_parts``
+      pages; each ``workitem`` part already carries its description.
+
+    Use ``get_work_item`` only when you need the full detail of a
+    specific WI that you've already located.
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -1158,7 +1198,7 @@ async def get_work_item(
     timeout=60.0,
     annotations={"readOnlyHint": True},
 )
-async def get_linked_work_items(
+async def get_linked_work_items(  # noqa: PLR0913
     ctx: Context,
     project_id: str = Field(
         description="Polarion project ID.",
@@ -1169,15 +1209,42 @@ async def get_linked_work_items(
             "Use ``list_work_items`` to discover valid IDs."
         ),
     ),
-) -> LinkedWorkItemsList:
-    """Get all linked work items (forward and back) for a work item.
+    direction: Literal["forward", "back"] = Field(
+        default="forward",
+        description=(
+            "Link direction to retrieve. 'forward' returns outgoing links "
+            "(this WI links to others) with full role/suspect metadata. "
+            "'back' returns incoming links (other WIs link to this one); "
+            "``role`` is always None on back-direction items because "
+            "Polarion's ``linkedWorkItems:`` query does not expose the "
+            "originating link's role. Call this tool twice (once per "
+            "direction) when you need both."
+        ),
+    ),
+    page_size: int = Field(
+        default=DEFAULT_PAGE_SIZE,
+        ge=1,
+        le=100,
+        description="Number of links per page (1-100, default 100).",
+    ),
+    page_number: int = Field(
+        default=1,
+        ge=1,
+        description="Page number to retrieve (1-based, default 1).",
+    ),
+) -> PaginatedResult[LinkedWorkItemSummary]:
+    """Get linked work items (forward or back) for a work item, paginated.
 
-    Retrieves both outgoing (forward) and incoming (back) links for a
-    work item.  This provides complete traceability information such as
-    parent, relates_to, verifies, and depends_on relationships.
+    Retrieves outgoing (``direction='forward'``) or incoming
+    (``direction='back'``) links for a single work item. This provides
+    traceability information such as parent, relates_to, verifies, and
+    depends_on relationships.
 
     The ``suspect`` flag indicates whether the linked item has changed
-    since the link was last reviewed.
+    since the link was last reviewed (forward direction only).
+
+    A single call returns one direction. Call this tool twice when both
+    directions are needed.
 
     Use ``list_work_items`` first to discover valid work item IDs.
 
@@ -1185,29 +1252,28 @@ async def get_linked_work_items(
         ctx: MCP tool context (injected automatically).
         project_id: Polarion project ID.
         work_item_id: Work Item ID (e.g. 'MCPT-001').
+        direction: 'forward' (outgoing) or 'back' (incoming) links.
+            Default 'forward'.
+        page_size: Number of links per page (1-100, default 100).
+        page_number: Page number to retrieve (1-based, default 1).
 
     Returns:
-        LinkedWorkItemsList with:
-        - ``items``: All linked work items, each ``LinkedWorkItemSummary``
-          carrying:
-
-          * ``id`` / ``title`` — the linked work item.
-          * ``direction`` — 'forward' (this WI links out) or 'back'
-            (the other WI links in).
-          * ``role`` — link role identifier (e.g. 'parent', 'verifies').
-            ``None`` for back-direction links because Polarion's
-            ``linkedWorkItems:`` query does not expose the originating
-            link's role on this server version. To recover the role,
-            call ``get_linked_work_items`` on the source WI and inspect
-            its forward links.
-          * ``suspect`` — whether the link is marked suspect.
-          * ``type`` / ``status`` — linked WI type and workflow status.
-          * ``space_id`` / ``document_name`` — document the linked WI
-            belongs to (both empty when not module-bound).
-
-        - ``forward_count``: Number of outgoing links.
-        - ``back_count``: Number of incoming links.
-        - ``total_count``: Total number of linked items (forward + back).
+        PaginatedResult containing ``LinkedWorkItemSummary`` items with:
+        - ``id`` / ``title`` — the linked work item.
+        - ``direction`` — matches the requested direction.
+        - ``role`` — link role identifier (e.g. 'parent', 'verifies').
+          ``None`` for back-direction links because Polarion's
+          ``linkedWorkItems:`` query does not expose the originating
+          link's role on this server version. To recover the role for a
+          back link, call ``get_linked_work_items`` on the source WI
+          with ``direction='forward'`` and inspect the role there.
+        - ``suspect`` — whether the link is marked suspect (forward only;
+          always False for back links).
+        - ``type`` / ``status`` — linked WI type and workflow status.
+        - ``space_id`` / ``document_name`` — document the linked WI
+          belongs to (both empty when not module-bound).
+        - ``total_count`` / ``page`` / ``page_size`` / ``has_more``:
+          standard pagination state.
 
     Raises:
         ValueError: If the work item or project is not found.
@@ -1215,15 +1281,43 @@ async def get_linked_work_items(
         RuntimeError: On unexpected Polarion API errors.
     """
     client = get_client(ctx)
-    base_path = f"/projects/{project_id}/workitems/{work_item_id}"
 
+    if direction == "forward":
+        return await _get_forward_linked_page(
+            client,
+            project_id=project_id,
+            work_item_id=work_item_id,
+            page_size=page_size,
+            page_number=page_number,
+        )
+    return await _get_back_linked_page(
+        client,
+        project_id=project_id,
+        work_item_id=work_item_id,
+        page_size=page_size,
+        page_number=page_number,
+    )
+
+
+async def _get_forward_linked_page(
+    client: PolarionClient,
+    *,
+    project_id: str,
+    work_item_id: str,
+    page_size: int,
+    page_number: int,
+) -> PaginatedResult[LinkedWorkItemSummary]:
+    """Fetch a single page of forward (outgoing) links."""
+    path = f"/projects/{project_id}/workitems/{work_item_id}/linkedworkitems"
     try:
-        forward_response = await client.get(
-            f"{base_path}/linkedworkitems",
+        response = await client.get(
+            path,
             params={
                 "fields[linkedworkitems]": "@all",
                 "fields[workitems]": WI_LIST_FIELDS,
                 "include": "workItem",
+                "page[size]": page_size,
+                "page[number]": page_number,
             },
         )
     except PolarionNotFoundError as exc:
@@ -1241,70 +1335,72 @@ async def get_linked_work_items(
             f"Failed to get linked work items for '{work_item_id}': {exc.message}"
         ) from exc
 
-    forward_items = _parse_linked_items(forward_response, direction="forward")
+    items = _parse_linked_items(response, direction="forward")
 
-    back_items: list[LinkedWorkItemSummary] = []
+    raw_total = extract_total_count(response)
+    total = raw_total
+    if total <= 0 and items:
+        total = (page_number - 1) * page_size + len(items)
+
+    return PaginatedResult[LinkedWorkItemSummary](
+        items=items,
+        total_count=total,
+        page=page_number,
+        page_size=page_size,
+        has_more=compute_has_more(
+            response, raw_total, page_number, page_size, len(items)
+        ),
+    )
+
+
+async def _get_back_linked_page(
+    client: PolarionClient,
+    *,
+    project_id: str,
+    work_item_id: str,
+    page_size: int,
+    page_number: int,
+) -> PaginatedResult[LinkedWorkItemSummary]:
+    """Fetch a single page of back (incoming) links via Lucene query."""
     try:
-        back_page = 1
-        back_total: int | None = None
-
-        while True:
-            back_response = await client.get(
-                f"/projects/{project_id}/workitems",
-                params={
-                    "query": f"linkedWorkItems:{work_item_id}",
-                    "fields[workitems]": WI_LIST_FIELDS,
-                    "page[size]": DEFAULT_PAGE_SIZE,
-                    "page[number]": back_page,
-                },
-            )
-
-            if back_total is None:
-                back_total = extract_total_count(back_response)
-
-            page_summaries = parse_work_item_summaries(
-                back_response.get("data", []),
-            )
-            if not page_summaries:
-                break
-
-            back_items.extend(
-                LinkedWorkItemSummary(
-                    id=summary.id,
-                    title=summary.title,
-                    # role unknown — Polarion's ``linkedWorkItems:`` query
-                    # only exposes the source WI list, not the link role.
-                    role=None,
-                    direction="back",
-                    suspect=False,
-                    type=summary.type,
-                    status=summary.status,
-                    space_id=summary.space_id,
-                    document_name=summary.document_name,
-                )
-                for summary in page_summaries
-            )
-
-            if back_total and len(back_items) >= back_total:
-                break
-            # Prefer links.next as authoritative stop signal;
-            # fall back to partial-page heuristic when absent.
-            if has_links_next(back_response):
-                back_page += 1
-                continue
-            if len(page_summaries) < DEFAULT_PAGE_SIZE:
-                break
-
-            back_page += 1
+        response = await client.get(
+            f"/projects/{project_id}/workitems",
+            params={
+                "query": f"linkedWorkItems:{work_item_id}",
+                "fields[workitems]": WI_LIST_FIELDS,
+                "page[size]": page_size,
+                "page[number]": page_number,
+            },
+        )
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Work item '{work_item_id}' not found in project "
+            f"'{project_id}'. "
+            "Use `list_work_items` to discover valid IDs."
+        ) from exc
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot access linked work items -- check your POLARION_TOKEN permissions."
+        ) from exc
     except PolarionError as exc:
         raise RuntimeError(
             f"Backlink query failed for work item '{work_item_id}': {exc.message}"
         ) from exc
 
-    all_items = forward_items + back_items
-    return LinkedWorkItemsList(
-        items=all_items,
-        forward_count=len(forward_items),
-        back_count=len(back_items),
-        total_count=len(all_items),
+    summaries = parse_work_item_summaries(response.get("data", []))
+    items = [summary_to_back_linked(s) for s in summaries]
+
+    raw_total = extract_total_count(response)
+    total = raw_total
+    if total <= 0 and items:
+        total = (page_number - 1) * page_size + len(items)
+
+    return PaginatedResult[LinkedWorkItemSummary](
+        items=items,
+        total_count=total,
+        page=page_number,
+        page_size=page_size,
+        has_more=compute_has_more(
+            response, raw_total, page_number, page_size, len(items)
+        ),
     )
