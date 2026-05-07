@@ -676,16 +676,30 @@ async def get_document(
         ),
     ),
 ) -> DocumentDetail:
-    """Get metadata for a Polarion document.
+    """Get metadata (and optionally the body) for a Polarion document.
 
     Returns the document's title, type, and workflow status. By default
     the ``content`` field is empty; set ``include_content=True`` to also
     fetch ``homePageContent`` (converted to Markdown). Empty headings
     inside the home-page content are stripped automatically.
 
+    **When to use which document tool**:
+
+    - Need the document body in one shot to scan/search for keywords?
+      Call this tool with ``include_content=True`` — a single request,
+      no pagination, returns the full Markdown body. This is the
+      preferred entry point for "find X in this document" workflows.
+    - Need the structured part list (heading levels, work-item IDs,
+      embedded work-item descriptions)? Use ``get_document_parts``.
+      Each ``workitem`` part already includes its ``description`` in
+      Markdown, so no follow-up ``get_work_item`` call is required.
+    - Just need title/type/status? Leave ``include_content=False``
+      (default) to keep the response small.
+
     Polarion stores **heading text in work-item titles**, not in
-    ``homePageContent``. For the structured body of a document, call
-    ``get_document_parts`` — this tool is for fast metadata lookup.
+    ``homePageContent``, so the home-page Markdown contains the
+    inline rich-text body but not the heading wording — pair with
+    ``get_document_parts`` when the heading text matters.
 
     Use ``list_documents`` first to discover valid space IDs and
     document names.
@@ -810,18 +824,27 @@ async def get_document_parts(  # noqa: PLR0913
 
     Returns the ordered list of part IDs, titles, types, and linked
     work-item metadata that make up a document's body. Use this tool
-    **only** when you need:
+    when you need:
 
     - Part IDs for positioning with ``move_work_item_to_document`` —
       pass any existing part's ``id`` as ``next_part_id`` (insert
       before) or ``previous_part_id`` (insert after). Results are
       returned in document order.
     - The hierarchical structure (heading levels) of the document.
-    - The type/status of work items embedded in the document, without a
-      separate ``get_work_item`` call.
+    - **Work-item descriptions inline**: each ``workitem`` part already
+      includes its ``description`` field as Markdown, so a follow-up
+      ``get_work_item`` call is **not needed** when scanning bodies.
+      Iterate pages and match against ``description`` / ``content`` /
+      ``title`` to search content within a document.
+    - The type/status of work items embedded in the document.
 
-    **Do NOT call this tool just to read or summarise a document.**
-    ``get_document`` already returns the complete document body.
+    **Choosing between the document tools**:
+
+    - For a one-shot keyword search across the document body without
+      pagination, prefer ``get_document(include_content=True)`` —
+      faster when the document fits in one response.
+    - Use this tool when you need per-work-item descriptions, the
+      ordered part list, or part IDs for moves.
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -978,7 +1001,20 @@ async def list_work_items(
     - ``title:SRS*`` — trailing wildcard (leading wildcards not supported)
     - ``type:testCase AND status:draft`` — draft test cases
 
-    Use ``get_work_item`` for full details including the description.
+    **Searching work-item bodies (description) is NOT supported here.**
+    Polarion's Lucene index does not cover the ``description`` field, so
+    you cannot filter by body text via ``query=``. For content search,
+    pick the right document-scoped tool instead:
+
+    - Single-document body search (one shot, no pagination) →
+      ``get_document(include_content=True)`` returns the entire
+      ``homePageContent`` as Markdown.
+    - Document-scoped search that also covers each embedded
+      work-item's ``description`` → iterate ``get_document_parts``
+      pages; each ``workitem`` part already carries its description.
+
+    Use ``get_work_item`` only when you need the full detail of a
+    specific WI that you've already located.
 
     Args:
         ctx: MCP tool context (injected automatically).
