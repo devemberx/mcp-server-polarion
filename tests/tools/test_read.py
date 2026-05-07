@@ -25,6 +25,7 @@ from mcp_server_polarion.models import (
     ProjectSummary,
     WorkItemDetail,
 )
+from mcp_server_polarion.server import mcp
 from mcp_server_polarion.tools import read as _read_mod
 
 # In FastMCP 3.0, @mcp.tool returns the original function unchanged
@@ -1774,6 +1775,9 @@ class TestGetLinkedWorkItems:
     async def test_forward_signals_has_more_when_total_exceeds_page(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
+        # Simulate page 1 of a 5-item set with page_size=2 — server returns
+        # the first 2 items, meta.totalCount reports the full collection
+        # size, and has_more should be True (2 * 1 < 5).
         mock_client.get.return_value = {
             "data": [
                 {
@@ -2012,3 +2016,20 @@ class TestGetLinkedWorkItems:
                 page_size=100,
                 page_number=1,
             )
+
+    async def test_direction_default_is_forward_in_registered_schema(
+        self,
+    ) -> None:
+        """Guard the JSON-Schema default for ``direction``.
+
+        Direct invocation cannot exercise FastMCP's default-injection
+        (passing the ``Field(...)`` sentinel through), so the registered
+        tool schema is the authoritative place to verify the default
+        the LLM will see. Regressions here would silently break the
+        zero-arg call path.
+        """
+        tools = await mcp.list_tools()
+        tool = next(t for t in tools if t.name == "get_linked_work_items")
+        direction_schema = tool.parameters["properties"]["direction"]
+        assert direction_schema["default"] == "forward"
+        assert direction_schema["enum"] == ["forward", "back"]
