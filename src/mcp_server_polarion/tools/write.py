@@ -270,7 +270,16 @@ def _build_update_document_payload(  # noqa: PLR0913
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool(tags={"write"}, timeout=60.0)
+@mcp.tool(
+    tags={"write"},
+    timeout=60.0,
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    },
+)
 async def create_work_item(  # noqa: PLR0913
     ctx: Context,
     project_id: str = Field(
@@ -465,7 +474,16 @@ async def create_work_item(  # noqa: PLR0913
     )
 
 
-@mcp.tool(tags={"write"}, timeout=60.0)
+@mcp.tool(
+    tags={"write"},
+    timeout=60.0,
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
 async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     ctx: Context,
     project_id: str = Field(
@@ -797,7 +815,16 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     )
 
 
-@mcp.tool(tags={"write"}, timeout=60.0)
+@mcp.tool(
+    tags={"write"},
+    timeout=60.0,
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
 async def move_work_item_to_document(  # noqa: PLR0913
     ctx: Context,
     project_id: str = Field(
@@ -971,7 +998,16 @@ async def move_work_item_to_document(  # noqa: PLR0913
     )
 
 
-@mcp.tool(tags={"write"}, timeout=60.0)
+@mcp.tool(
+    tags={"write"},
+    timeout=60.0,
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
 async def update_document(  # noqa: PLR0913
     ctx: Context,
     project_id: str = Field(
