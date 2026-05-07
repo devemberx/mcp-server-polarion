@@ -13,7 +13,12 @@ from urllib.parse import quote
 from fastmcp import Context
 
 from mcp_server_polarion.core.client import PolarionClient
-from mcp_server_polarion.models import Hyperlink, WorkItemDetail, WorkItemSummary
+from mcp_server_polarion.models import (
+    Hyperlink,
+    LinkedWorkItemSummary,
+    WorkItemDetail,
+    WorkItemSummary,
+)
 from mcp_server_polarion.utils import html_to_markdown
 
 
@@ -376,6 +381,28 @@ def parse_work_item_detail(
     )
 
 
+def summary_to_back_linked(summary: WorkItemSummary) -> LinkedWorkItemSummary:
+    """Convert a ``WorkItemSummary`` from a ``linkedWorkItems:`` query
+    into a back-direction ``LinkedWorkItemSummary``.
+
+    Polarion's ``linkedWorkItems:`` Lucene query returns a flat list of
+    source work items but does not expose the originating link's role or
+    suspect flag — both are set to safe defaults (``role=None``,
+    ``suspect=False``).
+    """
+    return LinkedWorkItemSummary(
+        id=summary.id,
+        title=summary.title,
+        role=None,
+        direction="back",
+        suspect=False,
+        type=summary.type,
+        status=summary.status,
+        space_id=summary.space_id,
+        document_name=summary.document_name,
+    )
+
+
 def parse_work_item_summaries(
     data: object,
 ) -> list[WorkItemSummary]:
@@ -417,4 +444,5 @@ __all__: list[str] = [
     "parse_work_item_summaries",
     "safe_str",
     "split_module_id",
+    "summary_to_back_linked",
 ]

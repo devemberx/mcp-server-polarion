@@ -415,28 +415,6 @@ class LinkedWorkItemSummary(BaseModel):
     )
 
 
-class LinkedWorkItemsList(BaseModel):
-    """All links (forward and back) for a work item.
-
-    Returned by ``get_linked_work_items``.  Merges outgoing and incoming
-    links into a single list for complete traceability.
-    """
-
-    items: list[LinkedWorkItemSummary] = Field(
-        description="All linked work items (forward and back).",
-    )
-    total_count: int = Field(
-        default=0,
-        description="Total number of linked work items (forward + back)",
-    )
-    forward_count: int = Field(
-        description="Number of outgoing (forward) links.",
-    )
-    back_count: int = Field(
-        description="Number of incoming (back) links.",
-    )
-
-
 # ---------------------------------------------------------------------------
 # Write-result models
 # ---------------------------------------------------------------------------
@@ -620,7 +598,6 @@ __all__: list[str] = [
     "JsonValue",
     "LinkResult",
     "LinkedWorkItemSummary",
-    "LinkedWorkItemsList",
     "PaginatedResult",
     "ProjectSummary",
     "WorkItemCreateResult",

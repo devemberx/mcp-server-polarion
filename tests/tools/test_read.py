@@ -20,7 +20,7 @@ from mcp_server_polarion.core.exceptions import (
 from mcp_server_polarion.models import (
     DocumentDetail,
     DocumentPart,
-    LinkedWorkItemsList,
+    LinkedWorkItemSummary,
     PaginatedResult,
     ProjectSummary,
     WorkItemDetail,
@@ -1697,144 +1697,251 @@ class TestGetWorkItem:
 
 
 class TestGetLinkedWorkItems:
-    """Tests for the ``get_linked_work_items`` tool."""
+    """Tests for the ``get_linked_work_items`` tool.
 
-    async def test_merges_forward_and_back_links(
+    Each call returns a single page in a single direction (``forward`` or
+    ``back``). Pagination matches the convention used by other list tools.
+    """
+
+    async def test_forward_returns_paginated_result(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # Forward call: MCPT-001 -> MCPT-010 (parent) via linkedworkitems
-        # Back call: MCPT-020, MCPT-030 -> MCPT-001 via Lucene query
-        mock_client.get.side_effect = [
-            {
-                "data": [
-                    {
-                        "id": "proj1/MCPT-001/parent/proj1/MCPT-010",
-                        "attributes": {
-                            "role": "parent",
-                            "suspect": False,
-                        },
-                        "relationships": {
-                            "workItem": {
-                                "data": {
-                                    "type": "workitems",
-                                    "id": "proj1/MCPT-010",
-                                }
-                            },
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "id": "proj1/MCPT-001/parent/proj1/MCPT-010",
+                    "attributes": {"role": "parent", "suspect": False},
+                    "relationships": {
+                        "workItem": {
+                            "data": {
+                                "type": "workitems",
+                                "id": "proj1/MCPT-010",
+                            }
                         },
                     },
-                ],
-                "included": [
-                    {
-                        "type": "workitems",
-                        "id": "proj1/MCPT-010",
-                        "attributes": {
-                            "title": "Parent Item",
-                            "type": "heading",
-                            "status": "open",
-                        },
-                        "relationships": {
-                            "module": {
-                                "data": {
-                                    "type": "documents",
-                                    "id": "proj1/Design/SRS",
-                                }
-                            },
+                },
+            ],
+            "included": [
+                {
+                    "type": "workitems",
+                    "id": "proj1/MCPT-010",
+                    "attributes": {
+                        "title": "Parent Item",
+                        "type": "heading",
+                        "status": "open",
+                    },
+                    "relationships": {
+                        "module": {
+                            "data": {
+                                "type": "documents",
+                                "id": "proj1/Design/SRS",
+                            }
                         },
                     },
-                ],
-            },
-            {
-                "data": [
-                    {
-                        "id": "proj1/MCPT-020",
-                        "attributes": {
-                            "title": "Related Item",
-                            "type": "requirement",
-                            "status": "draft",
-                        },
-                        "relationships": {
-                            "module": {
-                                "data": {
-                                    "type": "documents",
-                                    "id": "proj1/Requirements/SysRS",
-                                }
-                            },
-                        },
-                    },
-                    {
-                        "id": "proj1/MCPT-030",
-                        "attributes": {
-                            "title": "Verifier Item",
-                            "type": "testCase",
-                            "status": "approved",
-                        },
-                    },
-                ],
-            },
-        ]
+                },
+            ],
+            "meta": {"totalCount": 1},
+        }
 
         result = await get_linked_work_items(
             mock_ctx,
             project_id="proj1",
             work_item_id="MCPT-001",
+            direction="forward",
+            page_size=100,
+            page_number=1,
         )
 
-        assert isinstance(result, LinkedWorkItemsList)
-        assert result.forward_count == 1
-        assert result.back_count == 2
-        assert result.total_count == 3
-        assert len(result.items) == 3
+        assert isinstance(result, PaginatedResult)
+        assert result.total_count == 1
+        assert result.page == 1
+        assert result.page_size == 100
+        assert result.has_more is False
+        assert len(result.items) == 1
 
-        fwd = [i for i in result.items if i.direction == "forward"]
-        back = [i for i in result.items if i.direction == "back"]
-        assert len(fwd) == 1
-        assert len(back) == 2
+        fwd = result.items[0]
+        assert isinstance(fwd, LinkedWorkItemSummary)
+        assert fwd.direction == "forward"
+        assert fwd.id == "MCPT-010"
+        assert fwd.role == "parent"
+        assert fwd.title == "Parent Item"
+        assert fwd.suspect is False
+        assert fwd.type == "heading"
+        assert fwd.status == "open"
+        assert fwd.space_id == "Design"
+        assert fwd.document_name == "SRS"
 
-        # Forward: target metadata extracted from included WI.
-        assert fwd[0].id == "MCPT-010"
-        assert fwd[0].role == "parent"
-        assert fwd[0].title == "Parent Item"
-        assert fwd[0].suspect is False
-        assert fwd[0].type == "heading"
-        assert fwd[0].status == "open"
-        assert fwd[0].space_id == "Design"
-        assert fwd[0].document_name == "SRS"
+    async def test_forward_signals_has_more_when_total_exceeds_page(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "id": f"proj1/MCPT-001/parent/proj1/MCPT-{i:03d}",
+                    "attributes": {"role": "parent", "suspect": False},
+                    "relationships": {
+                        "workItem": {
+                            "data": {
+                                "type": "workitems",
+                                "id": f"proj1/MCPT-{i:03d}",
+                            }
+                        },
+                    },
+                }
+                for i in range(2)
+            ],
+            "included": [
+                {
+                    "type": "workitems",
+                    "id": f"proj1/MCPT-{i:03d}",
+                    "attributes": {
+                        "title": f"WI {i}",
+                        "type": "requirement",
+                        "status": "open",
+                    },
+                }
+                for i in range(2)
+            ],
+            "meta": {"totalCount": 5},
+        }
 
-        # Back: parsed from workitems query. role is None on this server
-        # version (the originating link role is not exposed).
-        back_by_id = {i.id: i for i in back}
+        result = await get_linked_work_items(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT-001",
+            direction="forward",
+            page_size=2,
+            page_number=1,
+        )
+
+        assert result.total_count == 5
+        assert result.page == 1
+        assert result.page_size == 2
+        assert result.has_more is True
+        assert len(result.items) == 2
+
+    async def test_forward_passes_pagination_params(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {"data": []}
+
+        await get_linked_work_items(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT-001",
+            direction="forward",
+            page_size=25,
+            page_number=3,
+        )
+
+        calls = mock_client.get.call_args_list
+        assert len(calls) == 1
+        assert calls[0][0][0] == "/projects/proj1/workitems/MCPT-001/linkedworkitems"
+        params = calls[0][1]["params"]
+        assert params["fields[linkedworkitems]"] == "@all"
+        assert params["include"] == "workItem"
+        assert params["page[size]"] == 25
+        assert params["page[number]"] == 3
+
+    async def test_back_returns_paginated_result(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "id": "proj1/MCPT-020",
+                    "attributes": {
+                        "title": "Related Item",
+                        "type": "requirement",
+                        "status": "draft",
+                    },
+                    "relationships": {
+                        "module": {
+                            "data": {
+                                "type": "documents",
+                                "id": "proj1/Requirements/SysRS",
+                            }
+                        },
+                    },
+                },
+                {
+                    "id": "proj1/MCPT-030",
+                    "attributes": {
+                        "title": "Verifier Item",
+                        "type": "testCase",
+                        "status": "approved",
+                    },
+                },
+            ],
+            "meta": {"totalCount": 2},
+        }
+
+        result = await get_linked_work_items(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT-001",
+            direction="back",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert isinstance(result, PaginatedResult)
+        assert result.total_count == 2
+        assert result.has_more is False
+        assert len(result.items) == 2
+
+        back_by_id = {item.id: item for item in result.items}
         assert set(back_by_id) == {"MCPT-020", "MCPT-030"}
-        for b in back:
-            assert b.role is None
-            assert b.suspect is False
-        # Back item with module gets space_id/document_name populated.
+        for item in result.items:
+            assert item.direction == "back"
+            assert item.role is None
+            assert item.suspect is False
         assert back_by_id["MCPT-020"].type == "requirement"
-        assert back_by_id["MCPT-020"].status == "draft"
         assert back_by_id["MCPT-020"].space_id == "Requirements"
         assert back_by_id["MCPT-020"].document_name == "SysRS"
-        # Back item without module → both empty.
-        assert back_by_id["MCPT-030"].type == "testCase"
         assert back_by_id["MCPT-030"].space_id == ""
-        assert back_by_id["MCPT-030"].document_name == ""
 
-    async def test_no_links(self, mock_ctx: MagicMock, mock_client: AsyncMock) -> None:
-        mock_client.get.side_effect = [
-            {"data": []},
-            {"data": []},
-        ]
+    async def test_back_passes_pagination_params(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {"data": []}
+
+        await get_linked_work_items(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT-001",
+            direction="back",
+            page_size=10,
+            page_number=2,
+        )
+
+        calls = mock_client.get.call_args_list
+        assert len(calls) == 1
+        assert calls[0][0][0] == "/projects/proj1/workitems"
+        params = calls[0][1]["params"]
+        assert params["query"] == "linkedWorkItems:MCPT-001"
+        assert params["page[size]"] == 10
+        assert params["page[number]"] == 2
+
+    async def test_no_links_returns_empty_page(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {"data": []}
 
         result = await get_linked_work_items(
             mock_ctx,
             project_id="proj1",
             work_item_id="MCPT-001",
+            direction="forward",
+            page_size=100,
+            page_number=1,
         )
 
-        assert result.forward_count == 0
-        assert result.back_count == 0
-        assert result.total_count == 0
         assert result.items == []
+        assert result.total_count == 0
+        assert result.has_more is False
 
-    async def test_not_found_raises_value_error(
+    async def test_forward_not_found_raises_value_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.get.side_effect = PolarionNotFoundError(
@@ -1847,6 +1954,27 @@ class TestGetLinkedWorkItems:
                 mock_ctx,
                 project_id="proj1",
                 work_item_id="MCPT-999",
+                direction="forward",
+                page_size=100,
+                page_number=1,
+            )
+
+    async def test_back_not_found_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionNotFoundError(
+            "Not found",
+            status_code=404,
+        )
+
+        with pytest.raises(ValueError, match="not found"):
+            await get_linked_work_items(
+                mock_ctx,
+                project_id="proj1",
+                work_item_id="MCPT-999",
+                direction="back",
+                page_size=100,
+                page_number=1,
             )
 
     async def test_auth_error_raises_permission_error(
@@ -1862,100 +1990,25 @@ class TestGetLinkedWorkItems:
                 mock_ctx,
                 project_id="proj1",
                 work_item_id="MCPT-001",
+                direction="forward",
+                page_size=100,
+                page_number=1,
             )
 
-    async def test_api_calls_forward_and_backlink_query(
+    async def test_back_polarion_error_raises_runtime_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.side_effect = [
-            {"data": []},
-            {"data": []},
-        ]
-
-        await get_linked_work_items(
-            mock_ctx,
-            project_id="proj1",
-            work_item_id="MCPT-001",
+        mock_client.get.side_effect = PolarionError(
+            "Boom",
+            status_code=500,
         )
 
-        calls = mock_client.get.call_args_list
-        assert len(calls) == 2
-        base = "/projects/proj1/workitems/MCPT-001"
-        assert calls[0][0][0] == f"{base}/linkedworkitems"
-        # Forward call includes fields and include params
-        fwd_params = calls[0][1]["params"]
-        assert fwd_params["fields[linkedworkitems]"] == "@all"
-        assert fwd_params["include"] == "workItem"
-        # Back links use camelCase Lucene query
-        assert calls[1][0][0] == "/projects/proj1/workitems"
-        back_params = calls[1][1]["params"]
-        assert back_params["query"] == "linkedWorkItems:MCPT-001"
-
-    async def test_parses_polarion_link_id_format(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        """Forward: Polarion ID format, Back: workitems query."""
-        mock_client.get.side_effect = [
-            {
-                "data": [
-                    {
-                        # Forward link: MCPT-001 --[parent]--> MCPT-010
-                        "id": "proj1/MCPT-001/parent/proj1/MCPT-010",
-                        "attributes": {"role": "parent", "suspect": False},
-                        "relationships": {
-                            "workItem": {
-                                "data": {
-                                    "type": "workitems",
-                                    "id": "proj1/MCPT-010",
-                                }
-                            },
-                        },
-                    },
-                ],
-                "included": [
-                    {
-                        "type": "workitems",
-                        "id": "proj1/MCPT-010",
-                        "attributes": {
-                            "title": "Parent Target",
-                            "type": "heading",
-                            "status": "open",
-                        },
-                    },
-                ],
-            },
-            {
-                "data": [
-                    {
-                        "id": "proj1/MCPT-099",
-                        "attributes": {
-                            "title": "Back Item",
-                            "type": "requirement",
-                            "status": "open",
-                        },
-                    },
-                ],
-            },
-        ]
-
-        result = await get_linked_work_items(
-            mock_ctx,
-            project_id="proj1",
-            work_item_id="MCPT-001",
-        )
-
-        fwd = result.items[0]  # forward
-        back = result.items[1]  # back
-
-        # Forward: target from relationships.workItem
-        assert fwd.direction == "forward"
-        assert fwd.id == "MCPT-010"
-        assert fwd.role == "parent"
-        assert fwd.title == "Parent Target"
-
-        # Back: parsed from workitems query — role is unknown on this
-        # server version (linkedWorkItems: query does not expose role).
-        assert back.direction == "back"
-        assert back.id == "MCPT-099"
-        assert back.role is None
-        assert back.title == "Back Item"
+        with pytest.raises(RuntimeError, match="Backlink query failed"):
+            await get_linked_work_items(
+                mock_ctx,
+                project_id="proj1",
+                work_item_id="MCPT-001",
+                direction="back",
+                page_size=100,
+                page_number=1,
+            )
