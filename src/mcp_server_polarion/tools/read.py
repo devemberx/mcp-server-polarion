@@ -822,6 +822,11 @@ async def get_document_parts(  # noqa: PLR0913
 ) -> PaginatedResult[DocumentPart]:
     """List the structural parts (headings and work items) of a document.
 
+    **Do NOT call this tool just to read or summarise a document body.**
+    For one-shot body retrieval prefer ``get_document(include_content=True)``
+    — it returns the full ``homePageContent`` Markdown in a single
+    request without paging.
+
     Returns the ordered list of part IDs, titles, types, and linked
     work-item metadata that make up a document's body. Use this tool
     when you need:

@@ -386,9 +386,12 @@ def summary_to_back_linked(summary: WorkItemSummary) -> LinkedWorkItemSummary:
     into a back-direction ``LinkedWorkItemSummary``.
 
     Polarion's ``linkedWorkItems:`` Lucene query returns a flat list of
-    source work items but does not expose the originating link's role or
-    suspect flag — both are set to safe defaults (``role=None``,
-    ``suspect=False``).
+    source work items without the originating link's role or suspect
+    flag (the ``/backlinkedworkitems`` endpoint that would expose them
+    is not available on this server, see CLAUDE.md). Both fields are
+    therefore set to explicit "unknown" defaults — ``role=None`` (do
+    NOT substitute a placeholder string; ``None`` signals to callers
+    that the value is unknown, not absent) and ``suspect=False``.
     """
     return LinkedWorkItemSummary(
         id=summary.id,
