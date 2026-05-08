@@ -69,6 +69,13 @@ _DECOMPOSE_TAGS: Final[frozenset[str]] = frozenset({"script", "style"})
 # (javascript:, data:, vbscript:, etc.) is stripped to prevent stored XSS.
 _SAFE_URL_SCHEMES: Final[frozenset[str]] = frozenset({"http", "https", "mailto"})
 
+# Upper bound on cells materialised for a single merged-cell expansion
+# (``colspan * rowspan``).  Per-attribute clamp is 1000, so without this
+# total bound an adversarial ``colspan="1000" rowspan="1000"`` would yield
+# 1M tag clones for a single cell.  10k cells comfortably accommodates any
+# realistic Polarion table while keeping worst-case allocation bounded.
+_MAX_CELLS_PER_MERGE: Final[int] = 10_000
+
 # markdown-it-py renderer: CommonMark base + GFM tables.
 # html_block and html_inline are disabled so that raw HTML embedded in
 # LLM/user-supplied Markdown cannot bypass sanitization.
@@ -144,28 +151,38 @@ def _rectangularize_table(table: Tag) -> None:
         col_idx = 0
 
         for cell in original_cells:
-            while col_idx in layout:
-                col_idx += 1
-
             colspan = _get_span(cell, "colspan")
             rowspan = _get_span(cell, "rowspan")
+
+            # Bound total expansion per merge to keep worst-case allocation
+            # proportional to realistic table sizes.  Drop rowspan first
+            # (rows are typically scarcer than columns in Polarion content).
+            if colspan * rowspan > _MAX_CELLS_PER_MERGE:
+                rowspan = max(1, _MAX_CELLS_PER_MERGE // colspan)
 
             for attr in ("colspan", "rowspan"):
                 if attr in cell.attrs:
                     del cell.attrs[attr]
 
-            layout[col_idx] = cell
-            for j in range(1, colspan):
-                layout[col_idx + j] = _clone_cell(cell)
+            # Place the original + colspan duplicates one column at a time,
+            # skipping positions already reserved by a rowspan from above.
+            # The cell may therefore land at non-contiguous column indices —
+            # the same behaviour browsers exhibit when a colspan is pushed
+            # past a rowspan reservation.
+            placed_cols: list[int] = []
+            for j in range(colspan):
+                while col_idx in layout:
+                    col_idx += 1
+                layout[col_idx] = cell if j == 0 else _clone_cell(cell)
+                placed_cols.append(col_idx)
+                col_idx += 1
 
             for k in range(1, rowspan):
                 target = row_idx + k
                 if target >= len(rows):
                     break
-                for j in range(colspan):
-                    reservations[target][col_idx + j] = _clone_cell(cell)
-
-            col_idx += colspan
+                for placed_col in placed_cols:
+                    reservations[target][placed_col] = _clone_cell(cell)
 
         # Rebuild the row in column order; row.clear() drops original cells
         # plus any inter-cell whitespace, which markdownify ignores anyway.
@@ -192,6 +209,13 @@ def _get_span(cell: Tag, attr_name: str) -> int:
 
 
 def _clone_cell(cell: Tag) -> Tag:
+    """Return a detached deep copy of ``cell`` with span attributes stripped.
+
+    ``deepcopy`` on a ``bs4.Tag`` yields a fresh subtree (children, text,
+    inline formatting) without a parent reference, so the copy can be
+    attached elsewhere in the soup.  Span attributes are removed defensively
+    even though ``_rectangularize_table`` already strips them on the source.
+    """
     clone: Tag = deepcopy(cell)
     for attr in ("colspan", "rowspan"):
         if attr in clone.attrs:

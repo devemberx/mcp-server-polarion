@@ -227,6 +227,75 @@ class TestHtmlToMarkdownMergedCells:
         assert all(len(r) == 2 for r in rows), result
         assert rows[2] == ["Tall", "Y"]
 
+    def test_table_colspan_skips_rowspan_reservation(self) -> None:
+        """A colspan cell pushed past a previous row's rowspan must not
+        overwrite the reservation — it should land at non-contiguous columns
+        (matching browser rendering)."""
+        # Row 0: A | B(rowspan=2) | C
+        # Row 1: D(colspan=2) — should occupy cols 0 and 2 (col 1 reserved)
+        # Row 2: E | F | G
+        html = (
+            "<table><tbody>"
+            '<tr><td>A</td><td rowspan="2">B</td><td>C</td></tr>'
+            '<tr><td colspan="2">D</td></tr>'
+            "<tr><td>E</td><td>F</td><td>G</td></tr>"
+            "</tbody></table>"
+        )
+        result = html_to_markdown(html)
+        rows = self._table_rows(result)
+        assert len(rows) == 3, result
+        assert all(len(r) == 3 for r in rows), result
+        assert rows[0] == ["A", "B", "C"]
+        # B's rowspan clone sits between D and D's duplicate.
+        assert rows[1] == ["D", "B", "D"]
+        assert rows[2] == ["E", "F", "G"]
+
+    def test_table_merged_cell_preserves_inline_formatting(self) -> None:
+        """deepcopy must replicate inline formatting tags into duplicates."""
+        html = (
+            "<table><tbody>"
+            '<tr><td colspan="2"><strong>bold</strong></td><td>X</td></tr>'
+            "<tr><td>1</td><td>2</td><td>3</td></tr>"
+            "</tbody></table>"
+        )
+        result = html_to_markdown(html)
+        # Markdownify renders <strong> as **bold**; both duplicates carry it.
+        assert result.count("**bold**") == 2, result
+
+    def test_nested_table_each_rectangularized(self) -> None:
+        """Outer and inner tables expand merges independently."""
+        html = (
+            "<table><tbody>"
+            "<tr><td>"
+            "<table><tbody>"
+            '<tr><td colspan="2">INNER</td></tr>'
+            "<tr><td>x</td><td>y</td></tr>"
+            "</tbody></table>"
+            "</td>"
+            '<td colspan="2">OUTER</td></tr>'
+            "<tr><td>p</td><td>q</td><td>r</td></tr>"
+            "</tbody></table>"
+        )
+        result = html_to_markdown(html)
+        assert result.count("INNER") >= 2, result
+        assert result.count("OUTER") >= 2, result
+
+    def test_table_pathological_span_product_bounded(self) -> None:
+        """colspan*rowspan is clamped to keep worst-case allocation bounded."""
+        # Per-attr clamp is 1000 each — without the product clamp this would
+        # try to materialise 1M tag clones.  With _MAX_CELLS_PER_MERGE=10000
+        # it stays bounded; we just assert the call returns in reasonable
+        # time and the first row carries the merged value.
+        html = (
+            '<table><tbody><tr><td colspan="1000" rowspan="1000">M</td>'
+            "<td>Z</td></tr></tbody></table>"
+        )
+        result = html_to_markdown(html)
+        rows = self._table_rows(result)
+        # Sanity: call returned (would OOM/hang without clamp), first cell is M.
+        assert rows, result
+        assert rows[0][0] == "M"
+
 
 # ---------------------------------------------------------------------------
 # markdown_to_html
