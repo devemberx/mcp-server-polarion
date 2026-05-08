@@ -122,6 +122,112 @@ class TestHtmlToMarkdown:
         assert "bold italic" in result
 
 
+class TestHtmlToMarkdownMergedCells:
+    """Tables with ``colspan``/``rowspan`` must produce rectangular GFM."""
+
+    @staticmethod
+    def _table_rows(markdown: str) -> list[list[str]]:
+        rows: list[list[str]] = []
+        for line in markdown.splitlines():
+            stripped = line.strip()
+            if not stripped.startswith("|"):
+                continue
+            inner = stripped.strip("|")
+            if set(inner.replace("|", "").strip()) <= {"-", " ", ":"}:
+                continue  # GFM separator row
+            rows.append([cell.strip() for cell in inner.split("|")])
+        return rows
+
+    def test_table_colspan_duplicates_value(self) -> None:
+        html = (
+            "<table><thead><tr><th>A</th><th>B</th><th>C</th></tr></thead>"
+            '<tbody><tr><td colspan="2">Merged</td><td>Z</td></tr>'
+            "<tr><td>1</td><td>2</td><td>3</td></tr></tbody></table>"
+        )
+        result = html_to_markdown(html)
+        rows = self._table_rows(result)
+        assert len(rows) == 3, result
+        assert all(len(r) == 3 for r in rows), result
+        assert rows[1] == ["Merged", "Merged", "Z"]
+        assert rows[2] == ["1", "2", "3"]
+
+    def test_table_rowspan_duplicates_value(self) -> None:
+        html = (
+            "<table><thead><tr><th>A</th><th>B</th></tr></thead>"
+            '<tbody><tr><td rowspan="2">Merged</td><td>X</td></tr>'
+            "<tr><td>Y</td></tr></tbody></table>"
+        )
+        result = html_to_markdown(html)
+        rows = self._table_rows(result)
+        assert len(rows) == 3, result
+        assert all(len(r) == 2 for r in rows), result
+        assert rows[1] == ["Merged", "X"]
+        assert rows[2] == ["Merged", "Y"]
+
+    def test_table_colspan_and_rowspan(self) -> None:
+        html = (
+            "<table><thead><tr><th>H1</th><th>H2</th><th>H3</th></tr></thead>"
+            "<tbody>"
+            '<tr><td colspan="2" rowspan="2">Big</td><td>A</td></tr>'
+            "<tr><td>B</td></tr>"
+            "<tr><td>1</td><td>2</td><td>3</td></tr>"
+            "</tbody></table>"
+        )
+        result = html_to_markdown(html)
+        rows = self._table_rows(result)
+        assert len(rows) == 4, result
+        assert all(len(r) == 3 for r in rows), result
+        assert rows[1] == ["Big", "Big", "A"]
+        assert rows[2] == ["Big", "Big", "B"]
+        assert rows[3] == ["1", "2", "3"]
+
+    def test_table_rowspan_after_normal_cell(self) -> None:
+        html = (
+            "<table><thead><tr><th>A</th><th>B</th></tr></thead>"
+            "<tbody>"
+            '<tr><td>P</td><td rowspan="2">Tall</td></tr>'
+            "<tr><td>Q</td></tr>"
+            "</tbody></table>"
+        )
+        result = html_to_markdown(html)
+        rows = self._table_rows(result)
+        assert len(rows) == 3, result
+        assert all(len(r) == 2 for r in rows), result
+        assert rows[1] == ["P", "Tall"]
+        assert rows[2] == ["Q", "Tall"]
+
+    def test_table_no_merge_unchanged(self) -> None:
+        html = (
+            "<table><thead><tr><th>A</th><th>B</th></tr></thead>"
+            "<tbody><tr><td>1</td><td>2</td></tr></tbody></table>"
+        )
+        result = html_to_markdown(html)
+        rows = self._table_rows(result)
+        assert rows == [["A", "B"], ["1", "2"]], result
+
+    def test_table_invalid_span_falls_back_to_one(self) -> None:
+        html = (
+            '<table><tbody><tr><td colspan="abc" rowspan="">X</td>'
+            "<td>Y</td></tr></tbody></table>"
+        )
+        result = html_to_markdown(html)
+        rows = self._table_rows(result)
+        assert rows == [["X", "Y"]], result
+
+    def test_table_rowspan_overflow_silently_clipped(self) -> None:
+        # rowspan claims 5 rows but only 2 exist — extra reservations dropped.
+        html = (
+            "<table><thead><tr><th>A</th><th>B</th></tr></thead>"
+            '<tbody><tr><td rowspan="5">Tall</td><td>X</td></tr>'
+            "<tr><td>Y</td></tr></tbody></table>"
+        )
+        result = html_to_markdown(html)
+        rows = self._table_rows(result)
+        assert len(rows) == 3, result
+        assert all(len(r) == 2 for r in rows), result
+        assert rows[2] == ["Tall", "Y"]
+
+
 # ---------------------------------------------------------------------------
 # markdown_to_html
 # ---------------------------------------------------------------------------

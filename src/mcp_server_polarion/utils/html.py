@@ -14,6 +14,7 @@ Document content) as HTML.  These utilities ensure:
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Final
 
 from bs4 import BeautifulSoup, Tag
@@ -93,8 +94,109 @@ def html_to_markdown(html: str) -> str:
     """
     if not html or not html.strip():
         return ""
-    result: str = markdownify(html, heading_style="ATX", strip=["img"])
+    expanded = _expand_merged_table_cells(html)
+    result: str = markdownify(expanded, heading_style="ATX", strip=["img"])
     return result.strip()
+
+
+def _expand_merged_table_cells(html: str) -> str:
+    """Rectangularize tables by duplicating ``colspan``/``rowspan`` cells.
+
+    ``markdownify`` 1.2.2 renders ``colspan`` extra columns as empty cells
+    (losing the merged value's association with those columns) and silently
+    drops ``rowspan`` entirely (producing GFM rows whose cell count disagrees
+    with the header — a structurally broken table).  Pre-process the HTML so
+    that every spanned cell is duplicated into each grid position it covered;
+    the resulting table is rectangular and ``markdownify`` emits valid GFM.
+    """
+    if "<table" not in html.lower():
+        return html
+    soup = BeautifulSoup(html, "html.parser")
+    for table in soup.find_all("table"):
+        _rectangularize_table(table)
+    return str(soup)
+
+
+def _rectangularize_table(table: Tag) -> None:
+    """Walk one ``<table>`` and replace span attributes with duplicated cells.
+
+    The cell at logical position (row, col) carrying ``colspan=N rowspan=M``
+    is replaced with ``N*M`` copies at consecutive positions
+    ``(row..row+M-1, col..col+N-1)``.  Reservations from earlier rows shift
+    later rows' fresh cells rightward so the column index stays correct.
+    """
+    rows: list[Tag] = [
+        tr for tr in table.find_all("tr") if tr.find_parent("table") is table
+    ]
+    if not rows:
+        return
+
+    # reservations[i][col] holds a clone scheduled to occupy (i, col),
+    # propagated from a rowspan in an earlier row.
+    reservations: list[dict[int, Tag]] = [{} for _ in rows]
+
+    for row_idx, row in enumerate(rows):
+        original_cells: list[Tag] = [
+            cell for cell in row.find_all(["td", "th"]) if cell.find_parent("tr") is row
+        ]
+
+        layout: dict[int, Tag] = dict(reservations[row_idx])
+        col_idx = 0
+
+        for cell in original_cells:
+            while col_idx in layout:
+                col_idx += 1
+
+            colspan = _get_span(cell, "colspan")
+            rowspan = _get_span(cell, "rowspan")
+
+            for attr in ("colspan", "rowspan"):
+                if attr in cell.attrs:
+                    del cell.attrs[attr]
+
+            layout[col_idx] = cell
+            for j in range(1, colspan):
+                layout[col_idx + j] = _clone_cell(cell)
+
+            for k in range(1, rowspan):
+                target = row_idx + k
+                if target >= len(rows):
+                    break
+                for j in range(colspan):
+                    reservations[target][col_idx + j] = _clone_cell(cell)
+
+            col_idx += colspan
+
+        # Rebuild the row in column order; row.clear() drops original cells
+        # plus any inter-cell whitespace, which markdownify ignores anyway.
+        row.clear()
+        for col in sorted(layout):
+            row.append(layout[col])
+
+
+def _get_span(cell: Tag, attr_name: str) -> int:
+    """Return the colspan/rowspan as an int in ``[1, 1000]``.
+
+    Mirrors ``markdownify``'s own clamp.  Missing, non-string, or
+    non-numeric values fall back to 1.
+    """
+    raw = cell.attrs.get(attr_name)
+    if isinstance(raw, list):
+        raw = raw[0] if raw else ""
+    if not isinstance(raw, str):
+        return 1
+    raw = raw.strip()
+    if not raw.isdigit():
+        return 1
+    return max(1, min(1000, int(raw)))
+
+
+def _clone_cell(cell: Tag) -> Tag:
+    clone: Tag = deepcopy(cell)
+    for attr in ("colspan", "rowspan"):
+        if attr in clone.attrs:
+            del clone.attrs[attr]
+    return clone
 
 
 def markdown_to_html(text: str) -> str:
