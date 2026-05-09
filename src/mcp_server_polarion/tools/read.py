@@ -1,6 +1,6 @@
 """Read-only MCP tools for querying Polarion ALM.
 
-Seven tools that retrieve projects, documents, work items, and their
+Eight tools that retrieve projects, documents, work items, and their
 relationships.  Every tool returns Pydantic models -- never raw
 ``dict`` -- and converts HTML descriptions to Markdown via
 ``html_to_markdown()``.
@@ -25,6 +25,7 @@ from mcp_server_polarion.core.exceptions import (
 from mcp_server_polarion.models import (
     DocumentDetail,
     DocumentPart,
+    DocumentReadResult,
     DocumentSummary,
     LinkedWorkItemSummary,
     PaginatedResult,
@@ -57,6 +58,11 @@ type _PartType = Literal["heading", "workitem", "normal", "toc", "wikiblock"]
 _VALID_PART_TYPES: Final[frozenset[str]] = frozenset(
     {"heading", "workitem", "normal", "toc", "wikiblock"},
 )
+
+# Defensive clamp for heading levels emitted by ``read_document``.
+# Polarion exposes 1-4, but ``_resolve_heading_level`` falls back to
+# regex-parsing ``<hN>`` which could in principle hit 5-6.
+_MAX_HEADING_LEVEL: Final[int] = 6
 
 # ---------------------------------------------------------------------------
 # Read-specific helpers
@@ -194,6 +200,47 @@ def _parse_document_part(
         external=bool(attrs.get("external", False)),
         next_part_id=next_short_id,
     )
+
+
+def _render_parts_to_markdown(parts: list[DocumentPart]) -> str:
+    """Interleave a page of parts into a single flowing Markdown string.
+
+    Rendering rules per ``DocumentPart.type``:
+
+    - ``heading``: ``{'#' * level} {title}``; level clamped to 1-6.
+    - ``workitem``: bold lead-in ``**{title}** (`{work_item_id}`)``
+      followed by the description body. Falls back to bare backticked
+      ID when both title and description are empty.
+    - ``normal`` / ``wikiblock``: ``content`` verbatim, skipped when
+      whitespace-only (matches the empty paragraphs Polarion stores
+      between parts; tables stored as ``normal`` content flow through
+      this branch unchanged).
+    - ``toc`` and unknown types: skipped.
+
+    Chunks are joined with a blank line; runs of three or more newlines
+    are collapsed to two for visual parity with ``get_document``.
+    """
+    chunks: list[str] = []
+    for part in parts:
+        if part.type == "heading":
+            level = max(1, min(part.level or 1, _MAX_HEADING_LEVEL))
+            chunks.append(f"{'#' * level} {part.title}")
+        elif part.type == "workitem":
+            if not part.title and not part.description:
+                chunks.append(f"`{part.work_item_id}`")
+            elif not part.description:
+                chunks.append(f"**{part.title}** (`{part.work_item_id}`)")
+            else:
+                chunks.append(
+                    f"**{part.title}** (`{part.work_item_id}`)\n\n{part.description}"
+                )
+        elif part.type in {"normal", "wikiblock"}:
+            if part.content.strip():
+                chunks.append(part.content)
+        # ``toc`` and any unknown type fall through silently.
+
+    joined = "\n\n".join(chunks)
+    return re.sub(r"\n{3,}", "\n\n", joined).strip()
 
 
 def _parse_linked_items(
@@ -670,13 +717,15 @@ async def get_document(
             "When True, also fetch and return the document's homePageContent "
             "as Markdown in the ``content`` field. Off by default because "
             "homePageContent can be large (tens of KB) and most callers only "
-            "need metadata. Note: Polarion stores actual document body in "
-            "work-item titles/descriptions — use ``get_document_parts`` for "
-            "the structured body."
+            "need metadata. NOTE: ``homePageContent`` contains only the inline "
+            "prose between parts — heading text and embedded work-item bodies "
+            "are stored in separate work items and are NOT included here. "
+            "For end-to-end reading use ``read_document``; this option is for "
+            "round-trip editing of the raw source."
         ),
     ),
 ) -> DocumentDetail:
-    """Get metadata (and optionally the body) for a Polarion document.
+    """Get metadata (and optionally the raw body source) for a Polarion document.
 
     Returns the document's title, type, and workflow status. By default
     the ``content`` field is empty; set ``include_content=True`` to also
@@ -685,10 +734,12 @@ async def get_document(
 
     **When to use which document tool**:
 
-    - Need the document body in one shot to scan/search for keywords?
-      Call this tool with ``include_content=True`` — a single request,
-      no pagination, returns the full Markdown body. This is the
-      preferred entry point for "find X in this document" workflows.
+    - Want to read or summarise the document body? Use ``read_document``
+      — it interleaves heading titles + embedded work-item bodies + prose
+      into a single Markdown stream. ``get_document(include_content=True)``
+      returns ``homePageContent`` only, which omits heading text and
+      embedded work-item bodies (Polarion stores those in separate work
+      items, not in ``homePageContent``).
     - Need the structured part list (heading levels, work-item IDs,
       embedded work-item descriptions)? Use ``get_document_parts``.
       Each ``workitem`` part already includes its ``description`` in
@@ -698,8 +749,9 @@ async def get_document(
 
     Polarion stores **heading text in work-item titles**, not in
     ``homePageContent``, so the home-page Markdown contains the
-    inline rich-text body but not the heading wording — pair with
-    ``get_document_parts`` when the heading text matters.
+    inline rich-text body but not the heading wording — call
+    ``read_document`` for the assembled body or ``get_document_parts``
+    when the structural metadata matters.
 
     Use ``list_documents`` first to discover valid space IDs and
     document names.
@@ -823,9 +875,10 @@ async def get_document_parts(  # noqa: PLR0913
     """List the structural parts (headings and work items) of a document.
 
     **Do NOT call this tool just to read or summarise a document body.**
-    For one-shot body retrieval prefer ``get_document(include_content=True)``
-    — it returns the full ``homePageContent`` Markdown in a single
-    request without paging.
+    For end-to-end reading prefer ``read_document`` — it interleaves
+    heading titles, embedded work-item bodies, and prose into a single
+    Markdown stream and skips the empty placeholder paragraphs Polarion
+    stores between parts.
 
     Returns the ordered list of part IDs, titles, types, and linked
     work-item metadata that make up a document's body. Use this tool
@@ -845,9 +898,9 @@ async def get_document_parts(  # noqa: PLR0913
 
     **Choosing between the document tools**:
 
-    - For a one-shot keyword search across the document body without
-      pagination, prefer ``get_document(include_content=True)`` —
-      faster when the document fits in one response.
+    - For end-to-end reading or summarising the document body, use
+      ``read_document`` — it returns rendered Markdown without the
+      structural metadata noise.
     - Use this tool when you need per-work-item descriptions, the
       ordered part list, or part IDs for moves.
 
@@ -961,6 +1014,111 @@ async def get_document_parts(  # noqa: PLR0913
     timeout=60.0,
     annotations={"readOnlyHint": True},
 )
+async def read_document(  # noqa: PLR0913
+    ctx: Context,
+    project_id: str = Field(
+        description="Polarion project ID.",
+    ),
+    space_id: str = Field(
+        description=(
+            "Space ID that contains the document. "
+            "Use ``list_documents`` to discover valid IDs."
+        ),
+    ),
+    document_name: str = Field(
+        description=(
+            "Document name within the space "
+            "(e.g. 'Software Requirement Specification'). "
+            "Spaces in the name are handled automatically."
+        ),
+    ),
+    page_size: int = Field(
+        default=DEFAULT_PAGE_SIZE,
+        ge=1,
+        le=100,
+        description="Number of parts per page (1-100, default 100).",
+    ),
+    page_number: int = Field(
+        default=1,
+        ge=1,
+        description="Page number to retrieve (1-based, default 1).",
+    ),
+) -> DocumentReadResult:
+    """Render a Polarion document end-to-end as flowing Markdown.
+
+    Paginates ``get_document_parts`` and interleaves heading titles,
+    embedded work-item descriptions, and inline prose into a single
+    Markdown stream — the canonical way for an LLM to read a document
+    body. Empty placeholder paragraphs that Polarion stores between
+    parts are skipped; runs of blank lines are collapsed.
+
+    **Use this for reading.** Other document tools have narrower jobs:
+
+    - ``get_document`` — title/type/status only (and the raw
+      ``homePageContent`` source via ``include_content=True``, which is
+      incomplete for reading because Polarion stores heading text and
+      embedded work-item bodies in *separate* work items rather than in
+      ``homePageContent``).
+    - ``get_document_parts`` — structural enumeration with per-part IDs,
+      heading levels, and work-item metadata. Use it when you need part
+      IDs for ``move_work_item_to_document`` or per-WI status/type, not
+      for end-to-end reading.
+
+    The output is read-only synthesis. It cannot be fed back to any
+    write tool because the rendered Markdown collapses Polarion's
+    placeholder structure (empty ``<h1>`` / ``<div>`` tags that
+    reference work items by ID); round-tripping it would orphan heading
+    work items and duplicate embedded bodies as inline prose.
+
+    Pagination maps 1:1 to ``get_document_parts``: each page covers
+    ``page_size`` parts (default 100). Use ``has_more`` to decide
+    whether to fetch the next page.
+
+    Args:
+        ctx: MCP tool context (injected automatically).
+        project_id: Polarion project ID.
+        space_id: Space ID containing the document.
+        document_name: Document name within the space.
+        page_size: Number of parts per page (1-100, default 100).
+        page_number: Page number to retrieve (1-based, default 1).
+
+    Returns:
+        DocumentReadResult with:
+        - ``content``: Rendered Markdown for the parts on this page.
+        - ``part_count``: Number of parts rendered.
+        - ``page`` / ``page_size`` / ``total_parts`` / ``has_more``:
+          pagination metadata propagated from ``get_document_parts``.
+
+    Raises:
+        ValueError: If the document, space, or project is not found.
+        PermissionError: If the token lacks permissions.
+        RuntimeError: On unexpected Polarion API errors.
+    """
+    # FastMCP 3.0's ``@mcp.tool()`` returns the original function unchanged,
+    # so direct invocation forwards both the fetch and the error mapping.
+    page = await get_document_parts(
+        ctx,
+        project_id=project_id,
+        space_id=space_id,
+        document_name=document_name,
+        page_size=page_size,
+        page_number=page_number,
+    )
+    return DocumentReadResult(
+        content=_render_parts_to_markdown(page.items),
+        part_count=len(page.items),
+        page=page.page,
+        page_size=page.page_size,
+        total_parts=page.total_count,
+        has_more=page.has_more,
+    )
+
+
+@mcp.tool(
+    tags={"read"},
+    timeout=60.0,
+    annotations={"readOnlyHint": True},
+)
 async def list_work_items(
     ctx: Context,
     project_id: str = Field(
@@ -1011,12 +1169,12 @@ async def list_work_items(
     you cannot filter by body text via ``query=``. For content search,
     pick the right document-scoped tool instead:
 
-    - Single-document body search (one shot, no pagination) →
-      ``get_document(include_content=True)`` returns the entire
-      ``homePageContent`` as Markdown.
-    - Document-scoped search that also covers each embedded
-      work-item's ``description`` → iterate ``get_document_parts``
-      pages; each ``workitem`` part already carries its description.
+    - End-to-end reading of a single document → ``read_document``
+      returns interleaved headings + embedded work-item bodies + prose
+      as flowing Markdown (paginated).
+    - Structural search that also covers each embedded work-item's
+      ``description`` → iterate ``get_document_parts`` pages; each
+      ``workitem`` part already carries its description.
 
     Use ``get_work_item`` only when you need the full detail of a
     specific WI that you've already located.

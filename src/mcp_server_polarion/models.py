@@ -215,6 +215,54 @@ class DocumentPart(BaseModel):
     )
 
 
+class DocumentReadResult(BaseModel):
+    """Rendered Markdown view of one page of document parts.
+
+    Returned by ``read_document``. Interleaves heading titles, embedded
+    work-item descriptions, and inline prose from a single page of
+    ``get_document_parts`` into a flowing Markdown stream suitable for
+    end-to-end reading by an LLM.
+
+    The output is read-only synthesis: it cannot be fed back to any
+    write tool because no update path accepts this shape. For round-trip
+    editing of the document body, fetch the raw source via
+    ``get_document(include_content=True)`` instead.
+    """
+
+    content: str = Field(
+        description=(
+            "Rendered Markdown for the parts on this page. "
+            "Empty placeholder paragraphs from Polarion are skipped, "
+            "and runs of blank lines are collapsed."
+        ),
+    )
+    part_count: int = Field(
+        description=(
+            "Number of document parts on this page (i.e. parts consumed "
+            "from ``get_document_parts``). Parts that produce no output "
+            "(empty placeholder paragraphs, ``toc``) still count toward "
+            "this — use it for pagination accounting, not chunk count."
+        ),
+    )
+    page: int = Field(
+        description="Current page number (1-based).",
+    )
+    page_size: int = Field(
+        description="Maximum number of parts per page.",
+    )
+    total_parts: int = Field(
+        description="Total number of parts across the entire document.",
+    )
+    has_more: bool = Field(
+        default=False,
+        description=(
+            "True when there are more pages of parts after this one. "
+            "Use to decide whether to call ``read_document`` again with "
+            "``page_number + 1``."
+        ),
+    )
+
+
 class WorkItemSummary(BaseModel):
     """Compact work-item representation for list and search results."""
 
@@ -592,6 +640,7 @@ __all__: list[str] = [
     "DocumentDetail",
     "DocumentPart",
     "DocumentPartCreateResult",
+    "DocumentReadResult",
     "DocumentSummary",
     "DocumentUpdateResult",
     "Hyperlink",
