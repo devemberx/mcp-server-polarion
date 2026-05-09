@@ -211,9 +211,10 @@ def _render_parts_to_markdown(parts: list[DocumentPart]) -> str:
     - ``workitem``: bold lead-in ``**{title}** (`{work_item_id}`)``
       followed by the description body. Falls back to bare backticked
       ID when both title and description are empty.
-    - ``normal`` / ``table`` / ``wikiblock``: ``content`` verbatim,
-      skipped when whitespace-only (matches the empty paragraphs Polarion
-      stores between parts).
+    - ``normal`` / ``wikiblock``: ``content`` verbatim, skipped when
+      whitespace-only (matches the empty paragraphs Polarion stores
+      between parts; tables stored as ``normal`` content flow through
+      this branch unchanged).
     - ``toc`` and unknown types: skipped.
 
     Chunks are joined with a blank line; runs of three or more newlines

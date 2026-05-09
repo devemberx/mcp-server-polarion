@@ -1658,6 +1658,30 @@ class TestReadDocument:
 
         assert result.content == '```\n#documentPanel(true "approved")\n```'
 
+    async def test_empty_wikiblock_skipped(
+        self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Whitespace-only wikiblock is dropped, mirroring empty normal parts."""
+        _stub_parts(
+            monkeypatch,
+            [
+                _make_part(type_="heading", title="Top", level=1),
+                _make_part(type_="wikiblock", content="   \n  "),
+                _make_part(type_="normal", content="After block."),
+            ],
+        )
+
+        result = await read_document(
+            mock_ctx,
+            project_id="p",
+            space_id="s",
+            document_name="d",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.content == "# Top\n\nAfter block."
+
     async def test_heading_level_clamp_low(
         self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
