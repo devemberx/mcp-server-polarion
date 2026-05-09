@@ -1,4 +1,4 @@
-"""Tests for the 7 read-only MCP tools.
+"""Tests for the 8 read-only MCP tools.
 
 Each tool is tested by calling the async function directly with a mock
 ``PolarionClient`` injected via a mock ``Context``.
@@ -6,10 +6,13 @@ Each tool is tested by calling the async function directly with a mock
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Iterator
+from typing import Annotated, get_type_hints
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from pydantic import TypeAdapter, ValidationError
 
 from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.core.exceptions import (
@@ -20,6 +23,7 @@ from mcp_server_polarion.core.exceptions import (
 from mcp_server_polarion.models import (
     DocumentDetail,
     DocumentPart,
+    DocumentReadResult,
     LinkedWorkItemSummary,
     PaginatedResult,
     ProjectSummary,
@@ -37,6 +41,7 @@ get_work_item = _read_mod.get_work_item
 list_documents = _read_mod.list_documents
 list_projects = _read_mod.list_projects
 list_work_items = _read_mod.list_work_items
+read_document = _read_mod.read_document
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -1267,6 +1272,518 @@ class TestGetDocumentParts:
 
         assert len(result.items) == 2
         assert result.total_count >= 2
+
+
+# ---------------------------------------------------------------------------
+# read_document
+# ---------------------------------------------------------------------------
+
+
+def _make_part(
+    *,
+    type_: str,
+    part_id: str = "polarion_x",
+    title: str = "",
+    content: str = "",
+    description: str = "",
+    level: int = 0,
+    work_item_id: str = "",
+) -> DocumentPart:
+    """Build a ``DocumentPart`` with sensible defaults for render-rule tests."""
+    return DocumentPart(
+        id=part_id,
+        title=title,
+        content=content,
+        type=type_,  # type: ignore[arg-type]
+        level=level,
+        description=description,
+        work_item_id=work_item_id,
+        work_item_type="",
+        work_item_status="",
+        external=False,
+        next_part_id="",
+    )
+
+
+def _stub_parts(
+    monkeypatch: pytest.MonkeyPatch, parts: list[DocumentPart]
+) -> AsyncMock:
+    """Replace ``get_document_parts`` with an AsyncMock returning *parts*.
+
+    Returns the mock so individual tests can assert call arguments. Page
+    metadata is derived from the part list so pagination defaults stay
+    sensible without each test having to spell them out.
+    """
+    stub = AsyncMock(
+        return_value=PaginatedResult[DocumentPart](
+            items=parts,
+            total_count=len(parts),
+            page=1,
+            page_size=100,
+            has_more=False,
+        )
+    )
+    monkeypatch.setattr(_read_mod, "get_document_parts", stub)
+    return stub
+
+
+class TestReadDocument:
+    """Tests for the ``read_document`` tool."""
+
+    # -- end-to-end wiring (exercises get_document_parts via client.get) --
+
+    async def test_end_to_end_renders_document(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Real fetch path: stub the HTTP layer, verify the rendered Markdown."""
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "type": "document_parts",
+                    "id": "proj1/_default/SRS/heading_MCPT-001",
+                    "attributes": {
+                        "id": "heading_MCPT-001",
+                        "content": (
+                            '<h1 id="polarion_wiki macro'
+                            " name=module-workitem;"
+                            'params=id=MCPT-001"></h1>'
+                        ),
+                        "type": "heading",
+                    },
+                    "relationships": {
+                        "workItem": {
+                            "data": {"type": "workitems", "id": "proj1/MCPT-001"},
+                        },
+                    },
+                },
+                {
+                    "type": "document_parts",
+                    "id": "proj1/_default/SRS/workitem_MCPT-002",
+                    "attributes": {
+                        "id": "workitem_MCPT-002",
+                        "content": "",
+                        "type": "workitem",
+                    },
+                    "relationships": {
+                        "workItem": {
+                            "data": {"type": "workitems", "id": "proj1/MCPT-002"},
+                        },
+                    },
+                },
+                {
+                    "type": "document_parts",
+                    "id": "proj1/_default/SRS/polarion_1",
+                    "attributes": {
+                        "id": "polarion_1",
+                        "content": "<p>Some prose between the WI and a heading.</p>",
+                        "type": "normal",
+                    },
+                    "relationships": {},
+                },
+                {
+                    "type": "document_parts",
+                    "id": "proj1/_default/SRS/polarion_2",
+                    "attributes": {
+                        "id": "polarion_2",
+                        # Empty paragraph — should not appear in the render.
+                        "content": "<p></p>",
+                        "type": "normal",
+                    },
+                    "relationships": {},
+                },
+            ],
+            "included": [
+                {
+                    "type": "workitems",
+                    "id": "proj1/MCPT-001",
+                    "attributes": {
+                        "type": "heading",
+                        "title": "Introduction",
+                        "status": "open",
+                    },
+                },
+                {
+                    "type": "workitems",
+                    "id": "proj1/MCPT-002",
+                    "attributes": {
+                        "type": "requirement",
+                        "title": "Login Feature",
+                        "description": {
+                            "type": "text/html",
+                            "value": "<p>The system shall support login.</p>",
+                        },
+                        "status": "draft",
+                    },
+                },
+            ],
+            "meta": {"totalCount": 4},
+        }
+
+        result = await read_document(
+            mock_ctx,
+            project_id="proj1",
+            space_id="_default",
+            document_name="SRS",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert isinstance(result, DocumentReadResult)
+        assert result.part_count == 4
+        assert result.total_parts == 4
+        assert result.page == 1
+        assert result.page_size == 100
+        assert result.has_more is False
+
+        # Heading rendered at level 1, then workitem with bold lead-in
+        # plus its description, then prose. Empty paragraph is skipped.
+        assert result.content == (
+            "# Introduction\n"
+            "\n"
+            "**Login Feature** (`MCPT-002`)\n"
+            "\n"
+            "The system shall support login.\n"
+            "\n"
+            "Some prose between the WI and a heading."
+        )
+
+    async def test_pagination_params_forwarded_to_http(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """``page_size`` / ``page_number`` reach the underlying client.get call."""
+        mock_client.get.return_value = {"data": [], "meta": {"totalCount": 0}}
+
+        await read_document(
+            mock_ctx,
+            project_id="proj1",
+            space_id="_default",
+            document_name="Doc",
+            page_size=25,
+            page_number=3,
+        )
+
+        _, kwargs = mock_client.get.call_args
+        assert kwargs["params"]["page[size]"] == 25
+        assert kwargs["params"]["page[number]"] == 3
+
+    async def test_empty_document_returns_empty_content(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {"data": [], "meta": {"totalCount": 0}}
+
+        result = await read_document(
+            mock_ctx,
+            project_id="proj1",
+            space_id="_default",
+            document_name="Empty",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.content == ""
+        assert result.part_count == 0
+        assert result.total_parts == 0
+        assert result.has_more is False
+
+    async def test_not_found_propagates_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Delegation to ``get_document_parts`` surfaces its ValueError verbatim."""
+        mock_client.get.side_effect = PolarionNotFoundError(
+            "Not found", status_code=404
+        )
+
+        with pytest.raises(ValueError, match="not found"):
+            await read_document(
+                mock_ctx,
+                project_id="proj1",
+                space_id="_default",
+                document_name="Missing",
+                page_size=100,
+                page_number=1,
+            )
+
+    # -- render-rule tests (isolated via monkeypatched get_document_parts) --
+
+    async def test_workitem_with_description_renders_lead_in_plus_body(
+        self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _stub_parts(
+            monkeypatch,
+            [
+                _make_part(
+                    type_="workitem",
+                    title="Login Feature",
+                    description="The system shall support login.",
+                    work_item_id="MCPT-002",
+                ),
+            ],
+        )
+
+        result = await read_document(
+            mock_ctx,
+            project_id="p",
+            space_id="s",
+            document_name="d",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.content == (
+            "**Login Feature** (`MCPT-002`)\n\nThe system shall support login."
+        )
+
+    async def test_workitem_without_description_renders_lead_in_only(
+        self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _stub_parts(
+            monkeypatch,
+            [
+                _make_part(
+                    type_="workitem",
+                    title="Stub Requirement",
+                    description="",
+                    work_item_id="MCPT-099",
+                ),
+            ],
+        )
+
+        result = await read_document(
+            mock_ctx,
+            project_id="p",
+            space_id="s",
+            document_name="d",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.content == "**Stub Requirement** (`MCPT-099`)"
+
+    async def test_workitem_empty_title_and_description_renders_bare_id(
+        self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Defensive guard for sparse-data WIs (rare but observed)."""
+        _stub_parts(
+            monkeypatch,
+            [
+                _make_part(
+                    type_="workitem",
+                    title="",
+                    description="",
+                    work_item_id="MCPT-7",
+                ),
+            ],
+        )
+
+        result = await read_document(
+            mock_ctx,
+            project_id="p",
+            space_id="s",
+            document_name="d",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.content == "`MCPT-7`"
+
+    async def test_empty_normal_parts_skipped(
+        self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Polarion's empty placeholder paragraphs (polarion_3, _4, ...) drop out."""
+        _stub_parts(
+            monkeypatch,
+            [
+                _make_part(type_="heading", title="Section", level=2),
+                _make_part(type_="normal", content="   "),  # whitespace-only
+                _make_part(type_="normal", content=""),
+                _make_part(type_="normal", content="Real content."),
+            ],
+        )
+
+        result = await read_document(
+            mock_ctx,
+            project_id="p",
+            space_id="s",
+            document_name="d",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.content == "## Section\n\nReal content."
+
+    async def test_toc_parts_skipped(
+        self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _stub_parts(
+            monkeypatch,
+            [
+                _make_part(type_="heading", title="Top", level=1),
+                _make_part(type_="toc", content=""),
+                _make_part(type_="normal", content="After TOC."),
+            ],
+        )
+
+        result = await read_document(
+            mock_ctx,
+            project_id="p",
+            space_id="s",
+            document_name="d",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.content == "# Top\n\nAfter TOC."
+
+    async def test_wikiblock_content_emitted(
+        self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _stub_parts(
+            monkeypatch,
+            [
+                _make_part(
+                    type_="wikiblock",
+                    content='```\n#documentPanel(true "approved")\n```',
+                ),
+            ],
+        )
+
+        result = await read_document(
+            mock_ctx,
+            project_id="p",
+            space_id="s",
+            document_name="d",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.content == '```\n#documentPanel(true "approved")\n```'
+
+    async def test_heading_level_clamp_low(
+        self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``level=0`` (the model default for non-headings) becomes ``#``."""
+        _stub_parts(
+            monkeypatch,
+            [_make_part(type_="heading", title="Corrupt", level=0)],
+        )
+
+        result = await read_document(
+            mock_ctx,
+            project_id="p",
+            space_id="s",
+            document_name="d",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.content == "# Corrupt"
+
+    async def test_heading_level_clamp_high(
+        self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``level`` above 6 clamps to ``######`` to stay valid Markdown."""
+        _stub_parts(
+            monkeypatch,
+            [_make_part(type_="heading", title="Deep", level=10)],
+        )
+
+        result = await read_document(
+            mock_ctx,
+            project_id="p",
+            space_id="s",
+            document_name="d",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.content == "###### Deep"
+
+    async def test_newline_collapse(
+        self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Runs of 3+ blank lines from joined chunks collapse to a single blank."""
+        _stub_parts(
+            monkeypatch,
+            [
+                _make_part(type_="normal", content="A\n\n\n\nB"),
+                _make_part(type_="normal", content="C"),
+            ],
+        )
+
+        result = await read_document(
+            mock_ctx,
+            project_id="p",
+            space_id="s",
+            document_name="d",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.content == "A\n\nB\n\nC"
+
+    async def test_pagination_metadata_propagated(
+        self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``page``/``page_size``/``total_parts``/``has_more`` echo inner page."""
+        stub = AsyncMock(
+            return_value=PaginatedResult[DocumentPart](
+                items=[_make_part(type_="normal", content="X")],
+                total_count=250,
+                page=2,
+                page_size=100,
+                has_more=True,
+            )
+        )
+        monkeypatch.setattr(_read_mod, "get_document_parts", stub)
+
+        result = await read_document(
+            mock_ctx,
+            project_id="p",
+            space_id="s",
+            document_name="d",
+            page_size=100,
+            page_number=2,
+        )
+
+        assert result.part_count == 1
+        assert result.total_parts == 250
+        assert result.page == 2
+        assert result.page_size == 100
+        assert result.has_more is True
+
+
+class TestReadDocumentFieldValidation:
+    """Verify Field constraints on ``read_document`` parameters.
+
+    Direct invocation bypasses FastMCP's JSON Schema gate; rebuild a
+    ``TypeAdapter`` from each parameter's annotation + ``FieldInfo`` to
+    prove the constraint is wired correctly.
+    """
+
+    @staticmethod
+    def _adapter_for(param_name: str) -> TypeAdapter[object]:
+        hints = get_type_hints(read_document)
+        sig = inspect.signature(read_document)
+        field_info = sig.parameters[param_name].default
+        return TypeAdapter(Annotated[hints[param_name], field_info])
+
+    def test_page_size_rejects_above_max(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("page_size").validate_python(101)
+
+    def test_page_size_rejects_zero(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("page_size").validate_python(0)
+
+    def test_page_size_accepts_max(self) -> None:
+        assert self._adapter_for("page_size").validate_python(100) == 100
+
+    def test_page_number_rejects_zero(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("page_number").validate_python(0)
+
+    def test_page_number_accepts_one(self) -> None:
+        assert self._adapter_for("page_number").validate_python(1) == 1
 
 
 # ---------------------------------------------------------------------------

@@ -21,7 +21,7 @@ CI runs: `ruff check` → `ruff format --check` → `mypy` → `pytest`.
 ## Architecture
 
 - **`core/`** — `client.py` (async httpx wrapper, exponential backoff for 429/5xx, `write_delay` after each mutation, maps responses to `PolarionError`/`PolarionAuthError`/`PolarionNotFoundError`), `config.py` (Pydantic settings reading `POLARION_URL`/`POLARION_TOKEN`), `exceptions.py`.
-- **`tools/`** — `read.py` (7 read tools), `write.py` (3 write tools: `create_work_item`, `update_work_item`, `move_work_item_to_document`; each preceded by its `_build_*_payload` helper), `_helpers.py` (sparse-fieldset constants `WI_LIST_FIELDS`/`WI_DETAIL_FIELDS`, JSON:API extractors, pagination helpers, `build_work_item_summary_kwargs` keeps `WorkItemDetail` a strict superset of `WorkItemSummary`).
+- **`tools/`** — `read.py` (8 read tools, including `read_document` which renders a document's parts as a single flowing Markdown stream), `write.py` (4 write tools: `create_work_item`, `update_work_item`, `move_work_item_to_document`, `update_document`; each preceded by its `_build_*_payload` helper), `_helpers.py` (sparse-fieldset constants `WI_LIST_FIELDS`/`WI_DETAIL_FIELDS`, JSON:API extractors, pagination helpers, `build_work_item_summary_kwargs` keeps `WorkItemDetail` a strict superset of `WorkItemSummary`).
 - **`utils/html.py`** — Markdown ↔ HTML conversion (markdownify + BeautifulSoup4 sanitization).
 - **`models.py`** — Pydantic v2 models. `PaginatedResult[T]` wraps all list responses.
 - **`server.py`** — FastMCP instance with lifespan that opens/closes `PolarionClient`.
@@ -67,8 +67,9 @@ Polarion Lucene does NOT index `description`, so `list_work_items` cannot filter
 | Goal | Tool | Notes |
 |---|---|---|
 | Find WIs by metadata (title/type/status) | `list_work_items` | Lucene query against `title`, `type`, `status`, etc. — not `description`. |
-| Read or scan a single document body in one shot | `get_document(include_content=True)` | Returns full `homePageContent` Markdown — no pagination. Heading text lives in WI titles, not here. |
-| Search inside a document including each embedded WI's body | `get_document_parts` | Each `workitem` part already carries `description` as Markdown — **no follow-up `get_work_item` call needed** when scanning bodies. Iterate pages and match `description` / `content` / `title`. |
+| Read the document end-to-end | `read_document` | Renders interleaved headings + embedded WI bodies + prose as flowing Markdown. Paginated by part (default 100/page). The canonical "let me read this doc" tool. |
+| Get document metadata only | `get_document` | Title/type/status. `include_content=True` returns the raw `homePageContent` source (incomplete for reading — heading text and embedded WI bodies live in separate work items, not in `homePageContent`; use this option for round-trip editing of the source, not for reading). |
+| Search inside a document with structural metadata | `get_document_parts` | Each `workitem` part carries `description` as Markdown — **no follow-up `get_work_item` call needed**. Use when you need part IDs (for `move_work_item_to_document`), heading levels, or per-WI status/type. For plain reading, prefer `read_document`. |
 
 ### Server-side validation is lenient on enum-like fields
 
