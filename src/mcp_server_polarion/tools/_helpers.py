@@ -45,10 +45,16 @@ DEFAULT_PAGE_SIZE: Final[int] = 100
 
 # Sparse fieldsets for list / detail endpoints.
 WI_LIST_FIELDS: Final[str] = "title,type,status,priority,updated,module,assignee"
+# ``customFields.@all`` is a Polarion sparse-fieldset token that returns all
+# populated custom field values inline at ``attributes.customFields``. Without
+# it the server omits every custom field, so the LLM never sees project-specific
+# fields configured per work-item type. Tokens must be appended (NOT replace
+# other fields) — listing only ``customFields.@all`` would hide every standard
+# attribute.
 WI_DETAIL_FIELDS: Final[str] = (
     "title,description,type,status,priority,updated,"
     "created,resolution,severity,outlineNumber,hyperlinks,"
-    "module,assignee,author"
+    "module,assignee,author,customFields.@all"
 )
 
 # ---------------------------------------------------------------------------
@@ -303,6 +309,22 @@ def build_work_item_summary_kwargs(
     }
 
 
+def extract_custom_fields(attrs: dict[str, object]) -> dict[str, object]:
+    """Extract the ``customFields`` map from a JSON:API attributes dict.
+
+    Polarion returns custom fields under ``attributes.customFields`` as a
+    flat ``{fieldId: value}`` mapping when the sparse fieldset includes
+    the ``customFields.@all`` token. Values may be primitives (str / int /
+    float / bool / list) or rich-text dicts of the form
+    ``{"type": "text/html", "value": "<...>"}`` — both are returned
+    verbatim so callers can round-trip them back to Polarion unchanged.
+    """
+    value = attrs.get("customFields")
+    if isinstance(value, dict):
+        return value
+    return {}
+
+
 def parse_hyperlinks(value: object) -> list[Hyperlink]:
     """Parse the ``attributes.hyperlinks`` field into ``Hyperlink`` models.
 
@@ -378,6 +400,7 @@ def parse_work_item_detail(
         severity=safe_str(attrs.get("severity", "")),
         outline_number=safe_str(attrs.get("outlineNumber", "")),
         hyperlinks=parse_hyperlinks(attrs.get("hyperlinks")),
+        custom_fields=extract_custom_fields(attrs),
     )
 
 
@@ -436,6 +459,7 @@ __all__: list[str] = [
     "build_work_item_summary_kwargs",
     "compute_has_more",
     "encode_path_segment",
+    "extract_custom_fields",
     "extract_relationship_id",
     "extract_relationship_ids",
     "extract_short_id",

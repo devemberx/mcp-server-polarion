@@ -2139,6 +2139,7 @@ class TestGetWorkItem:
         assert "log in" in result.description
         assert "<p>" not in result.description
         assert result.project_id == "proj1"
+        assert result.custom_fields == {}
 
     async def test_defect_severity_and_open_resolution(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -2231,6 +2232,87 @@ class TestGetWorkItem:
         call_path = mock_client.get.call_args[0][0]
         expected = "/projects/proj1/workitems/MCPT-010"
         assert call_path == expected
+
+    async def test_custom_fields_populated_from_response(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """customFields dict on the response flows through verbatim."""
+        rich_value = {"type": "text/html", "value": "<p>note</p>"}
+        mock_client.get.return_value = {
+            "data": {
+                "id": "proj1/MCPT-542",
+                "attributes": {
+                    "title": "WI with customs",
+                    "type": "requirement",
+                    "status": "approved",
+                    "customFields": {
+                        "riskLevel": "high",
+                        "effortHours": 8.0,
+                        "approved": True,
+                        "richNote": rich_value,
+                    },
+                },
+            },
+        }
+
+        result = await get_work_item(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT-542",
+        )
+
+        # Raw passthrough: rich-text values stay as the original
+        # {type, value} dict — they are NOT converted to Markdown.
+        assert result.custom_fields == {
+            "riskLevel": "high",
+            "effortHours": 8.0,
+            "approved": True,
+            "richNote": rich_value,
+        }
+
+    async def test_custom_fields_empty_when_missing(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Absent customFields key → empty dict, never None or KeyError."""
+        mock_client.get.return_value = {
+            "data": {
+                "id": "proj1/MCPT-100",
+                "attributes": {
+                    "title": "No customs",
+                    "type": "task",
+                    "status": "open",
+                },
+            },
+        }
+
+        result = await get_work_item(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT-100",
+        )
+
+        assert result.custom_fields == {}
+
+    async def test_sparse_fieldset_requests_custom_fields_token(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """The ``customFields.@all`` token MUST be in fields[workitems]."""
+        mock_client.get.return_value = {
+            "data": {
+                "id": "proj1/MCPT-1",
+                "attributes": {"title": "x", "type": "task", "status": "open"},
+            },
+        }
+
+        await get_work_item(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT-1",
+        )
+
+        _, kwargs = mock_client.get.call_args
+        fields = kwargs["params"]["fields[workitems]"]
+        assert "customFields.@all" in fields
 
 
 # ---------------------------------------------------------------------------

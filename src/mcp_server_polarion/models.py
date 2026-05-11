@@ -396,6 +396,19 @@ class WorkItemDetail(WorkItemSummary):
             "Empty list when none are set."
         ),
     )
+    custom_fields: dict[str, object] = Field(
+        default_factory=dict,
+        description=(
+            "User-defined custom fields configured per project and "
+            "work-item type. Keys are project-specific custom field IDs "
+            "(e.g. 'riskLevel', 'effortHours'); values are heterogeneous "
+            "(string, int, float, bool, list, or "
+            "``{'type': 'text/html', 'value': '<...>'}`` for rich-text "
+            "custom fields — kept raw, NOT converted to Markdown, so the "
+            "shape round-trips back to Polarion unchanged). Empty dict "
+            "when no custom fields are populated on the work item."
+        ),
+    )
 
 
 class LinkedWorkItemSummary(BaseModel):

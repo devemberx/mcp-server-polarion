@@ -1309,6 +1309,11 @@ async def get_work_item(
           with ``role``, ``title``, ``uri`` fields.
         - ``description``: Full description in Markdown.
         - ``project_id``: Containing project.
+        - ``custom_fields``: User-defined custom fields as a
+          ``{fieldId: value}`` dict. Keys vary per project and work-item
+          type; values are returned verbatim (primitives or
+          ``{type: 'text/html', value: '<...>'}`` for rich-text fields).
+          Empty dict when no custom fields are populated.
 
     Raises:
         ValueError: If the work item or project is not found.
