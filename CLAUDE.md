@@ -52,6 +52,10 @@ JSON:API v1. Key paths: `/projects`, `/projects/{p}/workitems[?query=...]`, `/pr
 
 `fields[workitems]=title,type,status` removes **all** `relationships` from the response, not just other attributes. To receive a relationship, list its name explicitly (see `WI_LIST_FIELDS`). Forgetting this silently empties derived fields like `space_id`/`document_name`/`assignee_ids`/`author_id`.
 
+### Custom fields surface via the `customFields.@all` sparse-fieldset token
+
+Polarion projects define arbitrary custom fields per work-item type and per document type; field IDs differ per project and cannot be enumerated statically. Appending `,customFields.@all` to `fields[workitems]` / `fields[documents]` makes Polarion return all *populated* custom field values inline at `attributes.customFields` as a flat `{fieldId: value}` mapping. `WI_DETAIL_FIELDS` and `get_document` both include the token, surfacing values on `WorkItemDetail.custom_fields` and `DocumentDetail.custom_fields`. Values are heterogeneous: primitives (str/int/float/bool/list) plus `{type: 'text/html', value: '<...>'}` dicts for rich-text fields — kept raw, NOT converted to Markdown, so the shape round-trips back to Polarion unchanged. The `customFields` key is omitted entirely when no custom fields are populated, so consumers MUST tolerate its absence (`extract_custom_fields` defaults to `{}`).
+
 ### To-many relationships need `include=`
 
 Polarion does not inline `data` for to-many relationships (e.g. `assignee`) — only `links` come back. Pass `"include": "assignee"` to populate `relationships.assignee.data`. To-one relationships (`module`, `author`, `project`) are inlined without `include`.
