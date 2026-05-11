@@ -383,7 +383,12 @@ async def create_work_item(  # noqa: PLR0913
             "read response can be passed straight back. Rich-text values "
             "must be ``{'type': 'text/html', 'value': '<...>'}`` dicts "
             "(no Markdown auto-conversion). Keys colliding with standard "
-            "Polarion attributes raise ``ValueError``."
+            "Polarion attributes raise ``ValueError``. WARNING: unknown "
+            "field IDs are NOT validated by Polarion — they are silently "
+            "stored as ghost attributes and will reappear on every "
+            "subsequent ``get_work_item`` indistinguishable from real "
+            "customs. Pass keys taken from a prior ``get_work_item`` "
+            "result to avoid creating ghosts."
         ),
     ),
     dry_run: bool = Field(
@@ -610,7 +615,12 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
             "directly. Rich-text values must be ``{'type': 'text/html', "
             "'value': '<...>'}`` dicts. Keys colliding with standard "
             "Polarion attributes raise ``ValueError``. ``None`` values "
-            "inside the dict are skipped."
+            "inside the dict are skipped. WARNING: unknown field IDs "
+            "are NOT validated by Polarion — they are silently stored "
+            "as ghost attributes and will reappear on every subsequent "
+            "``get_work_item`` indistinguishable from real customs. "
+            "Pass keys taken from a prior ``get_work_item`` result to "
+            "avoid creating ghosts."
         ),
     ),
     workflow_action: str | None = Field(
@@ -1114,7 +1124,11 @@ async def update_document(  # noqa: PLR0913
             "text values must be ``{'type': 'text/html', 'value': "
             "'<...>'}`` dicts. Keys colliding with standard document "
             "attributes raise ``ValueError``; ``None`` values inside "
-            "the dict are skipped."
+            "the dict are skipped. WARNING: unknown field IDs are NOT "
+            "validated by Polarion — they are silently stored as ghost "
+            "attributes and will reappear on subsequent ``get_document`` "
+            "indistinguishable from real customs. Pass keys taken from a "
+            "prior ``get_document`` result to avoid creating ghosts."
         ),
     ),
     workflow_action: str | None = Field(
