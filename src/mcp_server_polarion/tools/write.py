@@ -31,10 +31,13 @@ from mcp_server_polarion.models import (
 )
 from mcp_server_polarion.server import mcp
 from mcp_server_polarion.tools._helpers import (
+    STANDARD_DOCUMENT_ATTRS,
+    STANDARD_WORKITEM_ATTRS,
     WI_DETAIL_FIELDS,
     encode_path_segment,
     extract_short_id,
     get_client,
+    merge_custom_fields,
     parse_work_item_detail,
     safe_str,
 )
@@ -57,12 +60,17 @@ def _build_work_item_payload(  # noqa: PLR0913
     due_date: str | None,
     initial_estimate: str | None,
     hyperlinks: list[Hyperlink] | None,
+    custom_fields: dict[str, object] | None = None,
 ) -> dict[str, JsonValue]:
     """Build the JSON:API request body for ``POST /projects/{p}/workitems``.
 
     Only attaches keys for values that are explicitly set — ``None``,
     empty strings, and empty lists are skipped so we never overwrite
-    Polarion defaults with empty values on creation.
+    Polarion defaults with empty values on creation. ``custom_fields``
+    entries are inlined into ``attributes`` alongside the standard
+    fields via ``merge_custom_fields``; colliding keys raise
+    ``ValueError`` so the caller cannot accidentally shadow an explicit
+    standard parameter.
     """
     attributes: dict[str, JsonValue] = {
         "title": title,
@@ -87,6 +95,7 @@ def _build_work_item_payload(  # noqa: PLR0913
         attributes["hyperlinks"] = [
             {"role": h.role, "title": h.title, "uri": h.uri} for h in hyperlinks
         ]
+    merge_custom_fields(attributes, custom_fields, STANDARD_WORKITEM_ATTRS)
 
     relationships: dict[str, JsonValue] = {}
     if assignee_ids:
@@ -137,6 +146,7 @@ def _build_update_work_item_payload(  # noqa: PLR0913
     resolution: str | None,
     hyperlinks: list[Hyperlink] | None,
     assignee_ids: list[str] | None,
+    custom_fields: dict[str, object] | None = None,
 ) -> dict[str, JsonValue]:
     """Build the JSON:API request body for ``PATCH /projects/{p}/workitems/{wi}``.
 
@@ -145,7 +155,9 @@ def _build_update_work_item_payload(  # noqa: PLR0913
     ``id`` of the form ``"{project_id}/{work_item_id}"``. Only attaches
     keys for values that are explicitly set — ``None``, empty strings,
     and empty lists are skipped so we never overwrite Polarion attributes
-    with empty values on update.
+    with empty values on update. ``custom_fields`` entries are inlined
+    into ``attributes`` alongside the standard fields via
+    ``merge_custom_fields``; colliding keys raise ``ValueError``.
     """
     attributes: dict[str, JsonValue] = {}
     if title:
@@ -171,6 +183,7 @@ def _build_update_work_item_payload(  # noqa: PLR0913
         attributes["hyperlinks"] = [
             {"role": h.role, "title": h.title, "uri": h.uri} for h in hyperlinks
         ]
+    merge_custom_fields(attributes, custom_fields, STANDARD_WORKITEM_ATTRS)
 
     relationships: dict[str, JsonValue] = {}
     if assignee_ids:
@@ -231,6 +244,7 @@ def _build_update_document_payload(  # noqa: PLR0913
     title: str | None,
     status: str | None,
     type: str | None,
+    custom_fields: dict[str, object] | None = None,
 ) -> dict[str, JsonValue]:
     """Build the JSON:API request body for ``PATCH .../documents/{d}``.
 
@@ -239,7 +253,9 @@ def _build_update_document_payload(  # noqa: PLR0913
     form ``"{project_id}/{space_id}/{document_name}"``. Only attaches
     keys for values that are explicitly set -- ``None`` values are
     skipped so JSON:API omit-preserve takes effect (the server keeps
-    the existing server-side value).
+    the existing server-side value). ``custom_fields`` entries are
+    inlined into ``attributes`` via ``merge_custom_fields``; colliding
+    keys raise ``ValueError``.
 
     NOTE: ``homePageContent`` is intentionally NOT exposed here. Body
     edits go through dedicated part-creation tools (e.g. a future
@@ -254,6 +270,7 @@ def _build_update_document_payload(  # noqa: PLR0913
         attributes["status"] = status
     if type is not None:
         attributes["type"] = type
+    merge_custom_fields(attributes, custom_fields, STANDARD_DOCUMENT_ATTRS)
 
     item: dict[str, JsonValue] = {
         "type": "documents",
@@ -357,6 +374,18 @@ async def create_work_item(  # noqa: PLR0913
             "Each must specify ``role`` and ``uri``; ``title`` is optional."
         ),
     ),
+    custom_fields: dict[str, object] | None = Field(  # noqa: B008
+        default=None,
+        description=(
+            "Project-defined custom fields keyed by Polarion field ID "
+            "(e.g. {'riskLevel': 'high', 'effortHours': 8.0}). Same "
+            "shape as ``WorkItemDetail.custom_fields`` on read, so the "
+            "read response can be passed straight back. Rich-text values "
+            "must be ``{'type': 'text/html', 'value': '<...>'}`` dicts "
+            "(no Markdown auto-conversion). Keys colliding with standard "
+            "Polarion attributes raise ``ValueError``."
+        ),
+    ),
     dry_run: bool = Field(
         default=False,
         description=(
@@ -436,6 +465,7 @@ async def create_work_item(  # noqa: PLR0913
         due_date=due_date,
         initial_estimate=initial_estimate,
         hyperlinks=hyperlinks,
+        custom_fields=custom_fields,
     )
 
     if dry_run:
@@ -567,6 +597,20 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
             "REPLACES the assignee list with these short user IDs "
             "(e.g. ['alice', 'bob']). Pass None (or omit) to leave "
             "assignees unchanged."
+        ),
+    ),
+    custom_fields: dict[str, object] | None = Field(  # noqa: B008
+        default=None,
+        description=(
+            "Project-defined custom fields keyed by Polarion field ID "
+            "(e.g. {'riskLevel': 'high', 'effortHours': 8.0}). PARTIAL "
+            "update — only the keys passed here are PATCHed; omitted "
+            "ones are preserved. Same shape as ``get_work_item(...)."
+            "custom_fields`` so the read result can be passed back "
+            "directly. Rich-text values must be ``{'type': 'text/html', "
+            "'value': '<...>'}`` dicts. Keys colliding with standard "
+            "Polarion attributes raise ``ValueError``. ``None`` values "
+            "inside the dict are skipped."
         ),
     ),
     workflow_action: str | None = Field(
@@ -711,6 +755,8 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
         ]
     if assignee_ids:
         changes["assignee_ids"] = list(assignee_ids)
+    if custom_fields:
+        changes["custom_fields"] = cast(JsonValue, dict(custom_fields))
     if workflow_action:
         changes["workflow_action"] = workflow_action
     if change_type_to:
@@ -720,8 +766,8 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
         raise ValueError(
             "Nothing to update -- pass at least one of title, description, "
             "status, priority, severity, due_date, initial_estimate, "
-            "resolution, hyperlinks, assignee_ids, workflow_action, or "
-            "change_type_to."
+            "resolution, hyperlinks, assignee_ids, custom_fields, "
+            "workflow_action, or change_type_to."
         )
 
     description_html = (
@@ -741,6 +787,7 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
         resolution=resolution,
         hyperlinks=hyperlinks,
         assignee_ids=assignee_ids,
+        custom_fields=custom_fields,
     )
 
     # Polarion's PATCH endpoint rejects bodies with neither attributes
@@ -1058,6 +1105,18 @@ async def update_document(  # noqa: PLR0913
             "New document type (e.g. 'req_specification'). Omit to leave unchanged."
         ),
     ),
+    custom_fields: dict[str, object] | None = Field(  # noqa: B008
+        default=None,
+        description=(
+            "Project-defined custom document fields keyed by Polarion "
+            "field ID. PARTIAL update — omitted keys preserved. Same "
+            "shape as ``DocumentDetail.custom_fields`` on read. Rich-"
+            "text values must be ``{'type': 'text/html', 'value': "
+            "'<...>'}`` dicts. Keys colliding with standard document "
+            "attributes raise ``ValueError``; ``None`` values inside "
+            "the dict are skipped."
+        ),
+    ),
     workflow_action: str | None = Field(
         default=None,
         description=(
@@ -1066,7 +1125,8 @@ async def update_document(  # noqa: PLR0913
             "respects the project's workflow rules. Polarion rejects "
             "PATCH bodies with no ``attributes``, so ``workflow_action`` "
             "MUST be paired with at least one of ``title``/``status``/"
-            "``type`` -- this is enforced at the tool layer."
+            "``type``/``custom_fields`` -- this is enforced at the tool "
+            "layer."
         ),
     ),
     dry_run: bool = Field(
@@ -1136,17 +1196,22 @@ async def update_document(  # noqa: PLR0913
             document.
         RuntimeError: On other Polarion API errors.
     """
-    has_attrs = title is not None or status is not None or type is not None
+    has_attrs = (
+        title is not None
+        or status is not None
+        or type is not None
+        or bool(custom_fields)
+    )
     if not has_attrs and not workflow_action:
         raise ValueError(
             "update_document requires at least one of: title, status, "
-            "type, or workflow_action."
+            "type, custom_fields, or workflow_action."
         )
     if not has_attrs and workflow_action:
         raise ValueError(
             "workflow_action alone is not supported -- Polarion rejects "
             "PATCH bodies with no attributes. Pair workflow_action with "
-            "at least one of title, status, or type."
+            "at least one of title, status, type, or custom_fields."
         )
 
     payload = _build_update_document_payload(
@@ -1156,6 +1221,7 @@ async def update_document(  # noqa: PLR0913
         title=title,
         status=status,
         type=type,
+        custom_fields=custom_fields,
     )
 
     if dry_run:

@@ -222,6 +222,47 @@ class TestBuildWorkItemPayload:
         assert attrs["dueDate"] == "2026-05-31"
         assert attrs["initialEstimate"] == "5 1/2d"
 
+    def test_custom_fields_inlined_alongside_standard_attrs(self) -> None:
+        payload = _build_work_item_payload(
+            title="x",
+            type="softwarerequirement",
+            description_html="",
+            status=None,
+            priority=None,
+            severity=None,
+            assignee_ids=None,
+            due_date=None,
+            initial_estimate=None,
+            hyperlinks=None,
+            custom_fields={"riskLevel": "high", "effortHours": 12.0},
+        )
+
+        item = cast(list[dict[str, object]], payload["data"])[0]
+        attrs = cast(dict[str, object], item["attributes"])
+        assert attrs["riskLevel"] == "high"
+        assert attrs["effortHours"] == 12.0
+        # Customs land flat under attributes, NOT inside a `customFields`
+        # container — Polarion silently drops the latter shape.
+        assert "customFields" not in attrs
+
+    def test_custom_fields_collision_with_standard_attr_raises(self) -> None:
+        # ``title`` is a Polarion-defined standard attribute; collision
+        # would silently shadow the explicit ``title`` param. Reject.
+        with pytest.raises(ValueError, match="custom_fields keys collide"):
+            _build_work_item_payload(
+                title="x",
+                type="task",
+                description_html="",
+                status=None,
+                priority=None,
+                severity=None,
+                assignee_ids=None,
+                due_date=None,
+                initial_estimate=None,
+                hyperlinks=None,
+                custom_fields={"title": "y"},
+            )
+
 
 # ---------------------------------------------------------------------------
 # _extract_created_id
@@ -283,6 +324,7 @@ class TestCreateWorkItemDryRun:
             due_date=None,
             initial_estimate=None,
             hyperlinks=None,
+            custom_fields=None,
             dry_run=True,
         )
 
@@ -333,6 +375,7 @@ class TestCreateWorkItemHappyPath:
             due_date=None,
             initial_estimate=None,
             hyperlinks=None,
+            custom_fields=None,
             dry_run=False,
         )
 
@@ -362,6 +405,7 @@ class TestCreateWorkItemHappyPath:
             due_date=None,
             initial_estimate=None,
             hyperlinks=None,
+            custom_fields=None,
             dry_run=False,
         )
 
@@ -396,6 +440,7 @@ class TestCreateWorkItemHappyPath:
             due_date=None,
             initial_estimate=None,
             hyperlinks=None,
+            custom_fields=None,
             dry_run=False,
         )
 
@@ -435,6 +480,7 @@ class TestCreateWorkItemHappyPath:
             due_date=None,
             initial_estimate=None,
             hyperlinks=None,
+            custom_fields=None,
             dry_run=False,
         )
 
@@ -473,6 +519,7 @@ class TestCreateWorkItemErrorMapping:
                 due_date=None,
                 initial_estimate=None,
                 hyperlinks=None,
+                custom_fields=None,
                 dry_run=False,
             )
 
@@ -497,6 +544,7 @@ class TestCreateWorkItemErrorMapping:
                 due_date=None,
                 initial_estimate=None,
                 hyperlinks=None,
+                custom_fields=None,
                 dry_run=False,
             )
 
@@ -519,6 +567,7 @@ class TestCreateWorkItemErrorMapping:
                 due_date=None,
                 initial_estimate=None,
                 hyperlinks=None,
+                custom_fields=None,
                 dry_run=False,
             )
 
@@ -550,6 +599,7 @@ class TestCreateWorkItemResponseParsing:
                 due_date=None,
                 initial_estimate=None,
                 hyperlinks=None,
+                custom_fields=None,
                 dry_run=False,
             )
 
@@ -572,6 +622,7 @@ class TestCreateWorkItemResponseParsing:
                 due_date=None,
                 initial_estimate=None,
                 hyperlinks=None,
+                custom_fields=None,
                 dry_run=False,
             )
 
@@ -594,6 +645,7 @@ class TestCreateWorkItemResponseParsing:
                 due_date=None,
                 initial_estimate=None,
                 hyperlinks=None,
+                custom_fields=None,
                 dry_run=False,
             )
 
@@ -1166,6 +1218,67 @@ class TestBuildUpdateWorkItemPayload:
         assert attrs["initialEstimate"] == "5 1/2d"
         assert attrs["resolution"] == "fixed"
 
+    def test_custom_fields_inlined_in_patch_attributes(self) -> None:
+        rich = {"type": "text/html", "value": "<p>note</p>"}
+        payload = _build_update_work_item_payload(
+            project_id="MyProj",
+            work_item_id="MCPT-1",
+            title=None,
+            description_html=None,
+            status=None,
+            priority=None,
+            severity=None,
+            due_date=None,
+            initial_estimate=None,
+            resolution=None,
+            hyperlinks=None,
+            assignee_ids=None,
+            custom_fields={"riskLevel": "low", "reviewerNote": rich},
+        )
+
+        item = cast(dict[str, object], payload["data"])
+        attrs = cast(dict[str, object], item["attributes"])
+        assert attrs == {"riskLevel": "low", "reviewerNote": rich}
+
+    def test_custom_fields_alone_keeps_attributes_dict(self) -> None:
+        # Without any standard fields, custom_fields alone should still
+        # produce an ``attributes`` block (otherwise PATCH 400s).
+        payload = _build_update_work_item_payload(
+            project_id="MyProj",
+            work_item_id="MCPT-1",
+            title=None,
+            description_html=None,
+            status=None,
+            priority=None,
+            severity=None,
+            due_date=None,
+            initial_estimate=None,
+            resolution=None,
+            hyperlinks=None,
+            assignee_ids=None,
+            custom_fields={"riskLevel": "high"},
+        )
+        item = cast(dict[str, object], payload["data"])
+        assert "attributes" in item
+
+    def test_custom_fields_collision_raises(self) -> None:
+        with pytest.raises(ValueError, match="custom_fields keys collide"):
+            _build_update_work_item_payload(
+                project_id="MyProj",
+                work_item_id="MCPT-1",
+                title=None,
+                description_html=None,
+                status=None,
+                priority=None,
+                severity=None,
+                due_date=None,
+                initial_estimate=None,
+                resolution=None,
+                hyperlinks=None,
+                assignee_ids=None,
+                custom_fields={"status": "open"},
+            )
+
 
 # ---------------------------------------------------------------------------
 # update_work_item — shared helpers for tool-level tests
@@ -1195,6 +1308,7 @@ async def _call_update(
         "resolution": None,
         "hyperlinks": None,
         "assignee_ids": None,
+        "custom_fields": None,
         "workflow_action": None,
         "change_type_to": None,
         "dry_run": False,
@@ -1218,6 +1332,33 @@ class TestUpdateWorkItemValidation:
             await _call_update(mock_ctx)
         mock_client.patch.assert_not_called()
         mock_client.get.assert_not_called()
+
+    async def test_custom_fields_alone_satisfies_at_least_one_check(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # custom_fields counts as a body field — neither title nor any
+        # other standard param is required when customs are present.
+        result = await _call_update(
+            mock_ctx,
+            custom_fields={"riskLevel": "high"},
+            dry_run=True,
+        )
+        assert result.dry_run is True
+        assert result.changes == {"custom_fields": {"riskLevel": "high"}}
+
+    async def test_collision_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Tool-layer collision detection prevents an explicit standard
+        # parameter from being shadowed by a same-named custom key.
+        with pytest.raises(ValueError, match="custom_fields keys collide"):
+            await _call_update(
+                mock_ctx,
+                title="x",
+                custom_fields={"title": "y"},
+                dry_run=True,
+            )
+        mock_client.patch.assert_not_called()
 
     async def test_workflow_action_alone_raises_value_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1424,7 +1565,7 @@ class TestUpdateWorkItemHappyPath:
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         # Polarion inlines customs as top-level attrs; this WI happens to
-        # have ``asil`` and ``requirement_id`` populated. The post-PATCH
+        # have ``riskLevel`` and ``effortHours`` populated. The post-PATCH
         # GET reuses ``parse_work_item_detail`` so they must land on
         # ``result.current.custom_fields`` automatically — guarding the
         # cross-tool inheritance the fix relies on.
@@ -1432,17 +1573,103 @@ class TestUpdateWorkItemHappyPath:
         get_response = _make_get_response(title="after")
         data = cast(dict[str, object], get_response["data"])
         attrs = cast(dict[str, object], data["attributes"])
-        attrs["asil"] = "B"
-        attrs["requirement_id"] = "REQ-42"
+        attrs["riskLevel"] = "high"
+        attrs["effortHours"] = 12.0
         mock_client.get.return_value = get_response
 
         result = await _call_update(mock_ctx, title="after")
 
         assert result.current is not None
         assert result.current.custom_fields == {
-            "asil": "B",
-            "requirement_id": "REQ-42",
+            "riskLevel": "high",
+            "effortHours": 12.0,
         }
+
+    async def test_custom_fields_inlined_into_patch_body(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # The PATCH body must carry customs at the top of ``attributes``
+        # (NOT nested under a ``customFields`` container — Polarion drops
+        # that). Pin the wire shape here.
+        mock_client.patch.return_value = {}
+        mock_client.get.return_value = _make_get_response()
+
+        rich = {"type": "text/html", "value": "<p>note</p>"}
+        await _call_update(
+            mock_ctx,
+            custom_fields={"riskLevel": "low", "reviewerNote": rich},
+        )
+
+        _, kwargs = mock_client.patch.call_args
+        body = kwargs["json"]
+        item = body["data"]
+        attrs = item["attributes"]
+        assert attrs["riskLevel"] == "low"
+        assert attrs["reviewerNote"] == rich
+        assert "customFields" not in attrs
+
+    async def test_changes_summary_records_custom_fields(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # ``WorkItemUpdateResult.changes`` should reflect what was sent
+        # so callers can confirm the intent client-side.
+        mock_client.patch.return_value = {}
+        mock_client.get.return_value = _make_get_response()
+
+        result = await _call_update(
+            mock_ctx,
+            title="t",
+            custom_fields={"riskLevel": "high"},
+        )
+
+        assert result.changes["title"] == "t"
+        assert result.changes["custom_fields"] == {"riskLevel": "high"}
+
+    async def test_dry_run_preview_includes_custom_fields(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Dry-run should echo the merged attributes (standard + custom)
+        # so the LLM can verify the wire shape before committing.
+        result = await _call_update(
+            mock_ctx,
+            title="t",
+            custom_fields={"riskLevel": "high"},
+            dry_run=True,
+        )
+
+        mock_client.patch.assert_not_called()
+        assert result.payload_preview is not None
+        item = cast(dict[str, object], result.payload_preview["data"])
+        attrs = cast(dict[str, object], item["attributes"])
+        assert attrs["title"] == "t"
+        assert attrs["riskLevel"] == "high"
+
+    async def test_round_trip_read_response_can_be_written_back(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # The dict shape that flows out of WorkItemDetail.custom_fields
+        # on read must be acceptable as the custom_fields argument on
+        # write — without copying or transformation. This is the
+        # critical end-to-end ergonomic that justifies symmetric shapes
+        # on both sides.
+        mock_client.patch.return_value = {}
+        mock_client.get.return_value = _make_get_response()
+
+        read_customs: dict[str, object] = {
+            "riskLevel": "high",
+            "effortHours": 8.0,
+            "reviewerNote": {"type": "text/html", "value": "<p>x</p>"},
+        }
+
+        result = await _call_update(mock_ctx, custom_fields=read_customs)
+
+        _, kwargs = mock_client.patch.call_args
+        attrs = kwargs["json"]["data"]["attributes"]
+        # Every key from the read response landed inline under attrs.
+        for key, value in read_customs.items():
+            assert attrs[key] == value
+        # Tool layer didn't accept it then re-emit a different shape.
+        assert result.updated is True
 
     async def test_workflow_action_appended_as_query_param(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1696,6 +1923,33 @@ class TestBuildUpdateDocumentPayload:
         data = cast(dict[str, object], payload["data"])
         assert data["id"] == "MyProj/Design/Folder/Sub Doc"
 
+    def test_custom_fields_inlined_in_document_patch(self) -> None:
+        payload = _build_update_document_payload(
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title=None,
+            status=None,
+            type=None,
+            custom_fields={"complianceLevel": "L3", "reviewerName": "alice"},
+        )
+        data = cast(dict[str, object], payload["data"])
+        attrs = cast(dict[str, object], data["attributes"])
+        assert attrs == {"complianceLevel": "L3", "reviewerName": "alice"}
+
+    def test_custom_fields_collision_raises_for_document_standard(self) -> None:
+        # ``moduleFolder`` is in the document standard set — collision.
+        with pytest.raises(ValueError, match="custom_fields keys collide"):
+            _build_update_document_payload(
+                project_id="MyProj",
+                space_id="S",
+                document_name="D",
+                title=None,
+                status=None,
+                type=None,
+                custom_fields={"moduleFolder": "Other"},
+            )
+
 
 # ---------------------------------------------------------------------------
 # update_document — at-least-one-field validation
@@ -1717,6 +1971,7 @@ class TestUpdateDocumentValidation:
                 title=None,
                 status=None,
                 type=None,
+                custom_fields=None,
                 workflow_action=None,
                 dry_run=True,
             )
@@ -1734,6 +1989,7 @@ class TestUpdateDocumentValidation:
                 title=None,
                 status=None,
                 type=None,
+                custom_fields=None,
                 workflow_action="approve",
                 dry_run=True,
             )
@@ -1751,10 +2007,66 @@ class TestUpdateDocumentValidation:
             title=None,
             status="approved",
             type=None,
+            custom_fields=None,
             workflow_action="approve",
             dry_run=True,
         )
         assert result.dry_run is True
+
+    async def test_custom_fields_alone_satisfies_at_least_one_check(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # custom_fields counts as a body field on update_document too.
+        result = await update_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title=None,
+            status=None,
+            type=None,
+            custom_fields={"documentVersion": "0.2"},
+            workflow_action=None,
+            dry_run=True,
+        )
+        assert result.dry_run is True
+
+    async def test_workflow_action_with_custom_fields_passes(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # workflow_action paired with custom_fields-only should also
+        # satisfy the body-field check.
+        result = await update_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title=None,
+            status=None,
+            type=None,
+            custom_fields={"documentVersion": "0.2"},
+            workflow_action="approve",
+            dry_run=True,
+        )
+        assert result.dry_run is True
+
+    async def test_custom_fields_collision_raises(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        with pytest.raises(ValueError, match="custom_fields keys collide"):
+            await update_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="S",
+                document_name="D",
+                title="t",
+                status=None,
+                type=None,
+                custom_fields={"title": "y"},
+                workflow_action=None,
+                dry_run=True,
+            )
+        mock_client.patch.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -1776,6 +2088,7 @@ class TestUpdateDocumentDryRun:
             title="New Title",
             status=None,
             type=None,
+            custom_fields=None,
             workflow_action=None,
             dry_run=True,
         )
@@ -1812,6 +2125,7 @@ class TestUpdateDocumentHappyPath:
             title="New Title",
             status=None,
             type=None,
+            custom_fields=None,
             workflow_action=None,
             dry_run=False,
         )
@@ -1834,6 +2148,7 @@ class TestUpdateDocumentHappyPath:
             title="T",
             status=None,
             type=None,
+            custom_fields=None,
             workflow_action=None,
             dry_run=False,
         )
@@ -1859,6 +2174,7 @@ class TestUpdateDocumentHappyPath:
             title=None,
             status="approved",
             type=None,
+            custom_fields=None,
             workflow_action="approve",
             dry_run=False,
         )
@@ -1882,6 +2198,7 @@ class TestUpdateDocumentHappyPath:
             title="T",
             status="approved",
             type="generic",
+            custom_fields=None,
             workflow_action=None,
             dry_run=False,
         )
@@ -1906,6 +2223,7 @@ class TestUpdateDocumentHappyPath:
             title="",
             status=None,
             type=None,
+            custom_fields=None,
             workflow_action=None,
             dry_run=False,
         )
@@ -1927,6 +2245,7 @@ class TestUpdateDocumentHappyPath:
             title="t",
             status=None,
             type=None,
+            custom_fields=None,
             workflow_action=None,
             dry_run=False,
         )
@@ -1949,6 +2268,7 @@ class TestUpdateDocumentHappyPath:
             title=None,
             status="approved",
             type=None,
+            custom_fields=None,
             workflow_action="needs review",
             dry_run=False,
         )
@@ -1984,6 +2304,7 @@ class TestUpdateDocumentErrorMapping:
                 title="t",
                 status=None,
                 type=None,
+                custom_fields=None,
                 workflow_action=None,
                 dry_run=False,
             )
@@ -2004,6 +2325,7 @@ class TestUpdateDocumentErrorMapping:
                 title="t",
                 status=None,
                 type=None,
+                custom_fields=None,
                 workflow_action=None,
                 dry_run=False,
             )
@@ -2023,6 +2345,7 @@ class TestUpdateDocumentErrorMapping:
                 title="t",
                 status=None,
                 type=None,
+                custom_fields=None,
                 workflow_action=None,
                 dry_run=False,
             )
