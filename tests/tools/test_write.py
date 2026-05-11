@@ -1415,8 +1415,10 @@ class TestUpdateWorkItemHappyPath:
         assert args == ("/projects/MyProj/workitems/MCPT-1",)
         params = kwargs["params"]
         assert params["include"] == "assignee"
-        assert "title" in params["fields[workitems]"]
-        assert "description" in params["fields[workitems]"]
+        # WI_DETAIL_FIELDS is the bare ``@all`` token so inline custom
+        # fields surface on ``current.custom_fields``; this assertion
+        # pins that semantics (changing it would silently drop customs).
+        assert params["fields[workitems]"] == "@all"
 
     async def test_workflow_action_appended_as_query_param(
         self, mock_ctx: MagicMock, mock_client: AsyncMock

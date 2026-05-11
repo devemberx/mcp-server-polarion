@@ -45,16 +45,75 @@ DEFAULT_PAGE_SIZE: Final[int] = 100
 
 # Sparse fieldsets for list / detail endpoints.
 WI_LIST_FIELDS: Final[str] = "title,type,status,priority,updated,module,assignee"
-# ``customFields.@all`` is a Polarion sparse-fieldset token that returns all
-# populated custom field values inline at ``attributes.customFields``. Without
-# it the server omits every custom field, so the LLM never sees project-specific
-# fields configured per work-item type. Tokens must be appended (NOT replace
-# other fields) — listing only ``customFields.@all`` would hide every standard
-# attribute.
-WI_DETAIL_FIELDS: Final[str] = (
-    "title,description,type,status,priority,updated,"
-    "created,resolution,severity,outlineNumber,hyperlinks,"
-    "module,assignee,author,customFields.@all"
+# Detail fetches use the bare ``@all`` token because this Polarion server
+# inlines custom fields as top-level keys under ``attributes`` (e.g.
+# ``attributes.asil``, ``attributes.requirement_id``) rather than nesting
+# them under a ``customFields`` container. The ``customFields.@all`` /
+# ``@custom`` / ``@additional`` tokens are silently dropped on this server —
+# only ``@all`` surfaces the inline custom attributes. Relationships still
+# come back, so existing module/assignee/author parsing keeps working.
+WI_DETAIL_FIELDS: Final[str] = "@all"
+# Same situation for documents — ``@all`` is the only token that exposes
+# project-defined custom document attributes (e.g. ``version``,
+# ``baseline_name``). The slight per-request cost (``homePageContent``
+# always travels over the wire) is paid in network bytes only; the tool
+# layer still hides the body from the LLM when ``include_content=False``.
+DOC_DETAIL_FIELDS: Final[str] = "@all"
+
+# Canonical standard attribute names per the Polarion REST OpenAPI schema.
+# Used by ``extract_custom_fields`` as an allowlist: anything appearing in
+# a response's ``attributes`` that is NOT in this set is treated as a
+# project-defined custom field. Sourced verbatim from the OpenAPI workitem
+# schema; a future Polarion release that adds new standard attributes
+# would misclassify them as custom until this set is updated.
+STANDARD_WORKITEM_ATTRS: Final[frozenset[str]] = frozenset(
+    {
+        "id",
+        "type",
+        "title",
+        "description",
+        "status",
+        "priority",
+        "severity",
+        "resolution",
+        "resolvedOn",
+        "created",
+        "updated",
+        "outlineNumber",
+        "dueDate",
+        "plannedStart",
+        "plannedEnd",
+        "initialEstimate",
+        "remainingEstimate",
+        "timeSpent",
+        "hyperlinks",
+    }
+)
+
+# Canonical standard document attribute names per the Polarion REST
+# OpenAPI schema. Mirrors ``STANDARD_WORKITEM_ATTRS`` for the document
+# resource type.
+STANDARD_DOCUMENT_ATTRS: Final[frozenset[str]] = frozenset(
+    {
+        "id",
+        "title",
+        "type",
+        "status",
+        "homePageContent",
+        "moduleFolder",
+        "moduleName",
+        "outlineNumbering",
+        "renderingLayouts",
+        "structureLinkRole",
+        "usesOutlineNumbering",
+        "autoSuspect",
+        "branchedWithInitializedFields",
+        "branchedWithQuery",
+        "derivedFields",
+        "derivedFromLinkRole",
+        "created",
+        "updated",
+    }
 )
 
 # ---------------------------------------------------------------------------
@@ -309,20 +368,29 @@ def build_work_item_summary_kwargs(
     }
 
 
-def extract_custom_fields(attrs: dict[str, object]) -> dict[str, object]:
-    """Extract the ``customFields`` map from a JSON:API attributes dict.
+def extract_custom_fields(
+    attrs: dict[str, object],
+    standard: frozenset[str],
+) -> dict[str, object]:
+    """Return the inline custom-field subset of a JSON:API attributes dict.
 
-    Polarion returns custom fields under ``attributes.customFields`` as a
-    flat ``{fieldId: value}`` mapping when the sparse fieldset includes
-    the ``customFields.@all`` token. Values may be primitives (str / int /
-    float / bool / list) or rich-text dicts of the form
-    ``{"type": "text/html", "value": "<...>"}`` — both are returned
-    verbatim so callers can round-trip them back to Polarion unchanged.
+    This Polarion server inlines project-defined custom fields as
+    top-level keys inside ``attributes`` (e.g. ``attributes.asil``,
+    ``attributes.requirement_id``) — there is no ``customFields``
+    container, and the ``customFields.@all`` / ``@custom`` sparse-fieldset
+    tokens are silently ignored. Callers fetch with ``fields[...]=@all``
+    so every populated attribute comes back, then pass the resulting
+    ``attributes`` dict here together with the standard-attribute
+    allowlist for the resource type (``STANDARD_WORKITEM_ATTRS`` or
+    ``STANDARD_DOCUMENT_ATTRS``). Anything not in the allowlist is
+    reported as a custom field.
+
+    Values are returned verbatim — primitives (str / int / float / bool /
+    list) and rich-text dicts of the form
+    ``{"type": "text/html", "value": "<...>"}`` both pass through so the
+    shape round-trips back to Polarion unchanged on a future PATCH.
     """
-    value = attrs.get("customFields")
-    if isinstance(value, dict):
-        return value
-    return {}
+    return {k: v for k, v in attrs.items() if k not in standard}
 
 
 def parse_hyperlinks(value: object) -> list[Hyperlink]:
@@ -400,7 +468,7 @@ def parse_work_item_detail(
         severity=safe_str(attrs.get("severity", "")),
         outline_number=safe_str(attrs.get("outlineNumber", "")),
         hyperlinks=parse_hyperlinks(attrs.get("hyperlinks")),
-        custom_fields=extract_custom_fields(attrs),
+        custom_fields=extract_custom_fields(attrs, STANDARD_WORKITEM_ATTRS),
     )
 
 
@@ -453,6 +521,9 @@ def parse_work_item_summaries(
 
 __all__: list[str] = [
     "DEFAULT_PAGE_SIZE",
+    "DOC_DETAIL_FIELDS",
+    "STANDARD_DOCUMENT_ATTRS",
+    "STANDARD_WORKITEM_ATTRS",
     "WI_DETAIL_FIELDS",
     "WI_LIST_FIELDS",
     "build_included_workitem_map",

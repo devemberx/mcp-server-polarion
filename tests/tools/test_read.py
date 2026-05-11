@@ -805,7 +805,12 @@ class TestGetDocument:
     async def test_include_content_false_omits_content(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """include_content=False → body skipped, metadata still populated."""
+        """include_content=False → body skipped even when API echoes it.
+
+        With ``fields[documents]=@all`` the wire always carries
+        ``homePageContent``; the tool layer is responsible for hiding it
+        from the LLM unless asked.
+        """
         mock_client.get.return_value = {
             "data": {
                 "attributes": {
@@ -813,8 +818,6 @@ class TestGetDocument:
                     "title": "SRS",
                     "type": "req_specification",
                     "status": "draft",
-                    # Even if the API echoes homePageContent (it shouldn't,
-                    # since we don't request it), the tool must ignore it.
                     "homePageContent": {
                         "type": "text/html",
                         "value": "<p>should be ignored</p>",
@@ -836,17 +839,10 @@ class TestGetDocument:
         assert result.status == "draft"
         assert result.content == ""
 
-        _, kwargs = mock_client.get.call_args
-        fields = kwargs["params"]["fields[documents]"]
-        assert "title" in fields
-        assert "type" in fields
-        assert "status" in fields
-        assert "homePageContent" not in fields
-
-    async def test_include_content_requests_homepage_field(
+    async def test_include_content_renders_homepage(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """With include_content=True, homePageContent is requested."""
+        """include_content=True → homePageContent rendered into result.content."""
         mock_client.get.return_value = {
             "data": {
                 "attributes": {
@@ -869,9 +865,6 @@ class TestGetDocument:
             include_content=True,
         )
 
-        _, kwargs = mock_client.get.call_args
-        fields = kwargs["params"]["fields[documents]"]
-        assert "homePageContent" in fields
         assert "body" in result.content
 
     async def test_encodes_document_name_with_spaces(
@@ -994,20 +987,21 @@ class TestGetDocument:
     async def test_custom_fields_populated_from_response(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """customFields dict on the response flows through verbatim."""
+        """Inline non-standard attributes flow through as ``custom_fields``."""
         rich_value = {"type": "text/html", "value": "<p>note</p>"}
         mock_client.get.return_value = {
             "data": {
                 "id": "proj1/_default/SRS",
                 "attributes": {
+                    # Standard attrs — present but excluded from custom_fields.
                     "title": "SRS",
                     "type": "req_specification",
                     "status": "approved",
-                    "customFields": {
-                        "reviewedBy": "alice",
-                        "complianceLevel": 3,
-                        "richNote": rich_value,
-                    },
+                    # Inline custom attributes — top-level keys.
+                    "description": rich_value,
+                    "version": "1.0",
+                    "version_history": [{"version": "1.0", "author": "alice"}],
+                    "baseline_name": "release-2026Q1",
                 },
             },
         }
@@ -1020,18 +1014,18 @@ class TestGetDocument:
             include_content=False,
         )
 
-        # Raw passthrough: rich-text values stay as the original
-        # {type, value} dict — they are NOT converted to Markdown.
+        # Raw passthrough: rich-text and structured values stay verbatim.
         assert result.custom_fields == {
-            "reviewedBy": "alice",
-            "complianceLevel": 3,
-            "richNote": rich_value,
+            "description": rich_value,
+            "version": "1.0",
+            "version_history": [{"version": "1.0", "author": "alice"}],
+            "baseline_name": "release-2026Q1",
         }
 
-    async def test_custom_fields_empty_when_missing(
+    async def test_custom_fields_empty_when_only_standard_attrs(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Absent customFields key → empty dict, never None or KeyError."""
+        """All-standard attributes → empty custom_fields dict."""
         mock_client.get.return_value = {
             "data": {
                 "attributes": {
@@ -1052,18 +1046,16 @@ class TestGetDocument:
 
         assert result.custom_fields == {}
 
-    async def test_sparse_fieldset_requests_custom_fields_token(
+    async def test_sparse_fieldset_uses_all_token(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """``customFields.@all`` MUST be in fields[documents] regardless of
-        include_content."""
+        """``fields[documents]=@all`` is sent regardless of include_content."""
         mock_client.get.return_value = {
             "data": {
                 "attributes": {"title": "x", "type": "generic", "status": "draft"},
             },
         }
 
-        # include_content=False path
         await get_document(
             mock_ctx,
             project_id="proj1",
@@ -1072,9 +1064,8 @@ class TestGetDocument:
             include_content=False,
         )
         _, kwargs_a = mock_client.get.call_args
-        assert "customFields.@all" in kwargs_a["params"]["fields[documents]"]
+        assert kwargs_a["params"]["fields[documents]"] == "@all"
 
-        # include_content=True path — must still include the token
         await get_document(
             mock_ctx,
             project_id="proj1",
@@ -1083,9 +1074,7 @@ class TestGetDocument:
             include_content=True,
         )
         _, kwargs_b = mock_client.get.call_args
-        fields_b = kwargs_b["params"]["fields[documents]"]
-        assert "customFields.@all" in fields_b
-        assert "homePageContent" in fields_b
+        assert kwargs_b["params"]["fields[documents]"] == "@all"
 
 
 # ---------------------------------------------------------------------------
@@ -2333,21 +2322,22 @@ class TestGetWorkItem:
     async def test_custom_fields_populated_from_response(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """customFields dict on the response flows through verbatim."""
+        """Inline non-standard attributes flow through as ``custom_fields``."""
         rich_value = {"type": "text/html", "value": "<p>note</p>"}
         mock_client.get.return_value = {
             "data": {
                 "id": "proj1/MCPT-542",
                 "attributes": {
+                    # Standard attrs — present but excluded from custom_fields.
                     "title": "WI with customs",
-                    "type": "requirement",
+                    "type": "softwarerequirement",
                     "status": "approved",
-                    "customFields": {
-                        "riskLevel": "high",
-                        "effortHours": 8.0,
-                        "approved": True,
-                        "richNote": rich_value,
-                    },
+                    "priority": "50.0",
+                    # Inline custom attributes — top-level keys, not nested.
+                    "asil": "B",
+                    "reqType": "user",
+                    "requirement_id": "REQ-42",
+                    "verification_criteria": rich_value,
                 },
             },
         }
@@ -2361,16 +2351,16 @@ class TestGetWorkItem:
         # Raw passthrough: rich-text values stay as the original
         # {type, value} dict — they are NOT converted to Markdown.
         assert result.custom_fields == {
-            "riskLevel": "high",
-            "effortHours": 8.0,
-            "approved": True,
-            "richNote": rich_value,
+            "asil": "B",
+            "reqType": "user",
+            "requirement_id": "REQ-42",
+            "verification_criteria": rich_value,
         }
 
-    async def test_custom_fields_empty_when_missing(
+    async def test_custom_fields_empty_when_only_standard_attrs(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Absent customFields key → empty dict, never None or KeyError."""
+        """All-standard attributes → empty custom_fields dict."""
         mock_client.get.return_value = {
             "data": {
                 "id": "proj1/MCPT-100",
@@ -2390,10 +2380,10 @@ class TestGetWorkItem:
 
         assert result.custom_fields == {}
 
-    async def test_sparse_fieldset_requests_custom_fields_token(
+    async def test_sparse_fieldset_uses_all_token(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """The ``customFields.@all`` token MUST be in fields[workitems]."""
+        """``fields[workitems]=@all`` is the only token that surfaces customs."""
         mock_client.get.return_value = {
             "data": {
                 "id": "proj1/MCPT-1",
@@ -2408,8 +2398,7 @@ class TestGetWorkItem:
         )
 
         _, kwargs = mock_client.get.call_args
-        fields = kwargs["params"]["fields[workitems]"]
-        assert "customFields.@all" in fields
+        assert kwargs["params"]["fields[workitems]"] == "@all"
 
 
 # ---------------------------------------------------------------------------

@@ -52,9 +52,15 @@ JSON:API v1. Key paths: `/projects`, `/projects/{p}/workitems[?query=...]`, `/pr
 
 `fields[workitems]=title,type,status` removes **all** `relationships` from the response, not just other attributes. To receive a relationship, list its name explicitly (see `WI_LIST_FIELDS`). Forgetting this silently empties derived fields like `space_id`/`document_name`/`assignee_ids`/`author_id`.
 
-### Custom fields surface via the `customFields.@all` sparse-fieldset token
+### Custom fields surface inline under `attributes`, not under a `customFields` container
 
-Polarion projects define arbitrary custom fields per work-item type and per document type; field IDs differ per project and cannot be enumerated statically. Appending `,customFields.@all` to `fields[workitems]` / `fields[documents]` makes Polarion return all *populated* custom field values inline at `attributes.customFields` as a flat `{fieldId: value}` mapping. `WI_DETAIL_FIELDS` and `get_document` both include the token, surfacing values on `WorkItemDetail.custom_fields` and `DocumentDetail.custom_fields`. Values are heterogeneous: primitives (str/int/float/bool/list) plus `{type: 'text/html', value: '<...>'}` dicts for rich-text fields — kept raw, NOT converted to Markdown, so the shape round-trips back to Polarion unchanged. The `customFields` key is omitted entirely when no custom fields are populated, so consumers MUST tolerate its absence (`extract_custom_fields` defaults to `{}`).
+This Polarion server inlines project-defined custom fields as **top-level keys inside `attributes`** alongside standard fields — e.g. `attributes.asil`, `attributes.requirement_id` on a work item, `attributes.version`, `attributes.baseline_name` on a document. There is no nested `customFields` object, and the sparse-fieldset tokens `customFields.@all`, `@custom`, `@additional` are silently dropped (returning either nothing or `@basic` semantics). `@basic` itself returns only a fixed minimal set (`id, type, title, status, severity` for WIs) — too narrow to be useful for detail reads.
+
+To surface customs the MCP server uses `fields[workitems]=@all` (`WI_DETAIL_FIELDS`) and `fields[documents]=@all` (`DOC_DETAIL_FIELDS`), then filters out the canonical Polarion-defined attributes using the `STANDARD_WORKITEM_ATTRS` / `STANDARD_DOCUMENT_ATTRS` allowlists in `_helpers.py` (sourced verbatim from the Polarion REST OpenAPI schema). Anything not in the allowlist is exposed on `WorkItemDetail.custom_fields` / `DocumentDetail.custom_fields`. Values are heterogeneous: primitives (str/int/float/bool/list) plus `{type: 'text/html', value: '<...>'}` dicts for rich-text custom fields — kept raw, NOT converted to Markdown, so the shape round-trips back to Polarion unchanged.
+
+Caveat: a future Polarion release that ships new standard attributes would misclassify them as custom until the allowlist is updated.
+
+Side effect: `update_work_item`'s post-PATCH GET reuses `WI_DETAIL_FIELDS`, so `WorkItemUpdateResult.current.custom_fields` is populated automatically. `@all` also returns the full relationship set (19 to-one/to-many entries for WIs) rather than the previous curated four — only `links` come back without `include=`, so the bandwidth cost is moderate.
 
 ### To-many relationships need `include=`
 

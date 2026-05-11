@@ -36,6 +36,8 @@ from mcp_server_polarion.models import (
 from mcp_server_polarion.server import mcp
 from mcp_server_polarion.tools._helpers import (
     DEFAULT_PAGE_SIZE,
+    DOC_DETAIL_FIELDS,
+    STANDARD_DOCUMENT_ATTRS,
     WI_DETAIL_FIELDS,
     WI_LIST_FIELDS,
     build_included_workitem_map,
@@ -792,17 +794,17 @@ async def get_document(
         f"/documents/{encoded_name}"
     )
 
-    # ``customFields.@all`` is always requested so the document's
-    # project-specific custom fields flow through, regardless of whether
-    # the caller also asked for the home-page body.
-    fields = "title,type,status,customFields.@all"
-    if include_content:
-        fields = f"{fields},homePageContent"
-
+    # ``@all`` is the only sparse-fieldset token this Polarion server
+    # honours for surfacing inline custom document attributes (e.g.
+    # ``version``, ``baseline_name``). Explicit field lists silently drop
+    # them; ``customFields.@all`` / ``@custom`` are no-ops on this server.
+    # The bandwidth cost — ``homePageContent`` always travels over the
+    # wire — is paid in network bytes only; the tool still hides the body
+    # from the LLM when ``include_content=False``.
     try:
         response = await client.get(
             path,
-            params={"fields[documents]": fields},
+            params={"fields[documents]": DOC_DETAIL_FIELDS},
         )
     except PolarionNotFoundError as exc:
         raise ValueError(
@@ -847,7 +849,7 @@ async def get_document(
         type=safe_str(attrs.get("type", "")),
         status=safe_str(attrs.get("status", "")),
         content=content_md,
-        custom_fields=extract_custom_fields(attrs),
+        custom_fields=extract_custom_fields(attrs, STANDARD_DOCUMENT_ATTRS),
     )
 
 
