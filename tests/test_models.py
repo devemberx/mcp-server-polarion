@@ -421,7 +421,7 @@ class TestWorkItemDetail:
         # survive a serialization round-trip unchanged.
         rich = {"type": "text/html", "value": "<p>note</p>"}
         detail = WorkItemDetail(
-            id="MCPT-542",
+            id="MCPT-999",
             title="With customs",
             type="requirement",
             status="approved",

@@ -998,10 +998,10 @@ class TestGetDocument:
                     "type": "req_specification",
                     "status": "approved",
                     # Inline custom attributes — top-level keys.
-                    "description": rich_value,
-                    "version": "1.0",
-                    "version_history": [{"version": "1.0", "author": "alice"}],
-                    "baseline_name": "release-2026Q1",
+                    "summary": rich_value,
+                    "documentVersion": "1.0",
+                    "reviewerName": "alice",
+                    "complianceLevel": "L3",
                 },
             },
         }
@@ -1016,10 +1016,10 @@ class TestGetDocument:
 
         # Raw passthrough: rich-text and structured values stay verbatim.
         assert result.custom_fields == {
-            "description": rich_value,
-            "version": "1.0",
-            "version_history": [{"version": "1.0", "author": "alice"}],
-            "baseline_name": "release-2026Q1",
+            "summary": rich_value,
+            "documentVersion": "1.0",
+            "reviewerName": "alice",
+            "complianceLevel": "L3",
         }
 
     async def test_custom_fields_empty_when_only_standard_attrs(
@@ -2326,7 +2326,7 @@ class TestGetWorkItem:
         rich_value = {"type": "text/html", "value": "<p>note</p>"}
         mock_client.get.return_value = {
             "data": {
-                "id": "proj1/MCPT-542",
+                "id": "proj1/MCPT-999",
                 "attributes": {
                     # Standard attrs — present but excluded from custom_fields.
                     "title": "WI with customs",
@@ -2334,10 +2334,10 @@ class TestGetWorkItem:
                     "status": "approved",
                     "priority": "50.0",
                     # Inline custom attributes — top-level keys, not nested.
-                    "asil": "B",
-                    "reqType": "user",
-                    "requirement_id": "REQ-42",
-                    "verification_criteria": rich_value,
+                    "riskLevel": "high",
+                    "category": "user",
+                    "effortHours": 12.0,
+                    "reviewerNote": rich_value,
                 },
             },
         }
@@ -2345,16 +2345,16 @@ class TestGetWorkItem:
         result = await get_work_item(
             mock_ctx,
             project_id="proj1",
-            work_item_id="MCPT-542",
+            work_item_id="MCPT-999",
         )
 
         # Raw passthrough: rich-text values stay as the original
         # {type, value} dict — they are NOT converted to Markdown.
         assert result.custom_fields == {
-            "asil": "B",
-            "reqType": "user",
-            "requirement_id": "REQ-42",
-            "verification_criteria": rich_value,
+            "riskLevel": "high",
+            "category": "user",
+            "effortHours": 12.0,
+            "reviewerNote": rich_value,
         }
 
     async def test_custom_fields_empty_when_only_standard_attrs(

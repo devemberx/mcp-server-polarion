@@ -7,7 +7,7 @@ package and are **not** part of the public package API.
 
 from __future__ import annotations
 
-from typing import Final, TypedDict
+from typing import Final, TypedDict, cast
 from urllib.parse import quote
 
 from fastmcp import Context
@@ -15,6 +15,7 @@ from fastmcp import Context
 from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.models import (
     Hyperlink,
+    JsonValue,
     LinkedWorkItemSummary,
     WorkItemDetail,
     WorkItemSummary,
@@ -47,17 +48,17 @@ DEFAULT_PAGE_SIZE: Final[int] = 100
 WI_LIST_FIELDS: Final[str] = "title,type,status,priority,updated,module,assignee"
 # Detail fetches use the bare ``@all`` token because this Polarion server
 # inlines custom fields as top-level keys under ``attributes`` (e.g.
-# ``attributes.asil``, ``attributes.requirement_id``) rather than nesting
+# ``attributes.riskLevel``, ``attributes.effortHours``) rather than nesting
 # them under a ``customFields`` container. The ``customFields.@all`` /
 # ``@custom`` / ``@additional`` tokens are silently dropped on this server —
 # only ``@all`` surfaces the inline custom attributes. Relationships still
 # come back, so existing module/assignee/author parsing keeps working.
 WI_DETAIL_FIELDS: Final[str] = "@all"
 # Same situation for documents — ``@all`` is the only token that exposes
-# project-defined custom document attributes (e.g. ``version``,
-# ``baseline_name``). The slight per-request cost (``homePageContent``
-# always travels over the wire) is paid in network bytes only; the tool
-# layer still hides the body from the LLM when ``include_content=False``.
+# project-defined custom document attributes. The slight per-request cost
+# (``homePageContent`` always travels over the wire) is paid in network
+# bytes only; the tool layer still hides the body from the LLM when
+# ``include_content=False``.
 DOC_DETAIL_FIELDS: Final[str] = "@all"
 
 # Canonical standard attribute names per the Polarion REST OpenAPI schema.
@@ -375,8 +376,8 @@ def extract_custom_fields(
     """Return the inline custom-field subset of a JSON:API attributes dict.
 
     This Polarion server inlines project-defined custom fields as
-    top-level keys inside ``attributes`` (e.g. ``attributes.asil``,
-    ``attributes.requirement_id``) — there is no ``customFields``
+    top-level keys inside ``attributes`` (e.g. ``attributes.riskLevel``,
+    ``attributes.effortHours``) — there is no ``customFields``
     container, and the ``customFields.@all`` / ``@custom`` sparse-fieldset
     tokens are silently ignored. Callers fetch with ``fields[...]=@all``
     so every populated attribute comes back, then pass the resulting
@@ -391,6 +392,69 @@ def extract_custom_fields(
     shape round-trips back to Polarion unchanged on a future PATCH.
     """
     return {k: v for k, v in attrs.items() if k not in standard}
+
+
+def merge_custom_fields(
+    attributes: dict[str, JsonValue],
+    customs: dict[str, object] | None,
+    standard: frozenset[str],
+) -> None:
+    """Merge caller-supplied custom-field key/values into a JSON:API attributes dict.
+
+    Write-side counterpart of ``extract_custom_fields``. Polarion accepts
+    custom field values inlined at the top level of ``attributes`` (the
+    same shape it returns on read), so this helper drops each entry of
+    ``customs`` directly into ``attributes`` in place — keeping the
+    "mutate-in-place" style of the surrounding ``_build_*_payload``
+    helpers.
+
+    Validation:
+    - Any key in ``customs`` that also appears in ``standard`` raises
+      ``ValueError`` — colliding with a Polarion-defined standard
+      attribute would silently overwrite (or be overwritten by) an
+      explicit standard tool parameter. Callers should rename the field
+      or use the matching standard parameter.
+    - ``None`` and ``{}`` whole-dict inputs are no-ops.
+    - Individual ``None`` values inside the dict are skipped, matching
+      the rest of the codebase's "skip None/empty" convention. Falsy
+      non-``None`` values (``""``, ``0``, ``False``, ``[]``) are sent
+      through verbatim because they may be meaningful custom-field
+      values. Polarion may interpret some of those as "clear"; clearing
+      semantics are intentionally out of scope for this phase.
+
+    Aliasing: values are stored under ``attributes`` by reference — no
+    defensive copy. Callers must NOT mutate the ``customs`` dict (or any
+    nested value such as a ``{type, value}`` rich-text dict) between
+    handing it to this helper and the eventual ``client.post`` /
+    ``client.patch`` serialisation, or the on-wire payload will see the
+    later mutation.
+
+    Args:
+        attributes: The JSON:API ``attributes`` dict under construction.
+            Mutated in place.
+        customs: Custom-field key/value pairs supplied by the caller, or
+            ``None`` to skip.
+        standard: The standard-attribute allowlist for the resource type
+            (``STANDARD_WORKITEM_ATTRS`` or ``STANDARD_DOCUMENT_ATTRS``).
+
+    Raises:
+        ValueError: When any key in ``customs`` is also in ``standard``.
+    """
+    if not customs:
+        return
+    collisions = sorted(set(customs) & standard)
+    if collisions:
+        msg = (
+            "custom_fields keys collide with standard Polarion attributes: "
+            f"{collisions}. Use the matching standard tool parameter "
+            "(e.g. ``title=``, ``status=``) instead of overriding via "
+            "custom_fields."
+        )
+        raise ValueError(msg)
+    for key, value in customs.items():
+        if value is None:
+            continue
+        attributes[key] = cast(JsonValue, value)
 
 
 def parse_hyperlinks(value: object) -> list[Hyperlink]:
@@ -537,6 +601,7 @@ __all__: list[str] = [
     "extract_total_count",
     "get_client",
     "has_links_next",
+    "merge_custom_fields",
     "parse_hyperlinks",
     "parse_work_item_detail",
     "parse_work_item_summaries",

@@ -795,12 +795,11 @@ async def get_document(
     )
 
     # ``@all`` is the only sparse-fieldset token this Polarion server
-    # honours for surfacing inline custom document attributes (e.g.
-    # ``version``, ``baseline_name``). Explicit field lists silently drop
-    # them; ``customFields.@all`` / ``@custom`` are no-ops on this server.
-    # The bandwidth cost — ``homePageContent`` always travels over the
-    # wire — is paid in network bytes only; the tool still hides the body
-    # from the LLM when ``include_content=False``.
+    # honours for surfacing inline custom document attributes. Explicit
+    # field lists silently drop them; ``customFields.@all`` / ``@custom``
+    # are no-ops on this server. The bandwidth cost — ``homePageContent``
+    # always travels over the wire — is paid in network bytes only; the
+    # tool still hides the body from the LLM when ``include_content=False``.
     try:
         response = await client.get(
             path,
