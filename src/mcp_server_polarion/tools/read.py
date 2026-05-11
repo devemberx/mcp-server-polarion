@@ -36,11 +36,14 @@ from mcp_server_polarion.models import (
 from mcp_server_polarion.server import mcp
 from mcp_server_polarion.tools._helpers import (
     DEFAULT_PAGE_SIZE,
+    DOC_DETAIL_FIELDS,
+    STANDARD_DOCUMENT_ATTRS,
     WI_DETAIL_FIELDS,
     WI_LIST_FIELDS,
     build_included_workitem_map,
     compute_has_more,
     encode_path_segment,
+    extract_custom_fields,
     extract_relationship_id,
     extract_short_id,
     extract_total_count,
@@ -772,6 +775,11 @@ async def get_document(
         - ``status``: Workflow status (e.g. 'draft').
         - ``content``: Document body in Markdown — only populated when
         - ``include_content=True``, otherwise empty.
+        - ``custom_fields``: User-defined custom fields as a
+          ``{fieldId: value}`` dict. Keys vary per project and document
+          type; values are returned verbatim (primitives or
+          ``{type: 'text/html', value: '<...>'}`` for rich-text fields).
+          Empty dict when no custom fields are populated.
 
     Raises:
         ValueError: If the document, space, or project is not found.
@@ -786,14 +794,17 @@ async def get_document(
         f"/documents/{encoded_name}"
     )
 
-    fields = "title,type,status"
-    if include_content:
-        fields = f"{fields},homePageContent"
-
+    # ``@all`` is the only sparse-fieldset token this Polarion server
+    # honours for surfacing inline custom document attributes (e.g.
+    # ``version``, ``baseline_name``). Explicit field lists silently drop
+    # them; ``customFields.@all`` / ``@custom`` are no-ops on this server.
+    # The bandwidth cost — ``homePageContent`` always travels over the
+    # wire — is paid in network bytes only; the tool still hides the body
+    # from the LLM when ``include_content=False``.
     try:
         response = await client.get(
             path,
-            params={"fields[documents]": fields},
+            params={"fields[documents]": DOC_DETAIL_FIELDS},
         )
     except PolarionNotFoundError as exc:
         raise ValueError(
@@ -838,6 +849,7 @@ async def get_document(
         type=safe_str(attrs.get("type", "")),
         status=safe_str(attrs.get("status", "")),
         content=content_md,
+        custom_fields=extract_custom_fields(attrs, STANDARD_DOCUMENT_ATTRS),
     )
 
 
@@ -1309,6 +1321,11 @@ async def get_work_item(
           with ``role``, ``title``, ``uri`` fields.
         - ``description``: Full description in Markdown.
         - ``project_id``: Containing project.
+        - ``custom_fields``: User-defined custom fields as a
+          ``{fieldId: value}`` dict. Keys vary per project and work-item
+          type; values are returned verbatim (primitives or
+          ``{type: 'text/html', value: '<...>'}`` for rich-text fields).
+          Empty dict when no custom fields are populated.
 
     Raises:
         ValueError: If the work item or project is not found.

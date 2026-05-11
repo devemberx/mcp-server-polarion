@@ -1415,8 +1415,34 @@ class TestUpdateWorkItemHappyPath:
         assert args == ("/projects/MyProj/workitems/MCPT-1",)
         params = kwargs["params"]
         assert params["include"] == "assignee"
-        assert "title" in params["fields[workitems]"]
-        assert "description" in params["fields[workitems]"]
+        # WI_DETAIL_FIELDS is the bare ``@all`` token so inline custom
+        # fields surface on ``current.custom_fields``; this assertion
+        # pins that semantics (changing it would silently drop customs).
+        assert params["fields[workitems]"] == "@all"
+
+    async def test_current_carries_custom_fields_from_post_patch_get(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Polarion inlines customs as top-level attrs; this WI happens to
+        # have ``asil`` and ``requirement_id`` populated. The post-PATCH
+        # GET reuses ``parse_work_item_detail`` so they must land on
+        # ``result.current.custom_fields`` automatically — guarding the
+        # cross-tool inheritance the fix relies on.
+        mock_client.patch.return_value = {}
+        get_response = _make_get_response(title="after")
+        data = cast(dict[str, object], get_response["data"])
+        attrs = cast(dict[str, object], data["attributes"])
+        attrs["asil"] = "B"
+        attrs["requirement_id"] = "REQ-42"
+        mock_client.get.return_value = get_response
+
+        result = await _call_update(mock_ctx, title="after")
+
+        assert result.current is not None
+        assert result.current.custom_fields == {
+            "asil": "B",
+            "requirement_id": "REQ-42",
+        }
 
     async def test_workflow_action_appended_as_query_param(
         self, mock_ctx: MagicMock, mock_client: AsyncMock

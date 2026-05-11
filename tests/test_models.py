@@ -183,6 +183,21 @@ class TestDocumentDetail:
         with pytest.raises(ValidationError):
             DocumentDetail()  # type: ignore[call-arg]
 
+    def test_custom_fields_default_empty(self):
+        d = DocumentDetail(title="Doc", content="")
+        assert d.custom_fields == {}
+
+    def test_custom_fields_round_trip(self):
+        rich = {"type": "text/html", "value": "<p>x</p>"}
+        d = DocumentDetail(
+            title="Doc",
+            content="",
+            custom_fields={"reviewedBy": "alice", "richNote": rich},
+        )
+        restored = DocumentDetail.model_validate(d.model_dump())
+        assert restored.custom_fields == d.custom_fields
+        assert restored.custom_fields["richNote"] == rich
+
 
 # ---------------------------------------------------------------------------
 # DocumentPart
@@ -398,6 +413,30 @@ class TestWorkItemDetail:
         assert detail.severity == ""
         assert detail.outline_number == ""
         assert detail.hyperlinks == []
+        assert detail.custom_fields == {}
+
+    def test_custom_fields_round_trip_heterogeneous_values(self):
+        # Custom-field values are intentionally `object`-typed: primitives
+        # and rich-text `{type: text/html, value: ...}` dicts must both
+        # survive a serialization round-trip unchanged.
+        rich = {"type": "text/html", "value": "<p>note</p>"}
+        detail = WorkItemDetail(
+            id="MCPT-542",
+            title="With customs",
+            type="requirement",
+            status="approved",
+            description="body",
+            project_id="proj1",
+            custom_fields={
+                "riskLevel": "high",
+                "effortHours": 8.0,
+                "approved": True,
+                "richNote": rich,
+            },
+        )
+        restored = WorkItemDetail.model_validate(detail.model_dump())
+        assert restored.custom_fields == detail.custom_fields
+        assert restored.custom_fields["richNote"] == rich
 
     def test_detail_specific_fields(self):
         detail = WorkItemDetail(
