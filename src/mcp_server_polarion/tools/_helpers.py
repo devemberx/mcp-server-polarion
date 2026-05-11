@@ -422,6 +422,13 @@ def merge_custom_fields(
       values. Polarion may interpret some of those as "clear"; clearing
       semantics are intentionally out of scope for this phase.
 
+    Aliasing: values are stored under ``attributes`` by reference — no
+    defensive copy. Callers must NOT mutate the ``customs`` dict (or any
+    nested value such as a ``{type, value}`` rich-text dict) between
+    handing it to this helper and the eventual ``client.post`` /
+    ``client.patch`` serialisation, or the on-wire payload will see the
+    later mutation.
+
     Args:
         attributes: The JSON:API ``attributes`` dict under construction.
             Mutated in place.

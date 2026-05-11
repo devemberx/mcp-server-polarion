@@ -263,6 +263,30 @@ class TestBuildWorkItemPayload:
                 custom_fields={"title": "y"},
             )
 
+    def test_custom_fields_skips_none_values_inside_dict(self) -> None:
+        # The merge helper already has direct coverage for skip-None;
+        # this test pins that the create-payload's wrapper invocation
+        # honours the same semantics — a ``None`` value inside the dict
+        # MUST NOT land under ``attributes``, while falsy non-``None``
+        # values (e.g. 0) pass through.
+        payload = _build_work_item_payload(
+            title="t",
+            type="task",
+            description_html="",
+            status=None,
+            priority=None,
+            severity=None,
+            assignee_ids=None,
+            due_date=None,
+            initial_estimate=None,
+            hyperlinks=None,
+            custom_fields={"riskLevel": None, "effortHours": 0},
+        )
+        item = cast(list[dict[str, object]], payload["data"])[0]
+        attrs = cast(dict[str, object], item["attributes"])
+        assert "riskLevel" not in attrs
+        assert attrs["effortHours"] == 0
+
 
 # ---------------------------------------------------------------------------
 # _extract_created_id
