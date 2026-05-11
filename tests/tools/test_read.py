@@ -800,6 +800,7 @@ class TestGetDocument:
         assert result.status == "approved"
         assert "SRS" in result.content
         assert "<p>" not in result.content
+        assert result.custom_fields == {}
 
     async def test_include_content_false_omits_content(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -989,6 +990,102 @@ class TestGetDocument:
         assert "##" not in result.content
         assert "Intro paragraph" in result.content
         assert "Detail text" in result.content
+
+    async def test_custom_fields_populated_from_response(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """customFields dict on the response flows through verbatim."""
+        rich_value = {"type": "text/html", "value": "<p>note</p>"}
+        mock_client.get.return_value = {
+            "data": {
+                "id": "proj1/_default/SRS",
+                "attributes": {
+                    "title": "SRS",
+                    "type": "req_specification",
+                    "status": "approved",
+                    "customFields": {
+                        "reviewedBy": "alice",
+                        "complianceLevel": 3,
+                        "richNote": rich_value,
+                    },
+                },
+            },
+        }
+
+        result = await get_document(
+            mock_ctx,
+            project_id="proj1",
+            space_id="_default",
+            document_name="SRS",
+            include_content=False,
+        )
+
+        # Raw passthrough: rich-text values stay as the original
+        # {type, value} dict — they are NOT converted to Markdown.
+        assert result.custom_fields == {
+            "reviewedBy": "alice",
+            "complianceLevel": 3,
+            "richNote": rich_value,
+        }
+
+    async def test_custom_fields_empty_when_missing(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Absent customFields key → empty dict, never None or KeyError."""
+        mock_client.get.return_value = {
+            "data": {
+                "attributes": {
+                    "title": "Plain Doc",
+                    "type": "generic",
+                    "status": "draft",
+                },
+            },
+        }
+
+        result = await get_document(
+            mock_ctx,
+            project_id="proj1",
+            space_id="_default",
+            document_name="Plain",
+            include_content=False,
+        )
+
+        assert result.custom_fields == {}
+
+    async def test_sparse_fieldset_requests_custom_fields_token(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """``customFields.@all`` MUST be in fields[documents] regardless of
+        include_content."""
+        mock_client.get.return_value = {
+            "data": {
+                "attributes": {"title": "x", "type": "generic", "status": "draft"},
+            },
+        }
+
+        # include_content=False path
+        await get_document(
+            mock_ctx,
+            project_id="proj1",
+            space_id="_default",
+            document_name="A",
+            include_content=False,
+        )
+        _, kwargs_a = mock_client.get.call_args
+        assert "customFields.@all" in kwargs_a["params"]["fields[documents]"]
+
+        # include_content=True path — must still include the token
+        await get_document(
+            mock_ctx,
+            project_id="proj1",
+            space_id="_default",
+            document_name="B",
+            include_content=True,
+        )
+        _, kwargs_b = mock_client.get.call_args
+        fields_b = kwargs_b["params"]["fields[documents]"]
+        assert "customFields.@all" in fields_b
+        assert "homePageContent" in fields_b
 
 
 # ---------------------------------------------------------------------------

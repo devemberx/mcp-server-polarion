@@ -127,6 +127,18 @@ class DocumentDetail(BaseModel):
             "``include_content=True``; otherwise an empty string."
         ),
     )
+    custom_fields: dict[str, object] = Field(
+        default_factory=dict,
+        description=(
+            "User-defined custom fields configured per project and "
+            "document type. Keys are project-specific custom field IDs; "
+            "values are heterogeneous (string, int, float, bool, list, "
+            "or ``{'type': 'text/html', 'value': '<...>'}`` for rich-text "
+            "custom fields — kept raw, NOT converted to Markdown, so the "
+            "shape round-trips back to Polarion unchanged). Empty dict "
+            "when no custom fields are populated on the document."
+        ),
+    )
 
 
 class DocumentPart(BaseModel):

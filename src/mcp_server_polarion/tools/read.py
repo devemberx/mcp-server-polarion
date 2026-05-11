@@ -41,6 +41,7 @@ from mcp_server_polarion.tools._helpers import (
     build_included_workitem_map,
     compute_has_more,
     encode_path_segment,
+    extract_custom_fields,
     extract_relationship_id,
     extract_short_id,
     extract_total_count,
@@ -772,6 +773,11 @@ async def get_document(
         - ``status``: Workflow status (e.g. 'draft').
         - ``content``: Document body in Markdown — only populated when
         - ``include_content=True``, otherwise empty.
+        - ``custom_fields``: User-defined custom fields as a
+          ``{fieldId: value}`` dict. Keys vary per project and document
+          type; values are returned verbatim (primitives or
+          ``{type: 'text/html', value: '<...>'}`` for rich-text fields).
+          Empty dict when no custom fields are populated.
 
     Raises:
         ValueError: If the document, space, or project is not found.
@@ -786,7 +792,10 @@ async def get_document(
         f"/documents/{encoded_name}"
     )
 
-    fields = "title,type,status"
+    # ``customFields.@all`` is always requested so the document's
+    # project-specific custom fields flow through, regardless of whether
+    # the caller also asked for the home-page body.
+    fields = "title,type,status,customFields.@all"
     if include_content:
         fields = f"{fields},homePageContent"
 
@@ -838,6 +847,7 @@ async def get_document(
         type=safe_str(attrs.get("type", "")),
         status=safe_str(attrs.get("status", "")),
         content=content_md,
+        custom_fields=extract_custom_fields(attrs),
     )
 
 

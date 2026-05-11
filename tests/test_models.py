@@ -183,6 +183,21 @@ class TestDocumentDetail:
         with pytest.raises(ValidationError):
             DocumentDetail()  # type: ignore[call-arg]
 
+    def test_custom_fields_default_empty(self):
+        d = DocumentDetail(title="Doc", content="")
+        assert d.custom_fields == {}
+
+    def test_custom_fields_round_trip(self):
+        rich = {"type": "text/html", "value": "<p>x</p>"}
+        d = DocumentDetail(
+            title="Doc",
+            content="",
+            custom_fields={"reviewedBy": "alice", "richNote": rich},
+        )
+        restored = DocumentDetail.model_validate(d.model_dump())
+        assert restored.custom_fields == d.custom_fields
+        assert restored.custom_fields["richNote"] == rich
+
 
 # ---------------------------------------------------------------------------
 # DocumentPart
