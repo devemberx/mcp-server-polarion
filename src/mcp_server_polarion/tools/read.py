@@ -737,7 +737,11 @@ async def get_document(
             "embedded work-item bodies are stored in separate work items "
             "and are NOT included here. For end-to-end reading use "
             "``read_document``; this option is for round-trip editing of "
-            "the raw source."
+            "the raw source. FOOTGUN: do NOT feed ``content_html`` from "
+            "a False-flagged read back into "
+            "``update_document(home_page_content_html=...)`` — the field "
+            "is blanked to ``''``, and the update tool REJECTS the empty "
+            "string at the body-wipe guard."
         ),
     ),
 ) -> DocumentDetail:
@@ -1318,7 +1322,12 @@ async def get_work_item(
             "token that surfaces inline custom fields, and Polarion drops "
             "any attempt to exclude individual standard fields). Setting "
             "this False therefore only saves LLM context tokens — not "
-            "network bytes."
+            "network bytes. FOOTGUN: do NOT feed ``description_html`` "
+            "from a False-flagged read back into "
+            "``update_work_item(description_html=...)`` — the field is "
+            "blanked to ``''`` for token savings, and the update tool "
+            "treats empty strings as 'leave unchanged', so the round-trip "
+            "would silently no-op instead of preserving the body."
         ),
     ),
 ) -> WorkItemDetail:
