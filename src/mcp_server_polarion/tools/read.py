@@ -819,7 +819,8 @@ async def get_document(
     # field lists silently drop them; ``customFields.@all`` / ``@custom``
     # are no-ops on this server. The bandwidth cost — ``homePageContent``
     # always travels over the wire — is paid in network bytes only; the
-    # tool still hides the body from the LLM when ``include_content=False``.
+    # tool still hides the body from the LLM when
+    # ``include_homepage_content_html=False``.
     try:
         response = await client.get(
             path,
@@ -1085,10 +1086,10 @@ async def read_document(  # noqa: PLR0913
     **Use this for reading.** Other document tools have narrower jobs:
 
     - ``get_document`` — title/type/status only (and the raw
-      ``homePageContent`` source via ``include_content=True``, which is
-      incomplete for reading because Polarion stores heading text and
-      embedded work-item bodies in *separate* work items rather than in
-      ``homePageContent``).
+      ``homePageContent`` source via ``include_homepage_content_html=True``,
+      which is incomplete for reading because Polarion stores heading
+      text and embedded work-item bodies in *separate* work items
+      rather than in ``homePageContent``).
     - ``get_document_parts`` — structural enumeration with per-part IDs,
       heading levels, and work-item metadata. Use it when you need part
       IDs for ``move_work_item_to_document`` or per-WI status/type, not

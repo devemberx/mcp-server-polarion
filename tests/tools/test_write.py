@@ -711,6 +711,13 @@ class TestCreateWorkItemFieldValidation:
     def test_type_accepts_non_empty(self) -> None:
         assert self._adapter_for("type").validate_python("task") == "task"
 
+    def test_description_rejects_overlong_input(self) -> None:
+        """``max_length=MAX_BODY_HTML_LEN`` defends against runaway Markdown."""
+        adapter = self._adapter_for("description")
+        assert adapter.validate_python("hello") == "hello"
+        with pytest.raises(ValidationError):
+            adapter.validate_python("x" * (2_000_000 + 1))
+
 
 # ===========================================================================
 # move_work_item_to_document
@@ -1357,6 +1364,42 @@ class TestUpdateWorkItemValidation:
         mock_client.patch.assert_not_called()
         mock_client.get.assert_not_called()
 
+    async def test_empty_description_html_is_noop(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """``description_html=''`` is "leave unchanged" — never PATCHes.
+
+        Asymmetric vs ``update_document(home_page_content_html='')`` which
+        RAISES (see test_home_page_content_html_empty_string_raises). The
+        difference is justified by blast radius: clearing a single WI's
+        description is recoverable; wiping a document body orphans every
+        heading WI inside it.
+        """
+        with pytest.raises(ValueError, match="Nothing to update"):
+            await _call_update(mock_ctx, description_html="")
+        mock_client.patch.assert_not_called()
+        mock_client.get.assert_not_called()
+
+    async def test_empty_description_html_with_other_field_drops_description(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """``description_html=''`` is skipped from the PATCH body even when
+        paired with other fields — the existing description is preserved."""
+        result = await _call_update(
+            mock_ctx,
+            title="new title",
+            description_html="",
+            dry_run=True,
+        )
+        # changes summary excludes the empty description_html.
+        assert result.changes == {"title": "new title"}
+        # Wire payload has only the title — no description key at all.
+        assert result.payload_preview is not None
+        item = cast(dict[str, object], result.payload_preview["data"])
+        attrs = cast(dict[str, object], item["attributes"])
+        assert "description" not in attrs
+        assert attrs == {"title": "new title"}
+
     async def test_custom_fields_alone_satisfies_at_least_one_check(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
@@ -1839,6 +1882,20 @@ class TestUpdateWorkItemFieldValidation:
     def test_work_item_id_accepts_non_empty(self) -> None:
         assert self._adapter_for("work_item_id").validate_python("MCPT-1") == "MCPT-1"
 
+    def test_description_html_rejects_overlong_input(self) -> None:
+        """``max_length=MAX_BODY_HTML_LEN`` defends against runaway HTML.
+
+        At the JSON Schema layer, FastMCP rejects bodies above the cap
+        before the tool ever sees them. Re-prove the constraint here so
+        a future docstring rewrite cannot silently drop ``max_length``.
+        """
+        adapter = self._adapter_for("description_html")
+        # Well-formed payload below the cap is accepted unchanged.
+        assert adapter.validate_python("<p>ok</p>") == "<p>ok</p>"
+        # 2 MiB + 1 char is rejected.
+        with pytest.raises(ValidationError):
+            adapter.validate_python("x" * (2_000_000 + 1))
+
 
 # ===========================================================================
 # update_document
@@ -2090,6 +2147,39 @@ class TestUpdateDocumentValidation:
         )
         assert result.dry_run is True
 
+    async def test_workflow_action_with_home_page_content_html_passes(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """workflow_action paired with home_page_content_html only is OK.
+
+        Polarion rejects empty PATCH bodies, so workflow_action MUST come
+        with at least one attribute. home_page_content_html is one such
+        attribute — this guard prevents the body-field check from
+        regressing to "title/status/type/custom_fields only".
+        """
+        result = await update_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title=None,
+            status=None,
+            type=None,
+            home_page_content_html="<p>new body</p>",
+            custom_fields=None,
+            workflow_action="approve",
+            dry_run=True,
+        )
+        assert result.dry_run is True
+        # Sanity: payload includes both the body and the workflow query param.
+        assert result.payload_preview is not None
+        item = cast(dict[str, object], result.payload_preview["data"])
+        attrs = cast(dict[str, object], item["attributes"])
+        assert attrs["homePageContent"] == {
+            "type": "text/html",
+            "value": "<p>new body</p>",
+        }
+
     async def test_custom_fields_collision_raises(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
@@ -2104,6 +2194,36 @@ class TestUpdateDocumentValidation:
                 type=None,
                 home_page_content_html=None,
                 custom_fields={"title": "y"},
+                workflow_action=None,
+                dry_run=True,
+            )
+        mock_client.patch.assert_not_called()
+
+    async def test_custom_fields_homepagecontent_collision_raises(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """`homePageContent` is a STANDARD_DOCUMENT_ATTRS key.
+
+        Allowing it via ``custom_fields`` would let a caller bypass the
+        explicit ``home_page_content_html`` parameter (and its empty-string
+        guard). The merge helper raises on collision; pin that semantics.
+        """
+        with pytest.raises(ValueError, match="custom_fields keys collide"):
+            await update_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="S",
+                document_name="D",
+                title="t",
+                status=None,
+                type=None,
+                home_page_content_html=None,
+                custom_fields={
+                    "homePageContent": {
+                        "type": "text/html",
+                        "value": "<p>sneak</p>",
+                    }
+                },
                 workflow_action=None,
                 dry_run=True,
             )
@@ -2498,6 +2618,13 @@ class TestUpdateDocumentFieldValidation:
     def test_optional_metadata_fields_accept_none(self) -> None:
         for name in ("title", "status", "type", "workflow_action"):
             assert self._adapter_for(name).validate_python(None) is None
+
+    def test_home_page_content_html_rejects_overlong_input(self) -> None:
+        """``max_length=MAX_BODY_HTML_LEN`` defends against runaway HTML."""
+        adapter = self._adapter_for("home_page_content_html")
+        assert adapter.validate_python("<p>ok</p>") == "<p>ok</p>"
+        with pytest.raises(ValidationError):
+            adapter.validate_python("x" * (2_000_000 + 1))
 
 
 # ---------------------------------------------------------------------------
