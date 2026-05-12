@@ -102,8 +102,44 @@ def html_to_markdown(html: str) -> str:
     if not html or not html.strip():
         return ""
     expanded = _expand_merged_table_cells(html)
-    result: str = markdownify(expanded, heading_style="ATX", strip=["img"])
+    rewritten = _fill_empty_img_alt(expanded)
+    result: str = markdownify(rewritten, heading_style="ATX")
     return result.strip()
+
+
+def _fill_empty_img_alt(html: str) -> str:
+    """Populate empty ``alt`` on ``<img>`` so markdownify emits a readable label.
+
+    ``markdownify`` outputs ``![](src "title")`` when ``alt`` is empty.  In a UI
+    renderer a broken image with empty alt shows no inline fallback text, so a
+    user reading the surrounding Markdown loses any signal about the attachment.
+    Polarion stores image attachments inline as ``<img src="attachment:..."/>``
+    or ``<img src="workitemimg:..."/>`` and typically puts the original filename
+    on ``title`` rather than ``alt``; promote ``title`` to ``alt``, falling back
+    to the filename portion of ``src`` (the segment after the first ``:``), and
+    drop ``title`` so the output stays ``![alt](src)`` without a redundant title
+    inside the parentheses.
+    """
+    if "<img" not in html.lower():
+        return html
+    soup = BeautifulSoup(html, "html.parser")
+    for img in soup.find_all("img"):
+        existing_alt = img.attrs.get("alt", "")
+        if isinstance(existing_alt, str) and existing_alt.strip():
+            continue
+        src_raw = img.attrs.get("src", "")
+        src = src_raw if isinstance(src_raw, str) else ""
+        title_raw = img.attrs.get("title", "")
+        title = title_raw if isinstance(title_raw, str) else ""
+        label = title.strip()
+        if not label:
+            _, sep, after = src.partition(":")
+            label = after if sep else src
+        if label:
+            img["alt"] = label
+        if "title" in img.attrs:
+            del img.attrs["title"]
+    return str(soup)
 
 
 def _expand_merged_table_cells(html: str) -> str:
