@@ -109,12 +109,56 @@ class TestHtmlToMarkdown:
         assert "$100" in result
         assert "&" in result
 
-    def test_img_stripped(self) -> None:
-        html = '<p>Before <img src="pic.jpg"/> After</p>'
+    def test_empty_alt_filled_from_title(self) -> None:
+        """``<img title="X" src="...">`` (no alt) becomes ``![X](src)``.
+
+        Polarion stores the upload filename in ``title``; promoting it to
+        ``alt`` and dropping ``title`` keeps the rendered Markdown to a single
+        canonical label without a redundant ``"X"`` inside the parentheses.
+        """
+        html = '<img src="attachment:1-shot.png" title="shot.png"/>'
+        result = html_to_markdown(html)
+        assert "![shot.png](attachment:1-shot.png)" in result
+        assert '"shot.png"' not in result
+
+    def test_empty_alt_filled_from_src_filename(self) -> None:
+        """No alt, no title -> alt derived from the segment after ``:`` in src.
+
+        Real Polarion descriptions occasionally carry attachment imgs without
+        a title attribute (e.g. when pasted from the clipboard); the filename
+        portion of ``src`` is the only readable label available.
+        """
+        html = (
+            '<img src="attachment:1-screenshot-20260512-142738-1.png" '
+            'style="max-width: 650px;"/>'
+        )
+        result = html_to_markdown(html)
+        assert (
+            "![1-screenshot-20260512-142738-1.png]"
+            "(attachment:1-screenshot-20260512-142738-1.png)" in result
+        )
+
+    def test_existing_alt_preserved(self) -> None:
+        """An img that already carries a non-empty alt is left alone."""
+        html = '<img alt="My picture" src="workitemimg:1-foo.png" title="foo.png"/>'
+        result = html_to_markdown(html)
+        assert "![My picture](workitemimg:1-foo.png" in result
+
+    def test_non_attachment_img_passes_through(self) -> None:
+        """External imgs are no longer filtered — markdownify emits them verbatim.
+
+        The previous attachment-prefix whitelist filtered out external URLs as
+        a defensive measure, but smoke tests showed Polarion descriptions never
+        contain them in practice, and filtering added complexity without value.
+        Let markdownify render them so the caller can see what was there.
+        """
+        html = '<p>Before <img src="https://example.com/pic.jpg"/> After</p>'
         result = html_to_markdown(html)
         assert "Before" in result
         assert "After" in result
-        assert "img" not in result.lower()
+        # Lock the exact emitted form: src is preserved on a bare ![](src) since
+        # the external img carries no alt or title to promote.
+        assert "![](https://example.com/pic.jpg)" in result
 
     def test_nested_formatting(self) -> None:
         html = "<p><strong><em>bold italic</em></strong></p>"
