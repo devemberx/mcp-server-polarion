@@ -156,7 +156,9 @@ class TestHtmlToMarkdown:
         result = html_to_markdown(html)
         assert "Before" in result
         assert "After" in result
-        assert "https://example.com/pic.jpg" in result
+        # Lock the exact emitted form: src is preserved on a bare ![](src) since
+        # the external img carries no alt or title to promote.
+        assert "![](https://example.com/pic.jpg)" in result
 
     def test_nested_formatting(self) -> None:
         html = "<p><strong><em>bold italic</em></strong></p>"

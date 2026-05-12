@@ -119,6 +119,12 @@ def _fill_empty_img_alt(html: str) -> str:
     to the filename portion of ``src`` (the segment after the first ``:``), and
     drop ``title`` so the output stays ``![alt](src)`` without a redundant title
     inside the parentheses.
+
+    The src-filename fallback is skipped for absolute URLs (``://`` present),
+    since the post-colon segment of ``https://host/path`` is the authority plus
+    path — not a filename — and would produce a misleading alt like
+    ``![//host/path](https://host/path)``.  External imgs without alt or title
+    therefore emit as ``![](src)`` instead.
     """
     if "<img" not in html.lower():
         return html
@@ -132,7 +138,7 @@ def _fill_empty_img_alt(html: str) -> str:
         title_raw = img.attrs.get("title", "")
         title = title_raw if isinstance(title_raw, str) else ""
         label = title.strip()
-        if not label:
+        if not label and "://" not in src:
             _, sep, after = src.partition(":")
             label = after if sep else src
         if label:
