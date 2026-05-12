@@ -1,9 +1,18 @@
 """Read-only MCP tools for querying Polarion ALM.
 
 Eight tools that retrieve projects, documents, work items, and their
-relationships.  Every tool returns Pydantic models -- never raw
-``dict`` -- and converts HTML descriptions to Markdown via
-``html_to_markdown()``.
+relationships.  Every tool returns Pydantic models -- never raw ``dict``.
+
+Body fields use two different formats depending on the tool's purpose:
+
+* **Round-trip paths** -- ``get_work_item`` and ``get_document`` return
+  raw Polarion HTML (``description_html``, ``content_html``). Same shape
+  round-trips back through the matching ``update_*`` tool without lossy
+  Markdown conversion.
+* **Synthesis paths** -- ``read_document`` and ``get_document_parts``
+  convert HTML to Markdown via ``html_to_markdown()`` for LLM
+  consumption. Output from these tools is read-only and cannot be fed
+  back to write tools.
 """
 
 from __future__ import annotations
@@ -40,6 +49,7 @@ from mcp_server_polarion.tools._helpers import (
     STANDARD_DOCUMENT_ATTRS,
     WI_DETAIL_FIELDS,
     WI_LIST_FIELDS,
+    WI_PART_FIELDS,
     build_included_workitem_map,
     compute_has_more,
     encode_path_segment,
@@ -714,47 +724,54 @@ async def get_document(
             "Spaces in the name are handled automatically."
         ),
     ),
-    include_content: bool = Field(
+    include_homepage_content_html: bool = Field(
         default=False,
         description=(
             "When True, also fetch and return the document's homePageContent "
-            "as Markdown in the ``content`` field. Off by default because "
-            "homePageContent can be large (tens of KB) and most callers only "
-            "need metadata. NOTE: ``homePageContent`` contains only the inline "
-            "prose between parts — heading text and embedded work-item bodies "
-            "are stored in separate work items and are NOT included here. "
-            "For end-to-end reading use ``read_document``; this option is for "
-            "round-trip editing of the raw source."
+            "as RAW Polarion HTML in the ``content_html`` field — the same "
+            "shape that round-trips back through "
+            "``update_document(home_page_content_html=...)``. Off by default "
+            "because homePageContent can be large (tens of KB) and most "
+            "callers only need metadata. NOTE: ``homePageContent`` contains "
+            "only the inline prose between parts — heading text and "
+            "embedded work-item bodies are stored in separate work items "
+            "and are NOT included here. For end-to-end reading use "
+            "``read_document``; this option is for round-trip editing of "
+            "the raw source."
         ),
     ),
 ) -> DocumentDetail:
     """Get metadata (and optionally the raw body source) for a Polarion document.
 
     Returns the document's title, type, and workflow status. By default
-    the ``content`` field is empty; set ``include_content=True`` to also
-    fetch ``homePageContent`` (converted to Markdown). Empty headings
-    inside the home-page content are stripped automatically.
+    the ``content_html`` field is empty; set
+    ``include_homepage_content_html=True`` to also fetch
+    ``homePageContent`` as raw Polarion HTML. The HTML is returned
+    verbatim (no Markdown conversion, no sanitization) so it round-trips
+    back through ``update_document(home_page_content_html=...)`` losslessly.
 
     **When to use which document tool**:
 
     - Want to read or summarise the document body? Use ``read_document``
       — it interleaves heading titles + embedded work-item bodies + prose
-      into a single Markdown stream. ``get_document(include_content=True)``
-      returns ``homePageContent`` only, which omits heading text and
+      into a single Markdown stream.
+      ``get_document(include_homepage_content_html=True)`` returns the
+      raw ``homePageContent`` HTML only, which omits heading text and
       embedded work-item bodies (Polarion stores those in separate work
-      items, not in ``homePageContent``).
+      items, not in ``homePageContent``) — use it for round-trip editing
+      of the source, not for reading.
     - Need the structured part list (heading levels, work-item IDs,
       embedded work-item descriptions)? Use ``get_document_parts``.
       Each ``workitem`` part already includes its ``description`` in
       Markdown, so no follow-up ``get_work_item`` call is required.
-    - Just need title/type/status? Leave ``include_content=False``
-      (default) to keep the response small.
+    - Just need title/type/status? Leave ``include_homepage_content_html``
+      at its default of False to keep the response small.
 
     Polarion stores **heading text in work-item titles**, not in
-    ``homePageContent``, so the home-page Markdown contains the
-    inline rich-text body but not the heading wording — call
-    ``read_document`` for the assembled body or ``get_document_parts``
-    when the structural metadata matters.
+    ``homePageContent``, so the home-page HTML contains the inline
+    rich-text body but not the heading wording — call ``read_document``
+    for the assembled body or ``get_document_parts`` when the
+    structural metadata matters.
 
     Use ``list_documents`` first to discover valid space IDs and
     document names.
@@ -764,17 +781,20 @@ async def get_document(
         project_id: Polarion project ID.
         space_id: Space ID containing the document.
         document_name: Document name within the space.
-        include_content: When True, also return the homePageContent
-            converted to Markdown. Default False to keep the response
-            small.
+        include_homepage_content_html: When True, also return the
+            ``homePageContent`` as raw Polarion HTML in
+            ``content_html``. Default False to keep the response small.
 
     Returns:
         DocumentDetail with:
         - ``title``: Document title.
         - ``type``: Document type (e.g. 'req_specification').
         - ``status``: Workflow status (e.g. 'draft').
-        - ``content``: Document body in Markdown — only populated when
-        - ``include_content=True``, otherwise empty.
+        - ``content_html``: Document body as raw Polarion HTML — only
+          populated when ``include_homepage_content_html=True``,
+          otherwise empty. Pass this string verbatim to
+          ``update_document(home_page_content_html=...)`` for a
+          lossless round-trip.
         - ``custom_fields``: User-defined custom fields as a
           ``{fieldId: value}`` dict. Keys vary per project and document
           type; values are returned verbatim (primitives or
@@ -827,27 +847,22 @@ async def get_document(
     if not isinstance(attrs, dict):
         attrs = {}
 
-    content_md = ""
-    if include_content:
+    content_html = ""
+    if include_homepage_content_html:
         # homePageContent is always HTML:
         # { "type": "text/html", "value": "<p>...</p>" }
+        # Pass through verbatim — no markdownify, no sanitize — so the
+        # value round-trips through update_document(home_page_content_html=)
+        # without losing Polarion-specific spans / data attributes.
         content_obj = attrs.get("homePageContent", {})
-        content_html = ""
         if isinstance(content_obj, dict):
             content_html = safe_str(content_obj.get("value", ""))
-
-        content_md = html_to_markdown(content_html)
-        # Polarion stores heading text in work-item titles, so the
-        # document body often contains empty headings (e.g. "## \n").
-        # Strip them to reduce noise for the LLM.
-        content_md = re.sub(r"^#{1,6}\s*$", "", content_md, flags=re.MULTILINE)
-        content_md = re.sub(r"\n{3,}", "\n\n", content_md).strip()
 
     return DocumentDetail(
         title=safe_str(attrs.get("title", "")),
         type=safe_str(attrs.get("type", "")),
         status=safe_str(attrs.get("status", "")),
-        content=content_md,
+        content_html=content_html,
         custom_fields=extract_custom_fields(attrs, STANDARD_DOCUMENT_ATTRS),
     )
 
@@ -968,7 +983,11 @@ async def get_document_parts(  # noqa: PLR0913
             path,
             params={
                 "fields[document_parts]": "@all",
-                "fields[workitems]": WI_DETAIL_FIELDS,
+                # DocumentPart only consumes title/type/status/description
+                # from the linked WI — sending ``@all`` here would ship
+                # every inline custom field (often KBs per page) for no
+                # downstream use. WI_PART_FIELDS keeps the payload tight.
+                "fields[workitems]": WI_PART_FIELDS,
                 "include": "workItem",
                 "page[size]": page_size,
                 "page[number]": page_number,
@@ -1285,17 +1304,39 @@ async def get_work_item(
             "Use ``list_work_items`` to discover valid IDs."
         ),
     ),
+    include_description_html: bool = Field(
+        default=False,
+        description=(
+            "When True, populate ``description_html`` with the work "
+            "item's raw Polarion HTML body — the same shape that "
+            "round-trips back through "
+            "``update_work_item(description_html=...)``. Default False to "
+            "keep responses small for list-style scans. NOTE: due to "
+            "Polarion server constraints, ``description`` ALWAYS travels "
+            "over the wire (the ``@all`` sparse fieldset is the only "
+            "token that surfaces inline custom fields, and Polarion drops "
+            "any attempt to exclude individual standard fields). Setting "
+            "this False therefore only saves LLM context tokens — not "
+            "network bytes."
+        ),
+    ),
 ) -> WorkItemDetail:
     """Get full details of a single Polarion work item.
 
-    Retrieves the complete work item including its description (converted
-    to Markdown).  Use ``list_work_items`` first to discover valid work
+    Retrieves the complete work item. The description is returned as raw
+    Polarion HTML (``description_html``) when
+    ``include_description_html=True``, preserving Polarion-specific spans
+    and data attributes so the value round-trips back through
+    ``update_work_item(description_html=...)`` without lossy Markdown
+    conversion. Use ``list_work_items`` first to discover valid work
     item IDs.
 
     Args:
         ctx: MCP tool context (injected automatically).
         project_id: Polarion project ID.
         work_item_id: Work Item ID (e.g. 'MCPT-001').
+        include_description_html: When True, populate
+            ``description_html`` with the raw HTML body. Default False.
 
     Returns:
         WorkItemDetail with:
@@ -1318,7 +1359,11 @@ async def get_work_item(
           (e.g. 'blocker', 'critical'); empty otherwise.
         - ``hyperlinks``: External hyperlinks as ``Hyperlink`` items
           with ``role``, ``title``, ``uri`` fields.
-        - ``description``: Full description in Markdown.
+        - ``description_html``: Raw Polarion HTML body — populated only
+          when ``include_description_html=True``, otherwise empty.
+          Pass this string verbatim back to
+          ``update_work_item(description_html=...)`` for a lossless
+          round-trip.
         - ``project_id``: Containing project.
         - ``custom_fields``: User-defined custom fields as a
           ``{fieldId: value}`` dict. Keys vary per project and work-item
@@ -1360,11 +1405,18 @@ async def get_work_item(
     if not isinstance(data, dict):
         data = {}
 
-    return parse_work_item_detail(
+    detail = parse_work_item_detail(
         data,
         project_id=project_id,
         fallback_id=work_item_id,
     )
+    if not include_description_html:
+        # Polarion has no sparse-fieldset that surfaces customs while
+        # excluding ``description``, so the body still travels over the
+        # wire. Blanking it here saves LLM context tokens — that is the
+        # contract advertised on the ``include_description_html`` flag.
+        detail = detail.model_copy(update={"description_html": ""})
+    return detail
 
 
 @mcp.tool(

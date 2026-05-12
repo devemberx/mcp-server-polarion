@@ -119,12 +119,18 @@ class DocumentDetail(BaseModel):
             "Empty string when the server does not report a status."
         ),
     )
-    content: str = Field(
+    content_html: str = Field(
         default="",
         description=(
-            "Document body (homePageContent) converted to Markdown. "
-            "Only populated when ``get_document`` is called with "
-            "``include_content=True``; otherwise an empty string."
+            "Document body (homePageContent) as raw Polarion HTML. Only "
+            "populated when ``get_document`` is called with "
+            "``include_homepage_content_html=True``; otherwise an empty "
+            "string. The same shape round-trips back through "
+            "``update_document(home_page_content_html=...)`` without "
+            "lossy Markdown conversion. NOTE: incomplete for end-to-end "
+            "reading — heading text and embedded work-item bodies live in "
+            "separate work items, not in homePageContent; use "
+            "``read_document`` for the assembled body."
         ),
     )
     custom_fields: dict[str, object] = Field(
@@ -238,7 +244,7 @@ class DocumentReadResult(BaseModel):
     The output is read-only synthesis: it cannot be fed back to any
     write tool because no update path accepts this shape. For round-trip
     editing of the document body, fetch the raw source via
-    ``get_document(include_content=True)`` instead.
+    ``get_document(include_homepage_content_html=True)`` instead.
     """
 
     content: str = Field(
@@ -354,10 +360,17 @@ class WorkItemDetail(WorkItemSummary):
     outline position, external hyperlinks).
     """
 
-    description: str = Field(
+    description_html: str = Field(
+        default="",
         description=(
-            "Work Item description converted to Markdown. "
-            "Empty string when the work item has no description."
+            "Work Item description as raw Polarion HTML. The same shape "
+            "round-trips back through ``update_work_item(description_html"
+            "=...)`` without lossy Markdown conversion. Empty string when "
+            "the work item has no description or when "
+            "``include_description_html=False`` was passed. WARNING: may "
+            "contain Polarion-specific spans / ``data-*`` attributes — "
+            "do NOT run through a Markdown converter or sanitizer; those "
+            "would strip the Polarion-side markers and break the round-trip."
         ),
     )
     project_id: str = Field(

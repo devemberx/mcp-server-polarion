@@ -244,6 +244,7 @@ def _build_update_document_payload(  # noqa: PLR0913
     title: str | None,
     status: str | None,
     type: str | None,
+    home_page_content_html: str | None = None,
     custom_fields: dict[str, object] | None = None,
 ) -> dict[str, JsonValue]:
     """Build the JSON:API request body for ``PATCH .../documents/{d}``.
@@ -257,11 +258,11 @@ def _build_update_document_payload(  # noqa: PLR0913
     inlined into ``attributes`` via ``merge_custom_fields``; colliding
     keys raise ``ValueError``.
 
-    NOTE: ``homePageContent`` is intentionally NOT exposed here. Body
-    edits go through dedicated part-creation tools (e.g. a future
-    ``create_document_parts``) so that ``update_document`` cannot
-    accidentally wipe a document's body via the lossy Markdown
-    round-trip.
+    ``home_page_content_html`` is treated as RAW Polarion HTML and is
+    wrapped verbatim into ``{"type":"text/html","value":...}`` — no
+    sanitization, no Markdown conversion. The body-clearing guard
+    (rejecting empty strings) lives in the tool layer (``update_document``)
+    rather than here so direct callers can opt out if needed.
     """
     attributes: dict[str, JsonValue] = {}
     if title is not None:
@@ -270,6 +271,11 @@ def _build_update_document_payload(  # noqa: PLR0913
         attributes["status"] = status
     if type is not None:
         attributes["type"] = type
+    if home_page_content_html is not None:
+        attributes["homePageContent"] = {
+            "type": "text/html",
+            "value": home_page_content_html,
+        }
     merge_custom_fields(attributes, custom_fields, STANDARD_DOCUMENT_ATTRS)
 
     item: dict[str, JsonValue] = {
@@ -414,6 +420,13 @@ async def create_work_item(  # noqa: PLR0913
     ``{"type": "text/html", "value": "..."}``. Dangerous link schemes
     such as ``javascript:`` are stripped automatically.
 
+    Note on the asymmetry: ``create_work_item`` accepts MARKDOWN here
+    because greenfield authoring is the LLM's natural medium. Once the
+    work item exists, the round-trip pair is
+    ``get_work_item(..., include_description_html=True)`` →
+    ``update_work_item(description_html=...)`` which speaks RAW HTML
+    verbatim. The two format paths never mix.
+
     Free-form fields (``type``, ``status``, ``priority``, ``severity``)
     are NOT strictly validated by this Polarion server version.
     Unrecognised ``priority`` values are silently coerced to the project
@@ -542,13 +555,21 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
         default=None,
         description=("New work item title. Pass None (or omit) to leave unchanged."),
     ),
-    description: str | None = Field(
+    description_html: str | None = Field(
         default=None,
         description=(
-            "New Markdown body. Converted to Polarion-safe HTML on write. "
-            "Pass None (or omit) to leave the description unchanged. "
-            "Note: empty string also leaves the field unchanged in v1 — "
-            "there is no way to clear an existing description via this tool."
+            "New work-item body as RAW Polarion HTML — the same shape "
+            "returned by ``get_work_item(..., include_description_html=True)"
+            ".description_html``. Pass None (or omit) to leave the "
+            "description unchanged; empty string is also treated as "
+            "'leave unchanged' in v1 (there is no way to clear an "
+            "existing description via this tool). "
+            "WARNING: HTML is sent VERBATIM to Polarion — no sanitization "
+            "is performed because sanitizing would strip Polarion-specific "
+            "spans / data attributes and break the round-trip. NEVER pass "
+            "untrusted user input here. For greenfield Markdown authoring "
+            "use ``create_work_item(description=...)`` instead — the two "
+            "format paths never mix."
         ),
     ),
     status: str | None = Field(
@@ -676,10 +697,14 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     value via this tool in v1. To actually change a field, pass a
     non-empty value.
 
-    Description handling: ``description`` is treated as Markdown,
-    converted via ``markdown_to_html`` (CommonMark + GFM tables), and
-    sanitized via ``sanitize_html`` before being stored as
-    ``{"type": "text/html", "value": "..."}``.
+    Description handling: ``description_html`` is RAW Polarion HTML and
+    is sent verbatim — no Markdown conversion, no sanitization. The
+    expected input is the value returned by
+    ``get_work_item(..., include_description_html=True).description_html``,
+    optionally mutated. NEVER pass untrusted user-supplied HTML here.
+    For greenfield Markdown authoring (e.g. creating a new work item),
+    use ``create_work_item(description=...)`` instead — Markdown and
+    HTML inputs never mix across these two tools.
 
     Replace-all semantics: when ``hyperlinks`` or ``assignee_ids`` is
     provided, it REPLACES the work item's existing list — pass the full
@@ -706,7 +731,8 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
         project_id: Polarion project ID.
         work_item_id: Short ID of the work item to update.
         title: Optional new title.
-        description: Optional new Markdown body.
+        description_html: Optional new raw HTML body (verbatim, no
+            sanitization).
         status: Optional new workflow status.
         priority: Optional new priority string.
         severity: Optional new severity.
@@ -745,8 +771,8 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     changes: dict[str, JsonValue] = {}
     if title:
         changes["title"] = title
-    if description:
-        changes["description"] = description
+    if description_html:
+        changes["description_html"] = description_html
     if status:
         changes["status"] = status
     if priority:
@@ -774,15 +800,11 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
 
     if not changes:
         raise ValueError(
-            "Nothing to update -- pass at least one of title, description, "
-            "status, priority, severity, due_date, initial_estimate, "
-            "resolution, hyperlinks, assignee_ids, custom_fields, "
-            "workflow_action, or change_type_to."
+            "Nothing to update -- pass at least one of title, "
+            "description_html, status, priority, severity, due_date, "
+            "initial_estimate, resolution, hyperlinks, assignee_ids, "
+            "custom_fields, workflow_action, or change_type_to."
         )
-
-    description_html = (
-        sanitize_html(markdown_to_html(description)) if description else None
-    )
 
     payload = _build_update_work_item_payload(
         project_id=project_id,
@@ -1115,6 +1137,25 @@ async def update_document(  # noqa: PLR0913
             "New document type (e.g. 'req_specification'). Omit to leave unchanged."
         ),
     ),
+    home_page_content_html: str | None = Field(
+        default=None,
+        description=(
+            "New document body as RAW Polarion HTML — the same shape "
+            "returned by ``get_document(..., include_homepage_content_html"
+            "=True).content_html``. Pass None (or omit) to leave the body "
+            "untouched. REPLACES the entire ``homePageContent``. Polarion "
+            "re-parses on save and auto-creates / removes heading work "
+            "items from inline ``<h1>..<h4>`` tags; headings that vanish "
+            "from the HTML become orphan work items (still linked to the "
+            "module, no outline_number) rather than being deleted — clean "
+            "them up via ``update_work_item`` afterwards if needed. "
+            "Empty string is REJECTED at the tool layer (would wipe the "
+            "body and orphan every heading) — pass at minimum '<p></p>'. "
+            "WARNING: HTML is sent VERBATIM with NO sanitization "
+            "(sanitization would strip Polarion-specific spans and break "
+            "the round-trip). NEVER pass untrusted input here."
+        ),
+    ),
     custom_fields: dict[str, object] | None = Field(  # noqa: B008
         default=None,
         description=(
@@ -1139,8 +1180,8 @@ async def update_document(  # noqa: PLR0913
             "respects the project's workflow rules. Polarion rejects "
             "PATCH bodies with no ``attributes``, so ``workflow_action`` "
             "MUST be paired with at least one of ``title``/``status``/"
-            "``type``/``custom_fields`` -- this is enforced at the tool "
-            "layer."
+            "``type``/``home_page_content_html``/``custom_fields`` -- "
+            "this is enforced at the tool layer."
         ),
     ),
     dry_run: bool = Field(
@@ -1151,33 +1192,42 @@ async def update_document(  # noqa: PLR0913
         ),
     ),
 ) -> DocumentUpdateResult:
-    """Update a Polarion document's metadata (title / status / type).
+    """Update a Polarion document's metadata or body.
 
     Sends ``PATCH /projects/{p}/spaces/{s}/documents/{d}`` with only
-    the metadata attributes the caller explicitly set. JSON:API
-    omit-preserve semantics apply: any field NOT included in the
-    request is left untouched server-side -- this tool can never
-    accidentally clear the document body or other unrelated fields.
+    the attributes the caller explicitly set. JSON:API omit-preserve
+    semantics apply: any field NOT included in the request is left
+    untouched server-side.
 
-    Body edits are deliberately not supported: ``homePageContent`` is
-    not exposed here because Markdown round-trips through
-    ``get_document`` are lossy (empty heading placeholders are
-    stripped, Polarion-specific WI fragments are sanitized away).
-    Use the dedicated part-creation tools instead -- e.g.
-    ``move_work_item_to_document`` to embed an existing work item, or
-    a future ``create_document_parts`` for new headings / normal
-    text parts.
+    Body editing via ``home_page_content_html`` is the canonical
+    round-trip pair for
+    ``get_document(..., include_homepage_content_html=True)``. The HTML
+    is sent verbatim — no sanitization, no Markdown conversion — which
+    preserves Polarion-specific markup that earlier Markdown-based
+    paths used to strip. Side effects to be aware of:
+
+    - **Heading auto-create**: Polarion re-parses the HTML on save and
+      creates a new heading-type work item for every inline
+      ``<h1>..<h4>`` tag that does not already correspond to a part.
+    - **Orphan headings**: removing an ``<hN>`` from the HTML removes
+      the document part but leaves the heading work item behind
+      (still ``module``-linked, no ``outline_number``). Clean up via
+      ``update_work_item`` if the orphans matter.
+    - **Body wipe protection**: empty string is rejected at the tool
+      layer to avoid wiping the body and orphaning every heading. Pass
+      at minimum ``'<p></p>'`` if you genuinely want a near-empty body.
 
     Workflow transitions: prefer ``workflow_action`` (e.g. 'approve',
     'close') over a raw ``status`` update so the project's workflow
     rules are evaluated. Polarion rejects PATCH bodies that contain
     neither attributes nor relationships (HTTP 400 "At least one of
     the members is required"); ``workflow_action`` therefore MUST be
-    accompanied by at least one of ``title`` / ``status`` / ``type``.
-    Calling with no fields set at all is rejected at the tool layer.
+    accompanied by at least one of ``title`` / ``status`` / ``type`` /
+    ``home_page_content_html`` / ``custom_fields``. Calling with no
+    fields set at all is rejected at the tool layer.
 
     Unlike ``update_work_item``, this tool does NOT follow up with a
-    GET to return the post-update document state -- the result only
+    GET to return the post-update document state — the result only
     confirms the PATCH succeeded. Call ``get_document`` afterwards if
     you need the refreshed document attributes.
 
@@ -1189,6 +1239,9 @@ async def update_document(  # noqa: PLR0913
         title: Optional new title.
         status: Optional new workflow status.
         type: Optional new document type.
+        home_page_content_html: Optional new body as raw Polarion HTML
+            (verbatim, no sanitization). Rejected if empty string.
+        custom_fields: Optional custom-field deltas.
         workflow_action: Optional workflow action ID. Must be paired
             with at least one attribute field.
         dry_run: When True, return payload preview without calling
@@ -1204,28 +1257,39 @@ async def update_document(  # noqa: PLR0913
 
     Raises:
         ValueError: If no fields are provided, if ``workflow_action``
-            is supplied without any attribute field, or if the
+            is supplied without any attribute field, if
+            ``home_page_content_html`` is the empty string, or if the
             project / space / document is not found.
         PermissionError: If the token lacks permissions to update the
             document.
         RuntimeError: On other Polarion API errors.
     """
+    if home_page_content_html == "":
+        raise ValueError(
+            "home_page_content_html='' would wipe the document body and "
+            "orphan all heading work items. Pass at minimum '<p></p>' "
+            "or omit the parameter to leave the body unchanged."
+        )
+
     has_attrs = (
         title is not None
         or status is not None
         or type is not None
+        or home_page_content_html is not None
         or bool(custom_fields)
     )
     if not has_attrs and not workflow_action:
         raise ValueError(
             "update_document requires at least one of: title, status, "
-            "type, custom_fields, or workflow_action."
+            "type, home_page_content_html, custom_fields, or "
+            "workflow_action."
         )
     if not has_attrs and workflow_action:
         raise ValueError(
             "workflow_action alone is not supported -- Polarion rejects "
             "PATCH bodies with no attributes. Pair workflow_action with "
-            "at least one of title, status, type, or custom_fields."
+            "at least one of title, status, type, home_page_content_html, "
+            "or custom_fields."
         )
 
     payload = _build_update_document_payload(
@@ -1235,6 +1299,7 @@ async def update_document(  # noqa: PLR0913
         title=title,
         status=status,
         type=type,
+        home_page_content_html=home_page_content_html,
         custom_fields=custom_fields,
     )
 

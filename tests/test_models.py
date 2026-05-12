@@ -168,30 +168,31 @@ class TestDocumentDetail:
     def test_valid(self):
         d = DocumentDetail(
             title="Software Requirement Specification",
-            content="## Overview\n\nSystem requirements.",
+            content_html="<h2>Overview</h2><p>System requirements.</p>",
         )
         assert d.title == "Software Requirement Specification"
+        assert "<h2>Overview</h2>" in d.content_html
 
     def test_empty_content(self):
         d = DocumentDetail(
             title="Empty Doc",
-            content="",
+            content_html="",
         )
-        assert d.content == ""
+        assert d.content_html == ""
 
     def test_missing_required_field(self):
         with pytest.raises(ValidationError):
             DocumentDetail()  # type: ignore[call-arg]
 
     def test_custom_fields_default_empty(self):
-        d = DocumentDetail(title="Doc", content="")
+        d = DocumentDetail(title="Doc", content_html="")
         assert d.custom_fields == {}
 
     def test_custom_fields_round_trip(self):
         rich = {"type": "text/html", "value": "<p>x</p>"}
         d = DocumentDetail(
             title="Doc",
-            content="",
+            content_html="",
             custom_fields={"reviewedBy": "alice", "richNote": rich},
         )
         restored = DocumentDetail.model_validate(d.model_dump())
@@ -361,11 +362,13 @@ class TestWorkItemDetail:
             title="Login Feature",
             type="requirement",
             status="approved",
-            description="## Login\n\nUser must authenticate.",
+            description_html="<h2>Login</h2><p>User must authenticate.</p>",
             project_id="myproject",
         )
         assert isinstance(detail, WorkItemSummary)
-        assert detail.description == "## Login\n\nUser must authenticate."
+        assert detail.description_html == (
+            "<h2>Login</h2><p>User must authenticate.</p>"
+        )
         assert detail.project_id == "myproject"
 
     def test_empty_description(self):
@@ -374,10 +377,22 @@ class TestWorkItemDetail:
             title="Empty WI",
             type="task",
             status="draft",
-            description="",
+            description_html="",
             project_id="proj1",
         )
-        assert detail.description == ""
+        assert detail.description_html == ""
+
+    def test_description_defaults_to_empty(self):
+        # The HTML field defaults to "" so callers can omit it on the
+        # ``include_description_html=False`` (blank) path.
+        detail = WorkItemDetail(
+            id="MCPT-003",
+            title="No desc",
+            type="task",
+            status="draft",
+            project_id="proj1",
+        )
+        assert detail.description_html == ""
 
     def test_inherits_summary_metadata(self):
         detail = WorkItemDetail(
@@ -390,7 +405,7 @@ class TestWorkItemDetail:
             space_id="Design",
             document_name="SRS",
             assignee_ids=["alice"],
-            description="body",
+            description_html="<p>body</p>",
             project_id="proj1",
         )
         assert detail.priority == "50.0"
@@ -404,7 +419,7 @@ class TestWorkItemDetail:
             title="Minimal",
             type="task",
             status="open",
-            description="",
+            description_html="",
             project_id="proj1",
         )
         assert detail.author_id == ""
@@ -425,7 +440,7 @@ class TestWorkItemDetail:
             title="With customs",
             type="requirement",
             status="approved",
-            description="body",
+            description_html="<p>body</p>",
             project_id="proj1",
             custom_fields={
                 "riskLevel": "high",
@@ -444,7 +459,7 @@ class TestWorkItemDetail:
             title="Login Bug",
             type="defect",
             status="closed",
-            description="repro steps",
+            description_html="<p>repro steps</p>",
             project_id="proj1",
             author_id="alice",
             created="2026-04-01T09:00:00Z",
@@ -604,7 +619,7 @@ class TestWorkItemUpdateResult:
             title="Old Title",
             type="requirement",
             status="draft",
-            description="Old desc",
+            description_html="<p>Old desc</p>",
             project_id="proj1",
         )
         result = WorkItemUpdateResult(
@@ -801,7 +816,7 @@ class TestCrossModelIntegration:
                 title="Before",
                 type="requirement",
                 status="draft",
-                description="Old description",
+                description_html="<p>Old description</p>",
                 project_id="proj1",
             ),
             changes={"title": "After", "status": "approved"},

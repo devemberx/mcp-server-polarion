@@ -1,8 +1,13 @@
 """Shared helpers for MCP tool implementations.
 
-Internal module used by ``tools.read`` (and future ``tools.write``).
-The helpers defined here are for internal use within the ``tools``
-package and are **not** part of the public package API.
+Internal module used by ``tools.read`` and ``tools.write``. The helpers
+defined here are for internal use within the ``tools`` package and are
+**not** part of the public package API.
+
+Body fields (``description``, ``homePageContent``) are passed through as
+raw Polarion HTML on the get/update round-trip path — Markdown conversion
+is reserved for synthesis paths (``read_document``, embedded WI bodies
+inside ``get_document_parts``) and lives in ``tools.read``.
 """
 
 from __future__ import annotations
@@ -20,7 +25,6 @@ from mcp_server_polarion.models import (
     WorkItemDetail,
     WorkItemSummary,
 )
-from mcp_server_polarion.utils import html_to_markdown
 
 
 class WorkItemSummaryKwargs(TypedDict):
@@ -54,11 +58,19 @@ WI_LIST_FIELDS: Final[str] = "title,type,status,priority,updated,module,assignee
 # only ``@all`` surfaces the inline custom attributes. Relationships still
 # come back, so existing module/assignee/author parsing keeps working.
 WI_DETAIL_FIELDS: Final[str] = "@all"
+# Minimal fieldset for embedded work items inside document parts:
+# ``DocumentPart`` only consumes title/type/status/description. Sending
+# ``@all`` here ships every inline custom field (often dozens of keys per
+# WI, KBs of payload per page) when the consumer never reads them — that
+# was the original ``get_document_parts`` over-fetch. The customs of the
+# part-linked WIs are not exposed on ``DocumentPart`` anyway; callers
+# needing them must issue a separate ``get_work_item`` request.
+WI_PART_FIELDS: Final[str] = "title,type,status,description"
 # Same situation for documents — ``@all`` is the only token that exposes
 # project-defined custom document attributes. The slight per-request cost
 # (``homePageContent`` always travels over the wire) is paid in network
 # bytes only; the tool layer still hides the body from the LLM when
-# ``include_content=False``.
+# ``include_homepage_content_html=False``.
 DOC_DETAIL_FIELDS: Final[str] = "@all"
 
 # Canonical standard attribute names per the Polarion REST OpenAPI schema.
@@ -497,6 +509,12 @@ def parse_work_item_detail(
     ``include=assignee`` so that ``relationships.assignee.data`` is
     populated.
 
+    The description value is passed through as raw Polarion HTML into
+    ``WorkItemDetail.description_html`` — no Markdown conversion, no
+    sanitization. This preserves Polarion-specific spans / data
+    attributes so the same string round-trips back through
+    ``update_work_item(description_html=...)`` unchanged.
+
     Args:
         item: A single JSON:API resource object (the ``data`` element).
         project_id: Project that contains this work item.
@@ -504,7 +522,8 @@ def parse_work_item_detail(
             missing. Pass the caller-supplied work-item ID.
 
     Returns:
-        A fully-populated ``WorkItemDetail`` model.
+        A fully-populated ``WorkItemDetail`` model with
+        ``description_html`` carrying the raw HTML payload.
     """
     attrs = item.get("attributes", {})
     if not isinstance(attrs, dict):
@@ -524,7 +543,7 @@ def parse_work_item_detail(
 
     return WorkItemDetail(
         **summary_kwargs,
-        description=html_to_markdown(desc_html),
+        description_html=desc_html,
         project_id=project_id,
         author_id=extract_short_id(extract_relationship_id(rels, "author")),
         created=safe_str(attrs.get("created", "")),
@@ -590,6 +609,7 @@ __all__: list[str] = [
     "STANDARD_WORKITEM_ATTRS",
     "WI_DETAIL_FIELDS",
     "WI_LIST_FIELDS",
+    "WI_PART_FIELDS",
     "build_included_workitem_map",
     "build_work_item_summary_kwargs",
     "compute_has_more",
