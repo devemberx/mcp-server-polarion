@@ -791,21 +791,23 @@ class TestGetDocument:
             project_id="proj1",
             space_id="_default",
             document_name="SRS",
-            include_content=True,
+            include_homepage_content_html=True,
         )
 
         assert isinstance(result, DocumentDetail)
         assert result.title == "Software Requirement Spec"
         assert result.type == "req_specification"
         assert result.status == "approved"
-        assert "SRS" in result.content
-        assert "<p>" not in result.content
+        # Raw HTML round-trip: <p> and <strong> tags survive verbatim.
+        assert result.content_html == (
+            "<p>This is the <strong>SRS</strong> document.</p>"
+        )
         assert result.custom_fields == {}
 
-    async def test_include_content_false_omits_content(
+    async def test_include_homepage_content_html_false_omits_content(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """include_content=False → body skipped even when API echoes it.
+        """include_homepage_content_html=False → body skipped even when API echoes it.
 
         With ``fields[documents]=@all`` the wire always carries
         ``homePageContent``; the tool layer is responsible for hiding it
@@ -831,18 +833,18 @@ class TestGetDocument:
             project_id="proj1",
             space_id="_default",
             document_name="SRS",
-            include_content=False,
+            include_homepage_content_html=False,
         )
 
         assert result.title == "SRS"
         assert result.type == "req_specification"
         assert result.status == "draft"
-        assert result.content == ""
+        assert result.content_html == ""
 
-    async def test_include_content_renders_homepage(
+    async def test_include_homepage_content_html_returns_raw_html(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """include_content=True → homePageContent rendered into result.content."""
+        """include_homepage_content_html=True → raw HTML in content_html (no markdownify)."""  # noqa: E501
         mock_client.get.return_value = {
             "data": {
                 "attributes": {
@@ -862,10 +864,44 @@ class TestGetDocument:
             project_id="proj1",
             space_id="_default",
             document_name="Doc",
-            include_content=True,
+            include_homepage_content_html=True,
         )
 
-        assert "body" in result.content
+        # Verbatim HTML; no Markdown conversion.
+        assert result.content_html == "<p>body</p>"
+
+    async def test_polarion_specific_markup_round_trips(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Polarion-specific spans / data-* attrs must survive on read.
+
+        This is the core round-trip guarantee — the same string must
+        be passable back into update_document(home_page_content_html=...)
+        unchanged. If sanitization / markdownify ever creeps back in,
+        these markers would be the first thing to disappear.
+        """
+        raw = (
+            '<p>See <span class="polarion-rte-link" '
+            'data-item-id="MCPT-7" data-scope="proj1">link</span>.</p>'
+        )
+        mock_client.get.return_value = {
+            "data": {
+                "attributes": {
+                    "title": "Doc",
+                    "homePageContent": {"type": "text/html", "value": raw},
+                },
+            },
+        }
+
+        result = await get_document(
+            mock_ctx,
+            project_id="proj1",
+            space_id="_default",
+            document_name="Doc",
+            include_homepage_content_html=True,
+        )
+
+        assert result.content_html == raw
 
     async def test_encodes_document_name_with_spaces(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -907,10 +943,10 @@ class TestGetDocument:
             project_id="proj1",
             space_id="_default",
             document_name="EmptyDoc",
-            include_content=True,
+            include_homepage_content_html=True,
         )
 
-        assert result.content == ""
+        assert result.content_html == ""
 
     async def test_not_found_raises_value_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -946,43 +982,10 @@ class TestGetDocument:
             project_id="proj1",
             space_id="_default",
             document_name="NoContent",
-            include_content=True,
+            include_homepage_content_html=True,
         )
 
-        assert result.content == ""
-
-    async def test_strips_empty_headings(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": {
-                "attributes": {
-                    "id": "DocH",
-                    "title": "Headings Doc",
-                    "homePageContent": {
-                        "type": "text/html",
-                        "value": (
-                            "<h2></h2>"
-                            "<p>Intro paragraph.</p>"
-                            "<h3></h3>"
-                            "<p>Detail text.</p>"
-                        ),
-                    },
-                },
-            },
-        }
-
-        result = await get_document(
-            mock_ctx,
-            project_id="proj1",
-            space_id="_default",
-            document_name="DocH",
-            include_content=True,
-        )
-
-        assert "##" not in result.content
-        assert "Intro paragraph" in result.content
-        assert "Detail text" in result.content
+        assert result.content_html == ""
 
     async def test_custom_fields_populated_from_response(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1011,7 +1014,7 @@ class TestGetDocument:
             project_id="proj1",
             space_id="_default",
             document_name="SRS",
-            include_content=False,
+            include_homepage_content_html=False,
         )
 
         # Raw passthrough: rich-text and structured values stay verbatim.
@@ -1041,7 +1044,7 @@ class TestGetDocument:
             project_id="proj1",
             space_id="_default",
             document_name="Plain",
-            include_content=False,
+            include_homepage_content_html=False,
         )
 
         assert result.custom_fields == {}
@@ -1049,7 +1052,7 @@ class TestGetDocument:
     async def test_sparse_fieldset_uses_all_token(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """``fields[documents]=@all`` is sent regardless of include_content."""
+        """``fields[documents]=@all`` is sent regardless of the include flag."""
         mock_client.get.return_value = {
             "data": {
                 "attributes": {"title": "x", "type": "generic", "status": "draft"},
@@ -1061,7 +1064,7 @@ class TestGetDocument:
             project_id="proj1",
             space_id="_default",
             document_name="A",
-            include_content=False,
+            include_homepage_content_html=False,
         )
         _, kwargs_a = mock_client.get.call_args
         assert kwargs_a["params"]["fields[documents]"] == "@all"
@@ -1071,7 +1074,7 @@ class TestGetDocument:
             project_id="proj1",
             space_id="_default",
             document_name="B",
-            include_content=True,
+            include_homepage_content_html=True,
         )
         _, kwargs_b = mock_client.get.call_args
         assert kwargs_b["params"]["fields[documents]"] == "@all"
@@ -1270,6 +1273,33 @@ class TestGetDocumentParts:
         assert kwargs["params"]["include"] == "workItem"
         assert kwargs["params"]["page[size]"] == 10
         assert kwargs["params"]["page[number]"] == 2
+
+    async def test_uses_tight_workitem_fieldset(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Embedded WIs are fetched with WI_PART_FIELDS, not ``@all``.
+
+        DocumentPart only consumes title/type/status/description from the
+        linked WI; sending ``@all`` would ship every inline custom field
+        (KBs per page) for no downstream use. This guard prevents a
+        regression to the old over-fetching behaviour.
+        """
+        mock_client.get.return_value = {
+            "data": [],
+            "meta": {"totalCount": 0},
+        }
+
+        await get_document_parts(
+            mock_ctx,
+            project_id="proj1",
+            space_id="_default",
+            document_name="Doc",
+            page_size=100,
+            page_number=1,
+        )
+
+        _, kwargs = mock_client.get.call_args
+        assert kwargs["params"]["fields[workitems]"] == "title,type,status,description"
 
     async def test_not_found_raises_value_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -2203,6 +2233,7 @@ class TestGetWorkItem:
             mock_ctx,
             project_id="proj1",
             work_item_id="MCPT-001",
+            include_description_html=True,
         )
 
         assert isinstance(result, WorkItemDetail)
@@ -2222,10 +2253,82 @@ class TestGetWorkItem:
         assert len(result.hyperlinks) == 1
         assert result.hyperlinks[0].role == "ref_ext"
         assert result.hyperlinks[0].uri == "https://example.com/spec"
-        assert "log in" in result.description
-        assert "<p>" not in result.description
+        # Raw HTML passthrough — <p>/<strong> survive verbatim, no markdownify.
+        assert result.description_html == (
+            "<p>User must be able to <strong>log in</strong>.</p>"
+        )
         assert result.project_id == "proj1"
         assert result.custom_fields == {}
+
+    async def test_include_description_html_false_blanks_field(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """include_description_html=False → description_html blanked.
+
+        ``@all`` is the only sparse-fieldset that surfaces custom fields,
+        so the body still travels over the wire; the tool layer is
+        responsible for stripping it from the response to save LLM
+        context tokens. The default at the FastMCP layer is False; here
+        we pass it explicitly because direct-call tests bypass the
+        FastMCP Field default unwrap.
+        """
+        mock_client.get.return_value = {
+            "data": {
+                "id": "proj1/MCPT-007",
+                "attributes": {
+                    "title": "WI",
+                    "type": "task",
+                    "status": "draft",
+                    "description": {
+                        "type": "text/html",
+                        "value": "<p>should be hidden</p>",
+                    },
+                },
+            },
+        }
+
+        result = await get_work_item(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT-007",
+            include_description_html=False,
+        )
+
+        assert result.description_html == ""
+        # Other metadata still populated.
+        assert result.title == "WI"
+
+    async def test_polarion_specific_markup_round_trips(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Polarion-specific spans / data-* attrs must survive on read.
+
+        Core round-trip guarantee for update_work_item(description_html=).
+        """
+        raw = (
+            '<p>Refs <span class="polarion-rte-link" '
+            'data-item-id="MCPT-9" data-scope="proj1">MCPT-9</span></p>'
+        )
+        mock_client.get.return_value = {
+            "data": {
+                "id": "proj1/MCPT-008",
+                "attributes": {
+                    "title": "RT",
+                    "type": "task",
+                    "status": "draft",
+                    "description": {"type": "text/html", "value": raw},
+                },
+            },
+        }
+
+        result = await get_work_item(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT-008",
+            include_description_html=True,
+        )
+
+        assert result.description_html == raw
 
     async def test_defect_severity_and_open_resolution(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -2269,9 +2372,10 @@ class TestGetWorkItem:
             mock_ctx,
             project_id="proj1",
             work_item_id="MCPT-002",
+            include_description_html=True,
         )
 
-        assert result.description == ""
+        assert result.description_html == ""
         # Default values for new detail-only fields.
         assert result.author_id == ""
         assert result.created == ""

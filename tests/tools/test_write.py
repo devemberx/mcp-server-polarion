@@ -711,6 +711,13 @@ class TestCreateWorkItemFieldValidation:
     def test_type_accepts_non_empty(self) -> None:
         assert self._adapter_for("type").validate_python("task") == "task"
 
+    def test_description_rejects_overlong_input(self) -> None:
+        """``max_length=MAX_BODY_HTML_LEN`` defends against runaway Markdown."""
+        adapter = self._adapter_for("description")
+        assert adapter.validate_python("hello") == "hello"
+        with pytest.raises(ValidationError):
+            adapter.validate_python("x" * (2_000_000 + 1))
+
 
 # ===========================================================================
 # move_work_item_to_document
@@ -1323,7 +1330,7 @@ async def _call_update(
         "project_id": "MyProj",
         "work_item_id": "MCPT-1",
         "title": None,
-        "description": None,
+        "description_html": None,
         "status": None,
         "priority": None,
         "severity": None,
@@ -1356,6 +1363,42 @@ class TestUpdateWorkItemValidation:
             await _call_update(mock_ctx)
         mock_client.patch.assert_not_called()
         mock_client.get.assert_not_called()
+
+    async def test_empty_description_html_is_noop(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """``description_html=''`` is "leave unchanged" — never PATCHes.
+
+        Asymmetric vs ``update_document(home_page_content_html='')`` which
+        RAISES (see test_home_page_content_html_empty_string_raises). The
+        difference is justified by blast radius: clearing a single WI's
+        description is recoverable; wiping a document body orphans every
+        heading WI inside it.
+        """
+        with pytest.raises(ValueError, match="Nothing to update"):
+            await _call_update(mock_ctx, description_html="")
+        mock_client.patch.assert_not_called()
+        mock_client.get.assert_not_called()
+
+    async def test_empty_description_html_with_other_field_drops_description(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """``description_html=''`` is skipped from the PATCH body even when
+        paired with other fields — the existing description is preserved."""
+        result = await _call_update(
+            mock_ctx,
+            title="new title",
+            description_html="",
+            dry_run=True,
+        )
+        # changes summary excludes the empty description_html.
+        assert result.changes == {"title": "new title"}
+        # Wire payload has only the title — no description key at all.
+        assert result.payload_preview is not None
+        item = cast(dict[str, object], result.payload_preview["data"])
+        attrs = cast(dict[str, object], item["attributes"])
+        assert "description" not in attrs
+        assert attrs == {"title": "new title"}
 
     async def test_custom_fields_alone_satisfies_at_least_one_check(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1464,25 +1507,27 @@ class TestUpdateWorkItemDryRun:
     async def test_changes_uses_python_typed_values_not_json_api_shape(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # description in `changes` is the original Markdown; the
-        # JSON:API HTML wrapping happens only in the wire payload preview.
+        # description_html in `changes` is the raw HTML the caller passed;
+        # the JSON:API ``{type,value}`` wrapping happens only in the wire
+        # payload preview.
         result = await _call_update(
             mock_ctx,
-            description="**bold**",
+            description_html="<p>bold</p>",
             assignee_ids=["alice"],
             dry_run=True,
         )
 
         assert result.changes == {
-            "description": "**bold**",
+            "description_html": "<p>bold</p>",
             "assignee_ids": ["alice"],
         }
-        # The wire-shaped preview holds the HTML-wrapped description.
+        # The wire-shaped preview wraps the same raw HTML — VERBATIM, no
+        # sanitization or Markdown conversion in between.
         assert result.payload_preview is not None
         item = cast(dict[str, object], result.payload_preview["data"])
         attrs = cast(dict[str, object], item["attributes"])
         desc = cast(dict[str, object], attrs["description"])
-        assert desc["type"] == "text/html"
+        assert desc == {"type": "text/html", "value": "<p>bold</p>"}
 
 
 # ---------------------------------------------------------------------------
@@ -1723,38 +1768,27 @@ class TestUpdateWorkItemHappyPath:
         patch_path = mock_client.patch.call_args.args[0]
         assert patch_path == "/projects/MyProj/workitems/MCPT-1?changeTypeTo=task"
 
-    async def test_description_is_converted_and_sanitized(
+    async def test_description_html_is_sent_verbatim(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
+        """update_work_item passes description_html through unchanged.
+
+        Core round-trip guarantee: Polarion-specific spans and data-*
+        attributes must survive the PATCH unchanged so the round-trip
+        through ``get_work_item`` is lossless. No sanitize, no markdownify.
+        """
         mock_client.patch.return_value = {}
         mock_client.get.return_value = _make_get_response()
 
-        await _call_update(
-            mock_ctx,
-            description="**bold** [link](https://example.com)",
+        raw = (
+            '<p>See <span class="polarion-rte-link" '
+            'data-item-id="MCPT-7" data-scope="MyProj">MCPT-7</span></p>'
         )
+        await _call_update(mock_ctx, description_html=raw)
 
         body = mock_client.patch.call_args.kwargs["json"]
         desc = body["data"]["attributes"]["description"]
-        assert desc["type"] == "text/html"
-        assert "<strong>bold</strong>" in desc["value"]
-        assert 'href="https://example.com"' in desc["value"]
-
-    async def test_description_strips_dangerous_link_schemes(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.patch.return_value = {}
-        mock_client.get.return_value = _make_get_response()
-
-        await _call_update(
-            mock_ctx,
-            description="[click](javascript:alert(1))",
-        )
-
-        body = mock_client.patch.call_args.kwargs["json"]
-        desc_html = body["data"]["attributes"]["description"]["value"]
-        assert 'href="javascript:' not in desc_html
-        assert "href='javascript:" not in desc_html
+        assert desc == {"type": "text/html", "value": raw}
 
     async def test_path_url_encodes_special_chars(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1848,6 +1882,20 @@ class TestUpdateWorkItemFieldValidation:
     def test_work_item_id_accepts_non_empty(self) -> None:
         assert self._adapter_for("work_item_id").validate_python("MCPT-1") == "MCPT-1"
 
+    def test_description_html_rejects_overlong_input(self) -> None:
+        """``max_length=MAX_BODY_HTML_LEN`` defends against runaway HTML.
+
+        At the JSON Schema layer, FastMCP rejects bodies above the cap
+        before the tool ever sees them. Re-prove the constraint here so
+        a future docstring rewrite cannot silently drop ``max_length``.
+        """
+        adapter = self._adapter_for("description_html")
+        # Well-formed payload below the cap is accepted unchanged.
+        assert adapter.validate_python("<p>ok</p>") == "<p>ok</p>"
+        # 2 MiB + 1 char is rejected.
+        with pytest.raises(ValidationError):
+            adapter.validate_python("x" * (2_000_000 + 1))
+
 
 # ===========================================================================
 # update_document
@@ -1920,8 +1968,9 @@ class TestBuildUpdateDocumentPayload:
         assert "attributes" not in data
         assert data["id"] == "MyProj/S/D"
 
-    def test_homepagecontent_not_emitted_under_any_input(self) -> None:
-        # Body editing was intentionally removed from update_document.
+    def test_homepagecontent_omitted_when_not_passed(self) -> None:
+        # JSON:API omit-preserve: body stays untouched when the caller
+        # does not pass ``home_page_content_html``.
         payload = _build_update_document_payload(
             project_id="MyProj",
             space_id="S",
@@ -1932,6 +1981,23 @@ class TestBuildUpdateDocumentPayload:
         )
         body_str = repr(payload)
         assert "homePageContent" not in body_str
+
+    def test_home_page_content_html_wrapped_verbatim(self) -> None:
+        # Raw HTML pass-through — no sanitization, no markdownify.
+        raw = '<p>x <span class="polarion-rte-link" data-item-id="MCPT-1">y</span></p>'
+        payload = _build_update_document_payload(
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title=None,
+            status=None,
+            type=None,
+            home_page_content_html=raw,
+        )
+
+        data = cast(dict[str, object], payload["data"])
+        attrs = cast(dict[str, object], data["attributes"])
+        assert attrs["homePageContent"] == {"type": "text/html", "value": raw}
 
     def test_document_name_with_slashes_preserved_verbatim(self) -> None:
         # JSON body IDs must NOT be URL-encoded.
@@ -1955,6 +2021,7 @@ class TestBuildUpdateDocumentPayload:
             title=None,
             status=None,
             type=None,
+            home_page_content_html=None,
             custom_fields={"complianceLevel": "L3", "reviewerName": "alice"},
         )
         data = cast(dict[str, object], payload["data"])
@@ -1971,6 +2038,7 @@ class TestBuildUpdateDocumentPayload:
                 title=None,
                 status=None,
                 type=None,
+                home_page_content_html=None,
                 custom_fields={"moduleFolder": "Other"},
             )
 
@@ -1995,6 +2063,7 @@ class TestUpdateDocumentValidation:
                 title=None,
                 status=None,
                 type=None,
+                home_page_content_html=None,
                 custom_fields=None,
                 workflow_action=None,
                 dry_run=True,
@@ -2013,6 +2082,7 @@ class TestUpdateDocumentValidation:
                 title=None,
                 status=None,
                 type=None,
+                home_page_content_html=None,
                 custom_fields=None,
                 workflow_action="approve",
                 dry_run=True,
@@ -2031,6 +2101,7 @@ class TestUpdateDocumentValidation:
             title=None,
             status="approved",
             type=None,
+            home_page_content_html=None,
             custom_fields=None,
             workflow_action="approve",
             dry_run=True,
@@ -2049,6 +2120,7 @@ class TestUpdateDocumentValidation:
             title=None,
             status=None,
             type=None,
+            home_page_content_html=None,
             custom_fields={"documentVersion": "0.2"},
             workflow_action=None,
             dry_run=True,
@@ -2068,11 +2140,45 @@ class TestUpdateDocumentValidation:
             title=None,
             status=None,
             type=None,
+            home_page_content_html=None,
             custom_fields={"documentVersion": "0.2"},
             workflow_action="approve",
             dry_run=True,
         )
         assert result.dry_run is True
+
+    async def test_workflow_action_with_home_page_content_html_passes(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """workflow_action paired with home_page_content_html only is OK.
+
+        Polarion rejects empty PATCH bodies, so workflow_action MUST come
+        with at least one attribute. home_page_content_html is one such
+        attribute — this guard prevents the body-field check from
+        regressing to "title/status/type/custom_fields only".
+        """
+        result = await update_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title=None,
+            status=None,
+            type=None,
+            home_page_content_html="<p>new body</p>",
+            custom_fields=None,
+            workflow_action="approve",
+            dry_run=True,
+        )
+        assert result.dry_run is True
+        # Sanity: payload includes both the body and the workflow query param.
+        assert result.payload_preview is not None
+        item = cast(dict[str, object], result.payload_preview["data"])
+        attrs = cast(dict[str, object], item["attributes"])
+        assert attrs["homePageContent"] == {
+            "type": "text/html",
+            "value": "<p>new body</p>",
+        }
 
     async def test_custom_fields_collision_raises(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -2086,7 +2192,38 @@ class TestUpdateDocumentValidation:
                 title="t",
                 status=None,
                 type=None,
+                home_page_content_html=None,
                 custom_fields={"title": "y"},
+                workflow_action=None,
+                dry_run=True,
+            )
+        mock_client.patch.assert_not_called()
+
+    async def test_custom_fields_homepagecontent_collision_raises(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """`homePageContent` is a STANDARD_DOCUMENT_ATTRS key.
+
+        Allowing it via ``custom_fields`` would let a caller bypass the
+        explicit ``home_page_content_html`` parameter (and its empty-string
+        guard). The merge helper raises on collision; pin that semantics.
+        """
+        with pytest.raises(ValueError, match="custom_fields keys collide"):
+            await update_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="S",
+                document_name="D",
+                title="t",
+                status=None,
+                type=None,
+                home_page_content_html=None,
+                custom_fields={
+                    "homePageContent": {
+                        "type": "text/html",
+                        "value": "<p>sneak</p>",
+                    }
+                },
                 workflow_action=None,
                 dry_run=True,
             )
@@ -2112,6 +2249,7 @@ class TestUpdateDocumentDryRun:
             title="New Title",
             status=None,
             type=None,
+            home_page_content_html=None,
             custom_fields=None,
             workflow_action=None,
             dry_run=True,
@@ -2149,6 +2287,7 @@ class TestUpdateDocumentHappyPath:
             title="New Title",
             status=None,
             type=None,
+            home_page_content_html=None,
             custom_fields=None,
             workflow_action=None,
             dry_run=False,
@@ -2172,6 +2311,7 @@ class TestUpdateDocumentHappyPath:
             title="T",
             status=None,
             type=None,
+            home_page_content_html=None,
             custom_fields=None,
             workflow_action=None,
             dry_run=False,
@@ -2198,6 +2338,7 @@ class TestUpdateDocumentHappyPath:
             title=None,
             status="approved",
             type=None,
+            home_page_content_html=None,
             custom_fields=None,
             workflow_action="approve",
             dry_run=False,
@@ -2208,10 +2349,40 @@ class TestUpdateDocumentHappyPath:
         assert path.startswith("/projects/MyProj/spaces/S/documents/D")
         assert "workflowAction=approve" in path
 
-    async def test_homepagecontent_never_in_request_body(
+    async def test_home_page_content_html_is_sent_verbatim(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # Sanity: regardless of inputs, body editing is not exposed.
+        """home_page_content_html passes through with no sanitization."""
+        mock_client.patch.return_value = {}
+
+        raw = (
+            '<p>Body with <span class="polarion-rte-link" '
+            'data-item-id="MCPT-1">link</span></p>'
+        )
+        await update_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title=None,
+            status=None,
+            type=None,
+            home_page_content_html=raw,
+            custom_fields=None,
+            workflow_action=None,
+            dry_run=False,
+        )
+
+        _, kwargs = mock_client.patch.call_args
+        attrs = kwargs["json"]["data"]["attributes"]
+        assert attrs["homePageContent"] == {"type": "text/html", "value": raw}
+        # Nothing else slipped in.
+        assert set(attrs.keys()) == {"homePageContent"}
+
+    async def test_home_page_content_html_omitted_when_not_passed(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Omit-preserve: no homePageContent in body when not passed."""
         mock_client.patch.return_value = {}
 
         await update_document(
@@ -2222,6 +2393,7 @@ class TestUpdateDocumentHappyPath:
             title="T",
             status="approved",
             type="generic",
+            home_page_content_html=None,
             custom_fields=None,
             workflow_action=None,
             dry_run=False,
@@ -2230,6 +2402,45 @@ class TestUpdateDocumentHappyPath:
         _, kwargs = mock_client.patch.call_args
         body_str = repr(kwargs["json"])
         assert "homePageContent" not in body_str
+
+    async def test_home_page_content_html_empty_string_raises(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Empty string is rejected at the tool layer (body-wipe guard)."""
+        with pytest.raises(ValueError, match="would wipe"):
+            await update_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="S",
+                document_name="D",
+                title=None,
+                status=None,
+                type=None,
+                home_page_content_html="",
+                custom_fields=None,
+                workflow_action=None,
+                dry_run=False,
+            )
+        mock_client.patch.assert_not_called()
+
+    async def test_home_page_content_html_alone_passes_has_attrs_guard(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """home_page_content_html alone counts as a body field."""
+        result = await update_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title=None,
+            status=None,
+            type=None,
+            home_page_content_html="<p>x</p>",
+            custom_fields=None,
+            workflow_action=None,
+            dry_run=True,
+        )
+        assert result.dry_run is True
 
     async def test_explicit_empty_title_is_serialized(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -2247,6 +2458,7 @@ class TestUpdateDocumentHappyPath:
             title="",
             status=None,
             type=None,
+            home_page_content_html=None,
             custom_fields=None,
             workflow_action=None,
             dry_run=False,
@@ -2269,6 +2481,7 @@ class TestUpdateDocumentHappyPath:
             title="t",
             status=None,
             type=None,
+            home_page_content_html=None,
             custom_fields=None,
             workflow_action=None,
             dry_run=False,
@@ -2292,6 +2505,7 @@ class TestUpdateDocumentHappyPath:
             title=None,
             status="approved",
             type=None,
+            home_page_content_html=None,
             custom_fields=None,
             workflow_action="needs review",
             dry_run=False,
@@ -2328,6 +2542,7 @@ class TestUpdateDocumentErrorMapping:
                 title="t",
                 status=None,
                 type=None,
+                home_page_content_html=None,
                 custom_fields=None,
                 workflow_action=None,
                 dry_run=False,
@@ -2349,6 +2564,7 @@ class TestUpdateDocumentErrorMapping:
                 title="t",
                 status=None,
                 type=None,
+                home_page_content_html=None,
                 custom_fields=None,
                 workflow_action=None,
                 dry_run=False,
@@ -2369,6 +2585,7 @@ class TestUpdateDocumentErrorMapping:
                 title="t",
                 status=None,
                 type=None,
+                home_page_content_html=None,
                 custom_fields=None,
                 workflow_action=None,
                 dry_run=False,
@@ -2401,6 +2618,13 @@ class TestUpdateDocumentFieldValidation:
     def test_optional_metadata_fields_accept_none(self) -> None:
         for name in ("title", "status", "type", "workflow_action"):
             assert self._adapter_for(name).validate_python(None) is None
+
+    def test_home_page_content_html_rejects_overlong_input(self) -> None:
+        """``max_length=MAX_BODY_HTML_LEN`` defends against runaway HTML."""
+        adapter = self._adapter_for("home_page_content_html")
+        assert adapter.validate_python("<p>ok</p>") == "<p>ok</p>"
+        with pytest.raises(ValidationError):
+            adapter.validate_python("x" * (2_000_000 + 1))
 
 
 # ---------------------------------------------------------------------------
