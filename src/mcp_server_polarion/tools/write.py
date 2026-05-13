@@ -696,6 +696,22 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
             "``workflow_action``."
         ),
     ),
+    include_current_description_html: bool = Field(
+        default=False,
+        description=(
+            "When True, populate ``current.description_html`` in the "
+            "result with the post-PATCH raw HTML body so the caller can "
+            "confirm a body edit applied. Default False to keep the "
+            "response small for the common case where the PATCH only "
+            "touches metadata (status, priority, hyperlinks, ...). "
+            "Mirrors ``get_work_item(include_description_html=...)``. "
+            "Same caveat as that flag: the body STILL travels over the "
+            "wire on the follow-up GET because ``@all`` is the only "
+            "sparse-fieldset that surfaces inline custom fields — "
+            "setting this False saves LLM context tokens, not network "
+            "bytes."
+        ),
+    ),
     dry_run: bool = Field(
         default=False,
         description=(
@@ -769,6 +785,10 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
             (``workflowAction`` query parameter).
         change_type_to: Optional new work-item type
             (``changeTypeTo`` query parameter).
+        include_current_description_html: When True, return the
+            post-update body in ``current.description_html``; default
+            False keeps the response small. Pass True when verifying a
+            ``description_html`` edit applied.
         dry_run: When True, return preview without calling Polarion.
 
     Returns:
@@ -777,7 +797,9 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
           ``dry_run=True``.
         - ``dry_run``: Echo of the dry_run flag.
         - ``current``: Post-update ``WorkItemDetail`` fetched after the
-          PATCH succeeds. None on dry-run.
+          PATCH succeeds. ``current.description_html`` is populated only
+          when ``include_current_description_html=True``, otherwise
+          blanked to ``""``. None on dry-run.
         - ``changes``: Map of tool parameter names to the new values
           included in the PATCH (Python-typed, not JSON:API-shaped).
           Excludes parameters that were left unchanged.
@@ -911,6 +933,13 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
         project_id=project_id,
         fallback_id=work_item_id,
     )
+    if not include_current_description_html:
+        # Mirror ``get_work_item(include_description_html=False)`` —
+        # the body still travels over the wire (Polarion @all surfaces
+        # customs), but we blank it here to keep the LLM-facing
+        # ``current.description_html`` small for the common metadata-
+        # only update.
+        current = current.model_copy(update={"description_html": ""})
 
     return WorkItemUpdateResult(
         updated=True,

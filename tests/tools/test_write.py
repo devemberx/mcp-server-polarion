@@ -1342,6 +1342,7 @@ async def _call_update(
         "custom_fields": None,
         "workflow_action": None,
         "change_type_to": None,
+        "include_current_description_html": False,
         "dry_run": False,
     }
     defaults.update(overrides)
@@ -1588,6 +1589,47 @@ class TestUpdateWorkItemHappyPath:
         assert result.current.title == "after"
         assert result.changes == {"title": "after"}
         assert result.payload_preview is None
+
+    async def test_current_description_html_blanked_by_default(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Default (False) → ``current.description_html`` is ``""``.
+
+        The follow-up GET still returns the body over the wire (Polarion
+        @all is the only sparse-fieldset that surfaces customs), but the
+        tool layer blanks it so a metadata-only update does not blow up
+        LLM context. Caller opts in with
+        ``include_current_description_html=True`` when verifying a body
+        edit.
+        """
+        mock_client.patch.return_value = {}
+        mock_client.get.return_value = _make_get_response(
+            description_html="<p>large body that should be hidden</p>",
+        )
+
+        result = await _call_update(mock_ctx, status="approved")
+
+        assert result.current is not None
+        assert result.current.description_html == ""
+        # Other metadata is unaffected.
+        assert result.current.status == "open"  # _make_get_response default
+
+    async def test_current_description_html_kept_when_flag_true(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """include_current_description_html=True → raw HTML in current."""
+        mock_client.patch.return_value = {}
+        raw = "<p>verified body <strong>after</strong></p>"
+        mock_client.get.return_value = _make_get_response(description_html=raw)
+
+        result = await _call_update(
+            mock_ctx,
+            description_html=raw,
+            include_current_description_html=True,
+        )
+
+        assert result.current is not None
+        assert result.current.description_html == raw
 
     async def test_patch_called_with_correct_path_and_body(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
