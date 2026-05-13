@@ -1269,6 +1269,9 @@ async def update_document(  # noqa: PLR0913
     - **Heading auto-create**: Polarion re-parses the HTML on save and
       creates a new heading-type work item for every inline
       ``<h1>..<h4>`` tag that does not already correspond to a part.
+      Appending a bare ``<hN>Title</hN>`` IS safe — Polarion assigns
+      the new heading WI a ``module`` relationship and an
+      ``outline_number`` automatically.
     - **Orphan headings**: removing an ``<hN>`` from the HTML removes
       the document part but leaves the heading work item behind
       (still ``module``-linked, no ``outline_number``). Clean up via
@@ -1276,6 +1279,27 @@ async def update_document(  # noqa: PLR0913
     - **Body wipe protection**: empty string is rejected at the tool
       layer to avoid wiping the body and orphaning every heading. Pass
       at minimum ``'<p></p>'`` if you genuinely want a near-empty body.
+    - **DO NOT inject ID-anchor-less ``<p>`` paragraphs**: smoke-test
+      verified — appending ``<h3>X</h3><p>Body</p>`` lets the PATCH
+      succeed (HTTP 200), but the next ``get_document_parts`` returns
+      HTTP 500 ("There was an exception while processing the request").
+      Every paragraph Polarion already stores carries an
+      ``id="polarion_..."`` anchor; raw ``<p>`` blocks added by the
+      caller break server-side part derivation. **For body text,
+      create a new work item and attach via** ``create_work_item`` +
+      ``move_work_item_to_document`` — never inject the paragraph
+      directly into ``home_page_content_html``.
+    - **DO NOT inject WI macro references**: appending
+      ``<div id="polarion_wiki macro name=module-workitem;params=id=NEW">``
+      to embed a free-floating work item creates a ``workitem_<NEW>``
+      part visible in ``get_document_parts``, but the WI's ``module``
+      relationship stays unset (``space_id=""``,
+      ``document_name=""``, ``outline_number=""``) — an inconsistent
+      half-attached state that fails to render correctly in the
+      Polarion UI and can be silently lost on subsequent writes.
+      **Always add work items via** ``move_work_item_to_document``,
+      which is the only path that updates ``homePageContent``, sets
+      ``module``, and assigns ``outline_number`` atomically.
 
     Workflow transitions: prefer ``workflow_action`` (e.g. 'approve',
     'close') over a raw ``status`` update so the project's workflow
