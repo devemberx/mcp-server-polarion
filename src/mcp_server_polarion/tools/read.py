@@ -77,10 +77,6 @@ _VALID_PART_TYPES: Final[frozenset[str]] = frozenset(
 # regex-parsing ``<hN>`` which could in principle hit 5-6.
 _MAX_HEADING_LEVEL: Final[int] = 6
 
-# ---------------------------------------------------------------------------
-# Read-specific helpers
-# ---------------------------------------------------------------------------
-
 
 @dataclass(frozen=True, slots=True)
 class _LinkedWorkItem:
@@ -308,9 +304,8 @@ def _parse_linked_items(
         wi_full_id = extract_relationship_id(rels, "workItem")
         wi_id = extract_short_id(wi_full_id)
 
-        # Skip items where the target work item cannot be resolved
-        # via the relationships object (per project conventions, we do
-        # not parse the raw linked-work-item ID).
+        # Resolve the target via relationships only — raw ID parsing
+        # is intentionally avoided.
         if not wi_id:
             continue
 
@@ -432,14 +427,9 @@ async def _discover_documents(
 ) -> list[tuple[str, str]]:
     """Discover all unique (space_id, document_name) pairs via linear scan.
 
-    Iterates every heading-workitem page (page_size=100) in order and
-    accumulates unique ``module`` relationship IDs into a set. Results
-    are cached for ``_CACHE_TTL_SECONDS`` to amortise the cost across
-    paginated callers.
-
-    A linear scan is preferred over binary search because, in practice,
-    each page returns work items belonging to ~1 document (so N ≈ D and
-    binary search wastes log(N) probes per transition).
+    Iterates every heading-workitem page (page_size=100) and accumulates
+    unique ``module`` relationship IDs. Results are cached for
+    ``_CACHE_TTL_SECONDS`` so paginated callers reuse the discovery.
 
     Args:
         client: Active ``PolarionClient`` instance.

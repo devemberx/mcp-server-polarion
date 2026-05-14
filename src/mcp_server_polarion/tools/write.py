@@ -43,13 +43,8 @@ from mcp_server_polarion.tools._helpers import (
 )
 from mcp_server_polarion.utils import markdown_to_html, sanitize_html
 
-# Upper bound for body fields passed to write tools. Polarion enforces its
-# own server-side limits, but a tool-layer cap stops obviously broken or
-# adversarial callers (e.g. a prompt-injection nudging an LLM to PATCH a
-# 100 MB blob) from reaching the server at all. 2 MiB matches the rough
-# size of the largest real Polarion documents we have observed (Project
-# Scope homePageContent at ~30 KB sits well within this) and is large
-# enough that no honest caller should ever bump into it.
+# Caps tool-layer body payloads so a prompt-injected caller cannot ship a
+# multi-megabyte blob to Polarion. 2 MiB is well above any honest body.
 MAX_BODY_HTML_LEN: Final[int] = 2_000_000
 
 # ---------------------------------------------------------------------------

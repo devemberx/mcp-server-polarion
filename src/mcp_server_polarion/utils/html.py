@@ -108,23 +108,12 @@ def html_to_markdown(html: str) -> str:
 
 
 def _fill_empty_img_alt(html: str) -> str:
-    """Populate empty ``alt`` on ``<img>`` so markdownify emits a readable label.
+    """Promote ``<img title>`` (or the post-colon ``src`` filename) to ``alt``.
 
-    ``markdownify`` outputs ``![](src "title")`` when ``alt`` is empty.  In a UI
-    renderer a broken image with empty alt shows no inline fallback text, so a
-    user reading the surrounding Markdown loses any signal about the attachment.
-    Polarion stores image attachments inline as ``<img src="attachment:..."/>``
-    or ``<img src="workitemimg:..."/>`` and typically puts the original filename
-    on ``title`` rather than ``alt``; promote ``title`` to ``alt``, falling back
-    to the filename portion of ``src`` (the segment after the first ``:``), and
-    drop ``title`` so the output stays ``![alt](src)`` without a redundant title
-    inside the parentheses.
-
-    The src-filename fallback is skipped for absolute URLs (``://`` present),
-    since the post-colon segment of ``https://host/path`` is the authority plus
-    path — not a filename — and would produce a misleading alt like
-    ``![//host/path](https://host/path)``.  External imgs without alt or title
-    therefore emit as ``![](src)`` instead.
+    Polarion stores attachments as ``<img src="attachment:NAME"/>`` with
+    the filename on ``title`` rather than ``alt``, which makes markdownify
+    emit a label-less ``![](src)``. Lift the value into ``alt`` so the
+    Markdown carries a readable label.
     """
     if "<img" not in html.lower():
         return html
@@ -138,6 +127,8 @@ def _fill_empty_img_alt(html: str) -> str:
         title_raw = img.attrs.get("title", "")
         title = title_raw if isinstance(title_raw, str) else ""
         label = title.strip()
+        # Skip the src-filename fallback for absolute URLs — the
+        # post-colon segment is host+path, not a filename.
         if not label and "://" not in src:
             _, sep, after = src.partition(":")
             label = after if sep else src
