@@ -43,10 +43,6 @@ list_projects = _read_mod.list_projects
 list_work_items = _read_mod.list_work_items
 read_document = _read_mod.read_document
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
 
 @pytest.fixture
 def mock_client() -> AsyncMock:
@@ -64,11 +60,6 @@ def mock_ctx(mock_client: AsyncMock) -> MagicMock:
         "polarion_client": mock_client,
     }
     return ctx
-
-
-# ---------------------------------------------------------------------------
-# list_projects
-# ---------------------------------------------------------------------------
 
 
 class TestListProjects:
@@ -330,11 +321,6 @@ class TestListProjects:
         )
 
         assert result.total_count >= 1
-
-
-# ---------------------------------------------------------------------------
-# list_documents
-# ---------------------------------------------------------------------------
 
 
 class TestListDocuments:
@@ -758,11 +744,6 @@ class TestListDocuments:
             )
 
 
-# ---------------------------------------------------------------------------
-# get_document
-# ---------------------------------------------------------------------------
-
-
 class TestGetDocument:
     """Tests for the ``get_document`` tool."""
 
@@ -1080,11 +1061,6 @@ class TestGetDocument:
         assert kwargs_b["params"]["fields[documents]"] == "@all"
 
 
-# ---------------------------------------------------------------------------
-# get_document_parts
-# ---------------------------------------------------------------------------
-
-
 class TestGetDocumentParts:
     """Tests for the ``get_document_parts`` tool."""
 
@@ -1388,11 +1364,6 @@ class TestGetDocumentParts:
 
         assert len(result.items) == 2
         assert result.total_count >= 2
-
-
-# ---------------------------------------------------------------------------
-# read_document
-# ---------------------------------------------------------------------------
 
 
 def _make_part(
@@ -1926,11 +1897,6 @@ class TestReadDocumentFieldValidation:
         assert self._adapter_for("page_number").validate_python(1) == 1
 
 
-# ---------------------------------------------------------------------------
-# list_work_items
-# ---------------------------------------------------------------------------
-
-
 class TestListWorkItems:
     """Tests for the ``list_work_items`` tool."""
 
@@ -2176,11 +2142,6 @@ class TestListWorkItems:
 
         # total_count should be at least 2 (the number of returned items)
         assert result.total_count >= 2
-
-
-# ---------------------------------------------------------------------------
-# get_work_item
-# ---------------------------------------------------------------------------
 
 
 class TestGetWorkItem:
@@ -2503,11 +2464,6 @@ class TestGetWorkItem:
 
         _, kwargs = mock_client.get.call_args
         assert kwargs["params"]["fields[workitems]"] == "@all"
-
-
-# ---------------------------------------------------------------------------
-# get_linked_work_items
-# ---------------------------------------------------------------------------
 
 
 class TestGetLinkedWorkItems:

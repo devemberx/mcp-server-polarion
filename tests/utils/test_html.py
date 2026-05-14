@@ -145,13 +145,7 @@ class TestHtmlToMarkdown:
         assert "![My picture](workitemimg:1-foo.png" in result
 
     def test_non_attachment_img_passes_through(self) -> None:
-        """External imgs are no longer filtered — markdownify emits them verbatim.
-
-        The previous attachment-prefix whitelist filtered out external URLs as
-        a defensive measure, but smoke tests showed Polarion descriptions never
-        contain them in practice, and filtering added complexity without value.
-        Let markdownify render them so the caller can see what was there.
-        """
+        """External imgs render verbatim — no attachment-prefix filtering."""
         html = '<p>Before <img src="https://example.com/pic.jpg"/> After</p>'
         result = html_to_markdown(html)
         assert "Before" in result

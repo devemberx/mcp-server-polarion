@@ -22,10 +22,6 @@ from mcp_server_polarion.models import (
     WorkItemUpdateResult,
 )
 
-# ---------------------------------------------------------------------------
-# PaginatedResult[T]
-# ---------------------------------------------------------------------------
-
 
 class TestPaginatedResult:
     """Tests for the generic ``PaginatedResult[T]`` wrapper."""
@@ -112,11 +108,6 @@ class TestPaginatedResult:
         assert "total_count" in schema["properties"]
 
 
-# ---------------------------------------------------------------------------
-# ProjectSummary
-# ---------------------------------------------------------------------------
-
-
 class TestProjectSummary:
     def test_valid(self):
         p = ProjectSummary(id="myproject", name="My Project")
@@ -140,11 +131,6 @@ class TestProjectSummary:
             ProjectSummary(id="proj")  # type: ignore[call-arg]
 
 
-# ---------------------------------------------------------------------------
-# DocumentSummary
-# ---------------------------------------------------------------------------
-
-
 class TestDocumentSummary:
     def test_valid(self):
         d = DocumentSummary(space_id="_default", document_name="SRS")
@@ -157,11 +143,6 @@ class TestDocumentSummary:
             document_name="Software Requirement Specification",
         )
         assert d.document_name == "Software Requirement Specification"
-
-
-# ---------------------------------------------------------------------------
-# DocumentDetail
-# ---------------------------------------------------------------------------
 
 
 class TestDocumentDetail:
@@ -198,11 +179,6 @@ class TestDocumentDetail:
         restored = DocumentDetail.model_validate(d.model_dump())
         assert restored.custom_fields == d.custom_fields
         assert restored.custom_fields["richNote"] == rich
-
-
-# ---------------------------------------------------------------------------
-# DocumentPart
-# ---------------------------------------------------------------------------
 
 
 class TestDocumentPart:
@@ -284,11 +260,6 @@ class TestDocumentPart:
             )
 
 
-# ---------------------------------------------------------------------------
-# WorkItemSummary
-# ---------------------------------------------------------------------------
-
-
 class TestWorkItemSummary:
     def test_valid(self):
         wi = WorkItemSummary(
@@ -348,11 +319,6 @@ class TestWorkItemSummary:
                 title="Incomplete",
                 type="task",
             )
-
-
-# ---------------------------------------------------------------------------
-# WorkItemDetail
-# ---------------------------------------------------------------------------
 
 
 class TestWorkItemDetail:
@@ -479,11 +445,6 @@ class TestWorkItemDetail:
         assert detail.hyperlinks[0].uri == "https://example.com"
 
 
-# ---------------------------------------------------------------------------
-# Hyperlink
-# ---------------------------------------------------------------------------
-
-
 class TestHyperlink:
     def test_valid(self):
         link = Hyperlink(
@@ -502,11 +463,6 @@ class TestHyperlink:
     def test_missing_uri_rejected(self):
         with pytest.raises(ValidationError):
             Hyperlink(role="ref_ext")  # type: ignore[call-arg]
-
-
-# ---------------------------------------------------------------------------
-# LinkedWorkItemSummary
-# ---------------------------------------------------------------------------
 
 
 class TestLinkedWorkItemSummary:
@@ -573,11 +529,6 @@ class TestLinkedWorkItemSummary:
         assert link.document_name == "Software Test Case Specification"
 
 
-# ---------------------------------------------------------------------------
-# WorkItemCreateResult
-# ---------------------------------------------------------------------------
-
-
 class TestWorkItemCreateResult:
     def test_successful_create(self):
         result = WorkItemCreateResult(
@@ -605,11 +556,6 @@ class TestWorkItemCreateResult:
         assert result.dry_run is True
         assert result.work_item_id is None
         assert result.payload_preview is not None
-
-
-# ---------------------------------------------------------------------------
-# WorkItemUpdateResult
-# ---------------------------------------------------------------------------
 
 
 class TestWorkItemUpdateResult:
@@ -654,11 +600,6 @@ class TestWorkItemUpdateResult:
         assert result.payload_preview is not None
 
 
-# ---------------------------------------------------------------------------
-# CommentResult
-# ---------------------------------------------------------------------------
-
-
 class TestCommentResult:
     def test_successful_create(self):
         result = CommentResult(
@@ -688,11 +629,6 @@ class TestCommentResult:
         assert result.comment_id is None
 
 
-# ---------------------------------------------------------------------------
-# LinkResult
-# ---------------------------------------------------------------------------
-
-
 class TestLinkResult:
     def test_successful_create(self):
         result = LinkResult(
@@ -717,11 +653,6 @@ class TestLinkResult:
         )
         assert result.dry_run is True
         assert result.payload_preview is not None
-
-
-# ---------------------------------------------------------------------------
-# DocumentPartCreateResult
-# ---------------------------------------------------------------------------
 
 
 class TestDocumentPartCreateResult:
@@ -755,11 +686,6 @@ class TestDocumentPartCreateResult:
         )
         assert result.dry_run is True
         assert result.part_id is None
-
-
-# ---------------------------------------------------------------------------
-# Cross-model integration
-# ---------------------------------------------------------------------------
 
 
 class TestCrossModelIntegration:
