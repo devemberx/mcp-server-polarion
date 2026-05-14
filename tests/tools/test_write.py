@@ -2603,3 +2603,38 @@ class TestWriteToolAnnotations:
             assert getattr(annotations, key) is value, (
                 f"{tool_name}.{key} expected {value}, got {getattr(annotations, key)}"
             )
+
+
+class TestUpdateDocumentPitfallDocumentation:
+    """Lock the two body-edit pitfalls into the public docstring so a
+    future slim pass cannot silently delete them.
+
+    The pitfalls were reproduced against the live testdrive server and are
+    user-facing (MCP hosts on other platforms never load CLAUDE.md), so the
+    warnings must stay inside ``update_document.__doc__``.
+    """
+
+    def test_docstring_warns_about_anchorless_paragraph_returning_500(self) -> None:
+        """Anchorless <p> appended via update_document breaks get_document_parts."""
+        doc = update_document.__doc__ or ""
+        assert "anchorless" in doc, (
+            "update_document docstring must mention the anchorless <p> pitfall"
+        )
+        assert "HTTP 500" in doc, (
+            "update_document docstring must surface that the next get_document_parts "
+            "call returns HTTP 500 after an anchorless <p> append"
+        )
+        assert "move_work_item_to_document" in doc, (
+            "update_document docstring must point callers at the correct attach path"
+        )
+
+    def test_docstring_warns_about_macro_div_module_relationship_gap(self) -> None:
+        """Macro <div> reference injected via update_document leaves module unset."""
+        doc = update_document.__doc__ or ""
+        assert "polarion_wiki macro" in doc, (
+            "update_document docstring must mention the polarion_wiki macro pitfall"
+        )
+        assert "module" in doc, (
+            "update_document docstring must surface that the WI's module "
+            "relationship stays unset after a macro <div> injection"
+        )
