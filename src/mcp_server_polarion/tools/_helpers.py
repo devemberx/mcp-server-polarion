@@ -45,7 +45,7 @@ class WorkItemSummaryKwargs(TypedDict):
 # Constants
 # ---------------------------------------------------------------------------
 
-# Default page size — Polarion caps at 100.
+# Polarion enforces a hard cap of 100 server-side.
 DEFAULT_PAGE_SIZE: Final[int] = 100
 
 # Sparse fieldsets for list / detail endpoints.

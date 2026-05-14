@@ -363,14 +363,12 @@ class WorkItemDetail(WorkItemSummary):
     description_html: str = Field(
         default="",
         description=(
-            "Work Item description as raw Polarion HTML. The same shape "
-            "round-trips back through ``update_work_item(description_html"
-            "=...)`` without lossy Markdown conversion. Empty string when "
-            "the work item has no description or when "
-            "``include_description_html=False`` was passed. WARNING: may "
-            "contain Polarion-specific spans / ``data-*`` attributes — "
-            "do NOT run through a Markdown converter or sanitizer; those "
-            "would strip the Polarion-side markers and break the round-trip."
+            "Raw Polarion HTML body for the round-trip pair "
+            "``get_work_item(include_description_html=True)`` → "
+            "``update_work_item(description_html=...)``. Empty when the "
+            "work item has no description or when the read flag was "
+            "False. Never feed through a Markdown converter or sanitizer "
+            "(would strip Polarion-specific spans and break the round-trip)."
         ),
     )
     project_id: str = Field(

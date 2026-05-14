@@ -36,7 +36,7 @@ _INITIAL_BACKOFF_SECONDS: Final[float] = 1.0
 _BACKOFF_MULTIPLIER: Final[float] = 2.0
 _RETRYABLE_STATUS_CODES: Final[frozenset[int]] = frozenset({429, 500, 502, 503, 504})
 
-# Write-delay configuration -------------------------------------------------
+# Pause after each mutation (Polarion forbids concurrent writes).
 _WRITE_DELAY_SECONDS: Final[float] = 1.5
 
 # Timeout configuration ------------------------------------------------------
