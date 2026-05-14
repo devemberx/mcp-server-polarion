@@ -317,168 +317,112 @@ def _build_update_document_payload(  # noqa: PLR0913
 )
 async def create_work_item(  # noqa: PLR0913
     ctx: Context,
-    project_id: str = Field(
-        description=(
-            "Polarion project ID (e.g. 'myproject'). "
-            "Use ``list_projects`` to discover valid IDs."
-        ),
-    ),
+    project_id: str = Field(description="Polarion project ID."),
     title: str = Field(
-        min_length=1,
-        description="Work item title (required, non-empty).",
+        min_length=1, description="Work item title (required, non-empty)."
     ),
     type: str = Field(
         min_length=1,
-        description=(
-            "Work item type, e.g. 'requirement', 'task', 'testCase', "
-            "'defect'. Project-specific; refer to existing work items "
-            "via ``get_work_item`` if unsure of allowed values."
-        ),
+        description="Work item type (e.g. 'requirement', 'task', 'testCase').",
     ),
     description: str | None = Field(
         default=None,
         max_length=MAX_BODY_HTML_LEN,
-        description=(
-            "Markdown body. Converted to Polarion-safe HTML on write. "
-            "Pass None (or omit) to leave the description unset. "
-            "Capped at 2_000_000 characters at the tool layer to stop "
-            "obviously broken inputs from reaching Polarion."
-        ),
+        description="Optional Markdown body; converted to sanitized HTML on write.",
     ),
     status: str | None = Field(
         default=None,
         description=(
-            "Initial workflow status (e.g. 'draft', 'open'). "
-            "Server default applies when omitted. Project-specific."
+            "Optional initial workflow status (project default applies if omitted)."
         ),
     ),
     priority: str | None = Field(
         default=None,
         description=(
-            "Priority value as a string (e.g. '50.0'). "
-            "WARNING: this Polarion server version silently coerces "
-            "unrecognised values to the project default. Inspect an "
-            "existing work item with ``get_work_item`` to discover the "
-            "project's actual priority values before relying on this."
+            "Optional priority string (e.g. '50.0'); "
+            "unrecognised values silently coerced."
         ),
     ),
     severity: str | None = Field(
         default=None,
-        description=(
-            "Severity classification, primarily for defects "
-            "(e.g. 'major', 'critical'). Free-form."
-        ),
+        description="Optional severity classification (e.g. 'major', 'critical').",
     ),
     assignee_ids: list[str] | None = Field(  # noqa: B008
         default=None,
-        description=(
-            "Short user IDs (e.g. ['alice', 'bob']). "
-            "Each is wrapped as {type:'users', id:'<id>'} in the "
-            "assignee to-many relationship."
-        ),
+        description="Optional short user IDs to assign (e.g. ['alice', 'bob']).",
     ),
     due_date: str | None = Field(
         default=None,
-        description="Due date in ISO-8601 format 'YYYY-MM-DD'.",
+        description="Optional due date 'YYYY-MM-DD'.",
     ),
     initial_estimate: str | None = Field(
         default=None,
-        description=("Polarion duration string, e.g. '5 1/2d', '1w 2d', '4h'."),
+        description="Optional Polarion duration (e.g. '5 1/2d', '1w 2d', '4h').",
     ),
     hyperlinks: list[Hyperlink] | None = Field(  # noqa: B008
         default=None,
         description=(
-            "External hyperlinks attached to the work item. "
-            "Each must specify ``role`` and ``uri``; ``title`` is optional."
+            "Optional external hyperlinks; each must have ``role`` and ``uri``."
         ),
     ),
     custom_fields: dict[str, object] | None = Field(  # noqa: B008
         default=None,
         description=(
-            "Project-defined custom fields keyed by Polarion field ID "
-            "(e.g. {'riskLevel': 'high', 'effortHours': 8.0}). Same "
-            "shape as ``WorkItemDetail.custom_fields`` on read, so the "
-            "read response can be passed straight back. Rich-text values "
-            "must be ``{'type': 'text/html', 'value': '<...>'}`` dicts "
-            "(no Markdown auto-conversion). Keys colliding with standard "
-            "Polarion attributes raise ``ValueError``. WARNING: unknown "
-            "field IDs are NOT validated by Polarion — they are silently "
-            "stored as ghost attributes and will reappear on every "
-            "subsequent ``get_work_item`` indistinguishable from real "
-            "customs. Pass keys taken from a prior ``get_work_item`` "
-            "result to avoid creating ghosts."
+            "Optional custom fields keyed by Polarion field ID; "
+            "rich-text values must be ``{'type':'text/html','value':...}``."
         ),
     ),
     dry_run: bool = Field(
         default=False,
-        description=(
-            "When True, build and return the JSON:API payload preview "
-            "without calling Polarion. Useful for verifying the request "
-            "shape before committing."
-        ),
+        description="When True, return payload preview without calling Polarion.",
     ),
 ) -> WorkItemCreateResult:
     """Create a new Polarion work item in a project.
 
-    Builds a JSON:API ``POST /projects/{projectId}/workitems`` request
-    from the supplied fields, optionally previewing the payload with
-    ``dry_run=True``.  The created work item is *not* attached to any
-    document — to place it inside a document at a specific outline
-    position, follow up with ``move_work_item_to_document``.
+    The work item is created free-floating — to place it inside a
+    document at a specific outline position, follow up with
+    ``move_work_item_to_document``.
 
-    Description handling: ``description`` is treated as Markdown,
-    converted via ``markdown_to_html`` (CommonMark + GFM tables), and
-    sanitized via ``sanitize_html`` before being stored as
-    ``{"type": "text/html", "value": "..."}``. Dangerous link schemes
-    such as ``javascript:`` are stripped automatically.
+    Format asymmetry: ``description`` here is Markdown (converted to
+    sanitized HTML on write) because greenfield authoring is natural for
+    LLMs. After creation the round-trip pair is
+    ``get_work_item(include_description_html=True)`` ↔
+    ``update_work_item(description_html=...)`` which speaks raw HTML
+    verbatim. The two formats never mix.
 
-    Note on the asymmetry: ``create_work_item`` accepts MARKDOWN here
-    because greenfield authoring is the LLM's natural medium. Once the
-    work item exists, the round-trip pair is
-    ``get_work_item(..., include_description_html=True)`` →
-    ``update_work_item(description_html=...)`` which speaks RAW HTML
-    verbatim. The two format paths never mix.
-
-    Free-form fields (``type``, ``status``, ``priority``, ``severity``)
-    are NOT strictly validated by this Polarion server version.
-    Unrecognised ``priority`` values are silently coerced to the project
-    default; arbitrary ``type`` strings are stored verbatim (which can
-    create "ghost" work-item types that won't appear in any project
-    schema). Always inspect an existing work item with ``get_work_item``
-    and reuse its values to avoid corrupting the project's enum space.
+    Server-side validation is lenient: unrecognised ``type`` /
+    ``priority`` / ``status`` / ``severity`` values are silently coerced
+    or stored verbatim (creating "ghost" types). Reuse values from an
+    existing ``get_work_item`` to avoid corrupting the project's enums.
+    Same lenience applies to ``custom_fields``: unknown field IDs are
+    stored as ghost attributes — pass keys taken from a prior read.
 
     Args:
         ctx: MCP tool context (injected automatically).
         project_id: Polarion project ID.
-        title: Work item title (required, non-empty).
-        type: Work item type (e.g. 'requirement', 'task').
+        title: Work item title.
+        type: Work item type.
         description: Optional Markdown body.
-        status: Optional initial workflow status.
+        status: Optional workflow status.
         priority: Optional priority string.
         severity: Optional severity classification.
-        assignee_ids: Optional list of short user IDs to assign.
-        due_date: Optional ISO-8601 date 'YYYY-MM-DD'.
-        initial_estimate: Optional Polarion duration string.
-        hyperlinks: Optional list of ``Hyperlink`` objects.
-        dry_run: When True, return payload preview without calling
-            Polarion. Defaults to False.
+        assignee_ids: Optional short user IDs.
+        due_date: Optional ISO-8601 date.
+        initial_estimate: Optional duration string.
+        hyperlinks: Optional ``Hyperlink`` list.
+        custom_fields: Optional custom-field dict.
+        dry_run: When True, return payload preview only.
 
     Returns:
-        WorkItemCreateResult with:
-        - ``created``: True on a successful real create, False when
-          ``dry_run=True``.
-        - ``dry_run``: Echo of the dry_run flag.
-        - ``work_item_id``: Short ID of the created work item
-          (e.g. 'MCPT-042'). None on dry-run.
-        - ``payload_preview``: The JSON:API request body. Populated on
-          dry-run; None after a successful real create.
+        WorkItemCreateResult with ``created``, ``dry_run``,
+        ``work_item_id`` (None on dry-run), and ``payload_preview``
+        (populated on dry-run; None on real create).
 
     Raises:
-        ValueError: If the project ID is not found.
-        PermissionError: If the token lacks permissions to create work
-            items in the project.
-        RuntimeError: On other Polarion API errors, or if Polarion
-            accepts the request but returns no work-item ID.
+        ValueError: Project not found, or custom-field key collides with
+            a standard Polarion attribute.
+        PermissionError: Token lacks permission.
+        RuntimeError: Other Polarion API errors, or accepted-but-no-ID.
     """
     description_html = (
         sanitize_html(markdown_to_html(description)) if description else ""
@@ -549,270 +493,152 @@ async def create_work_item(  # noqa: PLR0913
 )
 async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     ctx: Context,
-    project_id: str = Field(
-        min_length=1,
-        description=(
-            "Polarion project ID containing the work item to update. "
-            "Use ``list_projects`` to discover valid IDs."
-        ),
-    ),
+    project_id: str = Field(min_length=1, description="Polarion project ID."),
     work_item_id: str = Field(
         min_length=1,
-        description=(
-            "Short ID of an EXISTING work item to update (e.g. 'MCPT-042'). "
-            "Use ``get_work_item`` or ``list_work_items`` to confirm the ID."
-        ),
+        description="Short ID of an EXISTING work item (e.g. 'MCPT-042').",
     ),
     title: str | None = Field(
-        default=None,
-        description=("New work item title. Pass None (or omit) to leave unchanged."),
+        default=None, description="New title (None to leave unchanged)."
     ),
     description_html: str | None = Field(
         default=None,
         max_length=MAX_BODY_HTML_LEN,
         description=(
-            "New work-item body as RAW Polarion HTML — the same shape "
-            "returned by ``get_work_item(..., include_description_html=True)"
-            ".description_html``. Pass None (or omit) to leave the "
-            "description unchanged; empty string is also treated as "
-            "'leave unchanged' in v1 (there is no way to clear an "
-            "existing description via this tool) — but if "
-            "``description_html=''`` is the ONLY field passed, the call "
-            "raises ``ValueError('Nothing to update ...')`` because the "
-            "PATCH body would have no attributes. NOTE: "
-            "``update_document(home_page_content_html='')`` raises by "
-            "contrast — same '' input, different semantics, because "
-            "wiping a document body orphans every heading WI in it. "
-            "Capped at 2_000_000 characters at the tool layer. "
-            "WARNING: HTML is sent VERBATIM to Polarion — no sanitization "
-            "is performed because sanitizing would strip Polarion-specific "
-            "spans / data attributes and break the round-trip. XSS / "
-            "script-tag filtering is therefore delegated to Polarion's "
-            "own rendering layer; this tool is NOT a defense-in-depth "
-            "boundary. NEVER pass untrusted user input (including content "
-            "that a prompt-injection attempt may have steered the LLM "
-            "into producing) here. For greenfield Markdown authoring use "
-            "``create_work_item(description=...)`` instead — the two "
-            "format paths never mix."
+            "New raw Polarion HTML body (round-trip shape from get_work_item); "
+            "'' is a no-op."
         ),
     ),
     status: str | None = Field(
         default=None,
         description=(
-            "New workflow status. To trigger a workflow transition with "
-            "side effects (e.g. setting resolution), prefer "
-            "``workflow_action`` over a raw status update."
+            "New workflow status; prefer ``workflow_action`` for real transitions."
         ),
     ),
     priority: str | None = Field(
         default=None,
         description=(
-            "New priority value as a string (e.g. '50.0'). "
-            "WARNING: this Polarion server version silently coerces "
-            "unrecognised values to the project default."
+            "New priority string (e.g. '50.0'); unrecognised values silently coerced."
         ),
     ),
     severity: str | None = Field(
-        default=None,
-        description="New severity classification (e.g. 'major', 'critical').",
+        default=None, description="New severity classification."
     ),
     due_date: str | None = Field(
-        default=None,
-        description="New due date in ISO-8601 format 'YYYY-MM-DD'.",
+        default=None, description="New due date 'YYYY-MM-DD'."
     ),
     initial_estimate: str | None = Field(
         default=None,
-        description="New Polarion duration string, e.g. '5 1/2d', '1w 2d'.",
+        description="New Polarion duration (e.g. '5 1/2d', '1w 2d').",
     ),
     resolution: str | None = Field(
         default=None,
         description=(
-            "New resolution outcome (e.g. 'fixed', 'wontfix'). Typically "
-            "set as part of closing a work item; consider using "
-            "``workflow_action`` instead so the project's workflow rules "
-            "apply."
+            "New resolution outcome; "
+            "prefer ``workflow_action`` so workflow rules apply."
         ),
     ),
     hyperlinks: list[Hyperlink] | None = Field(  # noqa: B008
         default=None,
-        description=(
-            "REPLACES the work item's hyperlink list. Pass the full new "
-            "list (not a delta). Pass None (or omit) to leave hyperlinks "
-            "unchanged."
-        ),
+        description="REPLACES the hyperlink list — pass the full list, not a delta.",
     ),
     assignee_ids: list[str] | None = Field(  # noqa: B008
         default=None,
-        description=(
-            "REPLACES the assignee list with these short user IDs "
-            "(e.g. ['alice', 'bob']). Pass None (or omit) to leave "
-            "assignees unchanged."
-        ),
+        description="REPLACES the assignee list — pass the full list, not a delta.",
     ),
     custom_fields: dict[str, object] | None = Field(  # noqa: B008
         default=None,
         description=(
-            "Project-defined custom fields keyed by Polarion field ID "
-            "(e.g. {'riskLevel': 'high', 'effortHours': 8.0}). PARTIAL "
-            "update — only the keys passed here are PATCHed; omitted "
-            "ones are preserved. Same shape as ``get_work_item(...)."
-            "custom_fields`` so the read result can be passed back "
-            "directly. Rich-text values must be ``{'type': 'text/html', "
-            "'value': '<...>'}`` dicts. Keys colliding with standard "
-            "Polarion attributes raise ``ValueError``. ``None`` values "
-            "inside the dict are skipped. WARNING: unknown field IDs "
-            "are NOT validated by Polarion — they are silently stored "
-            "as ghost attributes and will reappear on every subsequent "
-            "``get_work_item`` indistinguishable from real customs. "
-            "Pass keys taken from a prior ``get_work_item`` result to "
-            "avoid creating ghosts."
+            "Partial custom-field update; "
+            "rich-text values must be ``{'type':'text/html','value':...}``."
         ),
     ),
     workflow_action: str | None = Field(
         default=None,
         description=(
-            "Polarion workflow action ID to trigger as part of the update "
-            "(sent as the ``workflowAction`` query parameter, e.g. "
-            "'close', 'reopen'). Workflow actions run the project's "
-            "transition rules (which may set resolution, validate "
-            "required fields, etc.) — prefer this over editing ``status`` "
-            "directly when you want a real state transition. "
-            "Action IDs are project-specific; if the supplied ID is not "
-            "configured for this project, Polarion responds with HTTP 400 "
-            "'workflow action not found'. Must be paired with at least "
-            "one body field (e.g. title) — Polarion rejects PATCH bodies "
-            "with no attributes or relationships."
+            "Workflow action ID (e.g. 'close'); "
+            "must be paired with at least one body field."
         ),
     ),
     change_type_to: str | None = Field(
         default=None,
         description=(
-            "When set, changes the work item's type as part of the update "
-            "(sent as the ``changeTypeTo`` query parameter). Use sparingly "
-            "— type changes can invalidate type-specific fields and "
-            "RESET the workflow status to the new type's initial state "
-            "(observed: 'approved' task → defect → 'open'). Must be "
-            "paired with at least one body field for the same reason as "
-            "``workflow_action``."
+            "Change work-item type; RESETS status; "
+            "must be paired with at least one body field."
         ),
     ),
     include_current_description_html: bool = Field(
         default=False,
         description=(
-            "When True, populate ``current.description_html`` in the "
-            "result with the post-PATCH raw HTML body so the caller can "
-            "confirm a body edit applied. Default False to keep the "
-            "response small for the common case where the PATCH only "
-            "touches metadata (status, priority, hyperlinks, ...). "
-            "Mirrors ``get_work_item(include_description_html=...)``. "
-            "Same caveat as that flag: the body STILL travels over the "
-            "wire on the follow-up GET because ``@all`` is the only "
-            "sparse-fieldset that surfaces inline custom fields — "
-            "setting this False saves LLM context tokens, not network "
-            "bytes."
+            "When True, return the post-PATCH raw HTML body in "
+            "``current.description_html``."
         ),
     ),
     dry_run: bool = Field(
         default=False,
-        description=(
-            "When True, build the JSON:API payload and return it via "
-            "``payload_preview`` (plus a flat ``changes`` summary) "
-            "without calling Polarion. Useful for verifying the request "
-            "shape before committing."
-        ),
+        description="When True, return payload preview without calling Polarion.",
     ),
 ) -> WorkItemUpdateResult:
     """Update an existing Polarion work item.
 
-    Builds a JSON:API ``PATCH /projects/{projectId}/workitems/{workItemId}``
-    request from the supplied fields, optionally previewing it with
-    ``dry_run=True``. After the PATCH succeeds (Polarion returns 204
-    No Content), this tool issues a follow-up ``GET`` and returns the
-    fresh ``WorkItemDetail`` as ``current`` so the caller can confirm
-    the change applied.
+    PATCHes the supplied fields and follows up with a GET so the caller
+    can confirm the change in ``current``. ``None`` / empty string /
+    empty list all mean ``leave unchanged`` — there is no way to clear
+    a field via this tool in v1.
 
-    Field semantics: ``None`` (or omitted) leaves the corresponding
-    field unchanged. Empty string and empty list are also treated as
-    "leave unchanged" — there is no way to clear an existing field
-    value via this tool in v1. To actually change a field, pass a
-    non-empty value.
+    ``description_html`` is RAW Polarion HTML, sent verbatim with no
+    sanitization, so XSS/script filtering is delegated to Polarion's
+    renderer — NEVER pass untrusted input. Pair with
+    ``get_work_item(include_description_html=True)`` for the round-trip.
+    For greenfield authoring use ``create_work_item(description=...)``
+    (Markdown) — the two format paths never mix.
 
-    Description handling: ``description_html`` is RAW Polarion HTML and
-    is sent verbatim — no Markdown conversion, no sanitization. The
-    expected input is the value returned by
-    ``get_work_item(..., include_description_html=True).description_html``,
-    optionally mutated. NEVER pass untrusted user-supplied HTML here.
-    For greenfield Markdown authoring (e.g. creating a new work item),
-    use ``create_work_item(description=...)`` instead — Markdown and
-    HTML inputs never mix across these two tools.
+    ``hyperlinks`` and ``assignee_ids`` REPLACE the existing lists (pass
+    the full list, not a delta). ``custom_fields`` is partial — omitted
+    keys are preserved. Unknown custom-field IDs are silently stored as
+    ghost attributes; pass keys from a prior read to avoid creating them.
 
-    Replace-all semantics: when ``hyperlinks`` or ``assignee_ids`` is
-    provided, it REPLACES the work item's existing list — pass the full
-    new list, not a delta.
-
-    Workflow transitions: prefer ``workflow_action`` (e.g. 'close',
-    'reopen') over editing ``status`` directly. Workflow actions run
-    Polarion's project-defined transition rules, while a raw ``status``
-    edit bypasses them. ``workflow_action`` and ``change_type_to`` MUST
-    be paired with at least one body field — Polarion rejects PATCH
-    bodies that have neither ``attributes`` nor ``relationships`` (HTTP
-    400 "At least one of the members is required"). When the only
-    intent is to trigger a transition, pair it with a no-op echo
-    (e.g. ``title=<existing title>``) or any other valid body field.
-
-    Free-form fields (``status``, ``priority``, ``severity``,
-    ``resolution``) are NOT strictly validated by this Polarion server
-    version — unrecognised values are silently coerced or stored verbatim.
-    Inspect existing work items with ``get_work_item`` and reuse their
-    values to avoid corrupting the project's enum space.
+    Prefer ``workflow_action`` over a raw ``status`` edit so the project's
+    transition rules run. ``workflow_action`` and ``change_type_to`` MUST
+    be paired with at least one body field — Polarion rejects empty PATCH
+    bodies (HTTP 400 "At least one of the members is required"). Server-
+    side validation of ``status`` / ``priority`` / ``severity`` /
+    ``resolution`` is lenient — unrecognised values are coerced or stored
+    verbatim.
 
     Args:
         ctx: MCP tool context (injected automatically).
         project_id: Polarion project ID.
         work_item_id: Short ID of the work item to update.
         title: Optional new title.
-        description_html: Optional new raw HTML body (verbatim, no
-            sanitization).
+        description_html: Optional new raw HTML body.
         status: Optional new workflow status.
         priority: Optional new priority string.
         severity: Optional new severity.
-        due_date: Optional new ISO-8601 date 'YYYY-MM-DD'.
-        initial_estimate: Optional new Polarion duration string.
+        due_date: Optional new ISO-8601 date.
+        initial_estimate: Optional new duration.
         resolution: Optional new resolution outcome.
         hyperlinks: Optional REPLACEMENT hyperlink list.
         assignee_ids: Optional REPLACEMENT assignee list.
-        workflow_action: Optional workflow action ID
-            (``workflowAction`` query parameter).
-        change_type_to: Optional new work-item type
-            (``changeTypeTo`` query parameter).
+        custom_fields: Optional partial custom-field update.
+        workflow_action: Optional ``workflowAction`` query parameter.
+        change_type_to: Optional ``changeTypeTo`` query parameter.
         include_current_description_html: When True, return the
             post-update body in ``current.description_html``; default
-            False keeps the response small. Pass True when verifying a
-            ``description_html`` edit applied.
-        dry_run: When True, return preview without calling Polarion.
+            False keeps responses small.
+        dry_run: When True, return payload preview only.
 
     Returns:
-        WorkItemUpdateResult with:
-        - ``updated``: True on a successful real update, False when
-          ``dry_run=True``.
-        - ``dry_run``: Echo of the dry_run flag.
-        - ``current``: Post-update ``WorkItemDetail`` fetched after the
-          PATCH succeeds. ``current.description_html`` is populated only
-          when ``include_current_description_html=True``, otherwise
-          blanked to ``""``. None on dry-run.
-        - ``changes``: Map of tool parameter names to the new values
-          included in the PATCH (Python-typed, not JSON:API-shaped).
-          Excludes parameters that were left unchanged.
-        - ``payload_preview``: The JSON:API request body. Populated on
-          dry-run; None after a successful real update.
+        WorkItemUpdateResult with ``updated``, ``dry_run``, ``current``
+        (post-update detail; None on dry-run), ``changes`` (parameter
+        deltas), and ``payload_preview`` (populated on dry-run).
 
     Raises:
-        ValueError: If no mutating fields are provided; if
-            ``workflow_action`` / ``change_type_to`` is supplied without
-            any body field; or if the work item / project is not found.
-        PermissionError: If the token lacks permissions to update the
-            work item.
-        RuntimeError: On other Polarion API errors.
+        ValueError: No mutating fields supplied, action without body,
+            custom-field key collides with a standard attribute, or WI
+            not found.
+        PermissionError: Token lacks permission.
+        RuntimeError: Other Polarion API errors.
     """
     changes: dict[str, JsonValue] = {}
     if title:
@@ -966,123 +792,74 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
 )
 async def move_work_item_to_document(  # noqa: PLR0913
     ctx: Context,
-    project_id: str = Field(
-        description=(
-            "Polarion project ID containing the work item being moved. "
-            "Use ``list_projects`` to discover valid IDs."
-        ),
-    ),
+    project_id: str = Field(description="Project containing the work item."),
     work_item_id: str = Field(
         min_length=1,
-        description=(
-            "Short ID of an EXISTING work item to move into the target "
-            "document (e.g. 'MCPT-042'). Use ``create_work_item`` first "
-            "if the work item does not yet exist."
-        ),
+        description="Short ID of an EXISTING work item (e.g. 'MCPT-042').",
     ),
     target_space_id: str = Field(
         min_length=1,
-        description=(
-            "Space ID of the target document. Use '_default' for the "
-            "default space. Discover with ``list_documents``."
-        ),
+        description="Target space ID (use '_default' for the default space).",
     ),
     target_document_name: str = Field(
         min_length=1,
-        description=("Name of the target document within ``target_space_id``."),
+        description="Target document name within ``target_space_id``.",
     ),
     previous_part_id: str | None = Field(
         default=None,
         description=(
-            "Short part ID (e.g. 'workitem_MCPT-001', 'heading_MCPT-005') "
-            "to insert the work item AFTER. Discover existing part IDs "
-            "with ``get_document_parts``. Mutually exclusive with "
-            "``next_part_id``; exactly one must be provided."
+            "Insert AFTER this part ID (mutually exclusive with ``next_part_id``)."
         ),
     ),
     next_part_id: str | None = Field(
         default=None,
         description=(
-            "Short part ID to insert the work item BEFORE. Discover "
-            "existing part IDs with ``get_document_parts``. Mutually "
-            "exclusive with ``previous_part_id``; exactly one must be "
-            "provided."
+            "Insert BEFORE this part ID (mutually exclusive with ``previous_part_id``)."
         ),
     ),
     dry_run: bool = Field(
         default=False,
-        description=(
-            "When True, build and return the request payload preview "
-            "without calling Polarion."
-        ),
+        description="When True, return payload preview without calling Polarion.",
     ),
 ) -> WorkItemMoveResult:
-    """Move a work item into a Polarion document at a specific outline position.
+    """Move a work item into a Polarion document at a specific position.
 
-    Calls Polarion's ``moveToDocument`` action endpoint
-    (``POST /projects/{p}/workitems/{wi}/actions/moveToDocument``) which:
+    Calls the ``moveToDocument`` action endpoint, which updates the WI's
+    ``module`` relationship, inserts a document part at the specified
+    position, and assigns a proper ``outline_number`` — atomically. This
+    is the ONLY supported way to attach a WI body to a document; editing
+    ``homePageContent`` directly to inject a macro reference leaves the
+    ``module`` relationship unset and produces an inconsistent state.
 
-    - Updates the work item's ``module`` relationship to point at the
-      target document. After the move, the work item is a NATIVE member
-      of the document (its ``space_id`` / ``document_name`` will reflect
-      the target), not an external reference.
-    - Inserts a corresponding document part at the position specified
-      by ``previous_part_id`` or ``next_part_id`` and assigns the work
-      item a proper ``outline_number``.
-    - Works for all NON-heading work-item types.
+    Heading-type work items are rejected (HTTP 400 "Cannot move
+    headings"); headings must be created inside their target document.
+    If the WI is already in a different document, this detaches it from
+    the source — the operation is a move, not a copy.
 
-    LIMITATION: this Polarion server version rejects heading-type work
-    items with HTTP 400 ("Cannot move headings"). Headings appear to be
-    locked into the document that originally created them and cannot be
-    relocated via the API. If you need a heading inside a particular
-    document, the heading must be created inside that document at
-    work-item creation time (a future ``module_id`` parameter on
-    ``create_work_item`` is the planned path).
-
-    Prerequisite: the work item must already exist. Use
-    ``create_work_item`` first to create a free-floating work item.
-    Note that if the work item is already attached to a different
-    document, this tool detaches it from the source — the operation is
-    a true move, not a copy.
-
-    Position is specified by exactly ONE of ``previous_part_id``
-    (insert AFTER that part) or ``next_part_id`` (insert BEFORE that
-    part). Discover existing part IDs by calling ``get_document_parts``
-    on the target document; pass the short ID
-    (e.g. 'workitem_MCPT-001', 'heading_MCPT-005', 'polarion_1')
-    unchanged.
+    Exactly one of ``previous_part_id`` (insert AFTER) / ``next_part_id``
+    (insert BEFORE) must be provided. Discover part IDs with
+    ``get_document_parts``.
 
     Args:
         ctx: MCP tool context (injected automatically).
-        project_id: Project containing the work item to move.
+        project_id: Project containing the work item.
         work_item_id: Short ID of an existing work item.
-        target_space_id: Space ID of the target document.
-        target_document_name: Name of the target document.
-        previous_part_id: Insert AFTER this part. Mutually exclusive
-            with ``next_part_id``.
-        next_part_id: Insert BEFORE this part. Mutually exclusive with
-            ``previous_part_id``.
-        dry_run: When True, return payload preview without calling
-            Polarion. Defaults to False.
+        target_space_id: Target space ID.
+        target_document_name: Target document name.
+        previous_part_id: Insert AFTER this part.
+        next_part_id: Insert BEFORE this part.
+        dry_run: When True, return payload preview only.
 
     Returns:
-        WorkItemMoveResult with:
-        - ``moved``: True on a successful real move, False when
-          ``dry_run=True``.
-        - ``dry_run``: Echo of the dry_run flag.
-        - ``payload_preview``: The request body. Populated on dry-run;
-          None after a successful real move. The Polarion server
-          returns 204 No Content on success, so no part ID is
-          included; call ``get_document_parts`` on the target document
-          if you need the new part's ID.
+        WorkItemMoveResult with ``moved``, ``dry_run``, and
+        ``payload_preview`` (populated on dry-run). Polarion returns 204
+        on success — call ``get_document_parts`` for the new part ID.
 
     Raises:
-        ValueError: If neither or both of ``previous_part_id`` and
-            ``next_part_id`` are provided, or if the work item, target
-            document, or referenced part is not found.
-        PermissionError: If the token lacks permissions to modify the
-            work item or the target document.
-        RuntimeError: On other Polarion API errors.
+        ValueError: Position not exactly one of two, heading WI,
+            or WI / document / part not found.
+        PermissionError: Token lacks permission.
+        RuntimeError: Other Polarion API errors.
     """
     if (previous_part_id is None) == (next_part_id is None):
         raise ValueError(
@@ -1149,171 +926,94 @@ async def move_work_item_to_document(  # noqa: PLR0913
 )
 async def update_document(  # noqa: PLR0913
     ctx: Context,
-    project_id: str = Field(
-        description="Polarion project ID. Use ``list_projects`` to discover.",
-    ),
+    project_id: str = Field(description="Polarion project ID."),
     space_id: str = Field(
         min_length=1,
-        description=(
-            "Space ID (use '_default' for the default space). "
-            "Use ``list_documents`` to discover."
-        ),
+        description="Space ID (use '_default' for the default space).",
     ),
     document_name: str = Field(
         min_length=1,
-        description=(
-            "Document name within ``space_id``. Spaces and other special "
-            "characters in the name are URL-encoded automatically."
-        ),
+        description="Document name within ``space_id``.",
     ),
     title: str | None = Field(
-        default=None,
-        description=(
-            "New document title. Omit (or set None) to leave the title "
-            "unchanged via JSON:API omit-preserve semantics. Pass an "
-            "empty string to clear the title (the empty value IS sent "
-            "to Polarion -- only ``None`` skips the field)."
-        ),
+        default=None, description="New title (None to leave unchanged)."
     ),
     status: str | None = Field(
         default=None,
         description=(
-            "New workflow status (e.g. 'draft', 'approved'). Omit to "
-            "leave unchanged. Prefer ``workflow_action`` for status "
-            "transitions so the project's workflow rules are honoured; "
-            "a direct status edit bypasses them."
+            "New workflow status; prefer ``workflow_action`` for real transitions."
         ),
     ),
     type: str | None = Field(
-        default=None,
-        description=(
-            "New document type (e.g. 'req_specification'). Omit to leave unchanged."
-        ),
+        default=None, description="New document type (e.g. 'req_specification')."
     ),
     home_page_content_html: str | None = Field(
         default=None,
         max_length=MAX_BODY_HTML_LEN,
         description=(
-            "New document body as RAW Polarion HTML — the same shape "
-            "returned by ``get_document(..., include_homepage_content_html"
-            "=True).content_html``. Pass None (or omit) to leave the body "
-            "untouched. REPLACES the entire ``homePageContent``. Polarion "
-            "re-parses on save and auto-creates / removes heading work "
-            "items from inline ``<h1>..<h4>`` tags; headings that vanish "
-            "from the HTML become orphan work items (still linked to the "
-            "module, no outline_number) rather than being deleted — clean "
-            "them up via ``update_work_item`` afterwards if needed. "
-            "Empty string is REJECTED at the tool layer (would wipe the "
-            "body and orphan every heading) — pass at minimum '<p></p>'. "
-            "NOTE: ``update_work_item(description_html='')`` is a no-op "
-            "by contrast — same '' value, different semantics, because "
-            "the blast radius of wiping a document body (every heading "
-            "WI orphaned) is far larger than clearing a single WI's "
-            "description. Capped at 2_000_000 characters at the tool "
-            "layer. WARNING: HTML is sent VERBATIM with NO sanitization "
-            "(sanitization would strip Polarion-specific spans and break "
-            "the round-trip). XSS / script-tag filtering is delegated to "
-            "Polarion's own rendering layer. NEVER pass untrusted input."
+            "New body as raw Polarion HTML (round-trip shape from get_document); "
+            "'' is rejected."
         ),
     ),
     custom_fields: dict[str, object] | None = Field(  # noqa: B008
         default=None,
         description=(
-            "Project-defined custom document fields keyed by Polarion "
-            "field ID. PARTIAL update — omitted keys preserved. Same "
-            "shape as ``DocumentDetail.custom_fields`` on read. Rich-"
-            "text values must be ``{'type': 'text/html', 'value': "
-            "'<...>'}`` dicts. Keys colliding with standard document "
-            "attributes raise ``ValueError``; ``None`` values inside "
-            "the dict are skipped. WARNING: unknown field IDs are NOT "
-            "validated by Polarion — they are silently stored as ghost "
-            "attributes and will reappear on subsequent ``get_document`` "
-            "indistinguishable from real customs. Pass keys taken from a "
-            "prior ``get_document`` result to avoid creating ghosts."
+            "Partial custom-field update; "
+            "rich-text values must be ``{'type':'text/html','value':...}``."
         ),
     ),
     workflow_action: str | None = Field(
         default=None,
         description=(
-            "Optional workflow action ID to apply (e.g. 'approve', "
-            "'close'). Sent as the ``workflowAction`` query parameter; "
-            "respects the project's workflow rules. Polarion rejects "
-            "PATCH bodies with no ``attributes``, so ``workflow_action`` "
-            "MUST be paired with at least one of ``title``/``status``/"
-            "``type``/``home_page_content_html``/``custom_fields`` -- "
-            "this is enforced at the tool layer."
+            "Workflow action ID; must be paired with at least one attribute field."
         ),
     ),
     dry_run: bool = Field(
         default=False,
-        description=(
-            "When True, build and return the JSON:API payload preview "
-            "without calling Polarion."
-        ),
+        description="When True, return payload preview without calling Polarion.",
     ),
 ) -> DocumentUpdateResult:
     """Update a Polarion document's metadata or body.
 
-    Sends ``PATCH /projects/{p}/spaces/{s}/documents/{d}`` with only
-    the attributes the caller explicitly set. JSON:API omit-preserve
-    semantics apply: any field NOT included in the request is left
-    untouched server-side.
+    PATCHes only the attributes you set; omitted fields are preserved
+    server-side. Unlike ``update_work_item`` this does NOT follow up
+    with a GET — call ``get_document`` if you need the refreshed state.
 
-    Body editing via ``home_page_content_html`` is the canonical
-    round-trip pair for
-    ``get_document(..., include_homepage_content_html=True)``. The HTML
-    is sent verbatim — no sanitization, no Markdown conversion — which
-    preserves Polarion-specific markup that earlier Markdown-based
-    paths used to strip. Side effects to be aware of:
+    ``home_page_content_html`` is the round-trip pair for
+    ``get_document(include_homepage_content_html=True)``. The HTML is
+    sent verbatim with no sanitization, so XSS/script filtering is
+    delegated to Polarion's renderer — NEVER pass untrusted input.
+    Empty string is rejected (would wipe the body and orphan every
+    heading); pass ``'<p></p>'`` for a near-empty body.
 
-    - **Heading auto-create**: Polarion re-parses the HTML on save and
-      creates a new heading-type work item for every inline
-      ``<h1>..<h4>`` tag that does not already correspond to a part.
-      Appending a bare ``<hN>Title</hN>`` IS safe — Polarion assigns
-      the new heading WI a ``module`` relationship and an
-      ``outline_number`` automatically.
-    - **Orphan headings**: removing an ``<hN>`` from the HTML removes
-      the document part but leaves the heading work item behind
-      (still ``module``-linked, no ``outline_number``). Clean up via
-      ``update_work_item`` if the orphans matter.
-    - **Body wipe protection**: empty string is rejected at the tool
-      layer to avoid wiping the body and orphaning every heading. Pass
-      at minimum ``'<p></p>'`` if you genuinely want a near-empty body.
-    - **DO NOT inject ID-anchor-less ``<p>`` paragraphs**: smoke-test
-      verified — appending ``<h3>X</h3><p>Body</p>`` lets the PATCH
-      succeed (HTTP 200), but the next ``get_document_parts`` returns
-      HTTP 500 ("There was an exception while processing the request").
-      Every paragraph Polarion already stores carries an
-      ``id="polarion_..."`` anchor; raw ``<p>`` blocks added by the
-      caller break server-side part derivation. **For body text,
-      create a new work item and attach via** ``create_work_item`` +
-      ``move_work_item_to_document`` — never inject the paragraph
-      directly into ``home_page_content_html``.
+    Body-write behaviour:
+
+    - **Heading auto-create**: inline ``<h1>..<h4>`` tags become heading
+      WIs with ``module`` and ``outline_number`` set automatically.
+      A bare ``<hN>Title</hN>`` alone is safe.
+    - **Orphan headings**: removing an ``<hN>`` removes the part but
+      leaves the heading WI behind (still ``module``-linked, no
+      ``outline_number``).
+    - **DO NOT inject anchorless ``<p>`` paragraphs**: ``<h3>X</h3>
+      <p>Body</p>`` lets the PATCH succeed but the next
+      ``get_document_parts`` returns HTTP 500. Polarion's stored
+      paragraphs all carry ``id="polarion_..."`` anchors; raw ``<p>``
+      breaks server-side part derivation. For body text, create a new
+      work item and attach via ``create_work_item`` +
+      ``move_work_item_to_document``.
     - **DO NOT inject WI macro references**: appending
       ``<div id="polarion_wiki macro name=module-workitem;params=id=NEW">``
-      to embed a free-floating work item creates a ``workitem_<NEW>``
-      part visible in ``get_document_parts``, but the WI's ``module``
-      relationship stays unset (``space_id=""``,
-      ``document_name=""``, ``outline_number=""``) — an inconsistent
-      half-attached state that fails to render correctly in the
-      Polarion UI and can be silently lost on subsequent writes.
-      **Always add work items via** ``move_work_item_to_document``,
-      which is the only path that updates ``homePageContent``, sets
-      ``module``, and assigns ``outline_number`` atomically.
+      creates a ``workitem_<NEW>`` part visible in
+      ``get_document_parts`` but leaves the WI's ``module`` relationship
+      unset (``space_id=""``, ``outline_number=""``) — an inconsistent
+      half-attached state. Always attach via
+      ``move_work_item_to_document``.
 
-    Workflow transitions: prefer ``workflow_action`` (e.g. 'approve',
-    'close') over a raw ``status`` update so the project's workflow
-    rules are evaluated. Polarion rejects PATCH bodies that contain
-    neither attributes nor relationships (HTTP 400 "At least one of
-    the members is required"); ``workflow_action`` therefore MUST be
-    accompanied by at least one of ``title`` / ``status`` / ``type`` /
-    ``home_page_content_html`` / ``custom_fields``. Calling with no
-    fields set at all is rejected at the tool layer.
-
-    Unlike ``update_work_item``, this tool does NOT follow up with a
-    GET to return the post-update document state — the result only
-    confirms the PATCH succeeded. Call ``get_document`` afterwards if
-    you need the refreshed document attributes.
+    Workflow: prefer ``workflow_action`` over a raw ``status`` edit so
+    project rules run. ``workflow_action`` MUST be paired with at least
+    one attribute field — Polarion rejects empty PATCH bodies. Unknown
+    custom-field IDs become ghost attributes; pass keys from a prior
+    ``get_document`` to avoid them.
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -1323,30 +1023,22 @@ async def update_document(  # noqa: PLR0913
         title: Optional new title.
         status: Optional new workflow status.
         type: Optional new document type.
-        home_page_content_html: Optional new body as raw Polarion HTML
-            (verbatim, no sanitization). Rejected if empty string.
-        custom_fields: Optional custom-field deltas.
-        workflow_action: Optional workflow action ID. Must be paired
-            with at least one attribute field.
-        dry_run: When True, return payload preview without calling
-            Polarion. Defaults to False.
+        home_page_content_html: Optional new body as raw Polarion HTML.
+        custom_fields: Optional partial custom-field update.
+        workflow_action: Optional action ID; must be paired with a
+            body field.
+        dry_run: When True, return payload preview only.
 
     Returns:
-        DocumentUpdateResult with:
-        - ``updated``: True on a successful real update, False when
-          ``dry_run=True``.
-        - ``dry_run``: Echo of the dry_run flag.
-        - ``payload_preview``: The JSON:API request body. Populated
-          on dry-run; None after a successful real update.
+        DocumentUpdateResult with ``updated``, ``dry_run``, and
+        ``payload_preview`` (populated on dry-run; None on real update).
 
     Raises:
-        ValueError: If no fields are provided, if ``workflow_action``
-            is supplied without any attribute field, if
-            ``home_page_content_html`` is the empty string, or if the
-            project / space / document is not found.
-        PermissionError: If the token lacks permissions to update the
-            document.
-        RuntimeError: On other Polarion API errors.
+        ValueError: No fields supplied, action without body, empty
+            ``home_page_content_html``, custom-field key collision, or
+            document / space / project not found.
+        PermissionError: Token lacks permission.
+        RuntimeError: Other Polarion API errors.
     """
     if home_page_content_html == "":
         raise ValueError(
