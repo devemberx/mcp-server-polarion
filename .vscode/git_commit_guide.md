@@ -26,8 +26,8 @@
 <type>(<scope>): <subject>
 
 [BLANK LINE]
-- <Why: High-level purpose>
-- <What: Specific technical changes>
+- <High-level purpose / motivation>
+- <Specific technical change>
 
 # 4. Strict Constraints:
 - Subject:
@@ -39,9 +39,9 @@
   - Use lowercase nouns (e.g., tool, server, git).
 - Body:
   - Must follow a blank line after the subject.
-  - Must contain exactly 2 bullet points.
+  - Must contain exactly 2 bullet points (one for motivation, one for the change).
+  - Do NOT prefix bullets with literal "Why:" / "What:" — the order alone carries that meaning.
   - Each bullet must fit on a SINGLE line (max ~120 chars). Move longer rationale to the PR description.
-  - Focus on Why and How.
 
 # 4. Correct/Incorrect Examples (DO NOT DEVIATE):
 
@@ -60,8 +60,9 @@
 
 ## Case 4: Mandatory Body
 - INCORRECT: docs(git): update readme (X) -> Missing mandatory blank line and 2 bullets.
-- CORRECT: 
+- INCORRECT body bullets: "- Why: ..." / "- What: ..." (X) -> Drop the literal Why/What prefixes.
+- CORRECT:
 docs(git): update readme with setup instructions
 
-- Provide step-by-step guide for local MCP server installation.
-- Add environment variable requirements for API authentication. (O)
+- Onboarding instructions were spread across three places and went stale on every release.
+- Consolidate setup steps and required env vars into README "Getting Started".

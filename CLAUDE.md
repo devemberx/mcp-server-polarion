@@ -32,13 +32,23 @@ CI runs: `ruff check` → `ruff format --check` → `mypy` → `pytest`.
 - **NEVER `typing.Any`** — use concrete types or `object`.
 - All functions: full type annotations + `from __future__ import annotations`. All tool functions: `async def`. All tool returns: Pydantic models, never raw `dict`.
 - **Body fields are asymmetric by tool purpose**:
-  - **Round-trip pair** (lossless): `get_work_item(..., include_description_html=True)` / `get_document(..., include_homepage_content_html=True)` return **raw Polarion HTML** in `description_html` / `content_html`. `update_work_item(description_html=...)` / `update_document(home_page_content_html=...)` accept the same shape and send it verbatim — NO sanitization, NO Markdown conversion. Sanitizing would strip Polarion-specific spans / `data-*` attrs and defeat the round-trip; never pass untrusted input through these update parameters. **Security boundary**: XSS / script-tag filtering is delegated to Polarion's own rendering layer — this MCP server is NOT a defense-in-depth boundary, and a prompt-injected LLM that gets HTML routed through these parameters can plant stored payloads that fire in any client (including Polarion's web UI) that re-renders the value.
-  - **Greenfield create** (Markdown): `create_work_item(description=...)` accepts Markdown, converts via `markdown_to_html` + `sanitize_html` (allowed tags: p, br, b, i, u, strong, em, ul, ol, li, h1-h4, table+children, a, span, div, pre, code; schemes: http, https, mailto).
-  - **Synthesis paths** (Markdown): `read_document` and `get_document_parts` convert HTML→Markdown via `html_to_markdown()` for LLM consumption. Output is READ-ONLY — feeding it back to a write tool will lose Polarion-specific markup.
-  - Same precedent already applies to `custom_fields` rich-text values (`{type: 'text/html', value: ...}` passed through verbatim on both read and write).
+  - **Round-trip pair** (lossless): `get_*(include_*_html=True)` returns raw Polarion HTML; matching `update_*(*_html=...)` accepts the same shape verbatim — no sanitization, no Markdown conversion. XSS filtering is delegated to Polarion's renderer, so never route untrusted input through these parameters.
+  - **Greenfield create** (Markdown): `create_work_item(description=...)` accepts Markdown; runs through `markdown_to_html` + `sanitize_html` before storage.
+  - **Synthesis paths** (Markdown): `read_document` / `get_document_parts` convert HTML→Markdown via `html_to_markdown()`. Output is READ-ONLY — feeding it back to a write tool loses Polarion-specific markup.
 - **Write payloads** — skip `None`/empty values; Polarion may interpret empty as "clear default". JSON:API resource POSTs (`/workitems`) wrap in `{"data": [...]}`; **action endpoints** (`.../actions/<name>`) take a flat object — do NOT wrap. The `cast(dict[str, object], payload)` shim at the `client.post(json=...)` call site is intentional (dict invariance vs `JsonValue`).
 - Every list tool must support `page_size` (max 100) and `page_number`; return `PaginatedResult[T]` with `has_more`.
 - Tool docstrings are the LLM's manual — Google-style with Args/Returns/Raises. Keep return-field bullets in sync with the Pydantic model.
+
+## Comment & Docstring Style
+
+Applies to ALL comments / docstrings (tool docstrings, helpers, inline, CLAUDE.md).
+
+- **Field descriptions stay one line.** Longer explanations belong in the surrounding function docstring; skip the description entirely when field name + type say everything. The cross-model invariant in `tests/test_models.py::test_field_descriptions_are_non_empty_when_set` only requires non-empty *when set*.
+- **No `WARNING:` / `FOOTGUN:` / `NOTE:` prefix upgrades.** State the same fact in a single plain sentence — the prefix adds visual weight without information.
+- **No dev-narrative.** Phrases like "verified via smoke test", "we tried X then switched to Y", or "as of vN" belong in commit messages and PR descriptions, not in source comments. Use the declarative form in code.
+- **No banner-divider comments.** `# ----------------` / `# Section name` / `# === Section ===` sandwiches are visual noise; function and class headers already provide structure.
+- **CLAUDE.md is dev-only.** Other MCP hosts (Cursor / Copilot / generic FastMCP clients) never load this file. Anything an MCP-user LLM needs to know (round-trip pairs, replace-all semantics, body-edit pitfalls, etc.) must live inside the `@mcp.tool` docstring — even if it duplicates CLAUDE.md content.
+- **Module docstrings explain *why* the module exists.** Specific timing numbers, observed file sizes, refactor history, and other implementation detail belong in inline comments next to the thing they constrain.
 
 ## Error Handling Pattern
 
@@ -46,31 +56,23 @@ Map domain exceptions at the tool layer: `PolarionNotFoundError` → `ValueError
 
 ## Polarion API & Gotchas
 
-JSON:API v1. Key paths: `/projects`, `/projects/{p}/workitems[?query=...]`, `/projects/{p}/workitems/{wi}[/linkedworkitems]`, `/projects/{p}/spaces/{s}/documents/{d}[/parts]`.
+JSON:API v1. Key paths: `/projects`, `/projects/{p}/workitems[?query=...]`, `/projects/{p}/workitems/{wi}[/linkedworkitems]`, `/projects/{p}/spaces/{s}/documents/{d}[/parts]`. **HTML payloads** are stored as `{"type": "text/html", "value": "..."}`. **Linked WI IDs** have 5 segments — derive the target via `relationships.workItem.data.id`, never by parsing. **Module IDs** are 3 segments and document names may contain `/`, so always use `split_module_id` (splits on the first two slashes only). **Lucene**: trailing wildcards (`title:SRS*`) work; leading wildcards return HTTP 400. The `module` field is not indexed. **Server limits**: ≤3 API calls/second, no concurrent requests; `PolarionClient` retries 429/5xx with backoff but does NOT serialize client-side.
 
-**HTML payloads**: stored as `{"type": "text/html", "value": "..."}`. **Linked WI IDs** have 5 segments `{projectId}/{sourceWi}/{role}/{targetProject}/{targetWi}` — derive the target via `relationships.workItem.data.id`, never by parsing. **Module IDs** have 3 segments `{projectId}/{spaceId}/{documentName}`; document names may contain `/`, use `split_module_id` (splits on first two slashes only).
+### JSON:API quirks
 
-**Lucene**: trailing wildcards (`title:SRS*`) work; **leading wildcards** (`*SRS*`) → HTTP 400. The `module` field is **not indexed** and cannot be queried.
+**Sparse fieldset filters both attributes AND relationships.** `fields[workitems]=title,type,status` removes *all* `relationships` from the response, not just other attributes. List relationship names explicitly (see `WI_LIST_FIELDS`); forgetting silently empties derived fields like `space_id` / `document_name` / `assignee_ids` / `author_id`.
 
-### Sparse fieldset filters BOTH attributes AND relationships
+**To-many relationships need `include=`.** Polarion does not inline `data` for to-many relationships (e.g. `assignee`) — only `links` come back. Pass `"include": "assignee"` to populate `relationships.assignee.data`. To-one relationships (`module`, `author`, `project`) are inlined without `include`.
 
-`fields[workitems]=title,type,status` removes **all** `relationships` from the response, not just other attributes. To receive a relationship, list its name explicitly (see `WI_LIST_FIELDS`). Forgetting this silently empties derived fields like `space_id`/`document_name`/`assignee_ids`/`author_id`.
+**`/backlinkedworkitems` is not supported on this server.** `get_linked_work_items` returns one direction per call: forward links use `/projects/{p}/workitems/{wi}/linkedworkitems`; back links fall back to a `query=linkedWorkItems:{wi}` search that does not expose the originating role, so back items return with `role=None`. Call twice when both directions are needed.
+
+**Server-side enum validation is lenient.** Polarion does NOT strictly validate `type` / `status` / `priority` / `severity` on create — unrecognised values are silently coerced (`priority="not_a_number"` → project default) or stored verbatim (`type="not_a_real_type"` → ghost type). Use `Literal[...]` on Pydantic Fields for closed sets that matter.
 
 ### Custom fields surface inline under `attributes`
 
-This server inlines project-defined customs as top-level keys in `attributes` (e.g. `attributes.riskLevel`) — there is no `customFields` container, and `customFields.@all` / `@custom` / `@additional` tokens are silently dropped. The MCP server fetches with `fields[*]=@all`, then filters out canonical Polarion attributes via the `STANDARD_WORKITEM_ATTRS` / `STANDARD_DOCUMENT_ATTRS` allowlists in `_helpers.py`. Anything outside the allowlist is reported on `*.custom_fields`. Values are heterogeneous: primitives or `{type: 'text/html', value: ...}` dicts, kept raw so the shape round-trips. A future Polarion release adding new standard attributes would misclassify them as custom until the allowlist is updated.
+This server inlines project-defined customs as top-level keys in `attributes` — no `customFields` container, and `customFields.@all` / `@custom` / `@additional` tokens are silently dropped. The MCP server fetches with `fields[*]=@all` and filters out canonical attributes via the `STANDARD_WORKITEM_ATTRS` / `STANDARD_DOCUMENT_ATTRS` allowlists in `_helpers.py`; anything outside the allowlist is exposed on `*.custom_fields`. Values are kept raw (primitives or `{type: 'text/html', value: ...}` dicts) so the shape round-trips. A future Polarion release adding new standard attributes would misclassify them as custom until the allowlist is updated.
 
-**Write side**: `create_work_item` / `update_work_item` / `update_document` accept `custom_fields: dict[str, object] | None` mirroring the read shape. `merge_custom_fields` inlines entries into `attributes` and raises `ValueError` on a collision with a standard attribute (so an explicit `title=` is never silently shadowed). Rich-text values must be `{type: 'text/html', value: ...}` dicts. `None` inside the dict is skipped — explicit clearing is not supported by the helper. On `update_*`, omitted keys preserve their server-side value (JSON:API omit-preserve). `update_work_item`'s post-PATCH GET reuses `@all` so the returned `current.custom_fields` is fresh.
-
-**Ghost custom fields**: Polarion does NOT validate custom-field IDs server-side — an unknown key like `definitely_not_a_real_field_xyz` is stored as an inline attribute and reappears on every subsequent `get_*` indistinguishable from a real custom. Wrong-type values DO get rejected with HTTP 400. There is no schema-discovery endpoint, so always take custom-field keys from a prior read response. Clearing a ghost requires sending the key with explicit `null`, which the write tools skip — use a direct `PolarionClient.patch` if cleanup is needed.
-
-### To-many relationships need `include=`
-
-Polarion does not inline `data` for to-many relationships (e.g. `assignee`) — only `links` come back. Pass `"include": "assignee"` to populate `relationships.assignee.data`. To-one relationships (`module`, `author`, `project`) are inlined without `include`.
-
-### `/backlinkedworkitems` is NOT supported on this server
-
-`get_linked_work_items` accepts a `direction: Literal["forward", "back"]` parameter and returns `PaginatedResult[LinkedWorkItemSummary]` for one direction per call. Forward links are read from `/projects/{p}/workitems/{wi}/linkedworkitems`; back links fall back to a `query=linkedWorkItems:{wi}` search, which loses role information — back-direction items return with `role=None` (intentional — do not reintroduce the legacy `"backlink"` placeholder; `None` is an explicit "unknown" signal). Callers needing both directions issue two calls.
+**Write side**: `create_work_item` / `update_work_item` / `update_document` accept `custom_fields: dict[str, object]` mirroring the read shape; `merge_custom_fields` inlines entries and raises `ValueError` on collision with a standard attribute. `None` inside the dict is skipped (explicit clearing unsupported). **Ghost customs**: Polarion does NOT validate custom-field IDs server-side, so an unknown key is silently stored and reappears on every subsequent `get_*` indistinguishable from a real one — always take keys from a prior read response. Wrong-type values DO get rejected (HTTP 400).
 
 ### Document content search — pick the right tool
 
@@ -83,10 +85,6 @@ Polarion Lucene does NOT index `description`, so `list_work_items` cannot filter
 | Get document metadata only | `get_document` | Title/type/status. `include_homepage_content_html=True` returns the `homePageContent` as **raw Polarion HTML** in `content_html` for round-trip editing via `update_document(home_page_content_html=...)`. Incomplete for end-to-end reading (heading text + embedded WI bodies live in separate work items, not in `homePageContent`) — use `read_document` for that. |
 | Search inside a document with structural metadata | `get_document_parts` | Each `workitem` part carries `description` as Markdown — **no follow-up `get_work_item` call needed**. Embedded WIs are fetched with the tight `WI_PART_FIELDS` sparse set (`title,type,status,description`), not `@all`, to keep payloads small. Use when you need part IDs (for `move_work_item_to_document`), heading levels, or per-WI status/type. For plain reading, prefer `read_document`. |
 
-### Server-side validation is lenient on enum-like fields
-
-Polarion does NOT strictly validate `type`, `status`, `priority`, or `severity` on create. Unrecognised values are silently coerced (`priority="not_a_number"` → project default) or stored verbatim (`type="not_a_real_type"` → ghost type). Use `Literal[...]` on Pydantic Field for closed sets where validation matters; otherwise add a WARNING to the field description.
-
 ### Document body writes go through `homePageContent` PATCH (NOT `/parts`)
 
 Body edits use `PATCH /projects/{p}/spaces/{s}/documents/{d}` with `attributes.homePageContent.value` carrying the full body HTML — exposed at the tool layer as `update_document(home_page_content_html=...)`. The companion endpoints `/parts` POST and `actions/moveToDocument` are convenience wrappers that internally edit `homePageContent`; both reject heading-type WIs ("Cannot move headings" / "Creation of heading Parts is not supported"). Setting `relationships.module` directly on a WI links ownership only — it does NOT create a body part. `PATCH /workitems/{wi}` IS allowed on heading WIs (`update_work_item` can edit a heading's attributes); the lock is specific to body-part creation/relocation. The tool layer rejects `home_page_content_html=""` to stop an accidental wipe from orphaning every heading. Removing an `<hN>` later removes the part but leaves the heading WI as an orphan (module-linked, no `outline_number`).
@@ -97,26 +95,20 @@ Body edits use `PATCH /projects/{p}/spaces/{s}/documents/{d}` with `attributes.h
 
 2. **Injecting `<div id="polarion_wiki macro name=module-workitem;params=id=NEW-WI">` does NOT set the WI's `module` relationship.** The new part appears in `get_document_parts` as `workitem_<NEW-WI>`, but `get_work_item(<NEW-WI>)` reports `space_id=""`, `document_name=""`, `outline_number=""` — an inconsistent half-attached state. WI body parts must be added via `move_work_item_to_document`, which is the only path that updates `homePageContent`, sets `module`, and assigns `outline_number` atomically.
 
-### `PATCH /workitems/{wi}` requires a non-empty body
+### `PATCH /workitems/{wi}` quirks
 
-Polarion rejects PATCH bodies that have neither `attributes` nor `relationships` ("At least one of the members is required: 'attributes, relationships'"), even when only the `workflowAction` / `changeTypeTo` query parameter is set. Action-only transitions must be paired with at least one body field. `update_work_item` validates this at the tool layer (raises `ValueError`) so the caller gets an actionable message instead of a Polarion 400.
-
-### `changeTypeTo` resets the workflow status
-
-Setting `changeTypeTo` on `update_work_item` resets the WI's `status` to the new type's initial workflow state (e.g. `task[status=approved]` → `defect[status=open]`). The docstring warns about this; callers that need to preserve the prior status must re-apply it in a follow-up `update_work_item` call.
-
-## Server-Side Constraints
-
-The deployed Polarion server enforces **≤3 API calls/second** and **no concurrent requests**. `PolarionClient` does NOT implement client-side rate limiting or request serialization — callers must respect these limits or rely on Polarion's HTTP 429 responses (the client retries with exponential backoff).
+PATCH bodies need at least one `attributes` / `relationships` entry — Polarion 400s otherwise even when only `workflowAction` / `changeTypeTo` is set; `update_work_item` validates this at the tool layer. Setting `changeTypeTo` also resets `status` to the new type's initial workflow state (e.g. `task[status=approved]` → `defect[status=open]`); callers wanting to preserve status must re-apply it in a follow-up call.
 
 ## Testing
 
-`pytest-asyncio` in `mode=auto`. Two patterns coexist: **tool tests** (`tests/tools/`) call tool functions directly with a `mock_client` (`AsyncMock(spec=PolarionClient)`) injected via a `mock_ctx` — FastMCP 3.0's `@mcp.tool()` returns the original function unchanged, so direct invocation works; **client tests** (`tests/core/test_client.py`) use `respx` to mock the `httpx` transport. Shared fixtures live in `tests/conftest.py`. Pass `write_delay=0` when constructing a real `PolarionClient` in tests.
-
-**Pydantic Field constraint tests**: direct function calls bypass FastMCP's JSON Schema gate, so `min_length=1` / `ge` / `le` aren't naturally exercised. Reconstruct a `TypeAdapter` from the parameter's `Annotated[type, FieldInfo]` (via `inspect.signature` + `get_type_hints`) and assert it rejects bad input at the schema layer — see `TestCreateWorkItemFieldValidation`.
+`pytest-asyncio` in `mode=auto`. **Tool tests** (`tests/tools/`) call tool functions directly with an injected `mock_client` (FastMCP 3.0's `@mcp.tool` returns the original function unchanged). **Client tests** (`tests/core/test_client.py`) use `respx` to mock `httpx`. Shared fixtures live in `tests/conftest.py`; pass `write_delay=0` for real `PolarionClient` instances. Pydantic `Field` constraints (`min_length` / `ge` / `le`) bypass FastMCP's JSON Schema on direct calls — verify them by reconstructing a `TypeAdapter` from `Annotated[type, FieldInfo]` (see `TestCreateWorkItemFieldValidation`).
 
 ## Repo Conventions
 
-- **Commits**: `.vscode/git_commit_guide.md` — `type(scope): subject` (lowercase imperative ≤50 chars, no period) + blank line + exactly 2 bullets (Why + What), **each bullet a single line ≤~120 chars** — move longer rationale to the PR body. Types: `feat|fix|docs|refactor|perf|test|ci|chore`. Common scopes: `tool|server|transport|config|deps|utils|model|project|meta|git`.
-- **PRs**: `.github/pull_request_template.md` — fill Summary, Type-of-Change, Changes, Testing (esp. `dry_run` for write tools), Golden Rule Compliance.
+- **Commits** (`.vscode/git_commit_guide.md`):
+  - Subject: `type(scope): summary` — lowercase imperative, ≤50 chars, no period. Types: `feat | fix | docs | refactor | perf | test | ci | chore`. Scopes: `tool | server | transport | config | deps | utils | model | project | meta | git`.
+  - Body: blank line + **exactly 2 bullets** (motivation, then change) — no `Why:` / `What:` prefixes. Each bullet is a single line ≤120 chars; longer detail goes in the PR body.
+- **PRs** (`.github/pull_request_template.md`):
+  - Fill Summary, Type of Change, Changes, Testing (incl. `dry_run` for write tools), Golden Rule Compliance.
+  - **Type of Change**: keep the full checkbox list as written in the template; only flip `[ ]` → `[x]` for the matching items. Do not delete the unchecked options.
 - **Force push** allowed on feature branches only after explicit user authorization. Never force-push to `main`.
