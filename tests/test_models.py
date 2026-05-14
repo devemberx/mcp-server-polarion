@@ -752,8 +752,9 @@ class TestCrossModelIntegration:
         assert dumped["current"]["title"] == "Before"
         assert dumped["changes"]["title"] == "After"
 
-    def test_all_models_have_field_descriptions(self):
-        """Every field in every model must have a description for LLM docs."""
+    def test_field_descriptions_are_non_empty_when_set(self):
+        """When a model field carries a ``Field(description=...)`` it must be
+        non-empty; fields whose name alone is unambiguous may omit it."""
         models = [
             ProjectSummary,
             DocumentSummary,
@@ -772,7 +773,10 @@ class TestCrossModelIntegration:
             schema = model_cls.model_json_schema()
             properties = schema.get("properties", {})
             for field_name, field_schema in properties.items():
-                assert "description" in field_schema, (
-                    f"{model_cls.__name__}.{field_name} is missing "
-                    f"a Field(description=...)"
+                description = field_schema.get("description")
+                if description is None:
+                    continue
+                assert description.strip(), (
+                    f"{model_cls.__name__}.{field_name} has an empty "
+                    f"Field(description=...)"
                 )

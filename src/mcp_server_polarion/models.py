@@ -1,8 +1,9 @@
 """Pydantic models for MCP tool inputs and outputs.
 
-Every tool in the Polarion MCP server accepts and returns Pydantic models
-— never raw ``dict``.  Each field carries a ``Field(description=...)`` so
-that FastMCP can auto-generate JSON Schema documentation for the LLM.
+Every tool accepts and returns Pydantic models — never raw ``dict``.
+Fields where the name alone is unambiguous (e.g. ``items``, ``page``)
+omit ``Field(description=...)``; the rest carry a description that the
+JSON Schema surfaces to the LLM.
 
 Models are organised into three categories:
 
@@ -52,8 +53,8 @@ class PaginatedResult[T](BaseModel):
 class ProjectSummary(BaseModel):
     """Summary of a Polarion project returned by ``list_projects``."""
 
-    id: str = Field(description="Project ID.")
-    name: str = Field(description="Project name.")
+    id: str
+    name: str
     active: bool = Field(
         default=True,
         description="False means archived; skip these when picking a target.",
