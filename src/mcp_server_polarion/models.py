@@ -37,25 +37,11 @@ class PaginatedResult[T](BaseModel):
     so the LLM can decide whether to request additional pages.
     """
 
-    items: list[T] = Field(
-        description="List of items on the current page.",
-    )
-    total_count: int = Field(
-        description="Total number of items across all pages.",
-    )
-    page: int = Field(
-        description="Current page number (1-based).",
-    )
-    page_size: int = Field(
-        description="Maximum number of items per page.",
-    )
-    has_more: bool = Field(
-        default=False,
-        description=(
-            "True when there are more pages after this one. "
-            "Use this to decide whether to fetch the next page."
-        ),
-    )
+    items: list[T]
+    total_count: int
+    page: int
+    page_size: int
+    has_more: bool = Field(default=False, description="True if more pages follow.")
 
 
 # ---------------------------------------------------------------------------
@@ -66,20 +52,11 @@ class PaginatedResult[T](BaseModel):
 class ProjectSummary(BaseModel):
     """Summary of a Polarion project returned by ``list_projects``."""
 
-    id: str = Field(
-        description="Unique project identifier (e.g. 'myproject').",
-    )
-    name: str = Field(
-        description="Human-readable project name.",
-    )
+    id: str = Field(description="Project ID.")
+    name: str = Field(description="Project name.")
     active: bool = Field(
         default=True,
-        description=(
-            "Whether the project is active. False indicates an archived "
-            "or inactive project that should generally be skipped when "
-            "selecting a target project. Defaults to True if the server "
-            "does not report the flag."
-        ),
+        description="False means archived; skip these when picking a target.",
     )
 
 
