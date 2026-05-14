@@ -43,11 +43,6 @@ _build_work_item_payload = _write_mod._build_work_item_payload
 _extract_created_id = _write_mod._extract_created_id
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture
 def mock_client() -> AsyncMock:
     """Return a mock PolarionClient with async methods."""
@@ -66,11 +61,6 @@ def mock_ctx(mock_client: AsyncMock) -> MagicMock:
         "polarion_client": mock_client,
     }
     return ctx
-
-
-# ---------------------------------------------------------------------------
-# _build_work_item_payload
-# ---------------------------------------------------------------------------
 
 
 class TestBuildWorkItemPayload:
@@ -288,11 +278,6 @@ class TestBuildWorkItemPayload:
         assert attrs["effortHours"] == 0
 
 
-# ---------------------------------------------------------------------------
-# _extract_created_id
-# ---------------------------------------------------------------------------
-
-
 class TestExtractCreatedId:
     """Tests for the private ``_extract_created_id`` helper."""
 
@@ -322,11 +307,6 @@ class TestExtractCreatedId:
 
     def test_returns_none_when_first_entry_not_dict(self) -> None:
         assert _extract_created_id({"data": ["not a dict"]}) is None
-
-
-# ---------------------------------------------------------------------------
-# create_work_item — dry run
-# ---------------------------------------------------------------------------
 
 
 class TestCreateWorkItemDryRun:
@@ -363,11 +343,6 @@ class TestCreateWorkItemDryRun:
         item = cast(list[dict[str, object]], result.payload_preview["data"])[0]
         attrs = cast(dict[str, object], item["attributes"])
         assert attrs == {"title": "Dry test", "type": "task"}
-
-
-# ---------------------------------------------------------------------------
-# create_work_item — happy path
-# ---------------------------------------------------------------------------
 
 
 class TestCreateWorkItemHappyPath:
@@ -516,11 +491,6 @@ class TestCreateWorkItemHappyPath:
         assert "href='javascript:" not in desc_html
 
 
-# ---------------------------------------------------------------------------
-# create_work_item — error mapping
-# ---------------------------------------------------------------------------
-
-
 class TestCreateWorkItemErrorMapping:
     """Tests that domain exceptions are mapped at the tool layer."""
 
@@ -596,11 +566,6 @@ class TestCreateWorkItemErrorMapping:
             )
 
 
-# ---------------------------------------------------------------------------
-# create_work_item — response parsing failures
-# ---------------------------------------------------------------------------
-
-
 class TestCreateWorkItemResponseParsing:
     """Tests for unexpected 2xx response shapes from Polarion."""
 
@@ -674,11 +639,6 @@ class TestCreateWorkItemResponseParsing:
             )
 
 
-# ---------------------------------------------------------------------------
-# create_work_item — Pydantic Field constraints
-# ---------------------------------------------------------------------------
-
-
 class TestCreateWorkItemFieldValidation:
     """Verify ``min_length=1`` constraints attached to required parameters.
 
@@ -722,11 +682,6 @@ class TestCreateWorkItemFieldValidation:
 # ===========================================================================
 # move_work_item_to_document
 # ===========================================================================
-
-
-# ---------------------------------------------------------------------------
-# _build_move_to_document_payload
-# ---------------------------------------------------------------------------
 
 
 class TestBuildMoveToDocumentPayload:
@@ -799,11 +754,6 @@ class TestBuildMoveToDocumentPayload:
             )
 
 
-# ---------------------------------------------------------------------------
-# move_work_item_to_document — position validation
-# ---------------------------------------------------------------------------
-
-
 class TestMoveWorkItemToDocumentPositionValidation:
     """Tests for the exactly-one-of-position rule."""
 
@@ -870,11 +820,6 @@ class TestMoveWorkItemToDocumentPositionValidation:
         assert result.dry_run is True
 
 
-# ---------------------------------------------------------------------------
-# move_work_item_to_document — dry run
-# ---------------------------------------------------------------------------
-
-
 class TestMoveWorkItemToDocumentDryRun:
     """Tests for ``move_work_item_to_document`` with ``dry_run=True``."""
 
@@ -899,11 +844,6 @@ class TestMoveWorkItemToDocumentDryRun:
         assert result.payload_preview is not None
         assert isinstance(result.payload_preview, dict)
         assert result.payload_preview["targetDocument"] == "MyProj/Requirements/SRS"
-
-
-# ---------------------------------------------------------------------------
-# move_work_item_to_document — happy path
-# ---------------------------------------------------------------------------
 
 
 class TestMoveWorkItemToDocumentHappyPath:
@@ -979,11 +919,6 @@ class TestMoveWorkItemToDocumentHappyPath:
         assert args == ("/projects/My%20Proj/workitems/MCPT-1/actions/moveToDocument",)
 
 
-# ---------------------------------------------------------------------------
-# move_work_item_to_document — error mapping
-# ---------------------------------------------------------------------------
-
-
 class TestMoveWorkItemToDocumentErrorMapping:
     """Tests that domain exceptions are mapped at the tool layer."""
 
@@ -1041,11 +976,6 @@ class TestMoveWorkItemToDocumentErrorMapping:
             )
 
 
-# ---------------------------------------------------------------------------
-# move_work_item_to_document — Pydantic Field constraints
-# ---------------------------------------------------------------------------
-
-
 class TestMoveWorkItemToDocumentFieldValidation:
     """Verify ``min_length=1`` constraints attached to required parameters."""
 
@@ -1075,11 +1005,6 @@ class TestMoveWorkItemToDocumentFieldValidation:
 # ===========================================================================
 # update_work_item
 # ===========================================================================
-
-
-# ---------------------------------------------------------------------------
-# _build_update_work_item_payload
-# ---------------------------------------------------------------------------
 
 
 class TestBuildUpdateWorkItemPayload:
@@ -1311,11 +1236,6 @@ class TestBuildUpdateWorkItemPayload:
             )
 
 
-# ---------------------------------------------------------------------------
-# update_work_item — shared helpers for tool-level tests
-# ---------------------------------------------------------------------------
-
-
 async def _call_update(
     mock_ctx: MagicMock, **overrides: object
 ) -> WorkItemUpdateResult:
@@ -1342,15 +1262,11 @@ async def _call_update(
         "custom_fields": None,
         "workflow_action": None,
         "change_type_to": None,
+        "include_current_description_html": False,
         "dry_run": False,
     }
     defaults.update(overrides)
     return await update_work_item(mock_ctx, **defaults)
-
-
-# ---------------------------------------------------------------------------
-# update_work_item — at-least-one-field validation
-# ---------------------------------------------------------------------------
 
 
 class TestUpdateWorkItemValidation:
@@ -1473,11 +1389,6 @@ class TestUpdateWorkItemValidation:
         assert body["data"]["attributes"]["title"] == "closing this WI"
 
 
-# ---------------------------------------------------------------------------
-# update_work_item — dry run
-# ---------------------------------------------------------------------------
-
-
 class TestUpdateWorkItemDryRun:
     """Tests for ``update_work_item`` with ``dry_run=True``."""
 
@@ -1528,11 +1439,6 @@ class TestUpdateWorkItemDryRun:
         attrs = cast(dict[str, object], item["attributes"])
         desc = cast(dict[str, object], attrs["description"])
         assert desc == {"type": "text/html", "value": "<p>bold</p>"}
-
-
-# ---------------------------------------------------------------------------
-# update_work_item — happy path
-# ---------------------------------------------------------------------------
 
 
 def _make_get_response(
@@ -1588,6 +1494,47 @@ class TestUpdateWorkItemHappyPath:
         assert result.current.title == "after"
         assert result.changes == {"title": "after"}
         assert result.payload_preview is None
+
+    async def test_current_description_html_blanked_by_default(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Default (False) → ``current.description_html`` is ``""``.
+
+        The follow-up GET still returns the body over the wire (Polarion
+        @all is the only sparse-fieldset that surfaces customs), but the
+        tool layer blanks it so a metadata-only update does not blow up
+        LLM context. Caller opts in with
+        ``include_current_description_html=True`` when verifying a body
+        edit.
+        """
+        mock_client.patch.return_value = {}
+        mock_client.get.return_value = _make_get_response(
+            description_html="<p>large body that should be hidden</p>",
+        )
+
+        result = await _call_update(mock_ctx, status="approved")
+
+        assert result.current is not None
+        assert result.current.description_html == ""
+        # Other metadata is unaffected.
+        assert result.current.status == "open"  # _make_get_response default
+
+    async def test_current_description_html_kept_when_flag_true(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """include_current_description_html=True → raw HTML in current."""
+        mock_client.patch.return_value = {}
+        raw = "<p>verified body <strong>after</strong></p>"
+        mock_client.get.return_value = _make_get_response(description_html=raw)
+
+        result = await _call_update(
+            mock_ctx,
+            description_html=raw,
+            include_current_description_html=True,
+        )
+
+        assert result.current is not None
+        assert result.current.description_html == raw
 
     async def test_patch_called_with_correct_path_and_body(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1804,11 +1751,6 @@ class TestUpdateWorkItemHappyPath:
         )
 
 
-# ---------------------------------------------------------------------------
-# update_work_item — error mapping
-# ---------------------------------------------------------------------------
-
-
 class TestUpdateWorkItemErrorMapping:
     """Tests that domain exceptions are mapped at the tool layer."""
 
@@ -1853,11 +1795,6 @@ class TestUpdateWorkItemErrorMapping:
             await _call_update(mock_ctx, title="t")
 
 
-# ---------------------------------------------------------------------------
-# update_work_item — Pydantic Field constraints
-# ---------------------------------------------------------------------------
-
-
 class TestUpdateWorkItemFieldValidation:
     """Verify ``min_length=1`` constraints attached to required parameters."""
 
@@ -1900,11 +1837,6 @@ class TestUpdateWorkItemFieldValidation:
 # ===========================================================================
 # update_document
 # ===========================================================================
-
-
-# ---------------------------------------------------------------------------
-# _build_update_document_payload
-# ---------------------------------------------------------------------------
 
 
 class TestBuildUpdateDocumentPayload:
@@ -2041,11 +1973,6 @@ class TestBuildUpdateDocumentPayload:
                 home_page_content_html=None,
                 custom_fields={"moduleFolder": "Other"},
             )
-
-
-# ---------------------------------------------------------------------------
-# update_document — at-least-one-field validation
-# ---------------------------------------------------------------------------
 
 
 class TestUpdateDocumentValidation:
@@ -2230,11 +2157,6 @@ class TestUpdateDocumentValidation:
         mock_client.patch.assert_not_called()
 
 
-# ---------------------------------------------------------------------------
-# update_document — dry run
-# ---------------------------------------------------------------------------
-
-
 class TestUpdateDocumentDryRun:
     """Tests for ``update_document`` with ``dry_run=True``."""
 
@@ -2264,11 +2186,6 @@ class TestUpdateDocumentDryRun:
         assert data["type"] == "documents"
         attrs = cast(dict[str, object], data["attributes"])
         assert attrs == {"title": "New Title"}
-
-
-# ---------------------------------------------------------------------------
-# update_document — happy path
-# ---------------------------------------------------------------------------
 
 
 class TestUpdateDocumentHappyPath:
@@ -2520,11 +2437,6 @@ class TestUpdateDocumentHappyPath:
         )
 
 
-# ---------------------------------------------------------------------------
-# update_document — error mapping
-# ---------------------------------------------------------------------------
-
-
 class TestUpdateDocumentErrorMapping:
     """Tests that domain exceptions are mapped at the tool layer."""
 
@@ -2592,11 +2504,6 @@ class TestUpdateDocumentErrorMapping:
             )
 
 
-# ---------------------------------------------------------------------------
-# update_document — Pydantic Field constraints
-# ---------------------------------------------------------------------------
-
-
 class TestUpdateDocumentFieldValidation:
     """Verify ``min_length=1`` constraints on required path parameters."""
 
@@ -2625,11 +2532,6 @@ class TestUpdateDocumentFieldValidation:
         assert adapter.validate_python("<p>ok</p>") == "<p>ok</p>"
         with pytest.raises(ValidationError):
             adapter.validate_python("x" * (2_000_000 + 1))
-
-
-# ---------------------------------------------------------------------------
-# MCP tool annotations
-# ---------------------------------------------------------------------------
 
 
 class TestWriteToolAnnotations:
@@ -2701,3 +2603,38 @@ class TestWriteToolAnnotations:
             assert getattr(annotations, key) is value, (
                 f"{tool_name}.{key} expected {value}, got {getattr(annotations, key)}"
             )
+
+
+class TestUpdateDocumentPitfallDocumentation:
+    """Lock the two body-edit pitfalls into the public docstring so a
+    future slim pass cannot silently delete them.
+
+    The pitfalls were reproduced against the live testdrive server and are
+    user-facing (MCP hosts on other platforms never load CLAUDE.md), so the
+    warnings must stay inside ``update_document.__doc__``.
+    """
+
+    def test_docstring_warns_about_anchorless_paragraph_returning_500(self) -> None:
+        """Anchorless <p> appended via update_document breaks get_document_parts."""
+        doc = update_document.__doc__ or ""
+        assert "anchorless" in doc, (
+            "update_document docstring must mention the anchorless <p> pitfall"
+        )
+        assert "HTTP 500" in doc, (
+            "update_document docstring must surface that the next get_document_parts "
+            "call returns HTTP 500 after an anchorless <p> append"
+        )
+        assert "move_work_item_to_document" in doc, (
+            "update_document docstring must point callers at the correct attach path"
+        )
+
+    def test_docstring_warns_about_macro_div_module_relationship_gap(self) -> None:
+        """Macro <div> reference injected via update_document leaves module unset."""
+        doc = update_document.__doc__ or ""
+        assert "polarion_wiki macro" in doc, (
+            "update_document docstring must mention the polarion_wiki macro pitfall"
+        )
+        assert "module" in doc, (
+            "update_document docstring must surface that the WI's module "
+            "relationship stays unset after a macro <div> injection"
+        )

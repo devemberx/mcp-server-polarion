@@ -77,10 +77,6 @@ _VALID_PART_TYPES: Final[frozenset[str]] = frozenset(
 # regex-parsing ``<hN>`` which could in principle hit 5-6.
 _MAX_HEADING_LEVEL: Final[int] = 6
 
-# ---------------------------------------------------------------------------
-# Read-specific helpers
-# ---------------------------------------------------------------------------
-
 
 @dataclass(frozen=True, slots=True)
 class _LinkedWorkItem:
@@ -308,9 +304,8 @@ def _parse_linked_items(
         wi_full_id = extract_relationship_id(rels, "workItem")
         wi_id = extract_short_id(wi_full_id)
 
-        # Skip items where the target work item cannot be resolved
-        # via the relationships object (per project conventions, we do
-        # not parse the raw linked-work-item ID).
+        # Resolve the target via relationships only — raw ID parsing
+        # is intentionally avoided.
         if not wi_id:
             continue
 
@@ -432,14 +427,9 @@ async def _discover_documents(
 ) -> list[tuple[str, str]]:
     """Discover all unique (space_id, document_name) pairs via linear scan.
 
-    Iterates every heading-workitem page (page_size=100) in order and
-    accumulates unique ``module`` relationship IDs into a set. Results
-    are cached for ``_CACHE_TTL_SECONDS`` to amortise the cost across
-    paginated callers.
-
-    A linear scan is preferred over binary search because, in practice,
-    each page returns work items belonging to ~1 document (so N ≈ D and
-    binary search wastes log(N) probes per transition).
+    Iterates every heading-workitem page (page_size=100) and accumulates
+    unique ``module`` relationship IDs. Results are cached for
+    ``_CACHE_TTL_SECONDS`` so paginated callers reuse the discovery.
 
     Args:
         client: Active ``PolarionClient`` instance.
@@ -500,10 +490,7 @@ async def list_projects(
     query: str | None = Field(
         default=None,
         description=(
-            "Lucene query string for server-side filtering "
-            "(e.g. 'name:ILCU*'). Trailing wildcards are supported; "
-            "leading wildcards are not supported by Polarion. "
-            "Omit to return all accessible projects."
+            "Optional Lucene filter (e.g. 'name:ILCU*'); trailing wildcards only."
         ),
     ),
     page_size: int = Field(
@@ -518,40 +505,25 @@ async def list_projects(
         description="Page number to retrieve (1-based, default 1).",
     ),
 ) -> PaginatedResult[ProjectSummary]:
-    """List all accessible Polarion projects, with optional server-side filtering.
+    """List Polarion projects the authenticated user can access.
 
-    Returns a paginated list of Polarion projects the authenticated user
-    can access. Use this tool to discover valid project IDs for other
-    tools, and request additional pages when ``has_more`` is ``True``.
-
-    When ``query`` is omitted, all projects are fetched. When ``query``
-    is provided, Polarion performs a server-side Lucene search (trailing
-    wildcards supported, e.g. ``name:ILCU*``).
+    Use this to discover project IDs for other tools. Polarion's Lucene
+    supports trailing wildcards (``name:ILCU*``) but rejects leading
+    wildcards (``*foo*``) with HTTP 400.
 
     Args:
         ctx: MCP tool context (injected automatically).
-        query: Lucene expression to filter projects on the server
-            (e.g. ``'name:ILCU*'``). Leading wildcards (``*foo*``) are
-            rejected by Polarion with HTTP 400. Omit for no filter.
-        page_size: Number of projects per page (1-100, default 100).
-        page_number: Page number to retrieve (1-based, default 1).
+        query: Optional Lucene filter; omit to return all accessible projects.
+        page_size: Items per page (1-100, default 100).
+        page_number: 1-based page number (default 1).
 
     Returns:
-        PaginatedResult containing ``ProjectSummary`` items with:
-        - ``id``: Project identifier.
-        - ``name``: Human-readable project name.
-        - ``active``: Whether the project is active (True) or archived
-          (False). Use this to skip archived projects when picking a
-          target. Defaults to True when the server does not report the
-          flag.
-        - ``total_count``: Total number of matching projects.
-        - ``page`` / ``page_size``: Current pagination state.
-        - ``has_more``: True if more pages exist.
+        PaginatedResult of ``ProjectSummary`` items with ``id``, ``name``,
+        and ``active`` (False = archived; defaults to True if absent).
 
     Raises:
-        PermissionError: If the authentication token is invalid or
-            lacks permissions.
-        RuntimeError: On unexpected Polarion API errors.
+        PermissionError: Auth token invalid or lacks permission.
+        RuntimeError: Other Polarion API errors.
     """
     client = get_client(ctx)
     params: dict[str, str | int] = {
@@ -612,12 +584,7 @@ async def list_projects(
 )
 async def list_documents(
     ctx: Context,
-    project_id: str = Field(
-        description=(
-            "Polarion project ID (e.g. 'myproject'). "
-            "Use ``list_projects`` to discover valid IDs."
-        ),
-    ),
+    project_id: str = Field(description="Polarion project ID."),
     page_size: int = Field(
         default=DEFAULT_PAGE_SIZE,
         ge=1,
@@ -632,36 +599,25 @@ async def list_documents(
 ) -> PaginatedResult[DocumentSummary]:
     """List all documents in a Polarion project.
 
-    Discovers all documents server-side, then returns a paginated
-    subset.  Callers may need multiple pages depending on ``page_size``.
-
-    Returns space IDs and document names so the LLM can call
-    ``get_document`` or ``get_document_parts`` with the correct
-    parameters.
-
-    Since ``GET /projects/{projectId}/documents`` is not available on
-    the target Polarion version, this tool queries heading-type work
-    items with ``fields[workitems]=module`` and ``query=type:heading``
-    to extract unique (space_id, document_name) pairs from the
-    ``relationships.module.data.id`` field (format:
-    ``projectId/spaceId/documentName``).
+    Returns ``(space_id, document_name)`` pairs that other document
+    tools accept. First call per project performs a full discovery scan
+    and caches the result for 60 seconds, so subsequent paginated calls
+    are cheap.
 
     Args:
         ctx: MCP tool context (injected automatically).
         project_id: Polarion project ID.
-        page_size: Number of documents per page (1-100, default 100).
-        page_number: Page number to retrieve (1-based, default 1).
+        page_size: Items per page (1-100, default 100).
+        page_number: 1-based page number (default 1).
 
     Returns:
-        PaginatedResult containing ``DocumentSummary`` items with:
-        - ``space_id``: Space that contains the document.
-        - ``document_name``: Document name within the space.
-        - ``total_count``: Total number of documents found.
+        PaginatedResult of ``DocumentSummary`` items with ``space_id``
+        and ``document_name``.
 
     Raises:
-        ValueError: If the project ID is invalid or not found.
-        PermissionError: If the token lacks permissions.
-        RuntimeError: On unexpected Polarion API errors.
+        ValueError: Project not found.
+        PermissionError: Token lacks permission.
+        RuntimeError: Other Polarion API errors.
     """
     client = get_client(ctx)
 
@@ -708,107 +664,54 @@ async def list_documents(
 )
 async def get_document(
     ctx: Context,
-    project_id: str = Field(
-        description="Polarion project ID.",
-    ),
+    project_id: str = Field(description="Polarion project ID."),
     space_id: str = Field(
-        description=(
-            "Space ID that contains the document (e.g. '_default'). "
-            "Use ``list_documents`` to discover valid IDs."
-        ),
+        description="Space ID containing the document (e.g. '_default').",
     ),
     document_name: str = Field(
-        description=(
-            "Document name within the space "
-            "(e.g. 'Software Requirement Specification'). "
-            "Spaces in the name are handled automatically."
-        ),
+        description="Document name within the space (spaces handled automatically).",
     ),
     include_homepage_content_html: bool = Field(
         default=False,
         description=(
-            "When True, also fetch and return the document's homePageContent "
-            "as RAW Polarion HTML in the ``content_html`` field — the same "
-            "shape that round-trips back through "
-            "``update_document(home_page_content_html=...)``. Off by default "
-            "because homePageContent can be large (tens of KB) and most "
-            "callers only need metadata. NOTE: ``homePageContent`` contains "
-            "only the inline prose between parts — heading text and "
-            "embedded work-item bodies are stored in separate work items "
-            "and are NOT included here. For end-to-end reading use "
-            "``read_document``; this option is for round-trip editing of "
-            "the raw source. FOOTGUN: do NOT feed ``content_html`` from "
-            "a False-flagged read back into "
-            "``update_document(home_page_content_html=...)`` — the field "
-            "is blanked to ``''``, and the update tool REJECTS the empty "
-            "string at the body-wipe guard."
+            "When True, fill ``content_html`` with raw HTML for round-trip editing."
         ),
     ),
 ) -> DocumentDetail:
-    """Get metadata (and optionally the raw body source) for a Polarion document.
+    """Get a document's metadata (and optionally its raw body source).
 
-    Returns the document's title, type, and workflow status. By default
-    the ``content_html`` field is empty; set
-    ``include_homepage_content_html=True`` to also fetch
-    ``homePageContent`` as raw Polarion HTML. The HTML is returned
-    verbatim (no Markdown conversion, no sanitization) so it round-trips
-    back through ``update_document(home_page_content_html=...)`` losslessly.
+    Returns title, type, status, and custom fields. With
+    ``include_homepage_content_html=True`` the ``content_html`` field
+    carries ``homePageContent`` as raw Polarion HTML — the exact shape
+    that round-trips through ``update_document(home_page_content_html=...)``
+    losslessly (no Markdown conversion, no sanitization).
 
-    **When to use which document tool**:
-
-    - Want to read or summarise the document body? Use ``read_document``
-      — it interleaves heading titles + embedded work-item bodies + prose
-      into a single Markdown stream.
-      ``get_document(include_homepage_content_html=True)`` returns the
-      raw ``homePageContent`` HTML only, which omits heading text and
-      embedded work-item bodies (Polarion stores those in separate work
-      items, not in ``homePageContent``) — use it for round-trip editing
-      of the source, not for reading.
-    - Need the structured part list (heading levels, work-item IDs,
-      embedded work-item descriptions)? Use ``get_document_parts``.
-      Each ``workitem`` part already includes its ``description`` in
-      Markdown, so no follow-up ``get_work_item`` call is required.
-    - Just need title/type/status? Leave ``include_homepage_content_html``
-      at its default of False to keep the response small.
-
-    Polarion stores **heading text in work-item titles**, not in
-    ``homePageContent``, so the home-page HTML contains the inline
-    rich-text body but not the heading wording — call ``read_document``
-    for the assembled body or ``get_document_parts`` when the
-    structural metadata matters.
-
-    Use ``list_documents`` first to discover valid space IDs and
-    document names.
+    ``homePageContent`` is the inline prose only — heading text and
+    embedded work-item bodies live in separate work items. For end-to-end
+    reading use ``read_document``; for structural metadata
+    use ``get_document_parts``. Only feed ``content_html`` back to
+    ``update_document`` when the read flag was True (a False read blanks
+    the field, and the empty string is rejected at the write side).
 
     Args:
         ctx: MCP tool context (injected automatically).
         project_id: Polarion project ID.
         space_id: Space ID containing the document.
         document_name: Document name within the space.
-        include_homepage_content_html: When True, also return the
-            ``homePageContent`` as raw Polarion HTML in
-            ``content_html``. Default False to keep the response small.
+        include_homepage_content_html: When True, also return the raw
+            ``homePageContent`` HTML in ``content_html``. Default False
+            to keep the response small.
 
     Returns:
-        DocumentDetail with:
-        - ``title``: Document title.
-        - ``type``: Document type (e.g. 'req_specification').
-        - ``status``: Workflow status (e.g. 'draft').
-        - ``content_html``: Document body as raw Polarion HTML — only
-          populated when ``include_homepage_content_html=True``,
-          otherwise empty. Pass this string verbatim to
-          ``update_document(home_page_content_html=...)`` for a
-          lossless round-trip.
-        - ``custom_fields``: User-defined custom fields as a
-          ``{fieldId: value}`` dict. Keys vary per project and document
-          type; values are returned verbatim (primitives or
-          ``{type: 'text/html', value: '<...>'}`` for rich-text fields).
-          Empty dict when no custom fields are populated.
+        DocumentDetail with ``title``, ``type``, ``status``,
+        ``content_html`` (only when the flag is True; otherwise empty),
+        and ``custom_fields`` (``{fieldId: value}``; rich-text values
+        are returned as ``{type: 'text/html', value: ...}`` dicts).
 
     Raises:
-        ValueError: If the document, space, or project is not found.
-        PermissionError: If the token lacks permissions.
-        RuntimeError: On unexpected Polarion API errors.
+        ValueError: Document, space, or project not found.
+        PermissionError: Token lacks permission.
+        RuntimeError: Other Polarion API errors.
     """
     client = get_client(ctx)
     encoded_name = encode_path_segment(document_name)
@@ -879,18 +782,9 @@ async def get_document(
 )
 async def get_document_parts(  # noqa: PLR0913
     ctx: Context,
-    project_id: str = Field(
-        description="Polarion project ID.",
-    ),
-    space_id: str = Field(
-        description=(
-            "Space ID that contains the document. "
-            "Use ``list_documents`` to discover valid IDs."
-        ),
-    ),
-    document_name: str = Field(
-        description="Document name within the space.",
-    ),
+    project_id: str = Field(description="Polarion project ID."),
+    space_id: str = Field(description="Space ID containing the document."),
+    document_name: str = Field(description="Document name within the space."),
     page_size: int = Field(
         default=DEFAULT_PAGE_SIZE,
         ge=1,
@@ -903,77 +797,44 @@ async def get_document_parts(  # noqa: PLR0913
         description="Page number to retrieve (1-based, default 1).",
     ),
 ) -> PaginatedResult[DocumentPart]:
-    """List the structural parts (headings and work items) of a document.
+    """List the structural parts of a document in order.
 
-    **Do NOT call this tool just to read or summarise a document body.**
-    For end-to-end reading prefer ``read_document`` — it interleaves
-    heading titles, embedded work-item bodies, and prose into a single
-    Markdown stream and skips the empty placeholder paragraphs Polarion
-    stores between parts.
-
-    Returns the ordered list of part IDs, titles, types, and linked
-    work-item metadata that make up a document's body. Use this tool
-    when you need:
-
-    - Part IDs for positioning with ``move_work_item_to_document`` —
-      pass any existing part's ``id`` as ``next_part_id`` (insert
-      before) or ``previous_part_id`` (insert after). Results are
-      returned in document order.
-    - The hierarchical structure (heading levels) of the document.
-    - **Work-item descriptions inline**: each ``workitem`` part already
-      includes its ``description`` field as Markdown, so a follow-up
-      ``get_work_item`` call is **not needed** when scanning bodies.
-      Iterate pages and match against ``description`` / ``content`` /
-      ``title`` to search content within a document.
-    - The type/status of work items embedded in the document.
-
-    **Choosing between the document tools**:
-
-    - For end-to-end reading or summarising the document body, use
-      ``read_document`` — it returns rendered Markdown without the
-      structural metadata noise.
-    - Use this tool when you need per-work-item descriptions, the
-      ordered part list, or part IDs for moves.
+    Use this when you need part IDs for ``move_work_item_to_document``,
+    heading levels, or per-work-item type/status. Each ``workitem`` part
+    already carries its ``description`` as Markdown, so a follow-up
+    ``get_work_item`` is unnecessary when scanning bodies. For plain
+    reading prefer ``read_document``.
 
     Args:
         ctx: MCP tool context (injected automatically).
         project_id: Polarion project ID.
         space_id: Space ID containing the document.
         document_name: Document name within the space.
-        page_size: Number of parts per page (1-100, default 100).
-        page_number: Page number to retrieve (1-based, default 1).
+        page_size: Items per page (1-100, default 100).
+        page_number: 1-based page number (default 1).
 
     Returns:
-        PaginatedResult containing ``DocumentPart`` items with:
-        - ``id``: Short part identifier within the document
-          (e.g. 'heading_MCPT-001', 'workitem_MCPT-042', 'polarion_1').
-          Use as ``next_part_id`` or ``previous_part_id`` when calling
-          ``move_work_item_to_document``.
-        - ``title``: Part title (from the linked work item for heading
-          and workitem parts).
-        - ``content``: Part body in Markdown. Empty for 'heading' and
-          'workitem' parts (their text lives in ``title`` / ``level``
-          and ``description`` respectively).
-        - ``type``: 'heading', 'workitem', 'normal', 'toc',
-          or 'wikiblock'.
-        - ``level``: Heading level (1-4) or 0 for non-headings.
-        - ``description``: Work-item description in Markdown
-          (workitem parts only).
-        - ``work_item_id``: Short linked work-item ID
-          (e.g. 'MCPT-001'). Use directly with ``get_work_item`` /
-          ``get_linked_work_items``.
-        - ``work_item_type``: Linked work-item type
-          (e.g. 'requirement', 'testCase').
-        - ``work_item_status``: Linked work-item workflow status.
-        - ``external``: True when the part references a work item from
-          another project (re-used / typically read-only).
-        - ``next_part_id``: Short ID of the next part in document order
-          (e.g. 'workitem_MCPT-002'). Empty on the last part.
+        PaginatedResult of ``DocumentPart`` with:
+        - ``id``: Short part identifier (e.g. 'heading_MCPT-001',
+          'workitem_MCPT-042', 'polarion_1'). Pass to
+          ``move_work_item_to_document`` as ``previous_part_id`` /
+          ``next_part_id``.
+        - ``title``: Linked work-item title (heading/workitem parts).
+        - ``content``: Part body as Markdown; empty for heading and
+          workitem parts (text lives in ``title``/``level`` and
+          ``description``).
+        - ``type``: 'heading' | 'workitem' | 'normal' | 'toc' | 'wikiblock'.
+        - ``level``: Heading level 1-4 (0 for non-headings).
+        - ``description``: Markdown body (workitem parts only).
+        - ``work_item_id`` / ``work_item_type`` / ``work_item_status``:
+          Linked work-item metadata.
+        - ``external``: True when the work item belongs to another project.
+        - ``next_part_id``: Short ID of the next part; empty on the last.
 
     Raises:
-        ValueError: If the document, space, or project is not found.
-        PermissionError: If the token lacks permissions.
-        RuntimeError: On unexpected Polarion API errors.
+        ValueError: Document, space, or project not found.
+        PermissionError: Token lacks permission.
+        RuntimeError: Other Polarion API errors.
     """
     client = get_client(ctx)
     encoded_name = encode_path_segment(document_name)
@@ -1051,22 +912,9 @@ async def get_document_parts(  # noqa: PLR0913
 )
 async def read_document(  # noqa: PLR0913
     ctx: Context,
-    project_id: str = Field(
-        description="Polarion project ID.",
-    ),
-    space_id: str = Field(
-        description=(
-            "Space ID that contains the document. "
-            "Use ``list_documents`` to discover valid IDs."
-        ),
-    ),
-    document_name: str = Field(
-        description=(
-            "Document name within the space "
-            "(e.g. 'Software Requirement Specification'). "
-            "Spaces in the name are handled automatically."
-        ),
-    ),
+    project_id: str = Field(description="Polarion project ID."),
+    space_id: str = Field(description="Space ID containing the document."),
+    document_name: str = Field(description="Document name within the space."),
     page_size: int = Field(
         default=DEFAULT_PAGE_SIZE,
         ge=1,
@@ -1081,53 +929,34 @@ async def read_document(  # noqa: PLR0913
 ) -> DocumentReadResult:
     """Render a Polarion document end-to-end as flowing Markdown.
 
-    Paginates ``get_document_parts`` and interleaves heading titles,
-    embedded work-item descriptions, and inline prose into a single
-    Markdown stream — the canonical way for an LLM to read a document
-    body. Empty placeholder paragraphs that Polarion stores between
-    parts are skipped; runs of blank lines are collapsed.
+    Paginates ``get_document_parts`` internally and interleaves heading
+    titles, embedded work-item descriptions, and inline prose into a
+    single Markdown stream — the canonical way to read a document body.
+    Empty placeholder paragraphs are skipped.
 
-    **Use this for reading.** Other document tools have narrower jobs:
-
-    - ``get_document`` — title/type/status only (and the raw
-      ``homePageContent`` source via ``include_homepage_content_html=True``,
-      which is incomplete for reading because Polarion stores heading
-      text and embedded work-item bodies in *separate* work items
-      rather than in ``homePageContent``).
-    - ``get_document_parts`` — structural enumeration with per-part IDs,
-      heading levels, and work-item metadata. Use it when you need part
-      IDs for ``move_work_item_to_document`` or per-WI status/type, not
-      for end-to-end reading.
-
-    The output is read-only synthesis. It cannot be fed back to any
-    write tool because the rendered Markdown collapses Polarion's
-    placeholder structure (empty ``<h1>`` / ``<div>`` tags that
-    reference work items by ID); round-tripping it would orphan heading
-    work items and duplicate embedded bodies as inline prose.
-
-    Pagination maps 1:1 to ``get_document_parts``: each page covers
-    ``page_size`` parts (default 100). Use ``has_more`` to decide
-    whether to fetch the next page.
+    Output is read-only synthesis: do NOT feed it back to ``update_document``
+    (the rendered Markdown collapses Polarion's ID-anchored placeholder
+    structure and the round-trip would orphan headings). Use
+    ``get_document(include_homepage_content_html=True)`` for round-trip
+    editing of the raw HTML source.
 
     Args:
         ctx: MCP tool context (injected automatically).
         project_id: Polarion project ID.
         space_id: Space ID containing the document.
         document_name: Document name within the space.
-        page_size: Number of parts per page (1-100, default 100).
-        page_number: Page number to retrieve (1-based, default 1).
+        page_size: Parts per page (1-100, default 100).
+        page_number: 1-based page number (default 1).
 
     Returns:
-        DocumentReadResult with:
-        - ``content``: Rendered Markdown for the parts on this page.
-        - ``part_count``: Number of parts rendered.
-        - ``page`` / ``page_size`` / ``total_parts`` / ``has_more``:
-          pagination metadata propagated from ``get_document_parts``.
+        DocumentReadResult with ``content`` (Markdown for the page),
+        ``part_count``, and pagination metadata
+        (``page`` / ``page_size`` / ``total_parts`` / ``has_more``).
 
     Raises:
-        ValueError: If the document, space, or project is not found.
-        PermissionError: If the token lacks permissions.
-        RuntimeError: On unexpected Polarion API errors.
+        ValueError: Document, space, or project not found.
+        PermissionError: Token lacks permission.
+        RuntimeError: Other Polarion API errors.
     """
     # FastMCP 3.0's ``@mcp.tool()`` returns the original function unchanged,
     # so direct invocation forwards both the fetch and the error mapping.
@@ -1156,21 +985,12 @@ async def read_document(  # noqa: PLR0913
 )
 async def list_work_items(
     ctx: Context,
-    project_id: str = Field(
-        description=(
-            "Polarion project ID. Use ``list_projects`` to discover valid IDs."
-        ),
-    ),
+    project_id: str = Field(description="Polarion project ID."),
     query: str | None = Field(
         default=None,
         description=(
-            "Optional Lucene query string for filtering work items. "
-            "Examples: 'type:requirement', "
-            "'status:approved AND type:requirement', "
-            "'title:SRS*' (trailing wildcard only — leading wildcards "
-            "like '*SRS*' cause 400 errors). "
-            "The ``module`` field is NOT indexed and cannot be queried. "
-            "Omit to list all work items without filtering."
+            "Optional Lucene filter (e.g. 'type:requirement', 'title:SRS*'); "
+            "trailing wildcards only."
         ),
     ),
     page_size: int = Field(
@@ -1187,59 +1007,30 @@ async def list_work_items(
 ) -> PaginatedResult[WorkItemSummary]:
     """List and search work items in a Polarion project.
 
-    Returns a paginated list of work items with the metadata most often
-    needed for triage and traceability. Pass a Lucene ``query`` to
-    filter results, or omit it to list all work items.
+    Pass a Lucene ``query`` (`type:requirement`, `status:approved AND
+    type:requirement`, `title:SRS*`) or omit it for all WIs. Leading
+    wildcards (`*foo*`) return HTTP 400. ``module`` is not indexed.
 
-    Common Lucene query examples:
-
-    - ``type:requirement`` — all requirements
-    - ``status:approved AND type:requirement`` — approved requirements
-    - ``title:Login`` — work items with "Login" in the title
-    - ``title:SRS*`` — trailing wildcard (leading wildcards not supported)
-    - ``type:testCase AND status:draft`` — draft test cases
-
-    **Searching work-item bodies (description) is NOT supported here.**
-    Polarion's Lucene index does not cover the ``description`` field, so
-    you cannot filter by body text via ``query=``. For content search,
-    pick the right document-scoped tool instead:
-
-    - End-to-end reading of a single document → ``read_document``
-      returns interleaved headings + embedded work-item bodies + prose
-      as flowing Markdown (paginated).
-    - Structural search that also covers each embedded work-item's
-      ``description`` → iterate ``get_document_parts`` pages; each
-      ``workitem`` part already carries its description.
-
-    Use ``get_work_item`` only when you need the full detail of a
-    specific WI that you've already located.
+    Description body text is NOT indexed — for content search, scan
+    ``get_document_parts`` (each ``workitem`` part already carries its
+    description) or use ``read_document`` for end-to-end reading.
 
     Args:
         ctx: MCP tool context (injected automatically).
         project_id: Polarion project ID.
-        query: Optional Lucene query string for filtering.
-        page_size: Number of work items per page (1-100, default 100).
-        page_number: Page number to retrieve (1-based, default 1).
+        query: Optional Lucene filter.
+        page_size: Items per page (1-100, default 100).
+        page_number: 1-based page number (default 1).
 
     Returns:
-        PaginatedResult containing ``WorkItemSummary`` items with:
-        - ``id``: Work Item ID (e.g. 'MCPT-001').
-        - ``title``: Work Item title.
-        - ``type``: Work Item type (e.g. 'requirement').
-        - ``status``: Workflow status (e.g. 'draft').
-        - ``priority``: Priority value as a string (empty when unset).
-        - ``updated``: ISO-8601 timestamp of the last modification.
-        - ``space_id`` / ``document_name``: Document this work item
-          belongs to (both empty when not module-bound). Use with
-          ``get_document`` / ``get_document_parts``.
-        - ``assignee_ids``: Short user IDs of assignees (empty list
-          when unassigned).
+        PaginatedResult of ``WorkItemSummary`` items with ``id``,
+        ``title``, ``type``, ``status``, ``priority``, ``updated``,
+        ``space_id``, ``document_name``, and ``assignee_ids``.
 
     Raises:
-        ValueError: If the project is not found.
-        PermissionError: If the token lacks permissions.
-        RuntimeError: On unexpected Polarion API errors (including
-            invalid Lucene query syntax).
+        ValueError: Project not found.
+        PermissionError: Token lacks permission.
+        RuntimeError: Other Polarion API errors (incl. bad Lucene syntax).
     """
     client = get_client(ctx)
     params: dict[str, str | int] = {
@@ -1300,46 +1091,22 @@ async def list_work_items(
 )
 async def get_work_item(
     ctx: Context,
-    project_id: str = Field(
-        description="Polarion project ID.",
-    ),
-    work_item_id: str = Field(
-        description=(
-            "Work Item ID (e.g. 'MCPT-001'). "
-            "Use ``list_work_items`` to discover valid IDs."
-        ),
-    ),
+    project_id: str = Field(description="Polarion project ID."),
+    work_item_id: str = Field(description="Work Item ID (e.g. 'MCPT-001')."),
     include_description_html: bool = Field(
         default=False,
         description=(
-            "When True, populate ``description_html`` with the work "
-            "item's raw Polarion HTML body — the same shape that "
-            "round-trips back through "
-            "``update_work_item(description_html=...)``. Default False to "
-            "keep responses small for list-style scans. NOTE: due to "
-            "Polarion server constraints, ``description`` ALWAYS travels "
-            "over the wire (the ``@all`` sparse fieldset is the only "
-            "token that surfaces inline custom fields, and Polarion drops "
-            "any attempt to exclude individual standard fields). Setting "
-            "this False therefore only saves LLM context tokens — not "
-            "network bytes. FOOTGUN: do NOT feed ``description_html`` "
-            "from a False-flagged read back into "
-            "``update_work_item(description_html=...)`` — the field is "
-            "blanked to ``''`` for token savings, and the update tool "
-            "treats empty strings as 'leave unchanged', so the round-trip "
-            "would silently no-op instead of preserving the body."
+            "When True, fill ``description_html`` with raw HTML for round-trip editing."
         ),
     ),
 ) -> WorkItemDetail:
     """Get full details of a single Polarion work item.
 
-    Retrieves the complete work item. The description is returned as raw
-    Polarion HTML (``description_html``) when
-    ``include_description_html=True``, preserving Polarion-specific spans
-    and data attributes so the value round-trips back through
-    ``update_work_item(description_html=...)`` without lossy Markdown
-    conversion. Use ``list_work_items`` first to discover valid work
-    item IDs.
+    With ``include_description_html=True`` the ``description_html`` field
+    carries the raw Polarion HTML body — the exact shape that round-trips
+    through ``update_work_item(description_html=...)`` losslessly. Only
+    feed it back when this flag was True (a False read blanks the field,
+    and the update tool treats ``""`` as ``leave unchanged``).
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -1436,25 +1203,12 @@ async def get_work_item(
 )
 async def get_linked_work_items(  # noqa: PLR0913
     ctx: Context,
-    project_id: str = Field(
-        description="Polarion project ID.",
-    ),
-    work_item_id: str = Field(
-        description=(
-            "Work Item ID (e.g. 'MCPT-001'). "
-            "Use ``list_work_items`` to discover valid IDs."
-        ),
-    ),
+    project_id: str = Field(description="Polarion project ID."),
+    work_item_id: str = Field(description="Work Item ID (e.g. 'MCPT-001')."),
     direction: Literal["forward", "back"] = Field(
         default="forward",
         description=(
-            "Link direction to retrieve. 'forward' returns outgoing links "
-            "(this WI links to others) with full role/suspect metadata. "
-            "'back' returns incoming links (other WIs link to this one); "
-            "``role`` is always None on back-direction items because "
-            "Polarion's ``linkedWorkItems:`` query does not expose the "
-            "originating link's role. Call this tool twice (once per "
-            "direction) when you need both."
+            "'forward' (outgoing) or 'back' (incoming); call twice if both needed."
         ),
     ),
     page_size: int = Field(
@@ -1469,52 +1223,33 @@ async def get_linked_work_items(  # noqa: PLR0913
         description="Page number to retrieve (1-based, default 1).",
     ),
 ) -> PaginatedResult[LinkedWorkItemSummary]:
-    """Get linked work items (forward or back) for a work item, paginated.
+    """Get linked work items (forward or back) for a work item.
 
-    Retrieves outgoing (``direction='forward'``) or incoming
-    (``direction='back'``) links for a single work item. This provides
-    traceability information such as parent, relates_to, verifies, and
-    depends_on relationships.
-
+    A single call returns one direction; call twice when both are needed.
     The ``suspect`` flag indicates whether the linked item has changed
-    since the link was last reviewed (forward direction only).
-
-    A single call returns one direction. Call this tool twice when both
-    directions are needed.
-
-    Use ``list_work_items`` first to discover valid work item IDs.
+    since the link was last reviewed (forward only).
 
     Args:
         ctx: MCP tool context (injected automatically).
         project_id: Polarion project ID.
         work_item_id: Work Item ID (e.g. 'MCPT-001').
-        direction: 'forward' (outgoing) or 'back' (incoming) links.
-            Default 'forward'.
-        page_size: Number of links per page (1-100, default 100).
-        page_number: Page number to retrieve (1-based, default 1).
+        direction: 'forward' (outgoing) or 'back' (incoming). Default 'forward'.
+        page_size: Items per page (1-100, default 100).
+        page_number: 1-based page number (default 1).
 
     Returns:
-        PaginatedResult containing ``LinkedWorkItemSummary`` items with:
-        - ``id`` / ``title`` — the linked work item.
-        - ``direction`` — matches the requested direction.
-        - ``role`` — link role identifier (e.g. 'parent', 'verifies').
-          ``None`` for back-direction links because Polarion's
-          ``linkedWorkItems:`` query does not expose the originating
-          link's role on this server version. To recover the role for a
-          back link, call ``get_linked_work_items`` on the source WI
-          with ``direction='forward'`` and inspect the role there.
-        - ``suspect`` — whether the link is marked suspect (forward only;
-          always False for back links).
-        - ``type`` / ``status`` — linked WI type and workflow status.
-        - ``space_id`` / ``document_name`` — document the linked WI
-          belongs to (both empty when not module-bound).
-        - ``total_count`` / ``page`` / ``page_size`` / ``has_more``:
-          standard pagination state.
+        PaginatedResult of ``LinkedWorkItemSummary`` items with ``id``,
+        ``title``, ``direction``, ``role``, ``suspect``, ``type``,
+        ``status``, ``space_id``, and ``document_name``.
+
+        ``role`` is ``None`` for back-direction links — Polarion's
+        ``linkedWorkItems:`` query does not expose the originating role
+        on this server. Recover it by calling forward on the source WI.
 
     Raises:
-        ValueError: If the work item or project is not found.
-        PermissionError: If the token lacks permissions.
-        RuntimeError: On unexpected Polarion API errors.
+        ValueError: Work item or project not found.
+        PermissionError: Token lacks permission.
+        RuntimeError: Other Polarion API errors.
     """
     client = get_client(ctx)
 

@@ -1,14 +1,9 @@
 """Async HTTP client for the Polarion REST API v1.
 
-``PolarionClient`` wraps :class:`httpx.AsyncClient` with:
-
-* **Bearer-token authentication** via default headers.
-* **Automatic error mapping** — HTTP 401/403 → ``PolarionAuthError``,
-  404 → ``PolarionNotFoundError``, others → ``PolarionError``.
-* **Exponential-backoff retry** for transient failures (HTTP 429, 5xx)
-  with a maximum of 2 retries.
-* **Write-operation delay** — a configurable pause between sequential
-  writes to account for Polarion cluster propagation (~3 s).
+``PolarionClient`` wraps :class:`httpx.AsyncClient` with bearer-token
+authentication, JSON:API error mapping (401/403 → ``PolarionAuthError``,
+404 → ``PolarionNotFoundError``, others → ``PolarionError``),
+exponential-backoff retry on 429/5xx, and a post-mutation delay.
 """
 
 from __future__ import annotations
@@ -30,25 +25,20 @@ from mcp_server_polarion.core.exceptions import (
 
 logger: Final = logging.getLogger("mcp_server_polarion.core.client")
 
-# Retry configuration -------------------------------------------------------
 _MAX_RETRIES: Final[int] = 2
 _INITIAL_BACKOFF_SECONDS: Final[float] = 1.0
 _BACKOFF_MULTIPLIER: Final[float] = 2.0
 _RETRYABLE_STATUS_CODES: Final[frozenset[int]] = frozenset({429, 500, 502, 503, 504})
 
-# Write-delay configuration -------------------------------------------------
+# Pause after each mutation (Polarion forbids concurrent writes).
 _WRITE_DELAY_SECONDS: Final[float] = 1.5
-
-# Timeout configuration ------------------------------------------------------
 _DEFAULT_TIMEOUT_SECONDS: Final[float] = 30.0
 
-# HTTP status codes ----------------------------------------------------------
 _HTTP_NO_CONTENT: Final[int] = 204
 _HTTP_UNAUTHORIZED: Final[int] = 401
 _HTTP_FORBIDDEN: Final[int] = 403
 _HTTP_NOT_FOUND: Final[int] = 404
 
-# Error detail ---------------------------------------------------------------
 _MAX_ERROR_DETAIL_LEN: Final[int] = 200
 
 
@@ -161,8 +151,6 @@ class PolarionClient:
         """Close the underlying ``httpx.AsyncClient``."""
         await self._client.aclose()
 
-    # -- Public HTTP helpers -------------------------------------------------
-
     async def get(
         self,
         path: str,
@@ -227,8 +215,6 @@ class PolarionClient:
         result = await self._request("PATCH", path, json=json)
         await asyncio.sleep(self._write_delay)
         return result
-
-    # -- Internal request engine ---------------------------------------------
 
     async def _request(
         self,

@@ -45,32 +45,16 @@ class WorkItemSummaryKwargs(TypedDict):
 # Constants
 # ---------------------------------------------------------------------------
 
-# Default page size — Polarion caps at 100.
+# Polarion enforces a hard cap of 100 server-side.
 DEFAULT_PAGE_SIZE: Final[int] = 100
 
-# Sparse fieldsets for list / detail endpoints.
+# Sparse fieldsets. Detail / document fetches use ``@all`` because this
+# Polarion server inlines custom fields under ``attributes`` and silently
+# drops narrower ``customFields.*`` tokens. ``WI_PART_FIELDS`` stays tight
+# because ``DocumentPart`` does not surface embedded-WI customs.
 WI_LIST_FIELDS: Final[str] = "title,type,status,priority,updated,module,assignee"
-# Detail fetches use the bare ``@all`` token because this Polarion server
-# inlines custom fields as top-level keys under ``attributes`` (e.g.
-# ``attributes.riskLevel``, ``attributes.effortHours``) rather than nesting
-# them under a ``customFields`` container. The ``customFields.@all`` /
-# ``@custom`` / ``@additional`` tokens are silently dropped on this server —
-# only ``@all`` surfaces the inline custom attributes. Relationships still
-# come back, so existing module/assignee/author parsing keeps working.
 WI_DETAIL_FIELDS: Final[str] = "@all"
-# Minimal fieldset for embedded work items inside document parts:
-# ``DocumentPart`` only consumes title/type/status/description. Sending
-# ``@all`` here ships every inline custom field (often dozens of keys per
-# WI, KBs of payload per page) when the consumer never reads them — that
-# was the original ``get_document_parts`` over-fetch. The customs of the
-# part-linked WIs are not exposed on ``DocumentPart`` anyway; callers
-# needing them must issue a separate ``get_work_item`` request.
 WI_PART_FIELDS: Final[str] = "title,type,status,description"
-# Same situation for documents — ``@all`` is the only token that exposes
-# project-defined custom document attributes. The slight per-request cost
-# (``homePageContent`` always travels over the wire) is paid in network
-# bytes only; the tool layer still hides the body from the LLM when
-# ``include_homepage_content_html=False``.
 DOC_DETAIL_FIELDS: Final[str] = "@all"
 
 # Canonical standard attribute names per the Polarion REST OpenAPI schema.
@@ -556,16 +540,11 @@ def parse_work_item_detail(
 
 
 def summary_to_back_linked(summary: WorkItemSummary) -> LinkedWorkItemSummary:
-    """Convert a ``WorkItemSummary`` from a ``linkedWorkItems:`` query
-    into a back-direction ``LinkedWorkItemSummary``.
+    """Lift a ``linkedWorkItems:`` query result to a back-direction link.
 
-    Polarion's ``linkedWorkItems:`` Lucene query returns a flat list of
-    source work items without the originating link's role or suspect
-    flag (the ``/backlinkedworkitems`` endpoint that would expose them
-    is not available on this server, see CLAUDE.md). Both fields are
-    therefore set to explicit "unknown" defaults — ``role=None`` (do
-    NOT substitute a placeholder string; ``None`` signals to callers
-    that the value is unknown, not absent) and ``suspect=False``.
+    The ``linkedWorkItems:`` query exposes no role or suspect flag, so
+    both come back as ``role=None`` (unknown, not absent) and
+    ``suspect=False``.
     """
     return LinkedWorkItemSummary(
         id=summary.id,

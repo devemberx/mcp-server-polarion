@@ -1,8 +1,9 @@
 """Pydantic models for MCP tool inputs and outputs.
 
-Every tool in the Polarion MCP server accepts and returns Pydantic models
-— never raw ``dict``.  Each field carries a ``Field(description=...)`` so
-that FastMCP can auto-generate JSON Schema documentation for the LLM.
+Every tool accepts and returns Pydantic models — never raw ``dict``.
+Fields where the name alone is unambiguous (e.g. ``items``, ``page``)
+omit ``Field(description=...)``; the rest carry a description that the
+JSON Schema surfaces to the LLM.
 
 Models are organised into three categories:
 
@@ -37,25 +38,11 @@ class PaginatedResult[T](BaseModel):
     so the LLM can decide whether to request additional pages.
     """
 
-    items: list[T] = Field(
-        description="List of items on the current page.",
-    )
-    total_count: int = Field(
-        description="Total number of items across all pages.",
-    )
-    page: int = Field(
-        description="Current page number (1-based).",
-    )
-    page_size: int = Field(
-        description="Maximum number of items per page.",
-    )
-    has_more: bool = Field(
-        default=False,
-        description=(
-            "True when there are more pages after this one. "
-            "Use this to decide whether to fetch the next page."
-        ),
-    )
+    items: list[T]
+    total_count: int
+    page: int
+    page_size: int
+    has_more: bool = Field(default=False, description="True if more pages follow.")
 
 
 # ---------------------------------------------------------------------------
@@ -66,20 +53,11 @@ class PaginatedResult[T](BaseModel):
 class ProjectSummary(BaseModel):
     """Summary of a Polarion project returned by ``list_projects``."""
 
-    id: str = Field(
-        description="Unique project identifier (e.g. 'myproject').",
-    )
-    name: str = Field(
-        description="Human-readable project name.",
-    )
+    id: str
+    name: str
     active: bool = Field(
         default=True,
-        description=(
-            "Whether the project is active. False indicates an archived "
-            "or inactive project that should generally be skipped when "
-            "selecting a target project. Defaults to True if the server "
-            "does not report the flag."
-        ),
+        description="False means archived; skip these when picking a target.",
     )
 
 
@@ -363,14 +341,12 @@ class WorkItemDetail(WorkItemSummary):
     description_html: str = Field(
         default="",
         description=(
-            "Work Item description as raw Polarion HTML. The same shape "
-            "round-trips back through ``update_work_item(description_html"
-            "=...)`` without lossy Markdown conversion. Empty string when "
-            "the work item has no description or when "
-            "``include_description_html=False`` was passed. WARNING: may "
-            "contain Polarion-specific spans / ``data-*`` attributes — "
-            "do NOT run through a Markdown converter or sanitizer; those "
-            "would strip the Polarion-side markers and break the round-trip."
+            "Raw Polarion HTML body for the round-trip pair "
+            "``get_work_item(include_description_html=True)`` → "
+            "``update_work_item(description_html=...)``. Empty when the "
+            "work item has no description or when the read flag was "
+            "False. Never feed through a Markdown converter or sanitizer "
+            "(would strip Polarion-specific spans and break the round-trip)."
         ),
     )
     project_id: str = Field(
