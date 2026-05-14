@@ -44,7 +44,8 @@ from mcp_server_polarion.tools._helpers import (
 from mcp_server_polarion.utils import markdown_to_html, sanitize_html
 
 # Caps tool-layer body payloads so a prompt-injected caller cannot ship a
-# multi-megabyte blob to Polarion. 2 MiB is well above any honest body.
+# multi-megabyte blob to Polarion. Observed real document bodies stay
+# under ~30 KB, so 2 MiB leaves ~70x headroom.
 MAX_BODY_HTML_LEN: Final[int] = 2_000_000
 
 # ---------------------------------------------------------------------------
