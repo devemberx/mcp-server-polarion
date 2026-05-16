@@ -1327,6 +1327,41 @@ class TestGetDocumentParts:
         assert result.items[0].type == "normal"
         assert "Plain string content" in result.items[0].content
 
+    async def test_richpage_link_in_normal_part_becomes_markdown_link(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """``polarion-rte-link`` spans inside normal parts surface as Markdown."""
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "id": "proj1/_default/Doc/polarion_2",
+                    "attributes": {
+                        "id": "polarion_2",
+                        "content": (
+                            '<p>Browse using <span class="polarion-rte-link" '
+                            'data-type="richPage" '
+                            'data-item-name="Coverage" '
+                            'data-space-name="Design"></span>.</p>'
+                        ),
+                        "type": "normal",
+                    },
+                    "relationships": {},
+                },
+            ],
+            "meta": {"totalCount": 1},
+        }
+
+        result = await get_document_parts(
+            mock_ctx,
+            project_id="proj1",
+            space_id="_default",
+            document_name="Doc",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert "[Coverage](polarion:Design/Coverage)" in result.items[0].content
+
     async def test_total_count_floor_when_api_returns_zero(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:

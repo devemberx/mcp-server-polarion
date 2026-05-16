@@ -335,6 +335,68 @@ class TestHtmlToMarkdownMergedCells:
         assert rows[0][0] == "M"
 
 
+class TestHtmlToMarkdownPolarionRteLinks:
+    """``polarion-rte-link`` spans must surface as Markdown links."""
+
+    def test_rich_page_link_uses_item_name_label(self) -> None:
+        html = (
+            '<p>See <span class="polarion-rte-link" data-type="richPage" '
+            'data-item-name="Software Requirement Coverage" '
+            'data-space-name="Design"></span>.</p>'
+        )
+        result = html_to_markdown(html)
+        assert (
+            "[Software Requirement Coverage]"
+            "(polarion:Design/Software%20Requirement%20Coverage)"
+        ) in result
+
+    def test_rich_page_link_prefers_inner_text(self) -> None:
+        html = (
+            '<p><span class="polarion-rte-link" data-type="richPage" '
+            'data-item-name="Coverage" data-space-name="Design">'
+            "Click here</span></p>"
+        )
+        result = html_to_markdown(html)
+        assert "[Click here](polarion:Design/Coverage)" in result
+
+    def test_work_item_link_uses_item_id_label(self) -> None:
+        html = (
+            '<p>Linked: <span class="polarion-rte-link" '
+            'data-item-id="MCPT-7"></span>.</p>'
+        )
+        result = html_to_markdown(html)
+        assert "[MCPT-7](polarion:workitem/MCPT-7)" in result
+
+    def test_work_item_link_with_inner_text(self) -> None:
+        html = (
+            '<p><span class="polarion-rte-link" data-item-id="MCPT-7">'
+            "see ticket</span></p>"
+        )
+        result = html_to_markdown(html)
+        assert "[see ticket](polarion:workitem/MCPT-7)" in result
+
+    def test_korean_item_name_is_url_encoded(self) -> None:
+        html = (
+            '<p><span class="polarion-rte-link" data-type="richPage" '
+            'data-item-name="설계 문서" data-space-name="Design"></span></p>'
+        )
+        result = html_to_markdown(html)
+        # %EC%84%A4%EA%B3%84%20%EB%AC%B8%EC%84%9C == "설계 문서"
+        assert "polarion:Design/%EC%84%A4%EA%B3%84%20%EB%AC%B8%EC%84%9C" in result
+
+    def test_span_without_target_metadata_does_not_crash(self) -> None:
+        # Span carries no usable target metadata — surrounding text must still render.
+        html = '<p>Prefix <span class="polarion-rte-link">visible</span> suffix.</p>'
+        result = html_to_markdown(html)
+        assert "Prefix" in result
+        assert "suffix." in result
+
+    def test_no_rte_link_short_circuits(self) -> None:
+        html = '<p><a href="https://example.com">x</a></p>'
+        result = html_to_markdown(html)
+        assert "[x](https://example.com)" in result
+
+
 # ---------------------------------------------------------------------------
 # markdown_to_html
 # ---------------------------------------------------------------------------

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from typing import Final
+from urllib.parse import quote
 
 from bs4 import BeautifulSoup, Tag
 from markdown_it import MarkdownIt
@@ -103,8 +104,65 @@ def html_to_markdown(html: str) -> str:
         return ""
     expanded = _expand_merged_table_cells(html)
     rewritten = _fill_empty_img_alt(expanded)
-    result: str = markdownify(rewritten, heading_style="ATX")
+    relinked = _render_polarion_rte_links(rewritten)
+    result: str = markdownify(relinked, heading_style="ATX")
     return result.strip()
+
+
+def _render_polarion_rte_links(html: str) -> str:
+    """Convert ``span.polarion-rte-link`` placeholders to ``<a>`` tags.
+
+    Polarion serialises rich-text references (to other documents or work
+    items) as empty ``<span>`` elements whose target lives on ``data-*``
+    attributes. ``markdownify`` drops empty spans entirely, silently losing
+    the link. Lift the target into ``<a href="polarion:...">label</a>``
+    so the downstream conversion emits ``[label](polarion:...)``.
+
+    The ``polarion:`` scheme is intentionally absent from
+    ``_SAFE_URL_SCHEMES``: if this synthesised Markdown ever round-trips
+    through ``sanitize_html`` the href is stripped, preventing an
+    unresolvable scheme from leaking into a write payload.
+    """
+    if "polarion-rte-link" not in html:
+        return html
+    soup = BeautifulSoup(html, "html.parser")
+    for span in soup.find_all("span", class_="polarion-rte-link"):
+        href, label = _resolve_rte_link(span)
+        if not href:
+            continue
+        anchor = soup.new_tag("a", href=href)
+        anchor.string = label
+        span.replace_with(anchor)
+    return str(soup)
+
+
+def _resolve_rte_link(span: Tag) -> tuple[str, str]:
+    """Return ``(href, label)`` for one ``polarion-rte-link`` span.
+
+    Returns ``("", "")`` when neither richPage nor work-item metadata is
+    usable, so the caller can leave the span untouched.
+    """
+    inner_text = span.get_text(strip=True)
+    data_type_raw = span.attrs.get("data-type", "")
+    data_type = data_type_raw if isinstance(data_type_raw, str) else ""
+
+    if data_type == "richPage":
+        item_raw = span.attrs.get("data-item-name", "")
+        space_raw = span.attrs.get("data-space-name", "")
+        item_name = item_raw if isinstance(item_raw, str) else ""
+        space_name = space_raw if isinstance(space_raw, str) else ""
+        if not item_name:
+            return ("", "")
+        href = f"polarion:{quote(space_name, safe='')}/{quote(item_name, safe='')}"
+        return (href, inner_text or item_name)
+
+    item_id_raw = span.attrs.get("data-item-id", "")
+    item_id = item_id_raw if isinstance(item_id_raw, str) else ""
+    if item_id:
+        href = f"polarion:workitem/{quote(item_id, safe='')}"
+        return (href, inner_text or item_id)
+
+    return ("", "")
 
 
 def _fill_empty_img_alt(html: str) -> str:
