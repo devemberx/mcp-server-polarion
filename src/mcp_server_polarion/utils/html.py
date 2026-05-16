@@ -140,7 +140,9 @@ def _resolve_rte_link(span: Tag) -> tuple[str, str]:
     """Return ``(href, label)`` for one ``polarion-rte-link`` span.
 
     Returns ``("", "")`` when neither richPage nor work-item metadata is
-    usable, so the caller can leave the span untouched.
+    usable, so the caller can leave the span untouched. The returned
+    ``label`` is pre-escaped so that ``[``, ``]``, ``\\`` survive Markdown
+    link syntax without collapsing the surrounding brackets.
     """
     inner_text = span.get_text(strip=True)
     data_type_raw = span.attrs.get("data-type", "")
@@ -154,15 +156,37 @@ def _resolve_rte_link(span: Tag) -> tuple[str, str]:
         if not item_name:
             return ("", "")
         href = f"polarion:{quote(space_name, safe='')}/{quote(item_name, safe='')}"
-        return (href, inner_text or item_name)
+        return (href, _escape_md_link_label(inner_text or item_name))
 
     item_id_raw = span.attrs.get("data-item-id", "")
     item_id = item_id_raw if isinstance(item_id_raw, str) else ""
     if item_id:
-        href = f"polarion:workitem/{quote(item_id, safe='')}"
-        return (href, inner_text or item_id)
+        scope_raw = span.attrs.get("data-scope", "")
+        scope = scope_raw if isinstance(scope_raw, str) else ""
+        # Two distinct URI shapes keep the project segment unambiguous:
+        # bare ``polarion:workitem/MCPT-7`` resolves against the current
+        # project, while ``polarion:project/Proj/workitem/MCPT-7`` carries
+        # the scope for cross-project references.
+        if scope:
+            href = (
+                f"polarion:project/{quote(scope, safe='')}"
+                f"/workitem/{quote(item_id, safe='')}"
+            )
+        else:
+            href = f"polarion:workitem/{quote(item_id, safe='')}"
+        return (href, _escape_md_link_label(inner_text or item_id))
 
     return ("", "")
+
+
+def _escape_md_link_label(text: str) -> str:
+    """Backslash-escape characters that would break Markdown link syntax.
+
+    ``markdownify`` writes anchor text verbatim into ``[label](href)``;
+    unescaped ``[`` / ``]`` in the label collapses the link or invites a
+    different reference, and a trailing ``\\`` swallows the closing bracket.
+    """
+    return text.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
 
 
 def _fill_empty_img_alt(html: str) -> str:

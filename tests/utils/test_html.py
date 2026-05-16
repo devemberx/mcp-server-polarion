@@ -396,6 +396,49 @@ class TestHtmlToMarkdownPolarionRteLinks:
         result = html_to_markdown(html)
         assert "[x](https://example.com)" in result
 
+    def test_work_item_link_with_scope_uses_project_segment(self) -> None:
+        """``data-scope`` becomes a ``project/<scope>/`` URI segment."""
+        html = (
+            '<p><span class="polarion-rte-link" '
+            'data-item-id="MCPT-7" data-scope="OtherProj"></span></p>'
+        )
+        result = html_to_markdown(html)
+        assert "[MCPT-7](polarion:project/OtherProj/workitem/MCPT-7)" in result
+
+    def test_work_item_link_without_scope_keeps_bare_uri(self) -> None:
+        """No ``data-scope`` keeps the bare ``polarion:workitem/<id>`` URI."""
+        html = '<p><span class="polarion-rte-link" data-item-id="MCPT-7"></span></p>'
+        result = html_to_markdown(html)
+        assert "[MCPT-7](polarion:workitem/MCPT-7)" in result
+        assert "project/" not in result
+
+    def test_label_brackets_are_md_escaped(self) -> None:
+        """``[`` / ``]`` inside the label must not collapse the link syntax."""
+        html = (
+            '<p><span class="polarion-rte-link" data-item-id="MCPT-1">'
+            "see [draft]</span></p>"
+        )
+        result = html_to_markdown(html)
+        assert "[see \\[draft\\]](polarion:workitem/MCPT-1)" in result
+
+    def test_label_backslash_is_md_escaped(self) -> None:
+        """A trailing ``\\`` in the label must be doubled to stay literal."""
+        html = (
+            '<p><span class="polarion-rte-link" data-item-id="MCPT-1">a\\b</span></p>'
+        )
+        result = html_to_markdown(html)
+        assert "[a\\\\b](polarion:workitem/MCPT-1)" in result
+
+    def test_rich_page_label_brackets_escaped(self) -> None:
+        """Bracket escaping applies to richPage labels too."""
+        html = (
+            '<p><span class="polarion-rte-link" data-type="richPage" '
+            'data-item-name="Bracket [Doc]" data-space-name="Design"></span></p>'
+        )
+        result = html_to_markdown(html)
+        assert "[Bracket \\[Doc\\]]" in result
+        assert "polarion:Design/Bracket%20%5BDoc%5D" in result
+
 
 # ---------------------------------------------------------------------------
 # markdown_to_html
