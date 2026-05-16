@@ -34,7 +34,7 @@ Closes #<!-- issue number — delete this line if there is no linked issue -->
 - [ ] Unit tests added / updated (`tests/`)
 - [ ] `dry_run=True` path verified for all write tools
 - [ ] `uv run pytest` passes locally
-- [ ] `uv run mypy src --strict` passes with no errors
+- [ ] `uv run mypy src/` passes with no errors
 - [ ] `uv run ruff check src tests` passes with no warnings
 
 ```bash
@@ -54,8 +54,9 @@ uv run pytest tests/ -v
 - [ ] All tool inputs/outputs are Pydantic models (no raw `dict`)
 - [ ] All new tool functions are `async def`
 - [ ] Tool docstrings follow Google style with Args / Returns / Raises
-- [ ] HTML converted via `html_to_text()` in read paths
-- [ ] HTML sanitized via `text_to_polarion_html()` or `sanitize_html()` in write paths
+- [ ] Synthesis read paths (`read_document`, `get_document_parts`) convert HTML → Markdown via `html_to_markdown()`
+- [ ] Greenfield write paths (`create_work_item(description=...)`) convert Markdown → HTML via `markdown_to_html()` + `sanitize_html()`
+- [ ] Round-trip pairs (`get_*(include_*_html=True)` ↔ `update_*(*_html=...)`) pass raw Polarion HTML verbatim — no Markdown conversion, no sanitization
 - [ ] Any new list tool supports `page_size` and `page_number` pagination
 - [ ] No secrets hardcoded — env vars via `pydantic-settings` only
 
