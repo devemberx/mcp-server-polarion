@@ -66,9 +66,12 @@ from mcp_server_polarion.tools._helpers import (
 )
 from mcp_server_polarion.utils import html_to_markdown
 
-# Valid document part types returned by Polarion.
-type _PartType = Literal["heading", "workitem", "normal", "toc", "wikiblock"]
-_VALID_PART_TYPES: Final[frozenset[str]] = frozenset(
+# Polarion's ``attributes.type`` only emits the first 5; ``tof`` and
+# ``page_break`` are recovered from the part ID prefix in ``_parse_document_part``.
+type _PartType = Literal[
+    "heading", "workitem", "normal", "toc", "wikiblock", "tof", "page_break"
+]
+_POLARION_PART_TYPES: Final[frozenset[str]] = frozenset(
     {"heading", "workitem", "normal", "toc", "wikiblock"},
 )
 
@@ -87,6 +90,7 @@ class _LinkedWorkItem:
     type: str = ""
     status: str = ""
     description_html: str = ""
+    outline_number: str = ""
 
 
 def _extract_html_value(field: object) -> str:
@@ -139,6 +143,7 @@ def _resolve_linked_work_item(
         type=safe_str(wi_attrs.get("type", "")),
         status=safe_str(wi_attrs.get("status", "")),
         description_html=_extract_html_value(wi_attrs.get("description")),
+        outline_number=safe_str(wi_attrs.get("outlineNumber", "")),
     )
 
 
@@ -162,11 +167,21 @@ def _parse_document_part(
     if not isinstance(attrs, dict):
         attrs = {}
 
+    full_id = safe_str(item.get("id", ""))
+    short_id = full_id.rsplit("/", maxsplit=1)[-1] if "/" in full_id else full_id
+
     raw_type = safe_str(attrs.get("type", ""))
     part_type: _PartType = cast(
         _PartType,
-        raw_type if raw_type in _VALID_PART_TYPES else "normal",
+        raw_type if raw_type in _POLARION_PART_TYPES else "normal",
     )
+    # Polarion reports TOF and page-break parts as plain ``normal``; the
+    # kind is only encoded in the ID prefix.
+    if part_type == "normal":
+        if short_id.startswith("tof_"):
+            part_type = "tof"
+        elif short_id.startswith("pagebreak_"):
+            part_type = "page_break"
 
     # Polarion stores heading text in work-item titles and workitem body in
     # the work-item description, so attributes.content for those types is
@@ -183,9 +198,6 @@ def _parse_document_part(
     if not isinstance(rels, dict):
         rels = {}
     linked = _resolve_linked_work_item(rels, wi_map)
-
-    full_id = safe_str(item.get("id", ""))
-    short_id = full_id.rsplit("/", maxsplit=1)[-1] if "/" in full_id else full_id
 
     next_full_id = extract_relationship_id(rels, "nextPart")
     next_short_id = (
@@ -207,8 +219,22 @@ def _parse_document_part(
         work_item_type=linked.type,
         work_item_status=linked.status,
         external=bool(attrs.get("external", False)),
+        outline_number=linked.outline_number,
         next_part_id=next_short_id,
     )
+
+
+# Constant Markdown chunks for content-less widget part types.
+_CONSTANT_CHUNKS: Final[dict[str, str]] = {
+    "toc": "*[Table of Contents (Polarion widget)]*",
+    "tof": "*[Table of Figures (Polarion widget)]*",
+    "page_break": "---",
+}
+_WIKIBLOCK_MACRO_RE: Final[re.Pattern[str]] = re.compile(
+    r"#([A-Za-z_][A-Za-z0-9_]*)\s*\("
+)
+# Minimum line count for a fenced wikiblock: opener + closer.
+_FENCED_MIN_LINES: Final[int] = 2
 
 
 def _render_parts_to_markdown(parts: list[DocumentPart]) -> str:
@@ -216,40 +242,88 @@ def _render_parts_to_markdown(parts: list[DocumentPart]) -> str:
 
     Rendering rules per ``DocumentPart.type``:
 
-    - ``heading``: ``{'#' * level} {title}``; level clamped to 1-6.
+    - ``heading``: ``{'#' * level} {outline_number} {title}`` when the
+      heading has an outline number (e.g. ``### 1.1 Purpose``), otherwise
+      ``{'#' * level} {title}``. Level clamped to 1-6.
     - ``workitem``: bold lead-in ``**{title}** (`{work_item_id}`)``
       followed by the description body. Falls back to bare backticked
       ID when both title and description are empty.
-    - ``normal`` / ``wikiblock``: ``content`` verbatim, skipped when
-      whitespace-only (matches the empty paragraphs Polarion stores
-      between parts; tables stored as ``normal`` content flow through
-      this branch unchanged).
-    - ``toc`` and unknown types: skipped.
+    - ``normal``: ``content`` verbatim, skipped when whitespace-only.
+      Tables stored as ``normal`` flow through unchanged.
+    - ``wikiblock``: ``content`` verbatim, with the Velocity macro name
+      lifted into the fenced-code info-string when detectable (e.g.
+      ``#documentPanel(...)`` → ``` ```documentPanel ```). Falls back
+      to the raw fenced block when no macro token is present.
+    - ``page_break``: rendered as a ``---`` thematic break.
+    - ``toc`` / ``tof``: rendered as a one-line italic placeholder.
+      Widget content is not synthesised — heading text and figure
+      captions already appear inline elsewhere.
+    - Unknown types: skipped.
 
     Chunks are joined with a blank line; runs of three or more newlines
     are collapsed to two for visual parity with ``get_document``.
     """
     chunks: list[str] = []
     for part in parts:
-        if part.type == "heading":
-            level = max(1, min(part.level or 1, _MAX_HEADING_LEVEL))
-            chunks.append(f"{'#' * level} {part.title}")
-        elif part.type == "workitem":
-            if not part.title and not part.description:
-                chunks.append(f"`{part.work_item_id}`")
-            elif not part.description:
-                chunks.append(f"**{part.title}** (`{part.work_item_id}`)")
-            else:
-                chunks.append(
-                    f"**{part.title}** (`{part.work_item_id}`)\n\n{part.description}"
-                )
-        elif part.type in {"normal", "wikiblock"}:
-            if part.content.strip():
-                chunks.append(part.content)
-        # ``toc`` and any unknown type fall through silently.
+        chunk = _render_part(part)
+        if chunk:
+            chunks.append(chunk)
 
     joined = "\n\n".join(chunks)
     return re.sub(r"\n{3,}", "\n\n", joined).strip()
+
+
+def _render_part(part: DocumentPart) -> str:
+    """Return the Markdown chunk for one part, or ``""`` to skip it."""
+    constant = _CONSTANT_CHUNKS.get(part.type)
+    if constant is not None:
+        return constant
+    if part.type == "heading":
+        level = max(1, min(part.level or 1, _MAX_HEADING_LEVEL))
+        title = (
+            f"{part.outline_number} {part.title}" if part.outline_number else part.title
+        )
+        return f"{'#' * level} {title}"
+    if part.type == "workitem":
+        return _render_workitem_part(part)
+    if part.type == "wikiblock":
+        return _decorate_wikiblock(part.content)
+    if part.type == "normal":
+        return part.content if part.content.strip() else ""
+    return ""
+
+
+def _render_workitem_part(part: DocumentPart) -> str:
+    """Format a ``workitem`` part's lead-in line and optional body."""
+    if not part.title and not part.description:
+        return f"`{part.work_item_id}`"
+    if not part.description:
+        return f"**{part.title}** (`{part.work_item_id}`)"
+    return f"**{part.title}** (`{part.work_item_id}`)\n\n{part.description}"
+
+
+def _decorate_wikiblock(content: str) -> str:
+    """Lift the Velocity macro name into the fenced-code info-string.
+
+    Wikiblock content arrives as ``` ```\\n#macroName(...)\\n``` ``` from
+    ``markdownify``. Rewrap the fence so the macro name becomes the
+    info-string, giving the LLM an unambiguous macro identifier. Falls
+    back to the raw fence when no ``#name(`` token is detectable.
+    """
+    stripped = content.strip()
+    if not stripped:
+        return ""
+    if not stripped.startswith("```"):
+        return content
+    lines = stripped.split("\n")
+    if len(lines) < _FENCED_MIN_LINES or lines[-1].strip() != "```":
+        return content
+    body = "\n".join(lines[1:-1])
+    match = _WIKIBLOCK_MACRO_RE.search(body)
+    if not match:
+        return content
+    macro = match.group(1)
+    return f"```{macro}\n{body}\n```"
 
 
 def _parse_linked_items(
@@ -823,12 +897,16 @@ async def get_document_parts(  # noqa: PLR0913
         - ``content``: Part body as Markdown; empty for heading and
           workitem parts (text lives in ``title``/``level`` and
           ``description``).
-        - ``type``: 'heading' | 'workitem' | 'normal' | 'toc' | 'wikiblock'.
+        - ``type``: 'heading' | 'workitem' | 'normal' | 'toc' | 'wikiblock'
+          | 'tof' | 'page_break'. The last two are inferred from the part
+          ID prefix because Polarion reports both as plain 'normal'.
         - ``level``: Heading level 1-4 (0 for non-headings).
         - ``description``: Markdown body (workitem parts only).
         - ``work_item_id`` / ``work_item_type`` / ``work_item_status``:
           Linked work-item metadata.
         - ``external``: True when the work item belongs to another project.
+        - ``outline_number``: Hierarchical position (e.g. '1.2.3') for
+          heading and workitem parts; empty otherwise.
         - ``next_part_id``: Short ID of the next part; empty on the last.
 
     Raises:

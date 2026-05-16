@@ -142,16 +142,27 @@ class DocumentPart(BaseModel):
     )
     content: str = Field(
         description=(
-            "Part body in Markdown. Populated for 'normal', 'toc', and "
-            "'wikiblock' parts. Empty for 'heading' parts (the heading "
-            "text is in ``title`` and the level in ``level``) and for "
-            "'workitem' parts (the body is in ``description``)."
+            "Part body in Markdown. Populated for 'normal' and 'wikiblock' "
+            "parts; empty for 'heading' (text in ``title``, depth in "
+            "``level``), 'workitem' (body in ``description``), and the "
+            "'toc' / 'tof' / 'page_break' widget placeholders."
         ),
     )
-    type: Literal["heading", "workitem", "normal", "toc", "wikiblock"] = Field(
+    type: Literal[
+        "heading",
+        "workitem",
+        "normal",
+        "toc",
+        "wikiblock",
+        "tof",
+        "page_break",
+    ] = Field(
         description=(
             "Part type: 'heading', 'workitem', 'normal' (rich text), "
-            "'toc' (table of contents), or 'wikiblock' (wiki macro block)."
+            "'toc' (table of contents widget), 'wikiblock' (wiki macro "
+            "block), 'tof' (table of figures widget), or 'page_break'. "
+            "'tof' and 'page_break' are inferred from the part ID prefix "
+            "because Polarion reports both as plain 'normal'."
         ),
     )
     level: int = Field(
@@ -199,6 +210,14 @@ class DocumentPart(BaseModel):
             "True when this part references a work item from another "
             "project (re-used content). Such parts are typically "
             "read-only — editing must be done in the source project."
+        ),
+    )
+    outline_number: str = Field(
+        default="",
+        description=(
+            "Hierarchical position inside the document (e.g. '1.2.3'). "
+            "Populated for 'heading' and 'workitem' parts when Polarion "
+            "has assigned one; empty for prose and widget parts."
         ),
     )
     next_part_id: str = Field(

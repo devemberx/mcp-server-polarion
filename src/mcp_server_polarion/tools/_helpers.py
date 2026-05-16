@@ -54,7 +54,7 @@ DEFAULT_PAGE_SIZE: Final[int] = 100
 # because ``DocumentPart`` does not surface embedded-WI customs.
 WI_LIST_FIELDS: Final[str] = "title,type,status,priority,updated,module,assignee"
 WI_DETAIL_FIELDS: Final[str] = "@all"
-WI_PART_FIELDS: Final[str] = "title,type,status,description"
+WI_PART_FIELDS: Final[str] = "title,type,status,description,outlineNumber"
 DOC_DETAIL_FIELDS: Final[str] = "@all"
 
 # Canonical standard attribute names per the Polarion REST OpenAPI schema.

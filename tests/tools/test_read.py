@@ -1275,7 +1275,10 @@ class TestGetDocumentParts:
         )
 
         _, kwargs = mock_client.get.call_args
-        assert kwargs["params"]["fields[workitems]"] == "title,type,status,description"
+        assert (
+            kwargs["params"]["fields[workitems]"]
+            == "title,type,status,description,outlineNumber"
+        )
 
     async def test_not_found_raises_value_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1327,6 +1330,182 @@ class TestGetDocumentParts:
         assert result.items[0].type == "normal"
         assert "Plain string content" in result.items[0].content
 
+    async def test_tof_part_reclassified_from_id_prefix(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Polarion reports TOF as ``type=normal``; the ID prefix wins."""
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "id": "proj1/_default/Doc/tof_20",
+                    "attributes": {
+                        "id": "tof_20",
+                        "content": "",
+                        "type": "normal",
+                    },
+                    "relationships": {},
+                },
+            ],
+            "meta": {"totalCount": 1},
+        }
+
+        result = await get_document_parts(
+            mock_ctx,
+            project_id="proj1",
+            space_id="_default",
+            document_name="Doc",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.items[0].type == "tof"
+
+    async def test_page_break_part_reclassified_from_id_prefix(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """``pagebreak_*`` IDs are surfaced as ``page_break`` parts."""
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "id": "proj1/_default/Doc/pagebreak_23",
+                    "attributes": {
+                        "id": "pagebreak_23",
+                        "content": "",
+                        "type": "normal",
+                    },
+                    "relationships": {},
+                },
+            ],
+            "meta": {"totalCount": 1},
+        }
+
+        result = await get_document_parts(
+            mock_ctx,
+            project_id="proj1",
+            space_id="_default",
+            document_name="Doc",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.items[0].type == "page_break"
+
+    async def test_normal_part_without_special_prefix_stays_normal(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Plain ``polarion_*`` IDs must not be reclassified."""
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "id": "proj1/_default/Doc/polarion_99",
+                    "attributes": {
+                        "id": "polarion_99",
+                        "content": "<p>body</p>",
+                        "type": "normal",
+                    },
+                    "relationships": {},
+                },
+            ],
+            "meta": {"totalCount": 1},
+        }
+
+        result = await get_document_parts(
+            mock_ctx,
+            project_id="proj1",
+            space_id="_default",
+            document_name="Doc",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.items[0].type == "normal"
+
+    async def test_outline_number_surfaced_on_heading_part(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Heading parts expose Polarion's ``outlineNumber`` verbatim."""
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "id": "proj1/_default/Doc/heading_MCPT-149",
+                    "attributes": {
+                        "id": "heading_MCPT-149",
+                        "content": (
+                            '<h3 id="polarion_wiki macro '
+                            'name=module-workitem;params=id=MCPT-149"></h3>'
+                        ),
+                        "type": "heading",
+                    },
+                    "relationships": {
+                        "workItem": {
+                            "data": {"type": "workitems", "id": "proj1/MCPT-149"},
+                        },
+                    },
+                },
+            ],
+            "included": [
+                {
+                    "type": "workitems",
+                    "id": "proj1/MCPT-149",
+                    "attributes": {
+                        "type": "heading",
+                        "title": "Purpose",
+                        "status": "open",
+                        "outlineNumber": "1.1",
+                    },
+                },
+            ],
+            "meta": {"totalCount": 1},
+        }
+
+        result = await get_document_parts(
+            mock_ctx,
+            project_id="proj1",
+            space_id="_default",
+            document_name="Doc",
+            page_size=100,
+            page_number=1,
+        )
+
+        heading = result.items[0]
+        assert heading.type == "heading"
+        assert heading.outline_number == "1.1"
+
+    async def test_richpage_link_in_normal_part_becomes_markdown_link(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """``polarion-rte-link`` spans inside normal parts surface as Markdown."""
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "id": "proj1/_default/Doc/polarion_2",
+                    "attributes": {
+                        "id": "polarion_2",
+                        "content": (
+                            '<p>Browse using <span class="polarion-rte-link" '
+                            'data-type="richPage" '
+                            'data-item-name="Coverage" '
+                            'data-space-name="Design"></span>.</p>'
+                        ),
+                        "type": "normal",
+                    },
+                    "relationships": {},
+                },
+            ],
+            "meta": {"totalCount": 1},
+        }
+
+        result = await get_document_parts(
+            mock_ctx,
+            project_id="proj1",
+            space_id="_default",
+            document_name="Doc",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert "[Coverage](polarion:Design/Coverage)" in result.items[0].content
+
     async def test_total_count_floor_when_api_returns_zero(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
@@ -1375,6 +1554,7 @@ def _make_part(
     description: str = "",
     level: int = 0,
     work_item_id: str = "",
+    outline_number: str = "",
 ) -> DocumentPart:
     """Build a ``DocumentPart`` with sensible defaults for render-rule tests."""
     return DocumentPart(
@@ -1388,6 +1568,7 @@ def _make_part(
         work_item_type="",
         work_item_status="",
         external=False,
+        outline_number=outline_number,
         next_part_id="",
     )
 
@@ -1698,7 +1879,7 @@ class TestReadDocument:
 
         assert result.content == "## Section\n\nReal content."
 
-    async def test_toc_parts_skipped(
+    async def test_toc_emits_widget_placeholder(
         self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _stub_parts(
@@ -1719,9 +1900,59 @@ class TestReadDocument:
             page_number=1,
         )
 
-        assert result.content == "# Top\n\nAfter TOC."
+        assert result.content == (
+            "# Top\n\n*[Table of Contents (Polarion widget)]*\n\nAfter TOC."
+        )
 
-    async def test_wikiblock_content_emitted(
+    async def test_tof_emits_widget_placeholder(
+        self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _stub_parts(
+            monkeypatch,
+            [
+                _make_part(type_="heading", title="Top", level=1),
+                _make_part(type_="tof", content=""),
+                _make_part(type_="normal", content="After TOF."),
+            ],
+        )
+
+        result = await read_document(
+            mock_ctx,
+            project_id="p",
+            space_id="s",
+            document_name="d",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.content == (
+            "# Top\n\n*[Table of Figures (Polarion widget)]*\n\nAfter TOF."
+        )
+
+    async def test_page_break_emits_thematic_break(
+        self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _stub_parts(
+            monkeypatch,
+            [
+                _make_part(type_="normal", content="Before."),
+                _make_part(type_="page_break", content=""),
+                _make_part(type_="normal", content="After."),
+            ],
+        )
+
+        result = await read_document(
+            mock_ctx,
+            project_id="p",
+            space_id="s",
+            document_name="d",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.content == "Before.\n\n---\n\nAfter."
+
+    async def test_wikiblock_lifts_macro_name_as_info_string(
         self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _stub_parts(
@@ -1743,7 +1974,29 @@ class TestReadDocument:
             page_number=1,
         )
 
-        assert result.content == '```\n#documentPanel(true "approved")\n```'
+        assert result.content == (
+            '```documentPanel\n#documentPanel(true "approved")\n```'
+        )
+
+    async def test_wikiblock_without_macro_falls_back_to_plain_fence(
+        self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A wikiblock that doesn't start with ``#name(`` keeps its plain fence."""
+        _stub_parts(
+            monkeypatch,
+            [_make_part(type_="wikiblock", content="```\njust text\n```")],
+        )
+
+        result = await read_document(
+            mock_ctx,
+            project_id="p",
+            space_id="s",
+            document_name="d",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.content == "```\njust text\n```"
 
     async def test_empty_wikiblock_skipped(
         self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
@@ -1808,6 +2061,50 @@ class TestReadDocument:
         )
 
         assert result.content == "###### Deep"
+
+    async def test_heading_with_outline_number_prefix(
+        self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Outline number is prefixed before the heading title."""
+        _stub_parts(
+            monkeypatch,
+            [
+                _make_part(
+                    type_="heading", title="Purpose", level=3, outline_number="1.1"
+                ),
+            ],
+        )
+
+        result = await read_document(
+            mock_ctx,
+            project_id="p",
+            space_id="s",
+            document_name="d",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.content == "### 1.1 Purpose"
+
+    async def test_heading_without_outline_number_unchanged(
+        self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Headings without an outline number render as before."""
+        _stub_parts(
+            monkeypatch,
+            [_make_part(type_="heading", title="Standalone", level=2)],
+        )
+
+        result = await read_document(
+            mock_ctx,
+            project_id="p",
+            space_id="s",
+            document_name="d",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.content == "## Standalone"
 
     async def test_newline_collapse(
         self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
