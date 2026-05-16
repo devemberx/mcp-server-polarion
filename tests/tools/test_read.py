@@ -1275,7 +1275,10 @@ class TestGetDocumentParts:
         )
 
         _, kwargs = mock_client.get.call_args
-        assert kwargs["params"]["fields[workitems]"] == "title,type,status,description"
+        assert (
+            kwargs["params"]["fields[workitems]"]
+            == "title,type,status,description,outlineNumber"
+        )
 
     async def test_not_found_raises_value_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1417,6 +1420,57 @@ class TestGetDocumentParts:
 
         assert result.items[0].type == "normal"
 
+    async def test_outline_number_surfaced_on_heading_part(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Heading parts expose Polarion's ``outlineNumber`` verbatim."""
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "id": "proj1/_default/Doc/heading_MCPT-149",
+                    "attributes": {
+                        "id": "heading_MCPT-149",
+                        "content": (
+                            '<h3 id="polarion_wiki macro '
+                            'name=module-workitem;params=id=MCPT-149"></h3>'
+                        ),
+                        "type": "heading",
+                    },
+                    "relationships": {
+                        "workItem": {
+                            "data": {"type": "workitems", "id": "proj1/MCPT-149"},
+                        },
+                    },
+                },
+            ],
+            "included": [
+                {
+                    "type": "workitems",
+                    "id": "proj1/MCPT-149",
+                    "attributes": {
+                        "type": "heading",
+                        "title": "Purpose",
+                        "status": "open",
+                        "outlineNumber": "1.1",
+                    },
+                },
+            ],
+            "meta": {"totalCount": 1},
+        }
+
+        result = await get_document_parts(
+            mock_ctx,
+            project_id="proj1",
+            space_id="_default",
+            document_name="Doc",
+            page_size=100,
+            page_number=1,
+        )
+
+        heading = result.items[0]
+        assert heading.type == "heading"
+        assert heading.outline_number == "1.1"
+
     async def test_richpage_link_in_normal_part_becomes_markdown_link(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
@@ -1500,6 +1554,7 @@ def _make_part(
     description: str = "",
     level: int = 0,
     work_item_id: str = "",
+    outline_number: str = "",
 ) -> DocumentPart:
     """Build a ``DocumentPart`` with sensible defaults for render-rule tests."""
     return DocumentPart(
@@ -1513,6 +1568,7 @@ def _make_part(
         work_item_type="",
         work_item_status="",
         external=False,
+        outline_number=outline_number,
         next_part_id="",
     )
 
@@ -2005,6 +2061,50 @@ class TestReadDocument:
         )
 
         assert result.content == "###### Deep"
+
+    async def test_heading_with_outline_number_prefix(
+        self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Outline number is prefixed before the heading title."""
+        _stub_parts(
+            monkeypatch,
+            [
+                _make_part(
+                    type_="heading", title="Purpose", level=3, outline_number="1.1"
+                ),
+            ],
+        )
+
+        result = await read_document(
+            mock_ctx,
+            project_id="p",
+            space_id="s",
+            document_name="d",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.content == "### 1.1 Purpose"
+
+    async def test_heading_without_outline_number_unchanged(
+        self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Headings without an outline number render as before."""
+        _stub_parts(
+            monkeypatch,
+            [_make_part(type_="heading", title="Standalone", level=2)],
+        )
+
+        result = await read_document(
+            mock_ctx,
+            project_id="p",
+            space_id="s",
+            document_name="d",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.content == "## Standalone"
 
     async def test_newline_collapse(
         self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch

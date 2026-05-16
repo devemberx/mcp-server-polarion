@@ -212,6 +212,14 @@ class DocumentPart(BaseModel):
             "read-only — editing must be done in the source project."
         ),
     )
+    outline_number: str = Field(
+        default="",
+        description=(
+            "Hierarchical position inside the document (e.g. '1.2.3'). "
+            "Populated for 'heading' and 'workitem' parts when Polarion "
+            "has assigned one; empty for prose and widget parts."
+        ),
+    )
     next_part_id: str = Field(
         default="",
         description=(

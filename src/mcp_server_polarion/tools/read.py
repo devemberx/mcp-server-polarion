@@ -90,6 +90,7 @@ class _LinkedWorkItem:
     type: str = ""
     status: str = ""
     description_html: str = ""
+    outline_number: str = ""
 
 
 def _extract_html_value(field: object) -> str:
@@ -142,6 +143,7 @@ def _resolve_linked_work_item(
         type=safe_str(wi_attrs.get("type", "")),
         status=safe_str(wi_attrs.get("status", "")),
         description_html=_extract_html_value(wi_attrs.get("description")),
+        outline_number=safe_str(wi_attrs.get("outlineNumber", "")),
     )
 
 
@@ -217,6 +219,7 @@ def _parse_document_part(
         work_item_type=linked.type,
         work_item_status=linked.status,
         external=bool(attrs.get("external", False)),
+        outline_number=linked.outline_number,
         next_part_id=next_short_id,
     )
 
@@ -239,7 +242,9 @@ def _render_parts_to_markdown(parts: list[DocumentPart]) -> str:
 
     Rendering rules per ``DocumentPart.type``:
 
-    - ``heading``: ``{'#' * level} {title}``; level clamped to 1-6.
+    - ``heading``: ``{'#' * level} {outline_number} {title}`` when the
+      heading has an outline number (e.g. ``### 1.1 Purpose``), otherwise
+      ``{'#' * level} {title}``. Level clamped to 1-6.
     - ``workitem``: bold lead-in ``**{title}** (`{work_item_id}`)``
       followed by the description body. Falls back to bare backticked
       ID when both title and description are empty.
@@ -275,7 +280,10 @@ def _render_part(part: DocumentPart) -> str:
         return constant
     if part.type == "heading":
         level = max(1, min(part.level or 1, _MAX_HEADING_LEVEL))
-        return f"{'#' * level} {part.title}"
+        title = (
+            f"{part.outline_number} {part.title}" if part.outline_number else part.title
+        )
+        return f"{'#' * level} {title}"
     if part.type == "workitem":
         return _render_workitem_part(part)
     if part.type == "wikiblock":
@@ -897,6 +905,8 @@ async def get_document_parts(  # noqa: PLR0913
         - ``work_item_id`` / ``work_item_type`` / ``work_item_status``:
           Linked work-item metadata.
         - ``external``: True when the work item belongs to another project.
+        - ``outline_number``: Hierarchical position (e.g. '1.2.3') for
+          heading and workitem parts; empty otherwise.
         - ``next_part_id``: Short ID of the next part; empty on the last.
 
     Raises:
