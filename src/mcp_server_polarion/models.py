@@ -235,7 +235,7 @@ class DocumentReadResult(BaseModel):
 
     Returned by ``read_document``. Interleaves heading titles, embedded
     work-item descriptions, and inline prose from a single page of
-    ``get_document_parts`` into a flowing Markdown stream suitable for
+    ``read_document_parts`` into a flowing Markdown stream suitable for
     end-to-end reading by an LLM.
 
     The output is read-only synthesis: it cannot be fed back to any
@@ -254,7 +254,7 @@ class DocumentReadResult(BaseModel):
     part_count: int = Field(
         description=(
             "Number of document parts on this page (i.e. parts consumed "
-            "from ``get_document_parts``). Parts that produce no output "
+            "from ``read_document_parts``). Parts that produce no output "
             "(empty placeholder paragraphs, ``toc``) still count toward "
             "this — use it for pagination accounting, not chunk count."
         ),
@@ -322,7 +322,7 @@ class WorkItemSummary(BaseModel):
             "Name of the document this work item belongs to. "
             "Empty when the work item is not part of any document. "
             "Use with ``space_id`` to call ``get_document`` / "
-            "``get_document_parts``."
+            "``read_document_parts``."
         ),
     )
     assignee_ids: list[str] = Field(
@@ -491,7 +491,7 @@ class LinkedWorkItemSummary(BaseModel):
         description=(
             "Name of the document the linked work item belongs to. "
             "Empty when not module-bound. Use with ``space_id`` to call "
-            "``get_document`` / ``get_document_parts``."
+            "``get_document`` / ``read_document_parts``."
         ),
     )
 

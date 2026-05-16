@@ -9,7 +9,7 @@ Body fields use two different formats depending on the tool's purpose:
   raw Polarion HTML (``description_html``, ``content_html``). Same shape
   round-trips back through the matching ``update_*`` tool without lossy
   Markdown conversion.
-* **Synthesis paths** -- ``read_document`` and ``get_document_parts``
+* **Synthesis paths** -- ``read_document`` and ``read_document_parts``
   convert HTML to Markdown via ``html_to_markdown()`` for LLM
   consumption. Output from these tools is read-only and cannot be fed
   back to write tools.
@@ -763,7 +763,7 @@ async def get_document(
     ``homePageContent`` is the inline prose only — heading text and
     embedded work-item bodies live in separate work items. For end-to-end
     reading use ``read_document``; for structural metadata
-    use ``get_document_parts``. Only feed ``content_html`` back to
+    use ``read_document_parts``. Only feed ``content_html`` back to
     ``update_document`` when the read flag was True (a False read blanks
     the field, and the empty string is rejected at the write side).
 
@@ -854,7 +854,7 @@ async def get_document(
     timeout=60.0,
     annotations={"readOnlyHint": True},
 )
-async def get_document_parts(  # noqa: PLR0913
+async def read_document_parts(  # noqa: PLR0913
     ctx: Context,
     project_id: str = Field(description="Polarion project ID."),
     space_id: str = Field(description="Space ID containing the document."),
@@ -1007,7 +1007,7 @@ async def read_document(  # noqa: PLR0913
 ) -> DocumentReadResult:
     """Render a Polarion document end-to-end as flowing Markdown.
 
-    Paginates ``get_document_parts`` internally and interleaves heading
+    Paginates ``read_document_parts`` internally and interleaves heading
     titles, embedded work-item descriptions, and inline prose into a
     single Markdown stream — the canonical way to read a document body.
     Empty placeholder paragraphs are skipped.
@@ -1038,7 +1038,7 @@ async def read_document(  # noqa: PLR0913
     """
     # FastMCP 3.0's ``@mcp.tool()`` returns the original function unchanged,
     # so direct invocation forwards both the fetch and the error mapping.
-    page = await get_document_parts(
+    page = await read_document_parts(
         ctx,
         project_id=project_id,
         space_id=space_id,
@@ -1090,7 +1090,7 @@ async def list_work_items(
     wildcards (`*foo*`) return HTTP 400. ``module`` is not indexed.
 
     Description body text is NOT indexed — for content search, scan
-    ``get_document_parts`` (each ``workitem`` part already carries its
+    ``read_document_parts`` (each ``workitem`` part already carries its
     description) or use ``read_document`` for end-to-end reading.
 
     Args:

@@ -7,7 +7,7 @@ defined here are for internal use within the ``tools`` package and are
 Body fields (``description``, ``homePageContent``) are passed through as
 raw Polarion HTML on the get/update round-trip path — Markdown conversion
 is reserved for synthesis paths (``read_document``, embedded WI bodies
-inside ``get_document_parts``) and lives in ``tools.read``.
+inside ``read_document_parts``) and lives in ``tools.read``.
 """
 
 from __future__ import annotations

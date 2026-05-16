@@ -35,7 +35,7 @@ from mcp_server_polarion.tools import read as _read_mod
 # In FastMCP 3.0, @mcp.tool returns the original function unchanged
 # (not a FunctionTool wrapper), so we reference them directly.
 get_document = _read_mod.get_document
-get_document_parts = _read_mod.get_document_parts
+read_document_parts = _read_mod.read_document_parts
 get_linked_work_items = _read_mod.get_linked_work_items
 get_work_item = _read_mod.get_work_item
 list_documents = _read_mod.list_documents
@@ -1062,7 +1062,7 @@ class TestGetDocument:
 
 
 class TestGetDocumentParts:
-    """Tests for the ``get_document_parts`` tool."""
+    """Tests for the ``read_document_parts`` tool."""
 
     async def test_returns_document_parts(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1177,7 +1177,7 @@ class TestGetDocumentParts:
             "meta": {"totalCount": 3},
         }
 
-        result = await get_document_parts(
+        result = await read_document_parts(
             mock_ctx,
             project_id="proj1",
             space_id="_default",
@@ -1235,7 +1235,7 @@ class TestGetDocumentParts:
             "meta": {"totalCount": 0},
         }
 
-        await get_document_parts(
+        await read_document_parts(
             mock_ctx,
             project_id="proj1",
             space_id="_default",
@@ -1265,7 +1265,7 @@ class TestGetDocumentParts:
             "meta": {"totalCount": 0},
         }
 
-        await get_document_parts(
+        await read_document_parts(
             mock_ctx,
             project_id="proj1",
             space_id="_default",
@@ -1289,7 +1289,7 @@ class TestGetDocumentParts:
         )
 
         with pytest.raises(ValueError, match="not found"):
-            await get_document_parts(
+            await read_document_parts(
                 mock_ctx,
                 project_id="proj1",
                 space_id="_default",
@@ -1317,7 +1317,7 @@ class TestGetDocumentParts:
             "meta": {"totalCount": 1},
         }
 
-        result = await get_document_parts(
+        result = await read_document_parts(
             mock_ctx,
             project_id="proj1",
             space_id="_default",
@@ -1349,7 +1349,7 @@ class TestGetDocumentParts:
             "meta": {"totalCount": 1},
         }
 
-        result = await get_document_parts(
+        result = await read_document_parts(
             mock_ctx,
             project_id="proj1",
             space_id="_default",
@@ -1379,7 +1379,7 @@ class TestGetDocumentParts:
             "meta": {"totalCount": 1},
         }
 
-        result = await get_document_parts(
+        result = await read_document_parts(
             mock_ctx,
             project_id="proj1",
             space_id="_default",
@@ -1409,7 +1409,7 @@ class TestGetDocumentParts:
             "meta": {"totalCount": 1},
         }
 
-        result = await get_document_parts(
+        result = await read_document_parts(
             mock_ctx,
             project_id="proj1",
             space_id="_default",
@@ -1458,7 +1458,7 @@ class TestGetDocumentParts:
             "meta": {"totalCount": 1},
         }
 
-        result = await get_document_parts(
+        result = await read_document_parts(
             mock_ctx,
             project_id="proj1",
             space_id="_default",
@@ -1495,7 +1495,7 @@ class TestGetDocumentParts:
             "meta": {"totalCount": 1},
         }
 
-        result = await get_document_parts(
+        result = await read_document_parts(
             mock_ctx,
             project_id="proj1",
             space_id="_default",
@@ -1532,7 +1532,7 @@ class TestGetDocumentParts:
             "meta": {"totalCount": 0},  # Polarion quirk
         }
 
-        result = await get_document_parts(
+        result = await read_document_parts(
             mock_ctx,
             project_id="proj1",
             space_id="_default",
@@ -1576,7 +1576,7 @@ def _make_part(
 def _stub_parts(
     monkeypatch: pytest.MonkeyPatch, parts: list[DocumentPart]
 ) -> AsyncMock:
-    """Replace ``get_document_parts`` with an AsyncMock returning *parts*.
+    """Replace ``read_document_parts`` with an AsyncMock returning *parts*.
 
     Returns the mock so individual tests can assert call arguments. Page
     metadata is derived from the part list so pagination defaults stay
@@ -1591,14 +1591,14 @@ def _stub_parts(
             has_more=False,
         )
     )
-    monkeypatch.setattr(_read_mod, "get_document_parts", stub)
+    monkeypatch.setattr(_read_mod, "read_document_parts", stub)
     return stub
 
 
 class TestReadDocument:
     """Tests for the ``read_document`` tool."""
 
-    # -- end-to-end wiring (exercises get_document_parts via client.get) --
+    # -- end-to-end wiring (exercises read_document_parts via client.get) --
 
     async def test_end_to_end_renders_document(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1756,7 +1756,7 @@ class TestReadDocument:
     async def test_not_found_propagates_value_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Delegation to ``get_document_parts`` surfaces its ValueError verbatim."""
+        """Delegation to ``read_document_parts`` surfaces its ValueError verbatim."""
         mock_client.get.side_effect = PolarionNotFoundError(
             "Not found", status_code=404
         )
@@ -1771,7 +1771,7 @@ class TestReadDocument:
                 page_number=1,
             )
 
-    # -- render-rule tests (isolated via monkeypatched get_document_parts) --
+    # -- render-rule tests (isolated via monkeypatched read_document_parts) --
 
     async def test_workitem_with_description_renders_lead_in_plus_body(
         self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
@@ -2142,7 +2142,7 @@ class TestReadDocument:
                 has_more=True,
             )
         )
-        monkeypatch.setattr(_read_mod, "get_document_parts", stub)
+        monkeypatch.setattr(_read_mod, "read_document_parts", stub)
 
         result = await read_document(
             mock_ctx,
