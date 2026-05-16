@@ -41,6 +41,12 @@ async def _lifespan(
     setup_logging()
     config = PolarionConfig()  # type: ignore[call-arg]
     logger.info("Connecting to Polarion at %s", config.polarion_url)
+    if not config.polarion_verify_ssl:
+        logger.warning(
+            "TLS certificate verification is DISABLED (POLARION_VERIFY_SSL=false). "
+            "Connections to %s are vulnerable to MITM. Use only on trusted networks.",
+            config.polarion_url,
+        )
 
     async with PolarionClient(config) as client:
         logger.info("Polarion client ready")

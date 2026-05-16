@@ -18,6 +18,9 @@ class PolarionConfig(BaseSettings):
             '/polarion' context path).  Trailing slashes are accepted and
             will be stripped automatically.
         polarion_token: Personal access token for Bearer authentication.
+        polarion_verify_ssl: Whether to verify TLS certificates.  Default
+            ``True``.  Set ``False`` only for trusted internal instances
+            using self-signed certificates.
     """
 
     model_config = SettingsConfigDict(
@@ -34,6 +37,13 @@ class PolarionConfig(BaseSettings):
     )
     polarion_token: str = Field(
         description="Personal access token for Polarion REST API.",
+    )
+    polarion_verify_ssl: bool = Field(
+        default=True,
+        description=(
+            "Verify TLS certificates for HTTPS connections. Set to False only "
+            "for trusted internal Polarion instances using self-signed certificates."
+        ),
     )
 
     @property
