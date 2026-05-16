@@ -38,6 +38,7 @@ No other installation is needed — `uvx mcp-server-polarion` downloads and runs
 |---|---|---|
 | `POLARION_URL` | Base URL of your Polarion instance | `https://polarion.example.com` |
 | `POLARION_TOKEN` | Personal Access Token for authentication | `your-personal-access-token` |
+| `POLARION_VERIFY_SSL` | Verify TLS certificates (default `true`). Set `false` for self-signed certs on trusted networks. | `true` |
 
 <details>
 <summary><b>VS Code (GitHub Copilot)</b></summary>
@@ -53,7 +54,8 @@ Add to `.vscode/mcp.json`:
       "args": ["mcp-server-polarion"],
       "env": {
         "POLARION_URL": "https://polarion.example.com",
-        "POLARION_TOKEN": "your-personal-access-token"
+        "POLARION_TOKEN": "your-personal-access-token",
+        "POLARION_VERIFY_SSL": "true"
       }
     }
   }
@@ -75,7 +77,8 @@ Add to `claude_desktop_config.json`:
       "args": ["mcp-server-polarion"],
       "env": {
         "POLARION_URL": "https://polarion.example.com",
-        "POLARION_TOKEN": "your-personal-access-token"
+        "POLARION_TOKEN": "your-personal-access-token",
+        "POLARION_VERIFY_SSL": "true"
       }
     }
   }
@@ -97,7 +100,8 @@ Add to Cursor MCP settings:
       "args": ["mcp-server-polarion"],
       "env": {
         "POLARION_URL": "https://polarion.example.com",
-        "POLARION_TOKEN": "your-personal-access-token"
+        "POLARION_TOKEN": "your-personal-access-token",
+        "POLARION_VERIFY_SSL": "true"
       }
     }
   }
@@ -115,6 +119,7 @@ Register via the `claude mcp add` command:
 claude mcp add mcp-server-polarion \
   -e POLARION_URL=https://polarion.example.com \
   -e POLARION_TOKEN=your-personal-access-token \
+  -e POLARION_VERIFY_SSL=true \
   -- uvx mcp-server-polarion
 ```
 

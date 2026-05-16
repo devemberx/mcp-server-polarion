@@ -127,6 +127,7 @@ class PolarionClient:
                 "Accept": "application/json",
             },
             timeout=httpx.Timeout(_DEFAULT_TIMEOUT_SECONDS),
+            verify=config.polarion_verify_ssl,
         )
 
     # -- Context-manager interface -------------------------------------------

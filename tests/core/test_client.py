@@ -6,6 +6,8 @@ is needed.  The client uses ``write_delay=0`` to avoid sleeping.
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import httpx
 import pytest
 import respx
@@ -482,3 +484,18 @@ class TestConfigWiring:
             polarion_token="t",
         )
         assert config.base_api_url == "https://example.com/polarion/rest/v1"
+
+    def test_verify_ssl_default_true_passed_to_httpx(self) -> None:
+        with patch("mcp_server_polarion.core.client.httpx.AsyncClient") as spy:
+            PolarionClient(_config())
+        assert spy.call_args.kwargs["verify"] is True
+
+    def test_verify_ssl_false_passed_to_httpx(self) -> None:
+        config = PolarionConfig(
+            polarion_url="https://polarion.example.com",
+            polarion_token="test-token",
+            polarion_verify_ssl=False,
+        )
+        with patch("mcp_server_polarion.core.client.httpx.AsyncClient") as spy:
+            PolarionClient(config)
+        assert spy.call_args.kwargs["verify"] is False

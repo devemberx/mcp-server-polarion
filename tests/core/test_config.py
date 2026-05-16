@@ -47,6 +47,24 @@ class TestPolarionConfigLoading:
         with pytest.raises(ValidationError):
             PolarionConfig(_env_file=None)  # type: ignore[call-arg]
 
+    def test_verify_ssl_defaults_to_true(self) -> None:
+        config = PolarionConfig(
+            polarion_url="https://example.com",
+            polarion_token="t",
+        )
+        assert config.polarion_verify_ssl is True
+
+    def test_verify_ssl_reads_from_env(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("POLARION_URL", "https://example.com")
+        monkeypatch.setenv("POLARION_TOKEN", "t")
+        monkeypatch.setenv("POLARION_VERIFY_SSL", "false")
+
+        config = PolarionConfig()  # type: ignore[call-arg]
+        assert config.polarion_verify_ssl is False
+
 
 class TestBaseApiUrl:
     """Verify ``base_api_url`` property construction."""
