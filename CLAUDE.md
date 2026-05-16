@@ -12,6 +12,7 @@ MCP server providing AI assistants (Claude, Cursor, Copilot) with read and write
 uv sync --dev                                            # install deps
 uv run pytest                                            # all tests
 uv run pytest tests/tools/test_read.py::TestGetWorkItem  # single class
+uv run pytest -k test_page_size_rejects_above_max        # single test by name substring
 uv run ruff check . && uv run ruff format . && uv run mypy src/  # lint + format + types
 uv run mcp-server-polarion                               # run server (stdio)
 ```
@@ -20,7 +21,7 @@ CI runs: `ruff check` → `ruff format --check` → `mypy` → `pytest`.
 
 ## Architecture
 
-- **`core/`** — `client.py` (async httpx wrapper, 429/5xx backoff, post-mutation delay, maps responses to `PolarionError` / `PolarionAuthError` / `PolarionNotFoundError`), `config.py` (Pydantic settings: `POLARION_URL`, `POLARION_TOKEN`), `exceptions.py`.
+- **`core/`** — `client.py` (async httpx wrapper, 429/5xx backoff, post-mutation delay, maps responses to `PolarionError` / `PolarionAuthError` / `PolarionNotFoundError`), `config.py` (Pydantic settings: `POLARION_URL`, `POLARION_TOKEN`), `logging.py` (stderr-only configuration; called from server lifespan, never from tool code), `exceptions.py`. Every module obtains its logger via `logging.getLogger("mcp_server_polarion.<module>")`.
 - **`tools/`** — `read.py` (8 read tools incl. `read_document` for flowing Markdown), `write.py` (4 write tools, each with its `_build_*_payload` helper), `_helpers.py` (sparse-fieldset constants, JSON:API extractors, pagination helpers, custom-field merge).
 - **`utils/html.py`** — Markdown ↔ HTML (markdownify + BeautifulSoup4 sanitization).
 - **`models.py`** — Pydantic v2 models. `PaginatedResult[T]` wraps all list responses.
@@ -37,7 +38,9 @@ CI runs: `ruff check` → `ruff format --check` → `mypy` → `pytest`.
   - **Synthesis paths** (Markdown): `read_document` / `get_document_parts` convert HTML→Markdown via `html_to_markdown()`. Output is READ-ONLY — feeding it back to a write tool loses Polarion-specific markup.
 - **Write payloads** — skip `None`/empty values; Polarion may interpret empty as "clear default". JSON:API resource POSTs (`/workitems`) wrap in `{"data": [...]}`; **action endpoints** (`.../actions/<name>`) take a flat object — do NOT wrap. The `cast(dict[str, object], payload)` shim at the `client.post(json=...)` call site is intentional (dict invariance vs `JsonValue`).
 - Every list tool must support `page_size` (max 100) and `page_number`; return `PaginatedResult[T]` with `has_more`.
+- **Every write tool** must support `dry_run: bool = False`. When True, build and return the JSON:API payload in the result model (`dry_run=True`, `payload=…`) without hitting Polarion. The matching `_build_*_payload` helper is the unit-testable seam.
 - Tool docstrings are the LLM's manual — Google-style with Args/Returns/Raises. Keep return-field bullets in sync with the Pydantic model.
+- **Error handling**: Map domain exceptions at the tool layer — `PolarionNotFoundError` → `ValueError`, `PolarionAuthError` → `PermissionError`, `PolarionError` → `RuntimeError`.
 
 ## Comment & Docstring Style
 
@@ -50,13 +53,14 @@ Applies to ALL comments / docstrings (tool docstrings, helpers, inline, CLAUDE.m
 - **CLAUDE.md is dev-only.** Other MCP hosts (Cursor / Copilot / generic FastMCP clients) never load this file. Anything an MCP-user LLM needs to know (round-trip pairs, replace-all semantics, body-edit pitfalls, etc.) must live inside the `@mcp.tool` docstring — even if it duplicates CLAUDE.md content.
 - **Module docstrings explain *why* the module exists.** Specific timing numbers, observed file sizes, refactor history, and other implementation detail belong in inline comments next to the thing they constrain.
 
-## Error Handling Pattern
-
-Map domain exceptions at the tool layer: `PolarionNotFoundError` → `ValueError`, `PolarionAuthError` → `PermissionError`, `PolarionError` → `RuntimeError`.
-
 ## Polarion API & Gotchas
 
-JSON:API v1. Key paths: `/projects`, `/projects/{p}/workitems[?query=...]`, `/projects/{p}/workitems/{wi}[/linkedworkitems]`, `/projects/{p}/spaces/{s}/documents/{d}[/parts]`. **HTML payloads** are stored as `{"type": "text/html", "value": "..."}`. **Linked WI IDs** have 5 segments — derive the target via `relationships.workItem.data.id`, never by parsing. **Module IDs** are 3 segments and document names may contain `/`, so always use `split_module_id` (splits on the first two slashes only). **Lucene**: trailing wildcards (`title:SRS*`) work; leading wildcards return HTTP 400. The `module` field is not indexed. **Server limits**: ≤3 API calls/second, no concurrent requests; `PolarionClient` retries 429/5xx with backoff but does NOT serialize client-side.
+- **Endpoints (JSON:API v1)**: `/projects`, `/projects/{p}/workitems[?query=...]`, `/projects/{p}/workitems/{wi}[/linkedworkitems]`, `/projects/{p}/spaces/{s}/documents/{d}[/parts]`.
+- **HTML payloads**: stored as `{"type": "text/html", "value": "..."}`.
+- **Linked WI IDs**: 5 segments — derive the target via `relationships.workItem.data.id`, never by parsing.
+- **Module IDs**: 3 segments and document names may contain `/`, so always use `split_module_id` (splits on the first two slashes only).
+- **Lucene**: trailing wildcards (`title:SRS*`) work; leading wildcards return HTTP 400. The `module` field is not indexed.
+- **Server limits**: ≤3 API calls/second, no concurrent requests; `PolarionClient` retries 429/5xx with backoff but does NOT serialize client-side.
 
 ### JSON:API quirks
 
@@ -105,10 +109,11 @@ PATCH bodies need at least one `attributes` / `relationships` entry — Polarion
 
 ## Repo Conventions
 
-- **Commits** (`.vscode/git_commit_guide.md`):
+Branch strategy, full commit rules, and PR workflow are in [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md). Quick reference for commit/PR generation:
+
+- **Branches**: `<type>/<short-kebab-summary>` off latest `main` (e.g. `feature/read-fidelity`). Types: `feature | fix | refactor | docs | chore | ci`. One topic per branch.
+- **Commits**:
   - Subject: `type(scope): summary` — lowercase imperative, ≤50 chars, no period. Types: `feat | fix | docs | refactor | perf | test | ci | chore`. Scopes: `tool | server | transport | config | deps | utils | model | project | meta | git`.
-  - Body: blank line + **exactly 2 bullets** (motivation, then change) — no `Why:` / `What:` prefixes. Each bullet is a single line ≤120 chars; longer detail goes in the PR body.
-- **PRs** (`.github/pull_request_template.md`):
-  - Fill Summary, Type of Change, Changes, Testing (incl. `dry_run` for write tools), Golden Rule Compliance.
-  - **Type of Change**: keep the full checkbox list as written in the template; only flip `[ ]` → `[x]` for the matching items. Do not delete the unchecked options.
+  - Body: blank line + **exactly 2 bullets** (motivation, then change) — no `Why:` / `What:` prefixes. Each bullet ≤120 chars.
+- **PR Type of Change checklist** ([.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md)): flip `[ ]` → `[x]` for matching items; do not delete unchecked options.
 - **Force push** allowed on feature branches only after explicit user authorization. Never force-push to `main`.
