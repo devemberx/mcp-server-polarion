@@ -1327,6 +1327,96 @@ class TestGetDocumentParts:
         assert result.items[0].type == "normal"
         assert "Plain string content" in result.items[0].content
 
+    async def test_tof_part_reclassified_from_id_prefix(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Polarion reports TOF as ``type=normal``; the ID prefix wins."""
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "id": "proj1/_default/Doc/tof_20",
+                    "attributes": {
+                        "id": "tof_20",
+                        "content": "",
+                        "type": "normal",
+                    },
+                    "relationships": {},
+                },
+            ],
+            "meta": {"totalCount": 1},
+        }
+
+        result = await get_document_parts(
+            mock_ctx,
+            project_id="proj1",
+            space_id="_default",
+            document_name="Doc",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.items[0].type == "tof"
+
+    async def test_page_break_part_reclassified_from_id_prefix(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """``pagebreak_*`` IDs are surfaced as ``page_break`` parts."""
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "id": "proj1/_default/Doc/pagebreak_23",
+                    "attributes": {
+                        "id": "pagebreak_23",
+                        "content": "",
+                        "type": "normal",
+                    },
+                    "relationships": {},
+                },
+            ],
+            "meta": {"totalCount": 1},
+        }
+
+        result = await get_document_parts(
+            mock_ctx,
+            project_id="proj1",
+            space_id="_default",
+            document_name="Doc",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.items[0].type == "page_break"
+
+    async def test_normal_part_without_special_prefix_stays_normal(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Plain ``polarion_*`` IDs must not be reclassified."""
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "id": "proj1/_default/Doc/polarion_99",
+                    "attributes": {
+                        "id": "polarion_99",
+                        "content": "<p>body</p>",
+                        "type": "normal",
+                    },
+                    "relationships": {},
+                },
+            ],
+            "meta": {"totalCount": 1},
+        }
+
+        result = await get_document_parts(
+            mock_ctx,
+            project_id="proj1",
+            space_id="_default",
+            document_name="Doc",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.items[0].type == "normal"
+
     async def test_richpage_link_in_normal_part_becomes_markdown_link(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
@@ -1733,7 +1823,7 @@ class TestReadDocument:
 
         assert result.content == "## Section\n\nReal content."
 
-    async def test_toc_parts_skipped(
+    async def test_toc_emits_widget_placeholder(
         self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _stub_parts(
@@ -1754,9 +1844,59 @@ class TestReadDocument:
             page_number=1,
         )
 
-        assert result.content == "# Top\n\nAfter TOC."
+        assert result.content == (
+            "# Top\n\n*[Table of Contents (Polarion widget)]*\n\nAfter TOC."
+        )
 
-    async def test_wikiblock_content_emitted(
+    async def test_tof_emits_widget_placeholder(
+        self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _stub_parts(
+            monkeypatch,
+            [
+                _make_part(type_="heading", title="Top", level=1),
+                _make_part(type_="tof", content=""),
+                _make_part(type_="normal", content="After TOF."),
+            ],
+        )
+
+        result = await read_document(
+            mock_ctx,
+            project_id="p",
+            space_id="s",
+            document_name="d",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.content == (
+            "# Top\n\n*[Table of Figures (Polarion widget)]*\n\nAfter TOF."
+        )
+
+    async def test_page_break_emits_thematic_break(
+        self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _stub_parts(
+            monkeypatch,
+            [
+                _make_part(type_="normal", content="Before."),
+                _make_part(type_="page_break", content=""),
+                _make_part(type_="normal", content="After."),
+            ],
+        )
+
+        result = await read_document(
+            mock_ctx,
+            project_id="p",
+            space_id="s",
+            document_name="d",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.content == "Before.\n\n---\n\nAfter."
+
+    async def test_wikiblock_lifts_macro_name_as_info_string(
         self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _stub_parts(
@@ -1778,7 +1918,29 @@ class TestReadDocument:
             page_number=1,
         )
 
-        assert result.content == '```\n#documentPanel(true "approved")\n```'
+        assert result.content == (
+            '```documentPanel\n#documentPanel(true "approved")\n```'
+        )
+
+    async def test_wikiblock_without_macro_falls_back_to_plain_fence(
+        self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A wikiblock that doesn't start with ``#name(`` keeps its plain fence."""
+        _stub_parts(
+            monkeypatch,
+            [_make_part(type_="wikiblock", content="```\njust text\n```")],
+        )
+
+        result = await read_document(
+            mock_ctx,
+            project_id="p",
+            space_id="s",
+            document_name="d",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.content == "```\njust text\n```"
 
     async def test_empty_wikiblock_skipped(
         self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
