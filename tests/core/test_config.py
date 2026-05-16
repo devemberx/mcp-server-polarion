@@ -47,10 +47,15 @@ class TestPolarionConfigLoading:
         with pytest.raises(ValidationError):
             PolarionConfig(_env_file=None)  # type: ignore[call-arg]
 
-    def test_verify_ssl_defaults_to_true(self) -> None:
+    def test_verify_ssl_defaults_to_true(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv("POLARION_VERIFY_SSL", raising=False)
         config = PolarionConfig(
             polarion_url="https://example.com",
             polarion_token="t",
+            _env_file=None,  # type: ignore[call-arg]
         )
         assert config.polarion_verify_ssl is True
 
