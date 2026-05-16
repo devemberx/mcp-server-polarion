@@ -431,6 +431,72 @@ class WorkItemDetail(WorkItemSummary):
     )
 
 
+class WorkItemRead(WorkItemSummary):
+    """LLM-friendly work-item view returned by ``read_work_item``.
+
+    Mirrors ``WorkItemDetail`` but exposes ``description`` as Markdown
+    (converted from Polarion HTML) instead of the raw ``description_html``.
+    Read-only synthesis: the Markdown body cannot be fed back to
+    ``update_work_item`` (the converter collapses Polarion-specific
+    markup). For round-trip editing, use
+    ``get_work_item(include_description_html=True)`` paired with
+    ``update_work_item(description_html=...)``.
+    """
+
+    description: str = Field(
+        default="",
+        description=(
+            "Work-item body rendered as Markdown. Empty when the item has "
+            "no description. Read-only; do NOT feed to ``update_work_item``."
+        ),
+    )
+    project_id: str = Field(
+        description="Project that contains this work item.",
+    )
+    author_id: str = Field(
+        default="",
+        description="Short user ID of the author; empty when not reported.",
+    )
+    created: str = Field(
+        default="",
+        description="ISO-8601 creation timestamp; empty when not reported.",
+    )
+    resolution: str = Field(
+        default="",
+        description=(
+            "Resolution outcome for closed items (e.g. 'fixed', 'wontfix'); "
+            "empty otherwise."
+        ),
+    )
+    severity: str = Field(
+        default="",
+        description=(
+            "Severity classification, used for defects (e.g. 'blocker', "
+            "'critical'); empty otherwise."
+        ),
+    )
+    outline_number: str = Field(
+        default="",
+        description=(
+            "Hierarchical position inside the containing document "
+            "(e.g. '1.2.3'); empty when not part of a document."
+        ),
+    )
+    hyperlinks: list[Hyperlink] = Field(
+        default_factory=list,
+        description="External hyperlinks attached to this work item.",
+    )
+    custom_fields: dict[str, object] = Field(
+        default_factory=dict,
+        description=(
+            "User-defined custom fields as ``{fieldId: value}``. Rich-text "
+            "values stay raw as ``{'type': 'text/html', 'value': '<...>'}`` "
+            "dicts (NOT converted to Markdown) so they round-trip through "
+            "``update_work_item(custom_fields=...)``."
+        ),
+    )
+
+
 class LinkedWorkItemSummary(BaseModel):
     """A single linked work item with its link metadata."""
 
@@ -685,6 +751,7 @@ __all__: list[str] = [
     "WorkItemCreateResult",
     "WorkItemDetail",
     "WorkItemMoveResult",
+    "WorkItemRead",
     "WorkItemSummary",
     "WorkItemUpdateResult",
 ]

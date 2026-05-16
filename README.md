@@ -139,7 +139,8 @@ claude mcp add mcp-server-polarion \
 | `get_document` | Get document metadata (title / type / status); optionally returns the raw `homePageContent` source for round-trip editing |
 | `read_document_parts` | List structural parts with linked work-item metadata (type, status, `external` flag) — use for part IDs and structural traversal, not for reading |
 | `list_work_items` | Search work items with Lucene queries; results include priority, last-modified time, owning document, and assignees |
-| `get_work_item` | Get full work item details (description, author, created/updated timestamps, severity, resolution, outline number, hyperlinks) |
+| `get_work_item` | Get full work item details (description, author, created/updated timestamps, severity, resolution, outline number, hyperlinks); body is raw Polarion HTML for round-trip editing |
+| `read_work_item` | Same fields as `get_work_item` but the body is rendered as Markdown — read-only synthesis for LLM consumption |
 | `get_linked_work_items` | Get forward and back links with each linked item's type, status, and owning document for traceability analysis |
 
 All list tools support pagination via `page_size` (1–100) and `page_number` parameters.
