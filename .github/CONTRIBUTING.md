@@ -27,6 +27,7 @@ Rules:
 - Keep the summary short (≤4 words). The PR title carries the full description.
 - One topic per branch. Split unrelated changes into separate branches.
 - Branch off the latest `main`; rebase (do not merge) `main` into the branch before opening a PR.
+- **Branch prefixes use the long form (`feature/`, `refactor/`); commit types use the short Conventional Commits form (`feat`, `refactor`).** The asymmetry is intentional — branch names read as English nouns, commit types follow the Conventional Commits spec.
 
 ### Protection rules
 
@@ -135,7 +136,7 @@ fix(utils): preserve attachment imgs on read
 
 ### Opening the PR
 
-- **Title** follows the commit-subject format: `type(scope): summary`, ≤70 characters. Keep details for the body.
+- **Title** follows the commit-subject format: `type(scope): summary`, ≤70 characters. Keep details for the body. Since the merge strategy is squash, the PR title becomes the squashed commit subject — if your title exceeds the 50-char commit-subject limit, shorten it (or edit the subject at squash time) before merging.
 - **Base branch**: `main`.
 - Use the [pull request template](PULL_REQUEST_TEMPLATE.md). It is auto-loaded by GitHub.
 - Fill every section: **Summary**, **Type of Change**, **Changes**, **Testing**, **Golden Rule Compliance**.

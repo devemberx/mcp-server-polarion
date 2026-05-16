@@ -34,7 +34,7 @@ Closes #<!-- issue number — delete this line if there is no linked issue -->
 - [ ] Unit tests added / updated (`tests/`)
 - [ ] `dry_run=True` path verified for all write tools
 - [ ] `uv run pytest` passes locally
-- [ ] `uv run mypy src --strict` passes with no errors
+- [ ] `uv run mypy src/` passes with no errors
 - [ ] `uv run ruff check src tests` passes with no warnings
 
 ```bash
