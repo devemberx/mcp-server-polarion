@@ -491,7 +491,7 @@ class WorkItemRead(WorkItemSummary):
         description=(
             "User-defined custom fields as ``{fieldId: value}``. Rich-text "
             "values stay raw as ``{'type': 'text/html', 'value': '<...>'}`` "
-            "dicts (NOT converted to Markdown) so they round-trip through "
+            "dicts so this dict alone may be copied back into "
             "``update_work_item(custom_fields=...)``."
         ),
     )

@@ -1330,24 +1330,8 @@ async def read_work_item(
         html_to_markdown(detail.description_html) if detail.description_html else ""
     )
     return WorkItemRead(
-        id=detail.id,
-        title=detail.title,
-        type=detail.type,
-        status=detail.status,
-        priority=detail.priority,
-        updated=detail.updated,
-        space_id=detail.space_id,
-        document_name=detail.document_name,
-        assignee_ids=detail.assignee_ids,
+        **detail.model_dump(exclude={"description_html"}),
         description=description,
-        project_id=detail.project_id,
-        author_id=detail.author_id,
-        created=detail.created,
-        resolution=detail.resolution,
-        severity=detail.severity,
-        outline_number=detail.outline_number,
-        hyperlinks=detail.hyperlinks,
-        custom_fields=detail.custom_fields,
     )
 
 

@@ -1063,7 +1063,7 @@ class TestGetDocument:
         assert kwargs_b["params"]["fields[documents]"] == "@all"
 
 
-class TestGetDocumentParts:
+class TestReadDocumentParts:
     """Tests for the ``read_document_parts`` tool."""
 
     async def test_returns_document_parts(
