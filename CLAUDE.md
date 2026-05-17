@@ -115,5 +115,6 @@ Branch strategy, full commit rules, and PR workflow are in [.github/CONTRIBUTING
 - **Commits**:
   - Subject: `type(scope): summary` — lowercase imperative, ≤50 chars, no period. Types: `feat | fix | docs | refactor | perf | test | ci | chore`. Scopes: `tool | server | transport | config | deps | utils | model | project | meta | git`.
   - Body: blank line + **exactly 2 bullets** (motivation, then change) — no `Why:` / `What:` prefixes. Each bullet ≤120 chars.
+  - **Length is strict** — before staging, draft the subject/bullets into a file and run `awk '{print length}' <file>` to verify. The `.githooks/commit-msg` validator (enable once per clone: `git config core.hooksPath .githooks`) rejects oversize commits mechanically. The PR-title length budget on a squash merge is 50 minus the auto-appended ` (#NNN)` suffix.
 - **PR Type of Change checklist** ([.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md)): flip `[ ]` → `[x]` for matching items; do not delete unchecked options.
 - **Force push** allowed on feature branches only after explicit user authorization. Never force-push to `main`.

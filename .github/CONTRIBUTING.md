@@ -118,6 +118,16 @@ fix(utils): preserve attachment imgs on read
 | `docs(git): update readme`                       | Missing mandatory blank line and 2-bullet body          |
 | `- Why: ...` / `- What: ...`                     | Drop the literal `Why:` / `What:` prefixes              |
 
+### Enforcement
+
+The repo ships a `commit-msg` hook in [`.githooks/`](../.githooks/commit-msg) that mechanically enforces the subject and bullet length limits. Enable it once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+The hook rejects any commit whose subject exceeds 50 chars or whose body does not contain exactly two bullets ≤120 chars each. Merge / revert / fixup / squash / amend autosquash subjects are skipped.
+
 ---
 
 ## 3. Pull Request Guidelines
