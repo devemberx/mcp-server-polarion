@@ -36,6 +36,7 @@ from mcp_server_polarion.models import (
     DocumentPart,
     DocumentReadResult,
     DocumentSummary,
+    EnumOption,
     LinkedWorkItemSummary,
     PaginatedResult,
     ProjectSummary,
@@ -847,6 +848,140 @@ async def get_document(
         status=safe_str(attrs.get("status", "")),
         content_html=content_html,
         custom_fields=extract_custom_fields(attrs, STANDARD_DOCUMENT_ATTRS),
+    )
+
+
+def _build_enum_option(entry: dict[str, object]) -> EnumOption:
+    def _bool(key: str) -> bool:
+        value = entry.get(key)
+        return value if isinstance(value, bool) else False
+
+    return EnumOption(
+        id=safe_str(entry.get("id", "")),
+        name=safe_str(entry.get("name", "")),
+        description=safe_str(entry.get("description", "")),
+        default=_bool("default"),
+        hidden=_bool("hidden"),
+        terminal=_bool("terminal"),
+    )
+
+
+@mcp.tool(
+    tags={"read"},
+    timeout=60.0,
+    annotations={"readOnlyHint": True},
+)
+async def list_document_enum_options(  # noqa: PLR0913
+    ctx: Context,
+    project_id: str = Field(description="Polarion project ID."),
+    field_id: str = Field(
+        description=("Field id (e.g. 'status', 'type', or a custom field id)."),
+    ),
+    doc_type: str = Field(
+        description=(
+            "Document type id (e.g. 'systemReqSpecification')."
+            " Pass '~' for type-agnostic options."
+        ),
+    ),
+    page_size: int = Field(
+        default=DEFAULT_PAGE_SIZE,
+        ge=1,
+        le=100,
+        description="Number of options per page (1-100, default 100).",
+    ),
+    page_number: int = Field(
+        default=1,
+        ge=1,
+        description="Page number to retrieve (1-based, default 1).",
+    ),
+) -> PaginatedResult[EnumOption]:
+    """List valid enum options for a document field of the given document type.
+
+    Call this before ``update_document`` when you need to pick a value
+    for a document's ``status`` / ``type`` / custom enum field. Polarion
+    validates these values leniently on write -- unknown ids are silently
+    coerced or stored verbatim -- so resolve them first. This tool covers
+    DOCUMENT fields only; work-item fields use a separate endpoint and
+    are not surfaced here.
+
+    Returns the FULL enum set for the field on the given doc type.
+    Workflow transitions are NOT filtered by the document's current
+    state; that is a separate Polarion endpoint not exposed here.
+    ``doc_type='~'`` returns the type-agnostic option set. An unknown
+    ``doc_type`` is silently treated as ``~`` by Polarion with no error,
+    so verify the type id (e.g. via ``get_document``) before trusting
+    the result.
+
+    Args:
+        ctx: MCP tool context (injected automatically).
+        project_id: Polarion project ID.
+        field_id: Field id whose options to list.
+        doc_type: Document type id, or '~' for type-agnostic.
+        page_size: Items per page (1-100, default 100).
+        page_number: 1-based page number (default 1).
+
+    Returns:
+        PaginatedResult of ``EnumOption`` items with:
+        - ``id``: Option id to pass back to write tools.
+        - ``name``: Human-readable display name.
+        - ``description``: Option description; empty when Polarion has none.
+        - ``default``: True if Polarion uses this option as the default.
+        - ``hidden``: True if the option is hidden in the UI.
+        - ``terminal``: For status fields, True for workflow end-states.
+
+    Raises:
+        ValueError: Project, field, or document type not found.
+        PermissionError: Token lacks permission.
+        RuntimeError: Other Polarion API errors.
+    """
+    client = get_client(ctx)
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/documents/fields/{encode_path_segment(field_id)}"
+        "/actions/getAvailableOptions"
+    )
+    params: dict[str, str | int] = {
+        "type": doc_type,
+        "page[size]": page_size,
+        "page[number]": page_number,
+    }
+    try:
+        response = await client.get(path, params=params)
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"No enum options for field '{field_id}' on document type "
+            f"'{doc_type}' in project '{project_id}'."
+        ) from exc
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot list document enum options"
+            " -- check your POLARION_TOKEN permissions."
+        ) from exc
+    except PolarionError as exc:
+        raise RuntimeError(
+            f"Failed to list enum options for field '{field_id}': {exc.message}"
+        ) from exc
+
+    data = response.get("data", [])
+    items: list[EnumOption] = []
+    if isinstance(data, list):
+        for entry in data:
+            if isinstance(entry, dict):
+                items.append(_build_enum_option(entry))
+
+    raw_total = extract_total_count(response)
+    total = raw_total
+    if total <= 0 and items:
+        total = (page_number - 1) * page_size + len(items)
+
+    return PaginatedResult[EnumOption](
+        items=items,
+        total_count=total,
+        page=page_number,
+        page_size=page_size,
+        has_more=compute_has_more(
+            response, raw_total, page_number, page_size, len(items)
+        ),
     )
 
 
