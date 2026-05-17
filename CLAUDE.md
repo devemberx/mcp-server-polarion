@@ -22,7 +22,7 @@ CI runs: `ruff check` → `ruff format --check` → `mypy` → `pytest`.
 ## Architecture
 
 - **`core/`** — `client.py` (async httpx wrapper, 429/5xx backoff, post-mutation delay, maps responses to `PolarionError` / `PolarionAuthError` / `PolarionNotFoundError`), `config.py` (Pydantic settings: `POLARION_URL`, `POLARION_TOKEN`, `POLARION_VERIFY_SSL`), `logging.py` (stderr-only configuration; called from server lifespan, never from tool code), `exceptions.py`. Every module obtains its logger via `logging.getLogger("mcp_server_polarion.<module>")`.
-- **`tools/`** — `read.py` (9 read tools incl. `read_document` for flowing Markdown and `read_work_item` for a single WI's Markdown body), `write.py` (4 write tools, each with its `_build_*_payload` helper), `_helpers.py` (sparse-fieldset constants, JSON:API extractors, pagination helpers, custom-field merge).
+- **`tools/`** — `read.py` (10 read tools incl. `read_document` for flowing Markdown, `read_work_item` for a single WI's Markdown body, and `list_document_enum_options` for resolving valid enum ids before writes), `write.py` (4 write tools, each with its `_build_*_payload` helper), `_helpers.py` (sparse-fieldset constants, JSON:API extractors, pagination helpers, custom-field merge).
 - **`utils/html.py`** — Markdown ↔ HTML (markdownify + BeautifulSoup4 sanitization).
 - **`models.py`** — Pydantic v2 models. `PaginatedResult[T]` wraps all list responses.
 - **`server.py`** — FastMCP instance with lifespan that opens/closes `PolarionClient`.
@@ -70,7 +70,7 @@ Applies to ALL comments / docstrings (tool docstrings, helpers, inline, CLAUDE.m
 
 **`/backlinkedworkitems` is not supported on this server.** `get_linked_work_items` returns one direction per call: forward links use `/projects/{p}/workitems/{wi}/linkedworkitems`; back links fall back to a `query=linkedWorkItems:{wi}` search that does not expose the originating role, so back items return with `role=None`. Call twice when both directions are needed.
 
-**Server-side enum validation is lenient.** Polarion does NOT strictly validate `type` / `status` / `priority` / `severity` on create — unrecognised values are silently coerced (`priority="not_a_number"` → project default) or stored verbatim (`type="not_a_real_type"` → ghost type). Use `Literal[...]` on Pydantic Fields for closed sets that matter.
+**Server-side enum validation is lenient.** Polarion does NOT strictly validate `type` / `status` / `priority` / `severity` on create — unrecognised values are silently coerced (`priority="not_a_number"` → project default) or stored verbatim (`type="not_a_real_type"` → ghost type). Use `Literal[...]` on Pydantic Fields for closed sets that matter. For document fields the same `getAvailableOptions` action is wrapped by `list_document_enum_options` (instance and type endpoints return identical sets — workflow transitions are NOT filtered by current state, only enum-set membership). An unknown `doc_type` silently falls back to the `~` (no-type) set there too — verify the type id from a prior `get_document` before trusting the result.
 
 ### Custom fields surface inline under `attributes`
 

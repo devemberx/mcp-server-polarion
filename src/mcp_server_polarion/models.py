@@ -61,6 +61,45 @@ class ProjectSummary(BaseModel):
     )
 
 
+class EnumOption(BaseModel):
+    """Single enum option returned by ``list_document_enum_options``.
+
+    Captures only the attributes useful when an LLM picks a value before a
+    write call. The Polarion schema carries several more fields (color,
+    iconURL, columnWidth, createDefect, limited, minValue, oppositeName,
+    parent, requiresSignatureForTestCaseExecution, templateWorkItem) that
+    are intentionally not surfaced; add them on demand if a future caller
+    needs them.
+    """
+
+    id: str = Field(
+        description=(
+            "Option id -- pass this verbatim to write tools (e.g. 'open',"
+            " 'systemReqSpecification')."
+        ),
+    )
+    name: str = Field(description="Human-readable display name.")
+    description: str = Field(
+        default="",
+        description="Option description; empty when Polarion has none.",
+    )
+    default: bool = Field(
+        default=False,
+        description="True if Polarion uses this option when none is specified.",
+    )
+    hidden: bool = Field(
+        default=False,
+        description=(
+            "True if the option is hidden in the UI;"
+            " avoid selecting unless explicitly needed."
+        ),
+    )
+    terminal: bool = Field(
+        default=False,
+        description="For status fields: True if this is a workflow end-state.",
+    )
+
+
 class DocumentSummary(BaseModel):
     """Summary of a Polarion document returned by ``list_documents``."""
 
