@@ -1,4 +1,4 @@
-"""Tests for the 8 read-only MCP tools.
+"""Tests for the 9 read-only MCP tools.
 
 Each tool is tested by calling the async function directly with a mock
 ``PolarionClient`` injected via a mock ``Context``.
@@ -28,6 +28,7 @@ from mcp_server_polarion.models import (
     PaginatedResult,
     ProjectSummary,
     WorkItemDetail,
+    WorkItemRead,
 )
 from mcp_server_polarion.server import mcp
 from mcp_server_polarion.tools import read as _read_mod
@@ -35,13 +36,14 @@ from mcp_server_polarion.tools import read as _read_mod
 # In FastMCP 3.0, @mcp.tool returns the original function unchanged
 # (not a FunctionTool wrapper), so we reference them directly.
 get_document = _read_mod.get_document
-get_document_parts = _read_mod.get_document_parts
+read_document_parts = _read_mod.read_document_parts
 get_linked_work_items = _read_mod.get_linked_work_items
 get_work_item = _read_mod.get_work_item
 list_documents = _read_mod.list_documents
 list_projects = _read_mod.list_projects
 list_work_items = _read_mod.list_work_items
 read_document = _read_mod.read_document
+read_work_item = _read_mod.read_work_item
 
 
 @pytest.fixture
@@ -1061,8 +1063,8 @@ class TestGetDocument:
         assert kwargs_b["params"]["fields[documents]"] == "@all"
 
 
-class TestGetDocumentParts:
-    """Tests for the ``get_document_parts`` tool."""
+class TestReadDocumentParts:
+    """Tests for the ``read_document_parts`` tool."""
 
     async def test_returns_document_parts(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1177,7 +1179,7 @@ class TestGetDocumentParts:
             "meta": {"totalCount": 3},
         }
 
-        result = await get_document_parts(
+        result = await read_document_parts(
             mock_ctx,
             project_id="proj1",
             space_id="_default",
@@ -1235,7 +1237,7 @@ class TestGetDocumentParts:
             "meta": {"totalCount": 0},
         }
 
-        await get_document_parts(
+        await read_document_parts(
             mock_ctx,
             project_id="proj1",
             space_id="_default",
@@ -1265,7 +1267,7 @@ class TestGetDocumentParts:
             "meta": {"totalCount": 0},
         }
 
-        await get_document_parts(
+        await read_document_parts(
             mock_ctx,
             project_id="proj1",
             space_id="_default",
@@ -1289,7 +1291,7 @@ class TestGetDocumentParts:
         )
 
         with pytest.raises(ValueError, match="not found"):
-            await get_document_parts(
+            await read_document_parts(
                 mock_ctx,
                 project_id="proj1",
                 space_id="_default",
@@ -1317,7 +1319,7 @@ class TestGetDocumentParts:
             "meta": {"totalCount": 1},
         }
 
-        result = await get_document_parts(
+        result = await read_document_parts(
             mock_ctx,
             project_id="proj1",
             space_id="_default",
@@ -1349,7 +1351,7 @@ class TestGetDocumentParts:
             "meta": {"totalCount": 1},
         }
 
-        result = await get_document_parts(
+        result = await read_document_parts(
             mock_ctx,
             project_id="proj1",
             space_id="_default",
@@ -1379,7 +1381,7 @@ class TestGetDocumentParts:
             "meta": {"totalCount": 1},
         }
 
-        result = await get_document_parts(
+        result = await read_document_parts(
             mock_ctx,
             project_id="proj1",
             space_id="_default",
@@ -1409,7 +1411,7 @@ class TestGetDocumentParts:
             "meta": {"totalCount": 1},
         }
 
-        result = await get_document_parts(
+        result = await read_document_parts(
             mock_ctx,
             project_id="proj1",
             space_id="_default",
@@ -1458,7 +1460,7 @@ class TestGetDocumentParts:
             "meta": {"totalCount": 1},
         }
 
-        result = await get_document_parts(
+        result = await read_document_parts(
             mock_ctx,
             project_id="proj1",
             space_id="_default",
@@ -1495,7 +1497,7 @@ class TestGetDocumentParts:
             "meta": {"totalCount": 1},
         }
 
-        result = await get_document_parts(
+        result = await read_document_parts(
             mock_ctx,
             project_id="proj1",
             space_id="_default",
@@ -1532,7 +1534,7 @@ class TestGetDocumentParts:
             "meta": {"totalCount": 0},  # Polarion quirk
         }
 
-        result = await get_document_parts(
+        result = await read_document_parts(
             mock_ctx,
             project_id="proj1",
             space_id="_default",
@@ -1576,7 +1578,7 @@ def _make_part(
 def _stub_parts(
     monkeypatch: pytest.MonkeyPatch, parts: list[DocumentPart]
 ) -> AsyncMock:
-    """Replace ``get_document_parts`` with an AsyncMock returning *parts*.
+    """Replace ``read_document_parts`` with an AsyncMock returning *parts*.
 
     Returns the mock so individual tests can assert call arguments. Page
     metadata is derived from the part list so pagination defaults stay
@@ -1591,14 +1593,14 @@ def _stub_parts(
             has_more=False,
         )
     )
-    monkeypatch.setattr(_read_mod, "get_document_parts", stub)
+    monkeypatch.setattr(_read_mod, "read_document_parts", stub)
     return stub
 
 
 class TestReadDocument:
     """Tests for the ``read_document`` tool."""
 
-    # -- end-to-end wiring (exercises get_document_parts via client.get) --
+    # -- end-to-end wiring (exercises read_document_parts via client.get) --
 
     async def test_end_to_end_renders_document(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1756,7 +1758,7 @@ class TestReadDocument:
     async def test_not_found_propagates_value_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Delegation to ``get_document_parts`` surfaces its ValueError verbatim."""
+        """Delegation to ``read_document_parts`` surfaces its ValueError verbatim."""
         mock_client.get.side_effect = PolarionNotFoundError(
             "Not found", status_code=404
         )
@@ -1771,7 +1773,7 @@ class TestReadDocument:
                 page_number=1,
             )
 
-    # -- render-rule tests (isolated via monkeypatched get_document_parts) --
+    # -- render-rule tests (isolated via monkeypatched read_document_parts) --
 
     async def test_workitem_with_description_renders_lead_in_plus_body(
         self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
@@ -2142,7 +2144,7 @@ class TestReadDocument:
                 has_more=True,
             )
         )
-        monkeypatch.setattr(_read_mod, "get_document_parts", stub)
+        monkeypatch.setattr(_read_mod, "read_document_parts", stub)
 
         result = await read_document(
             mock_ctx,
@@ -2761,6 +2763,227 @@ class TestGetWorkItem:
 
         _, kwargs = mock_client.get.call_args
         assert kwargs["params"]["fields[workitems]"] == "@all"
+
+
+class TestReadWorkItem:
+    """Tests for the ``read_work_item`` tool.
+
+    Delegates the fetch + error mapping to ``get_work_item`` and converts
+    the raw HTML body to Markdown via ``html_to_markdown()``.
+    """
+
+    async def test_html_body_converted_to_markdown(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": {
+                "type": "workitems",
+                "id": "proj1/MCPT-001",
+                "attributes": {
+                    "title": "Login Feature",
+                    "type": "requirement",
+                    "status": "draft",
+                    "priority": "75.0",
+                    "outlineNumber": "1.2.3",
+                    "description": {
+                        "type": "text/html",
+                        "value": (
+                            "<p>User must be able to <strong>log in</strong>.</p>"
+                        ),
+                    },
+                },
+                "relationships": {
+                    "module": {
+                        "data": {"type": "documents", "id": "proj1/Design/SRS"},
+                    },
+                    "author": {"data": {"type": "users", "id": "proj1/bob"}},
+                },
+            },
+        }
+
+        result = await read_work_item(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT-001",
+        )
+
+        assert isinstance(result, WorkItemRead)
+        assert result.id == "MCPT-001"
+        assert result.title == "Login Feature"
+        assert "**log in**" in result.description
+        assert "<p>" not in result.description
+        assert "<strong>" not in result.description
+        assert result.outline_number == "1.2.3"
+        assert result.space_id == "Design"
+        assert result.document_name == "SRS"
+        assert result.author_id == "bob"
+        assert result.project_id == "proj1"
+
+    async def test_empty_description_yields_empty_markdown(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": {
+                "id": "proj1/MCPT-002",
+                "attributes": {
+                    "title": "Minimal",
+                    "type": "task",
+                    "status": "open",
+                },
+            },
+        }
+
+        result = await read_work_item(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT-002",
+        )
+
+        assert result.description == ""
+
+    async def test_polarion_specific_markup_collapses_to_text(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Polarion span/data-* attrs get stripped by html_to_markdown.
+
+        Marks the read-only contract: WorkItemRead.description is NOT a
+        round-trip shape — feeding it back to update_work_item would lose
+        the polarion-rte-link span. The round-trip pair lives on
+        get_work_item / update_work_item.
+        """
+        raw = (
+            '<p>Refs <span class="polarion-rte-link" '
+            'data-item-id="MCPT-9" data-scope="proj1">MCPT-9</span></p>'
+        )
+        mock_client.get.return_value = {
+            "data": {
+                "id": "proj1/MCPT-008",
+                "attributes": {
+                    "title": "RT",
+                    "type": "task",
+                    "status": "draft",
+                    "description": {"type": "text/html", "value": raw},
+                },
+            },
+        }
+
+        result = await read_work_item(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT-008",
+        )
+
+        assert "MCPT-9" in result.description
+        assert "polarion-rte-link" not in result.description
+        assert "data-item-id" not in result.description
+
+    async def test_not_found_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionNotFoundError(
+            "Not found",
+            status_code=404,
+        )
+
+        with pytest.raises(ValueError, match="not found"):
+            await read_work_item(
+                mock_ctx,
+                project_id="proj1",
+                work_item_id="MCPT-999",
+            )
+
+    async def test_auth_error_raises_permission_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError(
+            "Unauthorized",
+            status_code=401,
+        )
+
+        with pytest.raises(PermissionError):
+            await read_work_item(
+                mock_ctx,
+                project_id="proj1",
+                work_item_id="MCPT-001",
+            )
+
+    async def test_generic_error_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionError(
+            "boom",
+            status_code=500,
+        )
+
+        with pytest.raises(RuntimeError, match="boom"):
+            await read_work_item(
+                mock_ctx,
+                project_id="proj1",
+                work_item_id="MCPT-001",
+            )
+
+    async def test_metadata_fields_carry_through(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Defect-specific fields (severity, resolution) and customs survive."""
+        rich_value = {"type": "text/html", "value": "<p>note</p>"}
+        mock_client.get.return_value = {
+            "data": {
+                "id": "proj1/MCPT-500",
+                "attributes": {
+                    "title": "Login crashes",
+                    "type": "defect",
+                    "status": "closed",
+                    "severity": "blocker",
+                    "resolution": "fixed",
+                    "hyperlinks": [
+                        {
+                            "role": "ref_ext",
+                            "title": "Spec",
+                            "uri": "https://example.com/spec",
+                        },
+                    ],
+                    "riskLevel": "high",
+                    "reviewerNote": rich_value,
+                },
+            },
+        }
+
+        result = await read_work_item(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT-500",
+        )
+
+        assert result.severity == "blocker"
+        assert result.resolution == "fixed"
+        assert len(result.hyperlinks) == 1
+        assert result.hyperlinks[0].uri == "https://example.com/spec"
+        # Custom fields stay raw — rich-text dicts are NOT converted to Markdown
+        # because the same dict shape round-trips through update_work_item.
+        assert result.custom_fields == {
+            "riskLevel": "high",
+            "reviewerNote": rich_value,
+        }
+
+    async def test_no_description_html_field_on_model(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """WorkItemRead does not expose description_html — read-only contract."""
+        mock_client.get.return_value = {
+            "data": {
+                "id": "proj1/MCPT-1",
+                "attributes": {"title": "x", "type": "task", "status": "open"},
+            },
+        }
+
+        result = await read_work_item(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT-1",
+        )
+
+        assert not hasattr(result, "description_html")
 
 
 class TestGetLinkedWorkItems:

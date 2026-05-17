@@ -2615,13 +2615,13 @@ class TestUpdateDocumentPitfallDocumentation:
     """
 
     def test_docstring_warns_about_anchorless_paragraph_returning_500(self) -> None:
-        """Anchorless <p> appended via update_document breaks get_document_parts."""
+        """Anchorless <p> appended via update_document breaks read_document_parts."""
         doc = update_document.__doc__ or ""
         assert "anchorless" in doc, (
             "update_document docstring must mention the anchorless <p> pitfall"
         )
         assert "HTTP 500" in doc, (
-            "update_document docstring must surface that the next get_document_parts "
+            "update_document docstring must surface that the next read_document_parts "
             "call returns HTTP 500 after an anchorless <p> append"
         )
         assert "move_work_item_to_document" in doc, (

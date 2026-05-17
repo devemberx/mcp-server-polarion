@@ -834,7 +834,7 @@ async def move_work_item_to_document(  # noqa: PLR0913
 
     Exactly one of ``previous_part_id`` (insert AFTER) / ``next_part_id``
     (insert BEFORE) must be provided. Discover part IDs with
-    ``get_document_parts``.
+    ``read_document_parts``.
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -849,7 +849,7 @@ async def move_work_item_to_document(  # noqa: PLR0913
     Returns:
         WorkItemMoveResult with ``moved``, ``dry_run``, and
         ``payload_preview`` (populated on dry-run). Polarion returns 204
-        on success — call ``get_document_parts`` for the new part ID.
+        on success — call ``read_document_parts`` for the new part ID.
 
     Raises:
         ValueError: Position not exactly one of two, heading WI,
@@ -862,7 +862,7 @@ async def move_work_item_to_document(  # noqa: PLR0913
             "Exactly one of previous_part_id or next_part_id must be "
             "provided. Use previous_part_id to insert AFTER an existing "
             "part, or next_part_id to insert BEFORE an existing part. "
-            "Discover existing part IDs with `get_document_parts`."
+            "Discover existing part IDs with `read_document_parts`."
         )
 
     payload = _build_move_to_document_payload(
@@ -898,7 +898,7 @@ async def move_work_item_to_document(  # noqa: PLR0913
             f"target document '{target_document_name}' (space "
             f"'{target_space_id}') or referenced part not found. "
             "Verify with `get_work_item`, `list_documents`, and "
-            "`get_document_parts`."
+            "`read_document_parts`."
         ) from exc
     except PolarionError as exc:
         raise RuntimeError(f"Failed to move work item: {exc.message}") from exc
@@ -992,7 +992,7 @@ async def update_document(  # noqa: PLR0913
       ``outline_number``).
     - **DO NOT inject anchorless ``<p>`` paragraphs**: ``<h3>X</h3>
       <p>Body</p>`` lets the PATCH succeed but the next
-      ``get_document_parts`` returns HTTP 500. Polarion's stored
+      ``read_document_parts`` returns HTTP 500. Polarion's stored
       paragraphs all carry ``id="polarion_..."`` anchors; raw ``<p>``
       breaks server-side part derivation. For body text, create a new
       work item and attach via ``create_work_item`` +
@@ -1000,7 +1000,7 @@ async def update_document(  # noqa: PLR0913
     - **DO NOT inject WI macro references**: appending
       ``<div id="polarion_wiki macro name=module-workitem;params=id=NEW">``
       creates a ``workitem_<NEW>`` part visible in
-      ``get_document_parts`` but leaves the WI's ``module`` relationship
+      ``read_document_parts`` but leaves the WI's ``module`` relationship
       unset (``space_id=""``, ``outline_number=""``) — an inconsistent
       half-attached state. Always attach via
       ``move_work_item_to_document``.

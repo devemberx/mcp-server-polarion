@@ -1,6 +1,6 @@
 """Read-only MCP tools for querying Polarion ALM.
 
-Eight tools that retrieve projects, documents, work items, and their
+Nine tools that retrieve projects, documents, work items, and their
 relationships.  Every tool returns Pydantic models -- never raw ``dict``.
 
 Body fields use two different formats depending on the tool's purpose:
@@ -9,7 +9,7 @@ Body fields use two different formats depending on the tool's purpose:
   raw Polarion HTML (``description_html``, ``content_html``). Same shape
   round-trips back through the matching ``update_*`` tool without lossy
   Markdown conversion.
-* **Synthesis paths** -- ``read_document`` and ``get_document_parts``
+* **Synthesis paths** -- ``read_document`` and ``read_document_parts``
   convert HTML to Markdown via ``html_to_markdown()`` for LLM
   consumption. Output from these tools is read-only and cannot be fed
   back to write tools.
@@ -40,6 +40,7 @@ from mcp_server_polarion.models import (
     PaginatedResult,
     ProjectSummary,
     WorkItemDetail,
+    WorkItemRead,
     WorkItemSummary,
 )
 from mcp_server_polarion.server import mcp
@@ -763,7 +764,7 @@ async def get_document(
     ``homePageContent`` is the inline prose only — heading text and
     embedded work-item bodies live in separate work items. For end-to-end
     reading use ``read_document``; for structural metadata
-    use ``get_document_parts``. Only feed ``content_html`` back to
+    use ``read_document_parts``. Only feed ``content_html`` back to
     ``update_document`` when the read flag was True (a False read blanks
     the field, and the empty string is rejected at the write side).
 
@@ -854,7 +855,7 @@ async def get_document(
     timeout=60.0,
     annotations={"readOnlyHint": True},
 )
-async def get_document_parts(  # noqa: PLR0913
+async def read_document_parts(  # noqa: PLR0913
     ctx: Context,
     project_id: str = Field(description="Polarion project ID."),
     space_id: str = Field(description="Space ID containing the document."),
@@ -1007,7 +1008,7 @@ async def read_document(  # noqa: PLR0913
 ) -> DocumentReadResult:
     """Render a Polarion document end-to-end as flowing Markdown.
 
-    Paginates ``get_document_parts`` internally and interleaves heading
+    Paginates ``read_document_parts`` internally and interleaves heading
     titles, embedded work-item descriptions, and inline prose into a
     single Markdown stream — the canonical way to read a document body.
     Empty placeholder paragraphs are skipped.
@@ -1038,7 +1039,7 @@ async def read_document(  # noqa: PLR0913
     """
     # FastMCP 3.0's ``@mcp.tool()`` returns the original function unchanged,
     # so direct invocation forwards both the fetch and the error mapping.
-    page = await get_document_parts(
+    page = await read_document_parts(
         ctx,
         project_id=project_id,
         space_id=space_id,
@@ -1090,7 +1091,7 @@ async def list_work_items(
     wildcards (`*foo*`) return HTTP 400. ``module`` is not indexed.
 
     Description body text is NOT indexed — for content search, scan
-    ``get_document_parts`` (each ``workitem`` part already carries its
+    ``read_document_parts`` (each ``workitem`` part already carries its
     description) or use ``read_document`` for end-to-end reading.
 
     Args:
@@ -1272,6 +1273,66 @@ async def get_work_item(
         # contract advertised on the ``include_description_html`` flag.
         detail = detail.model_copy(update={"description_html": ""})
     return detail
+
+
+@mcp.tool(
+    tags={"read"},
+    timeout=60.0,
+    annotations={"readOnlyHint": True},
+)
+async def read_work_item(
+    ctx: Context,
+    project_id: str = Field(description="Polarion project ID."),
+    work_item_id: str = Field(description="Work Item ID (e.g. 'MCPT-001')."),
+) -> WorkItemRead:
+    """Read a Polarion work item with its body rendered as Markdown.
+
+    Synthesis variant of ``get_work_item``: returns the same metadata
+    fields plus ``description`` as Markdown (converted from Polarion
+    HTML via ``html_to_markdown()``) instead of ``description_html``.
+    Use this when an LLM needs to read or summarise the body. The
+    converter collapses Polarion-specific spans and ID anchors, so the
+    Markdown is read-only — do NOT feed it back to ``update_work_item``.
+    For round-trip editing, pair
+    ``get_work_item(include_description_html=True)`` with
+    ``update_work_item(description_html=...)``.
+
+    Args:
+        ctx: MCP tool context (injected automatically).
+        project_id: Polarion project ID.
+        work_item_id: Work Item ID (e.g. 'MCPT-001').
+
+    Returns:
+        WorkItemRead with all the metadata fields of ``WorkItemDetail``
+        (``id``, ``title``, ``type``, ``status``, ``priority``,
+        ``updated``, ``created``, ``space_id`` / ``document_name``,
+        ``outline_number``, ``assignee_ids``, ``author_id``,
+        ``resolution``, ``severity``, ``hyperlinks``, ``project_id``,
+        ``custom_fields``) plus ``description`` carrying the Markdown
+        body (empty when the work item has no description).
+
+    Raises:
+        ValueError: If the work item or project is not found.
+        PermissionError: If the token lacks permissions.
+        RuntimeError: On unexpected Polarion API errors.
+    """
+    # Delegate fetch + error mapping to ``get_work_item``; FastMCP 3.0's
+    # ``@mcp.tool`` returns the original function unchanged, so the call
+    # forwards directly. Pulling the raw HTML lets the converter run
+    # without an extra round trip.
+    detail = await get_work_item(
+        ctx,
+        project_id=project_id,
+        work_item_id=work_item_id,
+        include_description_html=True,
+    )
+    description = (
+        html_to_markdown(detail.description_html) if detail.description_html else ""
+    )
+    return WorkItemRead(
+        **detail.model_dump(exclude={"description_html"}),
+        description=description,
+    )
 
 
 @mcp.tool(

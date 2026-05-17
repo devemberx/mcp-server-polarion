@@ -18,6 +18,7 @@ from mcp_server_polarion.models import (
     ProjectSummary,
     WorkItemCreateResult,
     WorkItemDetail,
+    WorkItemRead,
     WorkItemSummary,
     WorkItemUpdateResult,
 )
@@ -752,6 +753,18 @@ class TestCrossModelIntegration:
         assert dumped["current"]["title"] == "Before"
         assert dumped["changes"]["title"] == "After"
 
+    def test_workitemread_metadata_mirrors_workitemdetail(self):
+        """Drift between the two models makes ``read_work_item`` silently
+        return less than ``get_work_item``; they must match exactly except
+        for the body field (``description_html`` vs ``description``)."""
+        detail_meta = set(WorkItemDetail.model_fields) - {"description_html"}
+        read_meta = set(WorkItemRead.model_fields) - {"description"}
+        assert detail_meta == read_meta, (
+            "WorkItemRead and WorkItemDetail metadata fields drifted — "
+            f"only in WorkItemDetail: {detail_meta - read_meta}; "
+            f"only in WorkItemRead: {read_meta - detail_meta}"
+        )
+
     def test_field_descriptions_are_non_empty_when_set(self):
         """When a model field carries a ``Field(description=...)`` it must be
         non-empty; fields whose name alone is unambiguous may omit it."""
@@ -762,6 +775,7 @@ class TestCrossModelIntegration:
             DocumentPart,
             WorkItemSummary,
             WorkItemDetail,
+            WorkItemRead,
             LinkedWorkItemSummary,
             WorkItemCreateResult,
             WorkItemUpdateResult,

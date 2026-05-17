@@ -22,7 +22,7 @@ CI runs: `ruff check` → `ruff format --check` → `mypy` → `pytest`.
 ## Architecture
 
 - **`core/`** — `client.py` (async httpx wrapper, 429/5xx backoff, post-mutation delay, maps responses to `PolarionError` / `PolarionAuthError` / `PolarionNotFoundError`), `config.py` (Pydantic settings: `POLARION_URL`, `POLARION_TOKEN`, `POLARION_VERIFY_SSL`), `logging.py` (stderr-only configuration; called from server lifespan, never from tool code), `exceptions.py`. Every module obtains its logger via `logging.getLogger("mcp_server_polarion.<module>")`.
-- **`tools/`** — `read.py` (8 read tools incl. `read_document` for flowing Markdown), `write.py` (4 write tools, each with its `_build_*_payload` helper), `_helpers.py` (sparse-fieldset constants, JSON:API extractors, pagination helpers, custom-field merge).
+- **`tools/`** — `read.py` (9 read tools incl. `read_document` for flowing Markdown and `read_work_item` for a single WI's Markdown body), `write.py` (4 write tools, each with its `_build_*_payload` helper), `_helpers.py` (sparse-fieldset constants, JSON:API extractors, pagination helpers, custom-field merge).
 - **`utils/html.py`** — Markdown ↔ HTML (markdownify + BeautifulSoup4 sanitization).
 - **`models.py`** — Pydantic v2 models. `PaginatedResult[T]` wraps all list responses.
 - **`server.py`** — FastMCP instance with lifespan that opens/closes `PolarionClient`.
@@ -35,7 +35,7 @@ CI runs: `ruff check` → `ruff format --check` → `mypy` → `pytest`.
 - **Body fields are asymmetric by tool purpose**:
   - **Round-trip pair** (lossless): `get_*(include_*_html=True)` returns raw Polarion HTML; matching `update_*(*_html=...)` accepts the same shape verbatim — no sanitization, no Markdown conversion. XSS filtering is delegated to Polarion's renderer, so never route untrusted input through these parameters.
   - **Greenfield create** (Markdown): `create_work_item(description=...)` accepts Markdown; runs through `markdown_to_html` + `sanitize_html` before storage.
-  - **Synthesis paths** (Markdown): `read_document` / `get_document_parts` convert HTML→Markdown via `html_to_markdown()`. Output is READ-ONLY — feeding it back to a write tool loses Polarion-specific markup.
+  - **Synthesis paths** (Markdown): `read_document` / `read_document_parts` / `read_work_item` convert HTML→Markdown via `html_to_markdown()`. Output is READ-ONLY — feeding it back to a write tool loses Polarion-specific markup.
 - **Write payloads** — skip `None`/empty values; Polarion may interpret empty as "clear default". JSON:API resource POSTs (`/workitems`) wrap in `{"data": [...]}`; **action endpoints** (`.../actions/<name>`) take a flat object — do NOT wrap. The `cast(dict[str, object], payload)` shim at the `client.post(json=...)` call site is intentional (dict invariance vs `JsonValue`).
 - Every list tool must support `page_size` (max 100) and `page_number`; return `PaginatedResult[T]` with `has_more`.
 - **Every write tool** must support `dry_run: bool = False`. When True, build and return the JSON:API payload in the result model (`dry_run=True`, `payload=…`) without hitting Polarion. The matching `_build_*_payload` helper is the unit-testable seam.
@@ -87,7 +87,7 @@ Polarion Lucene does NOT index `description`, so `list_work_items` cannot filter
 | Find WIs by metadata (title/type/status) | `list_work_items` | Lucene query against `title`, `type`, `status`, etc. — not `description`. |
 | Read the document end-to-end | `read_document` | Renders interleaved headings + embedded WI bodies + prose as flowing Markdown. Paginated by part (default 100/page). The canonical "let me read this doc" tool. |
 | Get document metadata only | `get_document` | Title/type/status. `include_homepage_content_html=True` returns the `homePageContent` as **raw Polarion HTML** in `content_html` for round-trip editing via `update_document(home_page_content_html=...)`. Incomplete for end-to-end reading (heading text + embedded WI bodies live in separate work items, not in `homePageContent`) — use `read_document` for that. |
-| Search inside a document with structural metadata | `get_document_parts` | Each `workitem` part carries `description` as Markdown — **no follow-up `get_work_item` call needed**. Embedded WIs are fetched with the tight `WI_PART_FIELDS` sparse set (`title,type,status,description,outlineNumber`), not `@all`, to keep payloads small. `outlineNumber` lets `DocumentPart.outline_number` carry the hierarchical position (e.g. `'1.2.3'`) so `read_document` can prefix heading titles with it. Use when you need part IDs (for `move_work_item_to_document`), heading levels, or per-WI status/type. For plain reading, prefer `read_document`. |
+| Search inside a document with structural metadata | `read_document_parts` | Each `workitem` part carries `description` as Markdown — **no follow-up `get_work_item` call needed**. Embedded WIs are fetched with the tight `WI_PART_FIELDS` sparse set (`title,type,status,description,outlineNumber`), not `@all`, to keep payloads small. `outlineNumber` lets `DocumentPart.outline_number` carry the hierarchical position (e.g. `'1.2.3'`) so `read_document` can prefix heading titles with it. Use when you need part IDs (for `move_work_item_to_document`), heading levels, or per-WI status/type. For plain reading, prefer `read_document`. |
 
 ### Document body writes go through `homePageContent` PATCH (NOT `/parts`)
 
@@ -97,7 +97,7 @@ Body edits use `PATCH /projects/{p}/spaces/{s}/documents/{d}` with `attributes.h
 
 1. **Plain `<hN>` is safe; ID-anchor-less `<p>` IS NOT.** Appending `<h3>Heading</h3>` alone is fine — Polarion auto-creates a heading WI with `module` and `outline_number` set, and the new `heading_MCPT-N` part renders correctly. But adding even one anchorless `<p>Body</p>` in the same PATCH lets the PATCH return 200 while the next `GET .../parts` returns HTTP 500. Polarion's stored paragraphs all carry `id="polarion_..."` anchors; raw `<p>` blocks break server-side part derivation. For body text, create a new work item and attach via `create_work_item` + `move_work_item_to_document`.
 
-2. **Injecting `<div id="polarion_wiki macro name=module-workitem;params=id=NEW-WI">` does NOT set the WI's `module` relationship.** The new part appears in `get_document_parts` as `workitem_<NEW-WI>`, but `get_work_item(<NEW-WI>)` reports `space_id=""`, `document_name=""`, `outline_number=""` — an inconsistent half-attached state. WI body parts must be added via `move_work_item_to_document`, which is the only path that updates `homePageContent`, sets `module`, and assigns `outline_number` atomically.
+2. **Injecting `<div id="polarion_wiki macro name=module-workitem;params=id=NEW-WI">` does NOT set the WI's `module` relationship.** The new part appears in `read_document_parts` as `workitem_<NEW-WI>`, but `get_work_item(<NEW-WI>)` reports `space_id=""`, `document_name=""`, `outline_number=""` — an inconsistent half-attached state. WI body parts must be added via `move_work_item_to_document`, which is the only path that updates `homePageContent`, sets `module`, and assigns `outline_number` atomically.
 
 ### `PATCH /workitems/{wi}` quirks
 
