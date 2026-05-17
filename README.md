@@ -8,7 +8,7 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for **P
 
 ## Prerequisites
 
-This server is distributed as a Python package and requires [**uv**](https://documents.astral.sh/uv/) to run.
+This server is distributed as a Python package and requires [**uv**](https://docs.astral.sh/uv/) to run.
 
 **Install uv** (if not already installed):
 

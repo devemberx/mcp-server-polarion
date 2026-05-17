@@ -2583,7 +2583,7 @@ class TestListWorkItems:
         mock_client.get.return_value = {
             "data": [
                 {
-                    "id": "myproject/work item-100",
+                    "id": "myproject/WI-100",
                     "attributes": {
                         "title": "Test",
                         "type": "task",
@@ -2602,7 +2602,7 @@ class TestListWorkItems:
             page_number=1,
         )
 
-        assert result.items[0].id == "work item-100"
+        assert result.items[0].id == "WI-100"
 
     async def test_query_param_forwarded(
         self, mock_ctx: MagicMock, mock_client: AsyncMock

@@ -223,14 +223,14 @@ class TestDocumentPart:
             work_item_type="requirement",
             work_item_status="approved",
             external=True,
-            next_part_id="proj/space/document/heading_MCPT-043",
+            next_part_id="proj/space/doc/heading_MCPT-043",
         )
         assert part.description == "Must support SSO."
         assert part.work_item_id == "MCPT-042"
         assert part.work_item_type == "requirement"
         assert part.work_item_status == "approved"
         assert part.external is True
-        assert part.next_part_id == "proj/space/document/heading_MCPT-043"
+        assert part.next_part_id == "proj/space/doc/heading_MCPT-043"
 
     def test_serialization(self):
         part = DocumentPart(
@@ -306,7 +306,7 @@ class TestWorkItemSummary:
     def test_various_types(self):
         for work_item_type in ("requirement", "task", "testCase", "defect"):
             work_item = WorkItemSummary(
-                id="work item-1",
+                id="WI-1",
                 title="Test",
                 type=work_item_type,
                 status="open",
@@ -316,7 +316,7 @@ class TestWorkItemSummary:
     def test_missing_status(self):
         with pytest.raises(ValidationError):
             WorkItemSummary(  # type: ignore[call-arg]
-                id="work item-1",
+                id="WI-1",
                 title="Incomplete",
                 type="task",
             )
