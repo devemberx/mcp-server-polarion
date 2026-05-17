@@ -1,6 +1,6 @@
 """Read-only MCP tools for querying Polarion ALM.
 
-Ten tools that retrieve projects, documents, work items, and their
+Eleven tools that retrieve projects, documents, work items, and their
 relationships.  Every tool returns Pydantic models -- never raw ``dict``.
 
 Body fields use two different formats depending on the tool's purpose:
@@ -903,8 +903,8 @@ async def list_document_enum_options(  # noqa: PLR0913
     for a document's ``status`` / ``type`` / custom enum field. Polarion
     validates these values leniently on write -- unknown ids are silently
     coerced or stored verbatim -- so resolve them first. This tool covers
-    DOCUMENT fields only; work-item fields use a separate endpoint and
-    are not surfaced here.
+    DOCUMENT fields only; work-item fields are surfaced via
+    ``list_work_item_enum_options``.
 
     Returns the FULL enum set for the field on the given document type.
     Workflow transitions are NOT filtered by the document's current
@@ -957,6 +957,128 @@ async def list_document_enum_options(  # noqa: PLR0913
     except PolarionAuthError as exc:
         raise PermissionError(
             "Cannot list document enum options"
+            " -- check your POLARION_TOKEN permissions."
+        ) from exc
+    except PolarionError as exc:
+        raise RuntimeError(
+            f"Failed to list enum options for field '{field_id}': {exc.message}"
+        ) from exc
+
+    data = response.get("data", [])
+    items: list[EnumOption] = []
+    if isinstance(data, list):
+        for entry in data:
+            if isinstance(entry, dict):
+                items.append(_build_enum_option(entry))
+
+    raw_total = extract_total_count(response)
+    total = raw_total
+    if total <= 0 and items:
+        total = (page_number - 1) * page_size + len(items)
+
+    return PaginatedResult[EnumOption](
+        items=items,
+        total_count=total,
+        page=page_number,
+        page_size=page_size,
+        has_more=compute_has_more(
+            response, raw_total, page_number, page_size, len(items)
+        ),
+    )
+
+
+@mcp.tool(
+    tags={"read"},
+    timeout=60.0,
+    annotations={"readOnlyHint": True},
+)
+async def list_work_item_enum_options(  # noqa: PLR0913
+    ctx: Context,
+    project_id: str = Field(description="Polarion project ID."),
+    field_id: str = Field(
+        description=(
+            "Field id (e.g. 'status', 'type', 'severity', or a custom field id)."
+        ),
+    ),
+    work_item_type: str = Field(
+        description=(
+            "Work item type id (e.g. 'task', 'requirement')."
+            " Pass '~' for type-agnostic options."
+        ),
+    ),
+    page_size: int = Field(
+        default=DEFAULT_PAGE_SIZE,
+        ge=1,
+        le=100,
+        description="Number of options per page (1-100, default 100).",
+    ),
+    page_number: int = Field(
+        default=1,
+        ge=1,
+        description="Page number to retrieve (1-based, default 1).",
+    ),
+) -> PaginatedResult[EnumOption]:
+    """List valid enum options for a work item field of the given type.
+
+    Call this before ``create_work_item`` / ``update_work_item`` when you
+    need to pick a value for a work item's ``type`` / ``status`` /
+    ``severity`` / ``priority`` / custom enum field. Polarion validates
+    these values leniently on write -- unknown ids are silently coerced
+    or stored verbatim -- so resolve them first. This tool covers WORK
+    ITEM fields only; document fields are surfaced via
+    ``list_document_enum_options``.
+
+    Returns the FULL enum set for the field on the given work item type.
+    Workflow transitions are NOT filtered by the work item's current
+    state; that is a separate Polarion endpoint not exposed here.
+    ``work_item_type='~'`` returns the type-agnostic option set. An
+    unknown ``work_item_type`` is silently treated as ``~`` by Polarion
+    with no error, so verify the type id (e.g. via ``get_work_item``)
+    before trusting the result.
+
+    Args:
+        ctx: MCP tool context (injected automatically).
+        project_id: Polarion project ID.
+        field_id: Field id whose options to list.
+        work_item_type: Work item type id, or '~' for type-agnostic.
+        page_size: Items per page (1-100, default 100).
+        page_number: 1-based page number (default 1).
+
+    Returns:
+        PaginatedResult of ``EnumOption`` items with:
+        - ``id``: Option id to pass back to write tools.
+        - ``name``: Human-readable display name.
+        - ``description``: Option description; empty when Polarion has none.
+        - ``default``: True if Polarion uses this option as the default.
+        - ``hidden``: True if the option is hidden in the UI.
+        - ``terminal``: For status fields, True for workflow end-states.
+
+    Raises:
+        ValueError: Project, field, or work item type not found.
+        PermissionError: Token lacks permission.
+        RuntimeError: Other Polarion API errors.
+    """
+    client = get_client(ctx)
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/workitems/fields/{encode_path_segment(field_id)}"
+        "/actions/getAvailableOptions"
+    )
+    params: dict[str, str | int] = {
+        "type": work_item_type,
+        "page[size]": page_size,
+        "page[number]": page_number,
+    }
+    try:
+        response = await client.get(path, params=params)
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"No enum options for field '{field_id}' on work item type "
+            f"'{work_item_type}' in project '{project_id}'."
+        ) from exc
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot list work item enum options"
             " -- check your POLARION_TOKEN permissions."
         ) from exc
     except PolarionError as exc:

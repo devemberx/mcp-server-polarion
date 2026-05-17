@@ -139,6 +139,7 @@ claude mcp add mcp-server-polarion \
 | `get_document` | Get document metadata (title / type / status); optionally returns the raw `homePageContent` source for round-trip editing |
 | `read_document_parts` | List structural parts with linked work-item metadata (type, status, `external` flag) — use for part IDs and structural traversal, not for reading |
 | `list_document_enum_options` | List the valid enum values (id / name / default / hidden / terminal) for a document field on a given document type — resolve allowed `status` / `type` / custom enum ids before calling `update_document` |
+| `list_work_item_enum_options` | List the valid enum values for a work item field on a given work item type — resolve allowed `type` / `status` / `severity` / `priority` / custom enum ids before calling `create_work_item` / `update_work_item` |
 | `list_work_items` | Search work items with Lucene queries; results include priority, last-modified time, owning document, and assignees |
 | `get_work_item` | Get full work item details (description, author, created/updated timestamps, severity, resolution, outline number, hyperlinks); body is raw Polarion HTML for round-trip editing |
 | `read_work_item` | Same metadata as `get_work_item`, with the body rendered as Markdown instead of raw HTML — read-only synthesis for LLM consumption |
