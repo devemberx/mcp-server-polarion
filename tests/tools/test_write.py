@@ -68,7 +68,7 @@ class TestBuildWorkItemPayload:
 
     def test_minimal_payload_has_only_required_attrs(self) -> None:
         payload = _build_work_item_payload(
-            title="My WI",
+            title="My work item",
             type="task",
             description_html="",
             status=None,
@@ -84,15 +84,15 @@ class TestBuildWorkItemPayload:
             "data": [
                 {
                     "type": "workitems",
-                    "attributes": {"title": "My WI", "type": "task"},
+                    "attributes": {"title": "My work item", "type": "task"},
                 }
             ]
         }
         # No relationships key, no description, no other attributes.
         item = cast(list[dict[str, object]], payload["data"])[0]
         assert "relationships" not in item
-        attrs = cast(dict[str, object], item["attributes"])
-        assert set(attrs.keys()) == {"title", "type"}
+        attributes = cast(dict[str, object], item["attributes"])
+        assert set(attributes.keys()) == {"title", "type"}
 
     def test_skips_none_and_empty_string_fields(self) -> None:
         payload = _build_work_item_payload(
@@ -109,9 +109,9 @@ class TestBuildWorkItemPayload:
         )
 
         item = cast(list[dict[str, object]], payload["data"])[0]
-        attrs = cast(dict[str, object], item["attributes"])
+        attributes = cast(dict[str, object], item["attributes"])
         # Only title + type — nothing else slipped through.
-        assert set(attrs.keys()) == {"title", "type"}
+        assert set(attributes.keys()) == {"title", "type"}
         assert "relationships" not in item
 
     def test_includes_description_block(self) -> None:
@@ -129,8 +129,8 @@ class TestBuildWorkItemPayload:
         )
 
         item = cast(list[dict[str, object]], payload["data"])[0]
-        attrs = cast(dict[str, object], item["attributes"])
-        assert attrs["description"] == {
+        attributes = cast(dict[str, object], item["attributes"])
+        assert attributes["description"] == {
             "type": "text/html",
             "value": "<p>hello</p>",
         }
@@ -150,8 +150,8 @@ class TestBuildWorkItemPayload:
         )
 
         item = cast(list[dict[str, object]], payload["data"])[0]
-        rels = cast(dict[str, object], item["relationships"])
-        assert rels["assignee"] == {
+        relationships = cast(dict[str, object], item["relationships"])
+        assert relationships["assignee"] == {
             "data": [
                 {"type": "users", "id": "alice"},
                 {"type": "users", "id": "bob"},
@@ -176,8 +176,8 @@ class TestBuildWorkItemPayload:
         )
 
         item = cast(list[dict[str, object]], payload["data"])[0]
-        attrs = cast(dict[str, object], item["attributes"])
-        assert attrs["hyperlinks"] == [
+        attributes = cast(dict[str, object], item["attributes"])
+        assert attributes["hyperlinks"] == [
             {
                 "role": "ref_ext",
                 "title": "Spec",
@@ -205,12 +205,12 @@ class TestBuildWorkItemPayload:
         )
 
         item = cast(list[dict[str, object]], payload["data"])[0]
-        attrs = cast(dict[str, object], item["attributes"])
-        assert attrs["status"] == "open"
-        assert attrs["priority"] == "50.0"
-        assert attrs["severity"] == "major"
-        assert attrs["dueDate"] == "2026-05-31"
-        assert attrs["initialEstimate"] == "5 1/2d"
+        attributes = cast(dict[str, object], item["attributes"])
+        assert attributes["status"] == "open"
+        assert attributes["priority"] == "50.0"
+        assert attributes["severity"] == "major"
+        assert attributes["dueDate"] == "2026-05-31"
+        assert attributes["initialEstimate"] == "5 1/2d"
 
     def test_custom_fields_inlined_alongside_standard_attrs(self) -> None:
         payload = _build_work_item_payload(
@@ -228,12 +228,12 @@ class TestBuildWorkItemPayload:
         )
 
         item = cast(list[dict[str, object]], payload["data"])[0]
-        attrs = cast(dict[str, object], item["attributes"])
-        assert attrs["riskLevel"] == "high"
-        assert attrs["effortHours"] == 12.0
+        attributes = cast(dict[str, object], item["attributes"])
+        assert attributes["riskLevel"] == "high"
+        assert attributes["effortHours"] == 12.0
         # Customs land flat under attributes, NOT inside a `customFields`
         # container — Polarion silently drops the latter shape.
-        assert "customFields" not in attrs
+        assert "customFields" not in attributes
 
     def test_custom_fields_collision_with_standard_attr_raises(self) -> None:
         # ``title`` is a Polarion-defined standard attribute; collision
@@ -273,9 +273,9 @@ class TestBuildWorkItemPayload:
             custom_fields={"riskLevel": None, "effortHours": 0},
         )
         item = cast(list[dict[str, object]], payload["data"])[0]
-        attrs = cast(dict[str, object], item["attributes"])
-        assert "riskLevel" not in attrs
-        assert attrs["effortHours"] == 0
+        attributes = cast(dict[str, object], item["attributes"])
+        assert "riskLevel" not in attributes
+        assert attributes["effortHours"] == 0
 
 
 class TestExtractCreatedId:
@@ -341,8 +341,8 @@ class TestCreateWorkItemDryRun:
         # payload_preview is a plain dict (no Pydantic objects leaked).
         assert isinstance(result.payload_preview, dict)
         item = cast(list[dict[str, object]], result.payload_preview["data"])[0]
-        attrs = cast(dict[str, object], item["attributes"])
-        assert attrs == {"title": "Dry test", "type": "task"}
+        attributes = cast(dict[str, object], item["attributes"])
+        assert attributes == {"title": "Dry test", "type": "task"}
 
 
 class TestCreateWorkItemHappyPath:
@@ -888,7 +888,7 @@ class TestMoveWorkItemToDocumentHappyPath:
         )
 
         args, kwargs = mock_client.post.call_args
-        # Path uses the WI ID, with URL-encoded segments.
+        # Path uses the work item ID, with URL-encoded segments.
         expected_path = "/projects/MyProj/workitems/MCPT-42/actions/moveToDocument"
         assert args == (expected_path,)
         body = kwargs["json"]
@@ -1093,8 +1093,8 @@ class TestBuildUpdateWorkItemPayload:
         )
 
         item = cast(dict[str, object], payload["data"])
-        attrs = cast(dict[str, object], item["attributes"])
-        assert attrs["description"] == {
+        attributes = cast(dict[str, object], item["attributes"])
+        assert attributes["description"] == {
             "type": "text/html",
             "value": "<p>hi</p>",
         }
@@ -1116,8 +1116,8 @@ class TestBuildUpdateWorkItemPayload:
         )
 
         item = cast(dict[str, object], payload["data"])
-        rels = cast(dict[str, object], item["relationships"])
-        assert rels["assignee"] == {
+        relationships = cast(dict[str, object], item["relationships"])
+        assert relationships["assignee"] == {
             "data": [
                 {"type": "users", "id": "alice"},
                 {"type": "users", "id": "bob"},
@@ -1143,8 +1143,8 @@ class TestBuildUpdateWorkItemPayload:
         )
 
         item = cast(dict[str, object], payload["data"])
-        attrs = cast(dict[str, object], item["attributes"])
-        assert attrs["hyperlinks"] == [
+        attributes = cast(dict[str, object], item["attributes"])
+        assert attributes["hyperlinks"] == [
             {"role": "ref_ext", "title": "Spec", "uri": "https://example.com"},
         ]
 
@@ -1165,14 +1165,14 @@ class TestBuildUpdateWorkItemPayload:
         )
 
         item = cast(dict[str, object], payload["data"])
-        attrs = cast(dict[str, object], item["attributes"])
-        assert attrs["title"] == "t"
-        assert attrs["status"] == "open"
-        assert attrs["priority"] == "50.0"
-        assert attrs["severity"] == "major"
-        assert attrs["dueDate"] == "2026-05-31"
-        assert attrs["initialEstimate"] == "5 1/2d"
-        assert attrs["resolution"] == "fixed"
+        attributes = cast(dict[str, object], item["attributes"])
+        assert attributes["title"] == "t"
+        assert attributes["status"] == "open"
+        assert attributes["priority"] == "50.0"
+        assert attributes["severity"] == "major"
+        assert attributes["dueDate"] == "2026-05-31"
+        assert attributes["initialEstimate"] == "5 1/2d"
+        assert attributes["resolution"] == "fixed"
 
     def test_custom_fields_inlined_in_patch_attributes(self) -> None:
         rich = {"type": "text/html", "value": "<p>note</p>"}
@@ -1193,8 +1193,8 @@ class TestBuildUpdateWorkItemPayload:
         )
 
         item = cast(dict[str, object], payload["data"])
-        attrs = cast(dict[str, object], item["attributes"])
-        assert attrs == {"riskLevel": "low", "reviewerNote": rich}
+        attributes = cast(dict[str, object], item["attributes"])
+        assert attributes == {"riskLevel": "low", "reviewerNote": rich}
 
     def test_custom_fields_alone_keeps_attributes_dict(self) -> None:
         # Without any standard fields, custom_fields alone should still
@@ -1287,9 +1287,9 @@ class TestUpdateWorkItemValidation:
 
         Asymmetric vs ``update_document(home_page_content_html='')`` which
         RAISES (see test_home_page_content_html_empty_string_raises). The
-        difference is justified by blast radius: clearing a single WI's
+        difference is justified by blast radius: clearing a single work item's
         description is recoverable; wiping a document body orphans every
-        heading WI inside it.
+        heading work item inside it.
         """
         with pytest.raises(ValueError, match="Nothing to update"):
             await _call_update(mock_ctx, description_html="")
@@ -1312,9 +1312,9 @@ class TestUpdateWorkItemValidation:
         # Wire payload has only the title — no description key at all.
         assert result.payload_preview is not None
         item = cast(dict[str, object], result.payload_preview["data"])
-        attrs = cast(dict[str, object], item["attributes"])
-        assert "description" not in attrs
-        assert attrs == {"title": "new title"}
+        attributes = cast(dict[str, object], item["attributes"])
+        assert "description" not in attributes
+        assert attributes == {"title": "new title"}
 
     async def test_custom_fields_alone_satisfies_at_least_one_check(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1379,14 +1379,14 @@ class TestUpdateWorkItemValidation:
         result = await _call_update(
             mock_ctx,
             workflow_action="close",
-            title="closing this WI",
+            title="closing this work item",
         )
 
         assert result.updated is True
         patch_path = mock_client.patch.call_args.args[0]
         assert patch_path == "/projects/MyProj/workitems/MCPT-1?workflowAction=close"
         body = mock_client.patch.call_args.kwargs["json"]
-        assert body["data"]["attributes"]["title"] == "closing this WI"
+        assert body["data"]["attributes"]["title"] == "closing this work item"
 
 
 class TestUpdateWorkItemDryRun:
@@ -1412,8 +1412,8 @@ class TestUpdateWorkItemDryRun:
         assert result.payload_preview is not None
         item = cast(dict[str, object], result.payload_preview["data"])
         assert item["id"] == "MyProj/MCPT-1"
-        attrs = cast(dict[str, object], item["attributes"])
-        assert attrs == {"title": "New title"}
+        attributes = cast(dict[str, object], item["attributes"])
+        assert attributes == {"title": "New title"}
 
     async def test_changes_uses_python_typed_values_not_json_api_shape(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1436,8 +1436,8 @@ class TestUpdateWorkItemDryRun:
         # sanitization or Markdown conversion in between.
         assert result.payload_preview is not None
         item = cast(dict[str, object], result.payload_preview["data"])
-        attrs = cast(dict[str, object], item["attributes"])
-        desc = cast(dict[str, object], attrs["description"])
+        attributes = cast(dict[str, object], item["attributes"])
+        desc = cast(dict[str, object], attributes["description"])
         assert desc == {"type": "text/html", "value": "<p>bold</p>"}
 
 
@@ -1451,12 +1451,12 @@ def _make_get_response(
     assignee_ids: list[str] | None = None,
 ) -> dict[str, object]:
     """Build a minimal JSON:API GET response for the follow-up fetch."""
-    rels: dict[str, object] = {}
+    relationships: dict[str, object] = {}
     if assignee_ids is not None:
-        rels["assignee"] = {
+        relationships["assignee"] = {
             "data": [{"type": "users", "id": uid} for uid in assignee_ids]
         }
-    attrs: dict[str, object] = {
+    attributes: dict[str, object] = {
         "title": title,
         "type": "task",
         "status": status,
@@ -1464,13 +1464,13 @@ def _make_get_response(
         "updated": "2026-05-04T10:00:00Z",
     }
     if description_html:
-        attrs["description"] = {"type": "text/html", "value": description_html}
+        attributes["description"] = {"type": "text/html", "value": description_html}
     return {
         "data": {
             "type": "workitems",
             "id": f"{project_id}/{work_item_id}",
-            "attributes": attrs,
-            "relationships": rels,
+            "attributes": attributes,
+            "relationships": relationships,
         }
     }
 
@@ -1572,7 +1572,7 @@ class TestUpdateWorkItemHappyPath:
         assert args == ("/projects/MyProj/workitems/MCPT-1",)
         params = kwargs["params"]
         assert params["include"] == "assignee"
-        # WI_DETAIL_FIELDS is the bare ``@all`` token so inline custom
+        # WORK_ITEM_DETAIL_FIELDS is the bare ``@all`` token so inline custom
         # fields surface on ``current.custom_fields``; this assertion
         # pins that semantics (changing it would silently drop customs).
         assert params["fields[workitems]"] == "@all"
@@ -1580,7 +1580,7 @@ class TestUpdateWorkItemHappyPath:
     async def test_current_carries_custom_fields_from_post_patch_get(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # Polarion inlines customs as top-level attrs; this WI happens to
+        # Polarion inlines customs as top-level attributes; this work item happens to
         # have ``riskLevel`` and ``effortHours`` populated. The post-PATCH
         # GET reuses ``parse_work_item_detail`` so they must land on
         # ``result.current.custom_fields`` automatically — guarding the
@@ -1588,9 +1588,9 @@ class TestUpdateWorkItemHappyPath:
         mock_client.patch.return_value = {}
         get_response = _make_get_response(title="after")
         data = cast(dict[str, object], get_response["data"])
-        attrs = cast(dict[str, object], data["attributes"])
-        attrs["riskLevel"] = "high"
-        attrs["effortHours"] = 12.0
+        attributes = cast(dict[str, object], data["attributes"])
+        attributes["riskLevel"] = "high"
+        attributes["effortHours"] = 12.0
         mock_client.get.return_value = get_response
 
         result = await _call_update(mock_ctx, title="after")
@@ -1619,10 +1619,10 @@ class TestUpdateWorkItemHappyPath:
         _, kwargs = mock_client.patch.call_args
         body = kwargs["json"]
         item = body["data"]
-        attrs = item["attributes"]
-        assert attrs["riskLevel"] == "low"
-        assert attrs["reviewerNote"] == rich
-        assert "customFields" not in attrs
+        attributes = item["attributes"]
+        assert attributes["riskLevel"] == "low"
+        assert attributes["reviewerNote"] == rich
+        assert "customFields" not in attributes
 
     async def test_changes_summary_records_custom_fields(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1656,9 +1656,9 @@ class TestUpdateWorkItemHappyPath:
         mock_client.patch.assert_not_called()
         assert result.payload_preview is not None
         item = cast(dict[str, object], result.payload_preview["data"])
-        attrs = cast(dict[str, object], item["attributes"])
-        assert attrs["title"] == "t"
-        assert attrs["riskLevel"] == "high"
+        attributes = cast(dict[str, object], item["attributes"])
+        assert attributes["title"] == "t"
+        assert attributes["riskLevel"] == "high"
 
     async def test_round_trip_read_response_can_be_written_back(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1680,10 +1680,10 @@ class TestUpdateWorkItemHappyPath:
         result = await _call_update(mock_ctx, custom_fields=read_customs)
 
         _, kwargs = mock_client.patch.call_args
-        attrs = kwargs["json"]["data"]["attributes"]
-        # Every key from the read response landed inline under attrs.
+        attributes = kwargs["json"]["data"]["attributes"]
+        # Every key from the read response landed inline under attributes.
         for key, value in read_customs.items():
-            assert attrs[key] == value
+            assert attributes[key] == value
         # Tool layer didn't accept it then re-emit a different shape.
         assert result.updated is True
 
@@ -1875,8 +1875,8 @@ class TestBuildUpdateDocumentPayload:
         )
 
         data = cast(dict[str, object], payload["data"])
-        attrs = cast(dict[str, object], data["attributes"])
-        assert attrs == {
+        attributes = cast(dict[str, object], data["attributes"])
+        assert attributes == {
             "title": "T",
             "status": "approved",
             "type": "req_specification",
@@ -1928,8 +1928,8 @@ class TestBuildUpdateDocumentPayload:
         )
 
         data = cast(dict[str, object], payload["data"])
-        attrs = cast(dict[str, object], data["attributes"])
-        assert attrs["homePageContent"] == {"type": "text/html", "value": raw}
+        attributes = cast(dict[str, object], data["attributes"])
+        assert attributes["homePageContent"] == {"type": "text/html", "value": raw}
 
     def test_document_name_with_slashes_preserved_verbatim(self) -> None:
         # JSON body IDs must NOT be URL-encoded.
@@ -1957,8 +1957,8 @@ class TestBuildUpdateDocumentPayload:
             custom_fields={"complianceLevel": "L3", "reviewerName": "alice"},
         )
         data = cast(dict[str, object], payload["data"])
-        attrs = cast(dict[str, object], data["attributes"])
-        assert attrs == {"complianceLevel": "L3", "reviewerName": "alice"}
+        attributes = cast(dict[str, object], data["attributes"])
+        assert attributes == {"complianceLevel": "L3", "reviewerName": "alice"}
 
     def test_custom_fields_collision_raises_for_document_standard(self) -> None:
         # ``moduleFolder`` is in the document standard set — collision.
@@ -2101,8 +2101,8 @@ class TestUpdateDocumentValidation:
         # Sanity: payload includes both the body and the workflow query param.
         assert result.payload_preview is not None
         item = cast(dict[str, object], result.payload_preview["data"])
-        attrs = cast(dict[str, object], item["attributes"])
-        assert attrs["homePageContent"] == {
+        attributes = cast(dict[str, object], item["attributes"])
+        assert attributes["homePageContent"] == {
             "type": "text/html",
             "value": "<p>new body</p>",
         }
@@ -2129,7 +2129,7 @@ class TestUpdateDocumentValidation:
     async def test_custom_fields_homepagecontent_collision_raises(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """`homePageContent` is a STANDARD_DOCUMENT_ATTRS key.
+        """`homePageContent` is a STANDARD_DOCUMENT_ATTRIBUTES key.
 
         Allowing it via ``custom_fields`` would let a caller bypass the
         explicit ``home_page_content_html`` parameter (and its empty-string
@@ -2184,8 +2184,8 @@ class TestUpdateDocumentDryRun:
         assert result.payload_preview is not None
         data = cast(dict[str, object], result.payload_preview["data"])
         assert data["type"] == "documents"
-        attrs = cast(dict[str, object], data["attributes"])
-        assert attrs == {"title": "New Title"}
+        attributes = cast(dict[str, object], data["attributes"])
+        assert attributes == {"title": "New Title"}
 
 
 class TestUpdateDocumentHappyPath:
@@ -2291,10 +2291,10 @@ class TestUpdateDocumentHappyPath:
         )
 
         _, kwargs = mock_client.patch.call_args
-        attrs = kwargs["json"]["data"]["attributes"]
-        assert attrs["homePageContent"] == {"type": "text/html", "value": raw}
+        attributes = kwargs["json"]["data"]["attributes"]
+        assert attributes["homePageContent"] == {"type": "text/html", "value": raw}
         # Nothing else slipped in.
-        assert set(attrs.keys()) == {"homePageContent"}
+        assert set(attributes.keys()) == {"homePageContent"}
 
     async def test_home_page_content_html_omitted_when_not_passed(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -2382,8 +2382,8 @@ class TestUpdateDocumentHappyPath:
         )
 
         _, kwargs = mock_client.patch.call_args
-        attrs = kwargs["json"]["data"]["attributes"]
-        assert attrs == {"title": ""}
+        attributes = kwargs["json"]["data"]["attributes"]
+        assert attributes == {"title": ""}
 
     async def test_path_url_encodes_special_chars_in_space_id(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -2467,12 +2467,12 @@ class TestUpdateDocumentErrorMapping:
             "not found", status_code=404
         )
 
-        with pytest.raises(ValueError, match="ghost-doc") as exc_info:
+        with pytest.raises(ValueError, match="ghost-document") as exc_info:
             await update_document(
                 mock_ctx,
                 project_id="MyProj",
                 space_id="ghost-space",
-                document_name="ghost-doc",
+                document_name="ghost-document",
                 title="t",
                 status=None,
                 type=None,
@@ -2616,25 +2616,25 @@ class TestUpdateDocumentPitfallDocumentation:
 
     def test_docstring_warns_about_anchorless_paragraph_returning_500(self) -> None:
         """Anchorless <p> appended via update_document breaks read_document_parts."""
-        doc = update_document.__doc__ or ""
-        assert "anchorless" in doc, (
+        document = update_document.__doc__ or ""
+        assert "anchorless" in document, (
             "update_document docstring must mention the anchorless <p> pitfall"
         )
-        assert "HTTP 500" in doc, (
+        assert "HTTP 500" in document, (
             "update_document docstring must surface that the next read_document_parts "
             "call returns HTTP 500 after an anchorless <p> append"
         )
-        assert "move_work_item_to_document" in doc, (
+        assert "move_work_item_to_document" in document, (
             "update_document docstring must point callers at the correct attach path"
         )
 
     def test_docstring_warns_about_macro_div_module_relationship_gap(self) -> None:
         """Macro <div> reference injected via update_document leaves module unset."""
-        doc = update_document.__doc__ or ""
-        assert "polarion_wiki macro" in doc, (
+        document = update_document.__doc__ or ""
+        assert "polarion_wiki macro" in document, (
             "update_document docstring must mention the polarion_wiki macro pitfall"
         )
-        assert "module" in doc, (
-            "update_document docstring must surface that the WI's module "
+        assert "module" in document, (
+            "update_document docstring must surface that the work item's module "
             "relationship stays unset after a macro <div> injection"
         )

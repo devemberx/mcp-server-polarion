@@ -688,9 +688,9 @@ class TestSanitizeHtml:
 
     def test_relative_href_preserved(self) -> None:
         """Relative URLs (no scheme) must be preserved."""
-        html = '<a href="/docs/readme">Docs</a>'
+        html = '<a href="/documents/readme">Docs</a>'
         result = sanitize_html(html)
-        assert 'href="/docs/readme"' in result
+        assert 'href="/documents/readme"' in result
 
     def test_multiple_disallowed_tags(self) -> None:
         html = "<font><marquee>Text</marquee></font>"

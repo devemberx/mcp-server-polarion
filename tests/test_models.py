@@ -223,14 +223,14 @@ class TestDocumentPart:
             work_item_type="requirement",
             work_item_status="approved",
             external=True,
-            next_part_id="proj/space/doc/heading_MCPT-043",
+            next_part_id="proj/space/document/heading_MCPT-043",
         )
         assert part.description == "Must support SSO."
         assert part.work_item_id == "MCPT-042"
         assert part.work_item_type == "requirement"
         assert part.work_item_status == "approved"
         assert part.external is True
-        assert part.next_part_id == "proj/space/doc/heading_MCPT-043"
+        assert part.next_part_id == "proj/space/document/heading_MCPT-043"
 
     def test_serialization(self):
         part = DocumentPart(
@@ -263,30 +263,30 @@ class TestDocumentPart:
 
 class TestWorkItemSummary:
     def test_valid(self):
-        wi = WorkItemSummary(
+        work_item = WorkItemSummary(
             id="MCPT-001",
             title="Login Feature",
             type="requirement",
             status="draft",
         )
-        assert wi.id == "MCPT-001"
-        assert wi.status == "draft"
+        assert work_item.id == "MCPT-001"
+        assert work_item.status == "draft"
 
     def test_default_optional_fields(self):
-        wi = WorkItemSummary(
+        work_item = WorkItemSummary(
             id="MCPT-001",
             title="Login Feature",
             type="requirement",
             status="draft",
         )
-        assert wi.priority == ""
-        assert wi.updated == ""
-        assert wi.space_id == ""
-        assert wi.document_name == ""
-        assert wi.assignee_ids == []
+        assert work_item.priority == ""
+        assert work_item.updated == ""
+        assert work_item.space_id == ""
+        assert work_item.document_name == ""
+        assert work_item.assignee_ids == []
 
     def test_full_metadata(self):
-        wi = WorkItemSummary(
+        work_item = WorkItemSummary(
             id="MCPT-042",
             title="Login Feature",
             type="requirement",
@@ -297,26 +297,26 @@ class TestWorkItemSummary:
             document_name="Software Requirement Specification",
             assignee_ids=["alice", "bob"],
         )
-        assert wi.priority == "90.0"
-        assert wi.updated == "2026-04-29T10:23:00Z"
-        assert wi.space_id == "Design"
-        assert wi.document_name == "Software Requirement Specification"
-        assert wi.assignee_ids == ["alice", "bob"]
+        assert work_item.priority == "90.0"
+        assert work_item.updated == "2026-04-29T10:23:00Z"
+        assert work_item.space_id == "Design"
+        assert work_item.document_name == "Software Requirement Specification"
+        assert work_item.assignee_ids == ["alice", "bob"]
 
     def test_various_types(self):
-        for wi_type in ("requirement", "task", "testCase", "defect"):
-            wi = WorkItemSummary(
-                id="WI-1",
+        for work_item_type in ("requirement", "task", "testCase", "defect"):
+            work_item = WorkItemSummary(
+                id="work item-1",
                 title="Test",
-                type=wi_type,
+                type=work_item_type,
                 status="open",
             )
-            assert wi.type == wi_type
+            assert work_item.type == work_item_type
 
     def test_missing_status(self):
         with pytest.raises(ValidationError):
             WorkItemSummary(  # type: ignore[call-arg]
-                id="WI-1",
+                id="work item-1",
                 title="Incomplete",
                 type="task",
             )
@@ -341,7 +341,7 @@ class TestWorkItemDetail:
     def test_empty_description(self):
         detail = WorkItemDetail(
             id="MCPT-002",
-            title="Empty WI",
+            title="Empty work item",
             type="task",
             status="draft",
             description_html="",
@@ -549,7 +549,7 @@ class TestWorkItemCreateResult:
             payload_preview={
                 "data": {
                     "type": "workitems",
-                    "attributes": {"title": "New WI"},
+                    "attributes": {"title": "New work item"},
                 }
             },
         )

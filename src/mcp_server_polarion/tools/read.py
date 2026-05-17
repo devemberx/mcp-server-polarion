@@ -47,12 +47,12 @@ from mcp_server_polarion.models import (
 from mcp_server_polarion.server import mcp
 from mcp_server_polarion.tools._helpers import (
     DEFAULT_PAGE_SIZE,
-    DOC_DETAIL_FIELDS,
-    STANDARD_DOCUMENT_ATTRS,
-    WI_DETAIL_FIELDS,
-    WI_LIST_FIELDS,
-    WI_PART_FIELDS,
-    build_included_workitem_map,
+    DOCUMENT_DETAIL_FIELDS,
+    STANDARD_DOCUMENT_ATTRIBUTES,
+    WORK_ITEM_DETAIL_FIELDS,
+    WORK_ITEM_LIST_FIELDS,
+    WORK_ITEM_PART_FIELDS,
+    build_included_work_item_map,
     compute_has_more,
     encode_path_segment,
     extract_custom_fields,
@@ -109,70 +109,72 @@ def _extract_html_value(field: object) -> str:
     return ""
 
 
-def _resolve_heading_level(attrs: dict[str, object]) -> int:
+def _resolve_heading_level(attributes: dict[str, object]) -> int:
     """Return the heading level for a heading part.
 
     Prefers ``attributes.level`` when present, otherwise falls back to
     parsing the leading ``<hN>`` tag in ``attributes.content``.
     """
-    attr_level = attrs.get("level")
+    attr_level = attributes.get("level")
     if isinstance(attr_level, int):
         return attr_level
-    head_html = _extract_html_value(attrs.get("content"))
+    head_html = _extract_html_value(attributes.get("content"))
     match = re.match(r"<h(\d)", head_html, re.IGNORECASE)
     return int(match.group(1)) if match else 0
 
 
 def _resolve_linked_work_item(
-    rels: dict[str, object],
-    wi_map: dict[str, dict[str, object]],
+    relationships: dict[str, object],
+    work_item_map: dict[str, dict[str, object]],
 ) -> _LinkedWorkItem:
     """Return metadata for the work item linked from a document part."""
-    wi_full_id = extract_relationship_id(rels, "workItem")
-    if not wi_full_id:
+    work_item_full_id = extract_relationship_id(relationships, "workItem")
+    if not work_item_full_id:
         return _LinkedWorkItem()
 
     short_id = (
-        wi_full_id.split("/", maxsplit=1)[-1] if "/" in wi_full_id else wi_full_id
+        work_item_full_id.split("/", maxsplit=1)[-1]
+        if "/" in work_item_full_id
+        else work_item_full_id
     )
-    wi_attrs = wi_map.get(wi_full_id, {}).get("attributes", {})
-    if not isinstance(wi_attrs, dict):
+    work_item_attrs = work_item_map.get(work_item_full_id, {}).get("attributes", {})
+    if not isinstance(work_item_attrs, dict):
         return _LinkedWorkItem(short_id=short_id)
 
     return _LinkedWorkItem(
         short_id=short_id,
-        title=safe_str(wi_attrs.get("title", "")),
-        type=safe_str(wi_attrs.get("type", "")),
-        status=safe_str(wi_attrs.get("status", "")),
-        description_html=_extract_html_value(wi_attrs.get("description")),
-        outline_number=safe_str(wi_attrs.get("outlineNumber", "")),
+        title=safe_str(work_item_attrs.get("title", "")),
+        type=safe_str(work_item_attrs.get("type", "")),
+        status=safe_str(work_item_attrs.get("status", "")),
+        description_html=_extract_html_value(work_item_attrs.get("description")),
+        outline_number=safe_str(work_item_attrs.get("outlineNumber", "")),
     )
 
 
 def _parse_document_part(
     item: object,
-    wi_map: dict[str, dict[str, object]],
+    work_item_map: dict[str, dict[str, object]],
 ) -> DocumentPart | None:
     """Parse a single JSON:API document-part resource into a model.
 
     Args:
         item: A single resource object from the ``data`` array.
-        wi_map: Included work-item lookup built by
-            ``build_included_workitem_map``.
+        work_item_map: Included work-item lookup built by
+            ``build_included_work_item_map``.
 
     Returns:
         A ``DocumentPart`` instance, or ``None`` if *item* is invalid.
     """
     if not isinstance(item, dict):
         return None
-    attrs = item.get("attributes", {})
-    if not isinstance(attrs, dict):
-        attrs = {}
+    attributes = item.get("attributes", {})
+    if not isinstance(attributes, dict):
+        attributes = {}
 
     full_id = safe_str(item.get("id", ""))
     short_id = full_id.rsplit("/", maxsplit=1)[-1] if "/" in full_id else full_id
 
-    raw_type = safe_str(attrs.get("type", ""))
+    raw_type = safe_str(attributes.get("type", ""))
     part_type: _PartType = cast(
         _PartType,
         raw_type if raw_type in _POLARION_PART_TYPES else "normal",
@@ -190,18 +192,18 @@ def _parse_document_part(
     # either an empty <hN></hN> stub or empty entirely. Skip the conversion
     # to avoid emitting noise like "#"/"##" or empty strings to the LLM.
     content_html = (
-        _extract_html_value(attrs.get("content"))
+        _extract_html_value(attributes.get("content"))
         if part_type not in {"heading", "workitem"}
         else ""
     )
-    level = _resolve_heading_level(attrs) if part_type == "heading" else 0
+    level = _resolve_heading_level(attributes) if part_type == "heading" else 0
 
-    rels = item.get("relationships", {})
-    if not isinstance(rels, dict):
-        rels = {}
-    linked = _resolve_linked_work_item(rels, wi_map)
+    relationships = item.get("relationships", {})
+    if not isinstance(relationships, dict):
+        relationships = {}
+    linked = _resolve_linked_work_item(relationships, work_item_map)
 
-    next_full_id = extract_relationship_id(rels, "nextPart")
+    next_full_id = extract_relationship_id(relationships, "nextPart")
     next_short_id = (
         next_full_id.rsplit("/", maxsplit=1)[-1]
         if "/" in next_full_id
@@ -220,7 +222,7 @@ def _parse_document_part(
         work_item_id=linked.short_id,
         work_item_type=linked.type,
         work_item_status=linked.status,
-        external=bool(attrs.get("external", False)),
+        external=bool(attributes.get("external", False)),
         outline_number=linked.outline_number,
         next_part_id=next_short_id,
     )
@@ -356,7 +358,7 @@ def _parse_linked_items(
     Returns:
         List of parsed ``LinkedWorkItemSummary`` instances.
     """
-    wi_map = build_included_workitem_map(response)
+    work_item_map = build_included_work_item_map(response)
 
     items: list[LinkedWorkItemSummary] = []
     data = response.get("data", [])
@@ -366,52 +368,52 @@ def _parse_linked_items(
     for item in data:
         if not isinstance(item, dict):
             continue
-        attrs = item.get("attributes", {})
-        if not isinstance(attrs, dict):
-            attrs = {}
+        attributes = item.get("attributes", {})
+        if not isinstance(attributes, dict):
+            attributes = {}
 
-        role = safe_str(attrs.get("role", ""))
-        suspect = bool(attrs.get("suspect", False))
+        role = safe_str(attributes.get("role", ""))
+        suspect = bool(attributes.get("suspect", False))
 
-        # Resolve target WI via relationships.
-        rels = item.get("relationships", {})
-        if not isinstance(rels, dict):
-            rels = {}
-        wi_full_id = extract_relationship_id(rels, "workItem")
-        wi_id = extract_short_id(wi_full_id)
+        # Resolve target work item via relationships.
+        relationships = item.get("relationships", {})
+        if not isinstance(relationships, dict):
+            relationships = {}
+        work_item_full_id = extract_relationship_id(relationships, "workItem")
+        work_item_id = extract_short_id(work_item_full_id)
 
         # Resolve the target via relationships only — raw ID parsing
         # is intentionally avoided.
-        if not wi_id:
+        if not work_item_id:
             continue
 
         # Resolve title and metadata from the included target work item.
         title = ""
-        wi_type = ""
-        wi_status = ""
+        work_item_type = ""
+        work_item_status = ""
         space_id = ""
         document_name = ""
-        wi = wi_map.get(wi_full_id, {})
-        wi_attrs = wi.get("attributes", {})
-        if isinstance(wi_attrs, dict):
-            title = safe_str(wi_attrs.get("title", ""))
-            wi_type = safe_str(wi_attrs.get("type", ""))
-            wi_status = safe_str(wi_attrs.get("status", ""))
-        wi_rels = wi.get("relationships", {})
-        if isinstance(wi_rels, dict):
+        work_item = work_item_map.get(work_item_full_id, {})
+        work_item_attrs = work_item.get("attributes", {})
+        if isinstance(work_item_attrs, dict):
+            title = safe_str(work_item_attrs.get("title", ""))
+            work_item_type = safe_str(work_item_attrs.get("type", ""))
+            work_item_status = safe_str(work_item_attrs.get("status", ""))
+        work_item_rels = work_item.get("relationships", {})
+        if isinstance(work_item_rels, dict):
             space_id, document_name = split_module_id(
-                extract_relationship_id(wi_rels, "module")
+                extract_relationship_id(work_item_rels, "module")
             )
 
         items.append(
             LinkedWorkItemSummary(
-                id=wi_id,
+                id=work_item_id,
                 title=title,
                 role=role,
                 direction=direction,
                 suspect=suspect,
-                type=wi_type,
-                status=wi_status,
+                type=work_item_type,
+                status=work_item_status,
                 space_id=space_id,
                 document_name=document_name,
             )
@@ -431,7 +433,7 @@ def _extract_document_pair(
 
     Args:
         item: A single JSON:API resource object from the ``data`` array.
-        documents: Mutable set to collect unique (space, doc) pairs into.
+        documents: Mutable set to collect unique (space, document) pairs into.
     """
     mod_id = _get_module_id(item)
     if mod_id:
@@ -439,8 +441,8 @@ def _extract_document_pair(
         # Format: "projectId/spaceId/docName" → parts[1], parts[2:]
         if len(parts) >= 3:  # noqa: PLR2004
             space_id = parts[1]
-            doc_name = "/".join(parts[2:])
-            documents.add((space_id, doc_name))
+            document_name = "/".join(parts[2:])
+            documents.add((space_id, document_name))
 
 
 def _get_module_id(item: object) -> str:
@@ -455,10 +457,10 @@ def _get_module_id(item: object) -> str:
     """
     if not isinstance(item, dict):
         return ""
-    rels = item.get("relationships", {})
-    if not isinstance(rels, dict):
+    relationships = item.get("relationships", {})
+    if not isinstance(relationships, dict):
         return ""
-    return extract_relationship_id(rels, "module")
+    return extract_relationship_id(relationships, "module")
 
 
 # Document-discovery TTL cache (in-process, keyed by project_id).
@@ -624,15 +626,15 @@ async def list_projects(
         for item in data:
             if not isinstance(item, dict):
                 continue
-            attrs = item.get("attributes", {})
-            if not isinstance(attrs, dict):
-                attrs = {}
-            active_attr = attrs.get("active")
+            attributes = item.get("attributes", {})
+            if not isinstance(attributes, dict):
+                attributes = {}
+            active_attr = attributes.get("active")
             active = active_attr if isinstance(active_attr, bool) else True
             items.append(
                 ProjectSummary(
                     id=safe_str(item.get("id", "")),
-                    name=safe_str(attrs.get("name", "")),
+                    name=safe_str(attributes.get("name", "")),
                     active=active,
                 )
             )
@@ -807,7 +809,7 @@ async def get_document(
     try:
         response = await client.get(
             path,
-            params={"fields[documents]": DOC_DETAIL_FIELDS},
+            params={"fields[documents]": DOCUMENT_DETAIL_FIELDS},
         )
     except PolarionNotFoundError as exc:
         raise ValueError(
@@ -827,9 +829,9 @@ async def get_document(
     data = response.get("data", {})
     if not isinstance(data, dict):
         data = {}
-    attrs = data.get("attributes", {})
-    if not isinstance(attrs, dict):
-        attrs = {}
+    attributes = data.get("attributes", {})
+    if not isinstance(attributes, dict):
+        attributes = {}
 
     content_html = ""
     if include_homepage_content_html:
@@ -838,16 +840,16 @@ async def get_document(
         # Pass through verbatim — no markdownify, no sanitize — so the
         # value round-trips through update_document(home_page_content_html=)
         # without losing Polarion-specific spans / data attributes.
-        content_obj = attrs.get("homePageContent", {})
+        content_obj = attributes.get("homePageContent", {})
         if isinstance(content_obj, dict):
             content_html = safe_str(content_obj.get("value", ""))
 
     return DocumentDetail(
-        title=safe_str(attrs.get("title", "")),
-        type=safe_str(attrs.get("type", "")),
-        status=safe_str(attrs.get("status", "")),
+        title=safe_str(attributes.get("title", "")),
+        type=safe_str(attributes.get("type", "")),
+        status=safe_str(attributes.get("status", "")),
         content_html=content_html,
-        custom_fields=extract_custom_fields(attrs, STANDARD_DOCUMENT_ATTRS),
+        custom_fields=extract_custom_fields(attributes, STANDARD_DOCUMENT_ATTRIBUTES),
     )
 
 
@@ -877,7 +879,7 @@ async def list_document_enum_options(  # noqa: PLR0913
     field_id: str = Field(
         description=("Field id (e.g. 'status', 'type', or a custom field id)."),
     ),
-    doc_type: str = Field(
+    document_type: str = Field(
         description=(
             "Document type id (e.g. 'systemReqSpecification')."
             " Pass '~' for type-agnostic options."
@@ -904,11 +906,11 @@ async def list_document_enum_options(  # noqa: PLR0913
     DOCUMENT fields only; work-item fields use a separate endpoint and
     are not surfaced here.
 
-    Returns the FULL enum set for the field on the given doc type.
+    Returns the FULL enum set for the field on the given document type.
     Workflow transitions are NOT filtered by the document's current
     state; that is a separate Polarion endpoint not exposed here.
-    ``doc_type='~'`` returns the type-agnostic option set. An unknown
-    ``doc_type`` is silently treated as ``~`` by Polarion with no error,
+    ``document_type='~'`` returns the type-agnostic option set. An unknown
+    ``document_type`` is silently treated as ``~`` by Polarion with no error,
     so verify the type id (e.g. via ``get_document``) before trusting
     the result.
 
@@ -916,7 +918,7 @@ async def list_document_enum_options(  # noqa: PLR0913
         ctx: MCP tool context (injected automatically).
         project_id: Polarion project ID.
         field_id: Field id whose options to list.
-        doc_type: Document type id, or '~' for type-agnostic.
+        document_type: Document type id, or '~' for type-agnostic.
         page_size: Items per page (1-100, default 100).
         page_number: 1-based page number (default 1).
 
@@ -941,7 +943,7 @@ async def list_document_enum_options(  # noqa: PLR0913
         "/actions/getAvailableOptions"
     )
     params: dict[str, str | int] = {
-        "type": doc_type,
+        "type": document_type,
         "page[size]": page_size,
         "page[number]": page_number,
     }
@@ -950,7 +952,7 @@ async def list_document_enum_options(  # noqa: PLR0913
     except PolarionNotFoundError as exc:
         raise ValueError(
             f"No enum options for field '{field_id}' on document type "
-            f"'{doc_type}' in project '{project_id}'."
+            f"'{document_type}' in project '{project_id}'."
         ) from exc
     except PolarionAuthError as exc:
         raise PermissionError(
@@ -1064,10 +1066,10 @@ async def read_document_parts(  # noqa: PLR0913
             params={
                 "fields[document_parts]": "@all",
                 # DocumentPart only consumes title/type/status/description
-                # from the linked WI — sending ``@all`` here would ship
+                # from the linked work item — sending ``@all`` here would ship
                 # every inline custom field (often KBs per page) for no
-                # downstream use. WI_PART_FIELDS keeps the payload tight.
-                "fields[workitems]": WI_PART_FIELDS,
+                # downstream use. WORK_ITEM_PART_FIELDS keeps the payload tight.
+                "fields[workitems]": WORK_ITEM_PART_FIELDS,
                 "include": "workItem",
                 "page[size]": page_size,
                 "page[number]": page_number,
@@ -1089,13 +1091,13 @@ async def read_document_parts(  # noqa: PLR0913
         ) from exc
 
     # Build lookup of included work items (keyed by full JSON:API id).
-    wi_map = build_included_workitem_map(response)
+    work_item_map = build_included_work_item_map(response)
 
     data = response.get("data", [])
     items: list[DocumentPart] = []
     if isinstance(data, list):
         for item in data:
-            part = _parse_document_part(item, wi_map)
+            part = _parse_document_part(item, work_item_map)
             if part is not None:
                 items.append(part)
 
@@ -1104,13 +1106,13 @@ async def read_document_parts(  # noqa: PLR0913
     # requested offset for an empty out-of-range page can massively inflate
     # the reported total_count.
     raw_doc_total = extract_total_count(response)
-    doc_total = raw_doc_total
-    if doc_total <= 0 and items:
-        doc_total = (page_number - 1) * page_size + len(items)
+    document_total = raw_doc_total
+    if document_total <= 0 and items:
+        document_total = (page_number - 1) * page_size + len(items)
 
     return PaginatedResult[DocumentPart](
         items=items,
-        total_count=doc_total,
+        total_count=document_total,
         page=page_number,
         page_size=page_size,
         has_more=compute_has_more(
@@ -1222,7 +1224,7 @@ async def list_work_items(
     """List and search work items in a Polarion project.
 
     Pass a Lucene ``query`` (`type:requirement`, `status:approved AND
-    type:requirement`, `title:SRS*`) or omit it for all WIs. Leading
+    type:requirement`, `title:SRS*`) or omit it for all work items. Leading
     wildcards (`*foo*`) return HTTP 400. ``module`` is not indexed.
 
     Description body text is NOT indexed — for content search, scan
@@ -1248,7 +1250,7 @@ async def list_work_items(
     """
     client = get_client(ctx)
     params: dict[str, str | int] = {
-        "fields[workitems]": WI_LIST_FIELDS,
+        "fields[workitems]": WORK_ITEM_LIST_FIELDS,
         # Polarion does not inline ``data`` for to-many relationships
         # unless the resource is included; ``include=assignee`` ensures
         # ``relationships.assignee.data`` is populated so that
@@ -1283,13 +1285,13 @@ async def list_work_items(
     # count as a lower bound when the API total is missing/zero and the
     # current page actually contains items.
     raw_wi_total = extract_total_count(response)
-    wi_total = raw_wi_total
-    if wi_total == 0 and items:
-        wi_total = (page_number - 1) * page_size + len(items)
+    work_item_total = raw_wi_total
+    if work_item_total == 0 and items:
+        work_item_total = (page_number - 1) * page_size + len(items)
 
     return PaginatedResult[WorkItemSummary](
         items=items,
-        total_count=wi_total,
+        total_count=work_item_total,
         page=page_number,
         page_size=page_size,
         has_more=compute_has_more(
@@ -1373,7 +1375,7 @@ async def get_work_item(
         response = await client.get(
             path,
             params={
-                "fields[workitems]": WI_DETAIL_FIELDS,
+                "fields[workitems]": WORK_ITEM_DETAIL_FIELDS,
                 "include": "assignee",
             },
         )
@@ -1518,7 +1520,7 @@ async def get_linked_work_items(  # noqa: PLR0913
 
         ``role`` is ``None`` for back-direction links — Polarion's
         ``linkedWorkItems:`` query does not expose the originating role
-        on this server. Recover it by calling forward on the source WI.
+        on this server. Recover it by calling forward on the source work item.
 
     Raises:
         ValueError: Work item or project not found.
@@ -1559,7 +1561,7 @@ async def _get_forward_linked_page(
             path,
             params={
                 "fields[linkedworkitems]": "@all",
-                "fields[workitems]": WI_LIST_FIELDS,
+                "fields[workitems]": WORK_ITEM_LIST_FIELDS,
                 "include": "workItem",
                 "page[size]": page_size,
                 "page[number]": page_number,
@@ -1612,7 +1614,7 @@ async def _get_back_linked_page(
             f"/projects/{project_id}/workitems",
             params={
                 "query": f"linkedWorkItems:{work_item_id}",
-                "fields[workitems]": WI_LIST_FIELDS,
+                "fields[workitems]": WORK_ITEM_LIST_FIELDS,
                 "page[size]": page_size,
                 "page[number]": page_number,
             },

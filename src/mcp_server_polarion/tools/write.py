@@ -31,9 +31,9 @@ from mcp_server_polarion.models import (
 )
 from mcp_server_polarion.server import mcp
 from mcp_server_polarion.tools._helpers import (
-    STANDARD_DOCUMENT_ATTRS,
-    STANDARD_WORKITEM_ATTRS,
-    WI_DETAIL_FIELDS,
+    STANDARD_DOCUMENT_ATTRIBUTES,
+    STANDARD_WORK_ITEM_ATTRIBUTES,
+    WORK_ITEM_DETAIL_FIELDS,
     encode_path_segment,
     extract_short_id,
     get_client,
@@ -100,7 +100,7 @@ def _build_work_item_payload(  # noqa: PLR0913
         attributes["hyperlinks"] = [
             {"role": h.role, "title": h.title, "uri": h.uri} for h in hyperlinks
         ]
-    merge_custom_fields(attributes, custom_fields, STANDARD_WORKITEM_ATTRS)
+    merge_custom_fields(attributes, custom_fields, STANDARD_WORK_ITEM_ATTRIBUTES)
 
     relationships: dict[str, JsonValue] = {}
     if assignee_ids:
@@ -153,7 +153,7 @@ def _build_update_work_item_payload(  # noqa: PLR0913
     assignee_ids: list[str] | None,
     custom_fields: dict[str, object] | None = None,
 ) -> dict[str, JsonValue]:
-    """Build the JSON:API request body for ``PATCH /projects/{p}/workitems/{wi}``.
+    """Build the JSON:API PATCH body for ``/projects/{p}/workitems/{work_item}``.
 
     Mirrors ``_build_work_item_payload`` but produces a PATCH-shaped body:
     ``data`` is a single resource object (not a list), with a required
@@ -188,7 +188,7 @@ def _build_update_work_item_payload(  # noqa: PLR0913
         attributes["hyperlinks"] = [
             {"role": h.role, "title": h.title, "uri": h.uri} for h in hyperlinks
         ]
-    merge_custom_fields(attributes, custom_fields, STANDARD_WORKITEM_ATTRS)
+    merge_custom_fields(attributes, custom_fields, STANDARD_WORK_ITEM_ATTRIBUTES)
 
     relationships: dict[str, JsonValue] = {}
     if assignee_ids:
@@ -281,7 +281,7 @@ def _build_update_document_payload(  # noqa: PLR0913
             "type": "text/html",
             "value": home_page_content_html,
         }
-    merge_custom_fields(attributes, custom_fields, STANDARD_DOCUMENT_ATTRS)
+    merge_custom_fields(attributes, custom_fields, STANDARD_DOCUMENT_ATTRIBUTES)
 
     item: dict[str, JsonValue] = {
         "type": "documents",
@@ -302,7 +302,7 @@ def _build_update_document_payload(  # noqa: PLR0913
     tags={"write"},
     timeout=60.0,
     annotations={
-        # Pure additive operation per MCP spec — creates a new WI without
+        # Pure additive operation per MCP spec — creates a new work item without
         # mutating existing data, so destructiveHint is False. Not idempotent
         # because retrying with the same input creates a duplicate.
         "readOnlyHint": False,
@@ -631,7 +631,7 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
 
     Raises:
         ValueError: No mutating fields supplied, action without body,
-            custom-field key collides with a standard attribute, or WI
+            custom-field key collides with a standard attribute, or work item
             not found.
         PermissionError: Token lacks permission.
         RuntimeError: Other Polarion API errors.
@@ -731,7 +731,7 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
         response = await client.get(
             base_path,
             params={
-                "fields[workitems]": WI_DETAIL_FIELDS,
+                "fields[workitems]": WORK_ITEM_DETAIL_FIELDS,
                 "include": "assignee",
             },
         )
@@ -778,7 +778,7 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     annotations={
         # idempotentHint=False: the moveToDocument action endpoint is not
         # verified to be safe on repeat — a second call against an already-
-        # moved WI may 400 instead of no-opping (per Polarion's heading-move
+        # moved work item may 400 instead of no-opping (per Polarion's heading-move
         # behaviour, see CLAUDE.md). Conservative until confirmed.
         "readOnlyHint": False,
         "destructiveHint": True,
@@ -820,16 +820,16 @@ async def move_work_item_to_document(  # noqa: PLR0913
 ) -> WorkItemMoveResult:
     """Move a work item into a Polarion document at a specific position.
 
-    Calls the ``moveToDocument`` action endpoint, which updates the WI's
+    Calls the ``moveToDocument`` action endpoint, which updates the work item's
     ``module`` relationship, inserts a document part at the specified
     position, and assigns a proper ``outline_number`` — atomically. This
-    is the ONLY supported way to attach a WI body to a document; editing
+    is the ONLY supported way to attach a work item body to a document; editing
     ``homePageContent`` directly to inject a macro reference leaves the
     ``module`` relationship unset and produces an inconsistent state.
 
     Heading-type work items are rejected (HTTP 400 "Cannot move
     headings"); headings must be created inside their target document.
-    If the WI is already in a different document, this detaches it from
+    If the work item is already in a different document, this detaches it from
     the source — the operation is a move, not a copy.
 
     Exactly one of ``previous_part_id`` (insert AFTER) / ``next_part_id``
@@ -852,8 +852,8 @@ async def move_work_item_to_document(  # noqa: PLR0913
         on success — call ``read_document_parts`` for the new part ID.
 
     Raises:
-        ValueError: Position not exactly one of two, heading WI,
-            or WI / document / part not found.
+        ValueError: Position not exactly one of two, heading work item,
+            or work item / document / part not found.
         PermissionError: Token lacks permission.
         RuntimeError: Other Polarion API errors.
     """
@@ -985,10 +985,10 @@ async def update_document(  # noqa: PLR0913
     Body-write behaviour:
 
     - **Heading auto-create**: inline ``<h1>..<h4>`` tags become heading
-      WIs with ``module`` and ``outline_number`` set automatically.
+      work items with ``module`` and ``outline_number`` set automatically.
       A bare ``<hN>Title</hN>`` alone is safe.
     - **Orphan headings**: removing an ``<hN>`` removes the part but
-      leaves the heading WI behind (still ``module``-linked, no
+      leaves the heading work item behind (still ``module``-linked, no
       ``outline_number``).
     - **DO NOT inject anchorless ``<p>`` paragraphs**: ``<h3>X</h3>
       <p>Body</p>`` lets the PATCH succeed but the next
@@ -997,10 +997,10 @@ async def update_document(  # noqa: PLR0913
       breaks server-side part derivation. For body text, create a new
       work item and attach via ``create_work_item`` +
       ``move_work_item_to_document``.
-    - **DO NOT inject WI macro references**: appending
+    - **DO NOT inject work item macro references**: appending
       ``<div id="polarion_wiki macro name=module-workitem;params=id=NEW">``
       creates a ``workitem_<NEW>`` part visible in
-      ``read_document_parts`` but leaves the WI's ``module`` relationship
+      ``read_document_parts`` but leaves the work item's ``module`` relationship
       unset (``space_id=""``, ``outline_number=""``) — an inconsistent
       half-attached state. Always attach via
       ``move_work_item_to_document``.

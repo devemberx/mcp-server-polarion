@@ -119,7 +119,7 @@ class TestSuccessfulResponses:
             mock.post("/projects/P1/workitems").mock(
                 return_value=httpx.Response(
                     201,
-                    json={"data": [{"id": "P1/WI-001"}]},
+                    json={"data": [{"id": "P1/work item-001"}]},
                 ),
             )
 
@@ -134,17 +134,17 @@ class TestSuccessfulResponses:
                     },
                 )
 
-            assert result["data"] == [{"id": "P1/WI-001"}]
+            assert result["data"] == [{"id": "P1/work item-001"}]
 
     async def test_patch_returns_empty_on_204(self) -> None:
         with respx.mock(base_url=BASE) as mock:
-            mock.patch("/projects/P1/workitems/WI-001").mock(
+            mock.patch("/projects/P1/workitems/work item-001").mock(
                 return_value=httpx.Response(204),
             )
 
             async with PolarionClient(_config(), write_delay=0) as client:
                 result = await client.patch(
-                    "/projects/P1/workitems/WI-001",
+                    "/projects/P1/workitems/work item-001",
                     json={"data": {"attributes": {"title": "Updated"}}},
                 )
 
@@ -204,7 +204,7 @@ class TestErrorMapping:
 
     async def test_404_raises_not_found_error(self) -> None:
         with respx.mock(base_url=BASE) as mock:
-            mock.get("/projects/MISSING/workitems/WI-999").mock(
+            mock.get("/projects/MISSING/workitems/work item-999").mock(
                 return_value=httpx.Response(
                     404,
                     json={"error": "Not Found"},
@@ -213,7 +213,7 @@ class TestErrorMapping:
 
             async with PolarionClient(_config(), write_delay=0) as client:
                 with pytest.raises(PolarionNotFoundError) as exc_info:
-                    await client.get("/projects/MISSING/workitems/WI-999")
+                    await client.get("/projects/MISSING/workitems/work item-999")
 
             assert exc_info.value.status_code == 404
 
