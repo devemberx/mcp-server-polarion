@@ -558,8 +558,8 @@ class LinkedWorkItemSummary(BaseModel):
     )
     direction: Literal["forward", "back"] = Field(
         description=(
-            "'forward' for outgoing links (this WI links to the target). "
-            "'back' for incoming links (the target links to this WI)."
+            "'forward' for outgoing links (this work item links to the target). "
+            "'back' for incoming links (the target links to this work item)."
         )
     )
     suspect: bool = Field(

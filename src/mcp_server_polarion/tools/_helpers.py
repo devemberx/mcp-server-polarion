@@ -6,7 +6,7 @@ defined here are for internal use within the ``tools`` package and are
 
 Body fields (``description``, ``homePageContent``) are passed through as
 raw Polarion HTML on the get/update round-trip path — Markdown conversion
-is reserved for synthesis paths (``read_document``, embedded WI bodies
+is reserved for synthesis paths (``read_document``, embedded work item bodies
 inside ``read_document_parts``) and lives in ``tools.read``.
 """
 
@@ -50,12 +50,12 @@ DEFAULT_PAGE_SIZE: Final[int] = 100
 
 # Sparse fieldsets. Detail / document fetches use ``@all`` because this
 # Polarion server inlines custom fields under ``attributes`` and silently
-# drops narrower ``customFields.*`` tokens. ``WI_PART_FIELDS`` stays tight
-# because ``DocumentPart`` does not surface embedded-WI customs.
-WI_LIST_FIELDS: Final[str] = "title,type,status,priority,updated,module,assignee"
-WI_DETAIL_FIELDS: Final[str] = "@all"
-WI_PART_FIELDS: Final[str] = "title,type,status,description,outlineNumber"
-DOC_DETAIL_FIELDS: Final[str] = "@all"
+# drops narrower ``customFields.*`` tokens. ``WORK_ITEM_PART_FIELDS`` stays tight
+# because ``DocumentPart`` does not surface embedded-work item customs.
+WORK_ITEM_LIST_FIELDS: Final[str] = "title,type,status,priority,updated,module,assignee"
+WORK_ITEM_DETAIL_FIELDS: Final[str] = "@all"
+WORK_ITEM_PART_FIELDS: Final[str] = "title,type,status,description,outlineNumber"
+DOCUMENT_DETAIL_FIELDS: Final[str] = "@all"
 
 # Canonical standard attribute names per the Polarion REST OpenAPI schema.
 # Used by ``extract_custom_fields`` as an allowlist: anything appearing in
@@ -63,7 +63,7 @@ DOC_DETAIL_FIELDS: Final[str] = "@all"
 # project-defined custom field. Sourced verbatim from the OpenAPI workitem
 # schema; a future Polarion release that adds new standard attributes
 # would misclassify them as custom until this set is updated.
-STANDARD_WORKITEM_ATTRS: Final[frozenset[str]] = frozenset(
+STANDARD_WORK_ITEM_ATTRIBUTES: Final[frozenset[str]] = frozenset(
     {
         "id",
         "type",
@@ -88,9 +88,9 @@ STANDARD_WORKITEM_ATTRS: Final[frozenset[str]] = frozenset(
 )
 
 # Canonical standard document attribute names per the Polarion REST
-# OpenAPI schema. Mirrors ``STANDARD_WORKITEM_ATTRS`` for the document
+# OpenAPI schema. Mirrors ``STANDARD_WORK_ITEM_ATTRIBUTES`` for the document
 # resource type.
-STANDARD_DOCUMENT_ATTRS: Final[frozenset[str]] = frozenset(
+STANDARD_DOCUMENT_ATTRIBUTES: Final[frozenset[str]] = frozenset(
     {
         "id",
         "title",
@@ -225,7 +225,7 @@ def encode_path_segment(segment: str) -> str:
     return quote(segment, safe="")
 
 
-def build_included_workitem_map(
+def build_included_work_item_map(
     response: dict[str, object],
 ) -> dict[str, dict[str, object]]:
     """Build a lookup dict of included work items from a JSON:API response.
@@ -236,29 +236,29 @@ def build_included_workitem_map(
     Returns:
         Mapping from full work-item ID to the included resource dict.
     """
-    wi_map: dict[str, dict[str, object]] = {}
+    work_item_map: dict[str, dict[str, object]] = {}
     included = response.get("included", [])
     if isinstance(included, list):
         for inc in included:
             if isinstance(inc, dict) and inc.get("type") == "workitems":
-                wi_map[safe_str(inc.get("id", ""))] = inc
-    return wi_map
+                work_item_map[safe_str(inc.get("id", ""))] = inc
+    return work_item_map
 
 
 def extract_relationship_id(
-    rels: dict[str, object],
+    relationships: dict[str, object],
     rel_name: str,
 ) -> str:
     """Extract the ``data.id`` of a named relationship.
 
     Args:
-        rels: The ``relationships`` dict of a JSON:API resource.
+        relationships: The ``relationships`` dict of a JSON:API resource.
         rel_name: Relationship key (e.g. ``'nextPart'``).
 
     Returns:
         The related resource ID, or ``""`` if absent.
     """
-    rel = rels.get(rel_name, {})
+    rel = relationships.get(rel_name, {})
     if isinstance(rel, dict):
         inner = rel.get("data")
         if isinstance(inner, dict):
@@ -267,20 +267,20 @@ def extract_relationship_id(
 
 
 def extract_relationship_ids(
-    rels: dict[str, object],
+    relationships: dict[str, object],
     rel_name: str,
 ) -> list[str]:
     """Extract the ``data[].id`` list of a to-many relationship.
 
     Args:
-        rels: The ``relationships`` dict of a JSON:API resource.
+        relationships: The ``relationships`` dict of a JSON:API resource.
         rel_name: Relationship key (e.g. ``'assignee'``).
 
     Returns:
         List of related resource IDs in declaration order. Empty list
         when the relationship is absent or its data array is empty.
     """
-    rel = rels.get(rel_name, {})
+    rel = relationships.get(rel_name, {})
     if not isinstance(rel, dict):
         return []
     data = rel.get("data")
@@ -339,26 +339,27 @@ def build_work_item_summary_kwargs(
         Dict suitable for ``WorkItemSummary(**kwargs)`` /
         ``WorkItemDetail(**kwargs, description=..., project_id=...)``.
     """
-    attrs = item.get("attributes", {})
-    if not isinstance(attrs, dict):
-        attrs = {}
-    rels = item.get("relationships", {})
-    if not isinstance(rels, dict):
-        rels = {}
+    attributes = item.get("attributes", {})
+    if not isinstance(attributes, dict):
+        attributes = {}
+    relationships = item.get("relationships", {})
+    if not isinstance(relationships, dict):
+        relationships = {}
 
-    module_id = extract_relationship_id(rels, "module")
+    module_id = extract_relationship_id(relationships, "module")
     space_id, document_name = split_module_id(module_id)
     assignee_ids = [
-        extract_short_id(uid) for uid in extract_relationship_ids(rels, "assignee")
+        extract_short_id(uid)
+        for uid in extract_relationship_ids(relationships, "assignee")
     ]
 
     return {
         "id": extract_short_id(safe_str(item.get("id", ""))),
-        "title": safe_str(attrs.get("title", "")),
-        "type": safe_str(attrs.get("type", "")),
-        "status": safe_str(attrs.get("status", "")),
-        "priority": safe_str(attrs.get("priority", "")),
-        "updated": safe_str(attrs.get("updated", "")),
+        "title": safe_str(attributes.get("title", "")),
+        "type": safe_str(attributes.get("type", "")),
+        "status": safe_str(attributes.get("status", "")),
+        "priority": safe_str(attributes.get("priority", "")),
+        "updated": safe_str(attributes.get("updated", "")),
         "space_id": space_id,
         "document_name": document_name,
         "assignee_ids": assignee_ids,
@@ -366,7 +367,7 @@ def build_work_item_summary_kwargs(
 
 
 def extract_custom_fields(
-    attrs: dict[str, object],
+    attributes: dict[str, object],
     standard: frozenset[str],
 ) -> dict[str, object]:
     """Return the inline custom-field subset of a JSON:API attributes dict.
@@ -378,8 +379,8 @@ def extract_custom_fields(
     tokens are silently ignored. Callers fetch with ``fields[...]=@all``
     so every populated attribute comes back, then pass the resulting
     ``attributes`` dict here together with the standard-attribute
-    allowlist for the resource type (``STANDARD_WORKITEM_ATTRS`` or
-    ``STANDARD_DOCUMENT_ATTRS``). Anything not in the allowlist is
+    allowlist for the resource type (``STANDARD_WORK_ITEM_ATTRIBUTES`` or
+    ``STANDARD_DOCUMENT_ATTRIBUTES``). Anything not in the allowlist is
     reported as a custom field.
 
     Values are returned verbatim — primitives (str / int / float / bool /
@@ -387,7 +388,7 @@ def extract_custom_fields(
     ``{"type": "text/html", "value": "<...>"}`` both pass through so the
     shape round-trips back to Polarion unchanged on a future PATCH.
     """
-    return {k: v for k, v in attrs.items() if k not in standard}
+    return {k: v for k, v in attributes.items() if k not in standard}
 
 
 def merge_custom_fields(
@@ -431,7 +432,7 @@ def merge_custom_fields(
         customs: Custom-field key/value pairs supplied by the caller, or
             ``None`` to skip.
         standard: The standard-attribute allowlist for the resource type
-            (``STANDARD_WORKITEM_ATTRS`` or ``STANDARD_DOCUMENT_ATTRS``).
+            (``STANDARD_WORK_ITEM_ATTRIBUTES`` or ``STANDARD_DOCUMENT_ATTRIBUTES``).
 
     Raises:
         ValueError: When any key in ``customs`` is also in ``standard``.
@@ -489,7 +490,7 @@ def parse_work_item_detail(
 
     Shared by ``get_work_item`` and ``update_work_item`` (which issues a
     follow-up GET after the PATCH succeeds). Expects the resource to
-    have been fetched with ``fields[workitems]=WI_DETAIL_FIELDS`` and
+    have been fetched with ``fields[workitems]=WORK_ITEM_DETAIL_FIELDS`` and
     ``include=assignee`` so that ``relationships.assignee.data`` is
     populated.
 
@@ -509,14 +510,14 @@ def parse_work_item_detail(
         A fully-populated ``WorkItemDetail`` model with
         ``description_html`` carrying the raw HTML payload.
     """
-    attrs = item.get("attributes", {})
-    if not isinstance(attrs, dict):
-        attrs = {}
-    rels = item.get("relationships", {})
-    if not isinstance(rels, dict):
-        rels = {}
+    attributes = item.get("attributes", {})
+    if not isinstance(attributes, dict):
+        attributes = {}
+    relationships = item.get("relationships", {})
+    if not isinstance(relationships, dict):
+        relationships = {}
 
-    desc_obj = attrs.get("description", {})
+    desc_obj = attributes.get("description", {})
     desc_html = ""
     if isinstance(desc_obj, dict):
         desc_html = safe_str(desc_obj.get("value", ""))
@@ -529,13 +530,13 @@ def parse_work_item_detail(
         **summary_kwargs,
         description_html=desc_html,
         project_id=project_id,
-        author_id=extract_short_id(extract_relationship_id(rels, "author")),
-        created=safe_str(attrs.get("created", "")),
-        resolution=safe_str(attrs.get("resolution", "")),
-        severity=safe_str(attrs.get("severity", "")),
-        outline_number=safe_str(attrs.get("outlineNumber", "")),
-        hyperlinks=parse_hyperlinks(attrs.get("hyperlinks")),
-        custom_fields=extract_custom_fields(attrs, STANDARD_WORKITEM_ATTRS),
+        author_id=extract_short_id(extract_relationship_id(relationships, "author")),
+        created=safe_str(attributes.get("created", "")),
+        resolution=safe_str(attributes.get("resolution", "")),
+        severity=safe_str(attributes.get("severity", "")),
+        outline_number=safe_str(attributes.get("outlineNumber", "")),
+        hyperlinks=parse_hyperlinks(attributes.get("hyperlinks")),
+        custom_fields=extract_custom_fields(attributes, STANDARD_WORK_ITEM_ATTRIBUTES),
     )
 
 
@@ -583,13 +584,13 @@ def parse_work_item_summaries(
 
 __all__: list[str] = [
     "DEFAULT_PAGE_SIZE",
-    "DOC_DETAIL_FIELDS",
-    "STANDARD_DOCUMENT_ATTRS",
-    "STANDARD_WORKITEM_ATTRS",
-    "WI_DETAIL_FIELDS",
-    "WI_LIST_FIELDS",
-    "WI_PART_FIELDS",
-    "build_included_workitem_map",
+    "DOCUMENT_DETAIL_FIELDS",
+    "STANDARD_DOCUMENT_ATTRIBUTES",
+    "STANDARD_WORK_ITEM_ATTRIBUTES",
+    "WORK_ITEM_DETAIL_FIELDS",
+    "WORK_ITEM_LIST_FIELDS",
+    "WORK_ITEM_PART_FIELDS",
+    "build_included_work_item_map",
     "build_work_item_summary_kwargs",
     "compute_has_more",
     "encode_path_segment",

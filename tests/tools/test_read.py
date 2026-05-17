@@ -492,10 +492,10 @@ class TestListDocuments:
     ) -> None:
         """Linear scan visits every heading page exactly once."""
 
-        def _make_item(doc: str) -> dict:
+        def _make_item(document: str) -> dict:
             return {
                 "relationships": {
-                    "module": {"data": {"type": "documents", "id": f"p/S/{doc}"}}
+                    "module": {"data": {"type": "documents", "id": f"p/S/{document}"}}
                 }
             }
 
@@ -532,10 +532,10 @@ class TestListDocuments:
     ) -> None:
         """A short final page (without totalCount/links.next) ends the loop."""
 
-        def _make_item(doc: str) -> dict:
+        def _make_item(document: str) -> dict:
             return {
                 "relationships": {
-                    "module": {"data": {"type": "documents", "id": f"p/S/{doc}"}}
+                    "module": {"data": {"type": "documents", "id": f"p/S/{document}"}}
                 }
             }
 
@@ -567,10 +567,10 @@ class TestListDocuments:
     ) -> None:
         """Multiple documents on a single page → one API call."""
 
-        def _make_item(doc: str) -> dict:
+        def _make_item(document: str) -> dict:
             return {
                 "relationships": {
-                    "module": {"data": {"type": "documents", "id": f"p/S/{doc}"}}
+                    "module": {"data": {"type": "documents", "id": f"p/S/{document}"}}
                 }
             }
 
@@ -634,7 +634,7 @@ class TestListDocuments:
         """Different project IDs do not share cache entries."""
 
         async def _mock_get(_path, *, params=None):
-            # Echo project from path? Simpler: return distinct doc per call.
+            # Echo project from path? Simpler: return distinct document per call.
             return {
                 "data": [
                     {
@@ -858,7 +858,7 @@ class TestGetDocument:
     async def test_polarion_specific_markup_round_trips(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Polarion-specific spans / data-* attrs must survive on read.
+        """Polarion-specific spans / data-* attributes must survive on read.
 
         This is the core round-trip guarantee — the same string must
         be passable back into update_document(home_page_content_html=...)
@@ -981,7 +981,7 @@ class TestGetDocument:
             "data": {
                 "id": "proj1/_default/SRS",
                 "attributes": {
-                    # Standard attrs — present but excluded from custom_fields.
+                    # Standard attributes — present but excluded from custom_fields.
                     "title": "SRS",
                     "type": "req_specification",
                     "status": "approved",
@@ -1106,7 +1106,7 @@ class TestListDocumentEnumOptions:
             mock_ctx,
             project_id="MCP_Test_Project",
             field_id="status",
-            doc_type="systemReqSpecification",
+            document_type="systemReqSpecification",
             page_size=100,
             page_number=1,
         )
@@ -1136,7 +1136,7 @@ class TestListDocumentEnumOptions:
             mock_ctx,
             project_id="MCP_Test_Project",
             field_id="status",
-            doc_type="systemReqSpecification",
+            document_type="systemReqSpecification",
             page_size=50,
             page_number=2,
         )
@@ -1164,7 +1164,7 @@ class TestListDocumentEnumOptions:
             mock_ctx,
             project_id="MCP_Test_Project",
             field_id="status",
-            doc_type="~",
+            document_type="~",
             page_size=100,
             page_number=1,
         )
@@ -1184,7 +1184,7 @@ class TestListDocumentEnumOptions:
             mock_ctx,
             project_id="MCP_Test_Project",
             field_id="status",
-            doc_type="systemReqSpecification",
+            document_type="systemReqSpecification",
             page_size=100,
             page_number=1,
         )
@@ -1216,7 +1216,7 @@ class TestListDocumentEnumOptions:
             mock_ctx,
             project_id="MCP_Test_Project",
             field_id="status",
-            doc_type="systemReqSpecification",
+            document_type="systemReqSpecification",
             page_size=100,
             page_number=1,
         )
@@ -1238,7 +1238,7 @@ class TestListDocumentEnumOptions:
             mock_ctx,
             project_id="MCP_Test_Project",
             field_id="status",
-            doc_type="systemReqSpecification",
+            document_type="systemReqSpecification",
             page_size=100,
             page_number=1,
         )
@@ -1259,7 +1259,7 @@ class TestListDocumentEnumOptions:
                 mock_ctx,
                 project_id="MCP_Test_Project",
                 field_id="nope",
-                doc_type="systemReqSpecification",
+                document_type="systemReqSpecification",
                 page_size=100,
                 page_number=1,
             )
@@ -1277,7 +1277,7 @@ class TestListDocumentEnumOptions:
                 mock_ctx,
                 project_id="MCP_Test_Project",
                 field_id="status",
-                doc_type="systemReqSpecification",
+                document_type="systemReqSpecification",
                 page_size=100,
                 page_number=1,
             )
@@ -1295,7 +1295,7 @@ class TestListDocumentEnumOptions:
                 mock_ctx,
                 project_id="MCP_Test_Project",
                 field_id="status",
-                doc_type="systemReqSpecification",
+                document_type="systemReqSpecification",
                 page_size=100,
                 page_number=1,
             )
@@ -1469,18 +1469,18 @@ class TestReadDocumentParts:
         assert heading.external is False
         assert heading.next_part_id == "workitem_MCPT-002"
 
-        wi_part = result.items[1]
-        assert wi_part.id == "workitem_MCPT-002"
-        assert wi_part.type == "workitem"
-        assert wi_part.level == 0
-        assert wi_part.title == "Login Feature"
-        assert wi_part.content == ""
-        assert "login" in wi_part.description.lower()
-        assert wi_part.work_item_id == "MCPT-002"
-        assert wi_part.work_item_type == "requirement"
-        assert wi_part.work_item_status == "draft"
-        assert wi_part.external is True
-        assert wi_part.next_part_id == "polarion_1"
+        work_item_part = result.items[1]
+        assert work_item_part.id == "workitem_MCPT-002"
+        assert work_item_part.type == "workitem"
+        assert work_item_part.level == 0
+        assert work_item_part.title == "Login Feature"
+        assert work_item_part.content == ""
+        assert "login" in work_item_part.description.lower()
+        assert work_item_part.work_item_id == "MCPT-002"
+        assert work_item_part.work_item_type == "requirement"
+        assert work_item_part.work_item_status == "draft"
+        assert work_item_part.external is True
+        assert work_item_part.next_part_id == "polarion_1"
 
         normal_part = result.items[2]
         assert normal_part.type == "normal"
@@ -1519,10 +1519,10 @@ class TestReadDocumentParts:
     async def test_uses_tight_workitem_fieldset(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Embedded WIs are fetched with WI_PART_FIELDS, not ``@all``.
+        """Embedded work items are fetched with WORK_ITEM_PART_FIELDS, not ``@all``.
 
         DocumentPart only consumes title/type/status/description from the
-        linked WI; sending ``@all`` would ship every inline custom field
+        linked work item; sending ``@all`` would ship every inline custom field
         (KBs per page) for no downstream use. This guard prevents a
         regression to the old over-fetching behaviour.
         """
@@ -1909,7 +1909,9 @@ class TestReadDocument:
                     "id": "proj1/_default/SRS/polarion_1",
                     "attributes": {
                         "id": "polarion_1",
-                        "content": "<p>Some prose between the WI and a heading.</p>",
+                        "content": (
+                            "<p>Some prose between the work item and a heading.</p>"
+                        ),
                         "type": "normal",
                     },
                     "relationships": {},
@@ -1978,7 +1980,7 @@ class TestReadDocument:
             "\n"
             "The system shall support login.\n"
             "\n"
-            "Some prose between the WI and a heading."
+            "Some prose between the work item and a heading."
         )
 
     async def test_pagination_params_forwarded_to_http(
@@ -2096,7 +2098,7 @@ class TestReadDocument:
     async def test_workitem_empty_title_and_description_renders_bare_id(
         self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Defensive guard for sparse-data WIs (rare but observed)."""
+        """Defensive guard for sparse-data work items (rare but observed)."""
         _stub_parts(
             monkeypatch,
             [
@@ -2800,7 +2802,7 @@ class TestGetWorkItem:
             "data": {
                 "id": "proj1/MCPT-007",
                 "attributes": {
-                    "title": "WI",
+                    "title": "work item",
                     "type": "task",
                     "status": "draft",
                     "description": {
@@ -2820,12 +2822,12 @@ class TestGetWorkItem:
 
         assert result.description_html == ""
         # Other metadata still populated.
-        assert result.title == "WI"
+        assert result.title == "work item"
 
     async def test_polarion_specific_markup_round_trips(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Polarion-specific spans / data-* attrs must survive on read.
+        """Polarion-specific spans / data-* attributes must survive on read.
 
         Core round-trip guarantee for update_work_item(description_html=).
         """
@@ -2956,8 +2958,8 @@ class TestGetWorkItem:
             "data": {
                 "id": "proj1/MCPT-999",
                 "attributes": {
-                    # Standard attrs — present but excluded from custom_fields.
-                    "title": "WI with customs",
+                    # Standard attributes — present but excluded from custom_fields.
+                    "title": "work item with customs",
                     "type": "softwarerequirement",
                     "status": "approved",
                     "priority": "50.0",
@@ -3108,7 +3110,7 @@ class TestReadWorkItem:
     async def test_polarion_specific_markup_collapses_to_text(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Polarion span/data-* attrs get stripped by html_to_markdown.
+        """Polarion span/data-* attributes get stripped by html_to_markdown.
 
         Marks the read-only contract: WorkItemRead.description is NOT a
         round-trip shape — feeding it back to update_work_item would lose
@@ -3352,7 +3354,7 @@ class TestGetLinkedWorkItems:
                     "type": "workitems",
                     "id": f"proj1/MCPT-{i:03d}",
                     "attributes": {
-                        "title": f"WI {i}",
+                        "title": f"work item {i}",
                         "type": "requirement",
                         "status": "open",
                     },
