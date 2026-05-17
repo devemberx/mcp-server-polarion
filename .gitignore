@@ -42,4 +42,5 @@ Thumbs.db
 .mcp.json
 
 # Claude configuration
-.claude/
+.claude/*
+!.claude/skills/
