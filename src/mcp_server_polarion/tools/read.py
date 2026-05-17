@@ -1,6 +1,6 @@
 """Read-only MCP tools for querying Polarion ALM.
 
-Nine tools that retrieve projects, documents, work items, and their
+Ten tools that retrieve projects, documents, work items, and their
 relationships.  Every tool returns Pydantic models -- never raw ``dict``.
 
 Body fields use two different formats depending on the tool's purpose:
