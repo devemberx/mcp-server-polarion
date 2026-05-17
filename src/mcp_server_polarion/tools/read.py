@@ -932,7 +932,9 @@ async def list_document_enum_options(  # noqa: PLR0913
         - ``terminal``: For status fields, True for workflow end-states.
 
     Raises:
-        ValueError: Project, field, or document type not found.
+        ValueError: Project or field not found. An unknown
+            ``document_type`` does NOT raise; Polarion silently
+            falls back to the ``~`` set.
         PermissionError: Token lacks permission.
         RuntimeError: Other Polarion API errors.
     """
@@ -997,7 +999,8 @@ async def list_work_item_enum_options(  # noqa: PLR0913
     project_id: str = Field(description="Polarion project ID."),
     field_id: str = Field(
         description=(
-            "Field id (e.g. 'status', 'type', 'severity', or a custom field id)."
+            "Field id (e.g. 'status', 'type', 'severity', 'priority',"
+            " or a custom field id)."
         ),
     ),
     work_item_type: str = Field(
@@ -1054,7 +1057,9 @@ async def list_work_item_enum_options(  # noqa: PLR0913
         - ``terminal``: For status fields, True for workflow end-states.
 
     Raises:
-        ValueError: Project, field, or work item type not found.
+        ValueError: Project or field not found. An unknown
+            ``work_item_type`` does NOT raise; Polarion silently
+            falls back to the ``~`` set.
         PermissionError: Token lacks permission.
         RuntimeError: Other Polarion API errors.
     """
