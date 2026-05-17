@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Enforce the commit-message rules from .github/CONTRIBUTING.md:
+#   - subject ≤ 50 chars
+#   - body contains exactly 2 bullets, each ≤ 120 chars
+# Activate locally with: git config core.hooksPath .githooks
+
+set -e
+
+msg_file="$1"
+first_line=$(head -n 1 "$msg_file")
+
+case "$first_line" in
+    "Merge "*|"Revert "*|"fixup! "*|"squash! "*|"amend! "*) exit 0 ;;
+esac
+
+clean=$(grep -v '^#' "$msg_file" | sed -e 's/[[:space:]]*$//')
+
+subject=$(printf '%s\n' "$clean" | awk 'NF { print; exit }')
+subject_len=${#subject}
+if [ "$subject_len" -gt 50 ]; then
+    printf 'commit-msg: subject is %d chars (limit: 50)\n  %s\n' \
+        "$subject_len" "$subject" >&2
+    exit 1
+fi
+
+bullets=$(printf '%s\n' "$clean" | awk '
+    subject_seen && /^- / { print }
+    NF && !subject_seen { subject_seen = 1 }
+')
+
+bullet_count=0
+if [ -n "$bullets" ]; then
+    bullet_count=$(printf '%s\n' "$bullets" | grep -c '^- ' || true)
+fi
+
+if [ "$bullet_count" -ne 2 ]; then
+    printf 'commit-msg: body must contain exactly 2 bullets (- ...), found %d\n' \
+        "$bullet_count" >&2
+    exit 1
+fi
+
+while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    line_len=${#line}
+    if [ "$line_len" -gt 120 ]; then
+        printf 'commit-msg: bullet is %d chars (limit: 120)\n  %s\n' \
+            "$line_len" "$line" >&2
+        exit 1
+    fi
+done <<< "$bullets"
+
+exit 0
