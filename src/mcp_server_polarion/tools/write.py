@@ -334,10 +334,7 @@ async def create_work_item(  # noqa: PLR0913
     ),
     priority: str | None = Field(
         default=None,
-        description=(
-            "Optional priority string (e.g. '50.0'); "
-            "unrecognised values silently coerced."
-        ),
+        description="Optional priority string (e.g. '50.0').",
     ),
     severity: str | None = Field(
         default=None,
@@ -386,12 +383,17 @@ async def create_work_item(  # noqa: PLR0913
     ``update_work_item(description_html=...)`` which speaks raw HTML
     verbatim. The two formats never mix.
 
-    Server-side validation is lenient: unrecognised ``type`` /
-    ``priority`` / ``status`` / ``severity`` values are silently coerced
-    or stored verbatim (creating "ghost" types). Reuse values from an
-    existing ``get_work_item`` to avoid corrupting the project's enums.
-    Same lenience applies to ``custom_fields``: unknown field IDs are
-    stored as ghost attributes — pass keys taken from a prior read.
+    Polarion does NOT validate enum membership server-side. Unknown
+    ``type`` / ``status`` / ``severity`` ids are stored verbatim as
+    ghost values that look real on later reads but never match Lucene
+    queries. ``priority`` is the only partial exception: a non-numeric
+    string coerces to the project default, but a numeric string outside
+    the enum set (e.g. ``"999.0"``) also stores verbatim. Resolve valid
+    ids first via ``list_work_item_enum_options(project_id, field_id,
+    work_item_type)``. ``custom_fields`` is the same story: unknown
+    field IDs — including brand-new IDs that no work item of this type
+    has ever used — silently persist as ghost attributes. Pass keys
+    taken from a prior ``get_work_item``.
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -513,9 +515,7 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     ),
     priority: str | None = Field(
         default=None,
-        description=(
-            "New priority string (e.g. '50.0'); unrecognised values silently coerced."
-        ),
+        description="New priority string (e.g. '50.0').",
     ),
     severity: str | None = Field(
         default=None, description="New severity classification."
@@ -597,10 +597,13 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     Prefer ``workflow_action`` over a raw ``status`` edit so the project's
     transition rules run. ``workflow_action`` and ``change_type_to`` MUST
     be paired with at least one body field — Polarion rejects empty PATCH
-    bodies (HTTP 400 "At least one of the members is required"). Server-
-    side validation of ``status`` / ``priority`` / ``severity`` /
-    ``resolution`` is lenient — unrecognised values are coerced or stored
-    verbatim.
+    bodies (HTTP 400 "At least one of the members is required"). Direct
+    ``status`` / ``severity`` / ``resolution`` writes are NOT validated
+    server-side: unknown ids are stored verbatim as ghost values.
+    ``priority`` only coerces non-numeric inputs to the project default;
+    numeric strings outside the enum set also store verbatim. Resolve
+    valid ids first via ``list_work_item_enum_options(project_id,
+    field_id, work_item_type)``.
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -1007,9 +1010,12 @@ async def update_document(  # noqa: PLR0913
 
     Workflow: prefer ``workflow_action`` over a raw ``status`` edit so
     project rules run. ``workflow_action`` MUST be paired with at least
-    one attribute field — Polarion rejects empty PATCH bodies. Unknown
-    custom-field IDs become ghost attributes; pass keys from a prior
-    ``get_document`` to avoid them.
+    one attribute field — Polarion rejects empty PATCH bodies. Direct
+    ``status`` / ``type`` writes are NOT validated server-side: unknown
+    ids are stored verbatim as ghost values. Resolve valid ids first via
+    ``list_document_enum_options(project_id, field_id, document_type)``.
+    Unknown ``custom_fields`` IDs also become ghost attributes; pass
+    keys from a prior ``get_document``.
 
     Args:
         ctx: MCP tool context (injected automatically).
