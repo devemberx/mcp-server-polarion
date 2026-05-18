@@ -1353,7 +1353,8 @@ async def list_work_items(
 
     Pass a Lucene ``query`` (`type:requirement`, `status:approved AND
     type:requirement`, `title:SRS*`) or omit it for all work items. Leading
-    wildcards (`*foo*`) return HTTP 400. ``module`` is not indexed.
+    wildcards (`*foo*`) return HTTP 400. ``module`` is not indexed — see
+    *SQL prefix* below for the workaround.
 
     Description body text is NOT indexed — for content search, scan
     ``read_document_parts`` (each ``workitem`` part already carries its

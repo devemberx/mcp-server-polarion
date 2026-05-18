@@ -2882,8 +2882,6 @@ class TestListWorkItems:
     async def test_sql_prefix_query_passed_verbatim(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # The wire path forwards `query` unchanged, so a `SQL:(...)` prefix
-        # reaches Polarion as-is and is dispatched as native SQL server-side.
         sql_query = (
             "SQL:(SELECT item.* FROM POLARION.WORKITEM item "
             "WHERE item.C_TYPE = 'requirement')"
