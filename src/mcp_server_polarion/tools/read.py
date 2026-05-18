@@ -901,8 +901,8 @@ async def list_document_enum_options(  # noqa: PLR0913
 
     Call this before ``update_document`` when you need to pick a value
     for a document's ``status`` / ``type`` / custom enum field. Polarion
-    validates these values leniently on write -- unknown ids are silently
-    coerced or stored verbatim -- so resolve them first. This tool covers
+    does NOT validate these values on write -- unknown ids are stored
+    verbatim as ghost values -- so resolve them first. This tool covers
     DOCUMENT fields only; work-item fields are surfaced via
     ``list_work_item_enum_options``.
 
@@ -1025,9 +1025,10 @@ async def list_work_item_enum_options(  # noqa: PLR0913
 
     Call this before ``create_work_item`` / ``update_work_item`` when you
     need to pick a value for a work item's ``type`` / ``status`` /
-    ``severity`` / ``priority`` / custom enum field. Polarion validates
-    these values leniently on write -- unknown ids are silently coerced
-    or stored verbatim -- so resolve them first. This tool covers WORK
+    ``severity`` / ``priority`` / custom enum field. Polarion does NOT
+    validate these values on write -- unknown ids are stored verbatim as
+    ghost values (``priority`` only coerces non-numeric inputs to the
+    project default) -- so resolve them first. This tool covers WORK
     ITEM fields only; document fields are surfaced via
     ``list_document_enum_options``.
 
