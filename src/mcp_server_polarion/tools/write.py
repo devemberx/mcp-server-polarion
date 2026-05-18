@@ -334,10 +334,7 @@ async def create_work_item(  # noqa: PLR0913
     ),
     priority: str | None = Field(
         default=None,
-        description=(
-            "Optional priority string (e.g. '50.0'); "
-            "unrecognised values silently coerced."
-        ),
+        description="Optional priority string (e.g. '50.0').",
     ),
     severity: str | None = Field(
         default=None,
@@ -518,9 +515,7 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     ),
     priority: str | None = Field(
         default=None,
-        description=(
-            "New priority string (e.g. '50.0'); unrecognised values silently coerced."
-        ),
+        description="New priority string (e.g. '50.0').",
     ),
     severity: str | None = Field(
         default=None, description="New severity classification."
