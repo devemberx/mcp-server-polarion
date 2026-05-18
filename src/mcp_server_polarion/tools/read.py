@@ -1333,8 +1333,8 @@ async def list_work_items(
     query: str | None = Field(
         default=None,
         description=(
-            "Optional Lucene filter (e.g. 'type:requirement', 'title:SRS*'); "
-            "trailing wildcards only."
+            "Optional Lucene filter (e.g. 'type:requirement', 'title:SRS*') "
+            "OR a 'SQL:(...)' prefix for native SQL."
         ),
     ),
     page_size: int = Field(
@@ -1359,10 +1359,30 @@ async def list_work_items(
     ``read_document_parts`` (each ``workitem`` part already carries its
     description) or use ``read_document`` for end-to-end reading.
 
+    **SQL prefix.** If ``query`` starts with ``SQL:(``, Polarion runs it as
+    native SQL against the schema (tables: ``POLARION.WORKITEM``,
+    ``POLARION.MODULE``, ``POLARION.PROJECT``, ``POLARION.REL_MODULE_WORKITEM``).
+    This unlocks two Lucene-impossible patterns: module-scoped lookup
+    (``module`` column is not indexed by Lucene) and leading-wildcard ``LIKE``
+    (``C_TITLE LIKE '%foo%'`` works; Lucene rejects ``*foo*``). Escape ``'``
+    as ``''`` inside string literals to avoid breaking out of the SQL string.
+    ``C_DESCRIPTION LIKE`` does NOT match — body content is stored as a
+    CLOB outside this column; use ``read_document_parts`` for body search.
+
+    Module-scoped template (returns work items belonging to one document)::
+
+        SQL:(SELECT item.* FROM POLARION.WORKITEM item, POLARION.MODULE doc,
+        POLARION.PROJECT proj WHERE proj.C_ID = '<project>'
+        AND doc.FK_PROJECT = proj.C_PK AND doc.C_MODULEFOLDER = '<space>'
+        AND doc.C_ID = '<document>' AND EXISTS (SELECT rel1.*
+        FROM POLARION.REL_MODULE_WORKITEM rel1
+        WHERE rel1.FK_URI_MODULE = doc.C_URI
+        AND rel1.FK_URI_WORKITEM = item.C_URI))
+
     Args:
         ctx: MCP tool context (injected automatically).
         project_id: Polarion project ID.
-        query: Optional Lucene filter.
+        query: Optional Lucene filter, OR a ``SQL:(...)`` prefix for native SQL.
         page_size: Items per page (1-100, default 100).
         page_number: 1-based page number (default 1).
 
@@ -1374,7 +1394,7 @@ async def list_work_items(
     Raises:
         ValueError: Project not found.
         PermissionError: Token lacks permission.
-        RuntimeError: Other Polarion API errors (incl. bad Lucene syntax).
+        RuntimeError: Other Polarion API errors (incl. bad Lucene or SQL syntax).
     """
     client = get_client(ctx)
     params: dict[str, str | int] = {

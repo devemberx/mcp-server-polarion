@@ -59,7 +59,7 @@ Applies to ALL comments / docstrings (tool docstrings, helpers, inline, CLAUDE.m
 - **HTML payloads**: stored as `{"type": "text/html", "value": "..."}`.
 - **Linked work item IDs**: 5 segments — derive the target via `relationships.workItem.data.id`, never by parsing.
 - **Module IDs**: 3 segments and document names may contain `/`, so always use `split_module_id` (splits on the first two slashes only).
-- **Lucene**: trailing wildcards (`title:SRS*`) work; leading wildcards return HTTP 400. The `module` field is not indexed.
+- **Lucene**: trailing wildcards (`title:SRS*`) work; leading wildcards return HTTP 400. The `module` field is not indexed. Workaround: pass `query="SQL:(...)"` to `list_work_items` for native SQL — module-scoped joins via `POLARION.REL_MODULE_WORKITEM` and leading-wildcard `LIKE` both work. See the `list_work_items` docstring for the template.
 - **Server limits**: ≤3 API calls/second, no concurrent requests; `PolarionClient` retries 429/5xx with backoff but does NOT serialize client-side.
 
 ### JSON:API quirks
