@@ -753,6 +753,32 @@ class WorkItemMoveResult(BaseModel):
     )
 
 
+class DocumentCreateResult(BaseModel):
+    """Result of a ``create_document`` operation."""
+
+    created: bool = Field(
+        description=(
+            "True if the document was actually created. False when dry_run is True."
+        ),
+    )
+    dry_run: bool = Field(
+        description="Whether this was a dry-run (preview only, no mutation).",
+    )
+    document_name: str | None = Field(
+        description=(
+            "Module name of the created document (e.g. 'MySpecV1'). "
+            "None when dry_run is True."
+        ),
+    )
+    payload_preview: dict[str, JsonValue] | None = Field(
+        description=(
+            "JSON:API request payload that was (or would be) sent. "
+            "Usually populated for dry-run previews and may be None "
+            "after a successful real operation."
+        ),
+    )
+
+
 class DocumentUpdateResult(BaseModel):
     """Result of an ``update_document`` operation."""
 
@@ -775,6 +801,7 @@ class DocumentUpdateResult(BaseModel):
 
 __all__: list[str] = [
     "CommentResult",
+    "DocumentCreateResult",
     "DocumentDetail",
     "DocumentPart",
     "DocumentPartCreateResult",

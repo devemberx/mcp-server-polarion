@@ -21,6 +21,7 @@ from mcp_server_polarion.core.exceptions import (
     PolarionNotFoundError,
 )
 from mcp_server_polarion.models import (
+    DocumentCreateResult,
     DocumentUpdateResult,
     Hyperlink,
     WorkItemCreateResult,
@@ -32,10 +33,12 @@ from mcp_server_polarion.tools import write as _write_mod
 
 # In FastMCP 3.0, @mcp.tool returns the original function unchanged
 # (not a FunctionTool wrapper), so we reference them directly.
+create_document = _write_mod.create_document
 create_work_item = _write_mod.create_work_item
 move_work_item_to_document = _write_mod.move_work_item_to_document
 update_document = _write_mod.update_document
 update_work_item = _write_mod.update_work_item
+_build_create_document_payload = _write_mod._build_create_document_payload
 _build_move_to_document_payload = _write_mod._build_move_to_document_payload
 _build_update_document_payload = _write_mod._build_update_document_payload
 _build_update_work_item_payload = _write_mod._build_update_work_item_payload
@@ -2638,3 +2641,502 @@ class TestUpdateDocumentPitfallDocumentation:
             "update_document docstring must surface that the work item's module "
             "relationship stays unset after a macro <div> injection"
         )
+
+
+# ===========================================================================
+# create_document
+# ===========================================================================
+
+
+class TestBuildCreateDocumentPayload:
+    """Tests for the private ``_build_create_document_payload`` helper."""
+
+    def test_minimal_payload_has_only_required_attrs(self) -> None:
+        payload = _build_create_document_payload(
+            module_name="MySpec",
+            title="My Spec",
+            type="req_specification",
+            home_page_content_html="",
+            status=None,
+        )
+
+        assert payload == {
+            "data": [
+                {
+                    "type": "documents",
+                    "attributes": {
+                        "moduleName": "MySpec",
+                        "title": "My Spec",
+                        "type": "req_specification",
+                    },
+                }
+            ]
+        }
+        item = cast(list[dict[str, object]], payload["data"])[0]
+        attributes = cast(dict[str, object], item["attributes"])
+        assert "status" not in attributes
+        assert "homePageContent" not in attributes
+
+    def test_status_attached_when_set(self) -> None:
+        payload = _build_create_document_payload(
+            module_name="MySpec",
+            title="t",
+            type="generic",
+            home_page_content_html="",
+            status="draft",
+        )
+
+        item = cast(list[dict[str, object]], payload["data"])[0]
+        attributes = cast(dict[str, object], item["attributes"])
+        assert attributes["status"] == "draft"
+
+    def test_home_page_content_wrapped_as_html_block(self) -> None:
+        payload = _build_create_document_payload(
+            module_name="MySpec",
+            title="t",
+            type="generic",
+            home_page_content_html="<p>Hi</p>",
+            status=None,
+        )
+
+        item = cast(list[dict[str, object]], payload["data"])[0]
+        attributes = cast(dict[str, object], item["attributes"])
+        assert attributes["homePageContent"] == {
+            "type": "text/html",
+            "value": "<p>Hi</p>",
+        }
+
+    def test_skips_none_status_and_empty_body(self) -> None:
+        payload = _build_create_document_payload(
+            module_name="MySpec",
+            title="t",
+            type="generic",
+            home_page_content_html="",
+            status=None,
+        )
+
+        item = cast(list[dict[str, object]], payload["data"])[0]
+        attributes = cast(dict[str, object], item["attributes"])
+        assert set(attributes.keys()) == {"moduleName", "title", "type"}
+
+    def test_custom_fields_inlined_alongside_standard_attrs(self) -> None:
+        payload = _build_create_document_payload(
+            module_name="MySpec",
+            title="t",
+            type="generic",
+            home_page_content_html="",
+            status=None,
+            custom_fields={"projectOwner": "alice", "phase": "design"},
+        )
+
+        item = cast(list[dict[str, object]], payload["data"])[0]
+        attributes = cast(dict[str, object], item["attributes"])
+        assert attributes["projectOwner"] == "alice"
+        assert attributes["phase"] == "design"
+
+    def test_custom_fields_collision_with_standard_attr_raises(self) -> None:
+        with pytest.raises(ValueError, match="title"):
+            _build_create_document_payload(
+                module_name="MySpec",
+                title="t",
+                type="generic",
+                home_page_content_html="",
+                status=None,
+                custom_fields={"title": "duplicate"},
+            )
+
+
+class TestCreateDocumentDryRun:
+    """Tests for ``create_document`` with ``dry_run=True``."""
+
+    async def test_dry_run_returns_payload_without_calling_post(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        result = await create_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="_default",
+            module_name="MySpec",
+            title="Dry test",
+            type="req_specification",
+            status=None,
+            home_page_content=None,
+            custom_fields=None,
+            dry_run=True,
+        )
+
+        mock_client.post.assert_not_called()
+        assert isinstance(result, DocumentCreateResult)
+        assert result.dry_run is True
+        assert result.created is False
+        assert result.document_name is None
+        assert result.payload_preview is not None
+        assert isinstance(result.payload_preview, dict)
+        item = cast(list[dict[str, object]], result.payload_preview["data"])[0]
+        attributes = cast(dict[str, object], item["attributes"])
+        assert attributes == {
+            "moduleName": "MySpec",
+            "title": "Dry test",
+            "type": "req_specification",
+        }
+
+
+class TestCreateDocumentHappyPath:
+    """Tests for a successful ``create_document`` call."""
+
+    async def test_returns_document_name_on_201(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {
+            "data": [
+                {
+                    "type": "documents",
+                    "id": "MyProj/_default/MySpec",
+                    "links": {"self": "..."},
+                }
+            ]
+        }
+
+        result = await create_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="_default",
+            module_name="MySpec",
+            title="Real",
+            type="req_specification",
+            status=None,
+            home_page_content=None,
+            custom_fields=None,
+            dry_run=False,
+        )
+
+        assert isinstance(result, DocumentCreateResult)
+        assert result.created is True
+        assert result.dry_run is False
+        assert result.document_name == "MySpec"
+        assert result.payload_preview is None
+
+    async def test_post_called_with_correct_path_and_body(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {
+            "data": [{"type": "documents", "id": "MyProj/_default/MySpec"}]
+        }
+
+        await create_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="_default",
+            module_name="MySpec",
+            title="t",
+            type="req_specification",
+            status="draft",
+            home_page_content=None,
+            custom_fields=None,
+            dry_run=False,
+        )
+
+        args, kwargs = mock_client.post.call_args
+        assert args == ("/projects/MyProj/spaces/_default/documents",)
+        body = kwargs["json"]
+        item = body["data"][0]
+        assert item["type"] == "documents"
+        assert item["attributes"]["moduleName"] == "MySpec"
+        assert item["attributes"]["title"] == "t"
+        assert item["attributes"]["type"] == "req_specification"
+        assert item["attributes"]["status"] == "draft"
+
+    async def test_path_url_encodes_special_chars(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {
+            "data": [{"type": "documents", "id": "Proj With Space/My Space/MySpec"}]
+        }
+
+        await create_document(
+            mock_ctx,
+            project_id="Proj With Space",
+            space_id="My Space",
+            module_name="MySpec",
+            title="t",
+            type="generic",
+            status=None,
+            home_page_content=None,
+            custom_fields=None,
+            dry_run=False,
+        )
+
+        args, _ = mock_client.post.call_args
+        assert args == ("/projects/Proj%20With%20Space/spaces/My%20Space/documents",)
+
+    async def test_home_page_content_markdown_converted_and_sanitized(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {
+            "data": [{"type": "documents", "id": "MyProj/_default/MySpec"}]
+        }
+
+        await create_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="_default",
+            module_name="MySpec",
+            title="t",
+            type="generic",
+            status=None,
+            home_page_content="**bold** [link](https://example.com)",
+            custom_fields=None,
+            dry_run=False,
+        )
+
+        _, kwargs = mock_client.post.call_args
+        body = kwargs["json"]["data"][0]["attributes"]["homePageContent"]
+        assert body["type"] == "text/html"
+        assert "<strong>bold</strong>" in body["value"]
+        assert 'href="https://example.com"' in body["value"]
+
+    async def test_home_page_content_strips_dangerous_link_schemes(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {
+            "data": [{"type": "documents", "id": "MyProj/_default/MySpec"}]
+        }
+
+        await create_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="_default",
+            module_name="MySpec",
+            title="t",
+            type="generic",
+            status=None,
+            home_page_content="[click](javascript:alert(1))",
+            custom_fields=None,
+            dry_run=False,
+        )
+
+        _, kwargs = mock_client.post.call_args
+        body_html = kwargs["json"]["data"][0]["attributes"]["homePageContent"]["value"]
+        assert 'href="javascript:' not in body_html
+        assert "href='javascript:" not in body_html
+
+    async def test_document_name_with_slashes_extracted_correctly(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """``split_module_id`` preserves slashes in the document_name segment."""
+        mock_client.post.return_value = {
+            "data": [{"type": "documents", "id": "MyProj/_default/Folder/Sub/Doc"}]
+        }
+
+        result = await create_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="_default",
+            module_name="Folder/Sub/Doc",
+            title="t",
+            type="generic",
+            status=None,
+            home_page_content=None,
+            custom_fields=None,
+            dry_run=False,
+        )
+
+        assert result.document_name == "Folder/Sub/Doc"
+
+
+class TestCreateDocumentErrorMapping:
+    """Tests that domain exceptions are mapped at the tool layer."""
+
+    async def test_401_raises_permission_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.side_effect = PolarionAuthError("auth", status_code=401)
+
+        with pytest.raises(PermissionError):
+            await create_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="_default",
+                module_name="MySpec",
+                title="t",
+                type="generic",
+                status=None,
+                home_page_content=None,
+                custom_fields=None,
+                dry_run=False,
+            )
+
+    async def test_404_raises_value_error_mentioning_project_and_space(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.side_effect = PolarionNotFoundError(
+            "not found", status_code=404
+        )
+
+        with pytest.raises(ValueError, match="space") as exc_info:
+            await create_document(
+                mock_ctx,
+                project_id="ghost",
+                space_id="ghost_space",
+                module_name="MySpec",
+                title="t",
+                type="generic",
+                status=None,
+                home_page_content=None,
+                custom_fields=None,
+                dry_run=False,
+            )
+        assert "ghost" in str(exc_info.value)
+        assert "ghost_space" in str(exc_info.value)
+
+    async def test_other_error_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.side_effect = PolarionError("conflict", status_code=409)
+
+        with pytest.raises(RuntimeError, match="conflict"):
+            await create_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="_default",
+                module_name="MySpec",
+                title="t",
+                type="generic",
+                status=None,
+                home_page_content=None,
+                custom_fields=None,
+                dry_run=False,
+            )
+
+
+class TestCreateDocumentResponseParsing:
+    """Tests for unexpected 2xx response shapes from Polarion."""
+
+    async def test_empty_data_array_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {"data": []}
+
+        with pytest.raises(RuntimeError, match="no document name"):
+            await create_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="_default",
+                module_name="MySpec",
+                title="t",
+                type="generic",
+                status=None,
+                home_page_content=None,
+                custom_fields=None,
+                dry_run=False,
+            )
+
+    async def test_data_not_a_list_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {"data": {"id": "MyProj/_default/MySpec"}}
+
+        with pytest.raises(RuntimeError, match="no document name"):
+            await create_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="_default",
+                module_name="MySpec",
+                title="t",
+                type="generic",
+                status=None,
+                home_page_content=None,
+                custom_fields=None,
+                dry_run=False,
+            )
+
+    async def test_two_segment_id_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """``split_module_id`` returns ``('','')`` for under-3-segment IDs."""
+        mock_client.post.return_value = {
+            "data": [{"type": "documents", "id": "MyProj/MySpec"}]
+        }
+
+        with pytest.raises(RuntimeError, match="no document name"):
+            await create_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="_default",
+                module_name="MySpec",
+                title="t",
+                type="generic",
+                status=None,
+                home_page_content=None,
+                custom_fields=None,
+                dry_run=False,
+            )
+
+
+class TestCreateDocumentFieldValidation:
+    """Verify ``min_length`` / ``max_length`` constraints on parameters."""
+
+    @staticmethod
+    def _adapter_for(param_name: str) -> TypeAdapter[object]:
+        hints = get_type_hints(create_document)
+        sig = inspect.signature(create_document)
+        field_info = sig.parameters[param_name].default
+        return TypeAdapter(Annotated[hints[param_name], field_info])
+
+    def test_project_id_rejects_empty_string(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("project_id").validate_python("")
+
+    def test_space_id_rejects_empty_string(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("space_id").validate_python("")
+
+    def test_module_name_rejects_empty_string(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("module_name").validate_python("")
+
+    def test_module_name_accepts_non_empty(self) -> None:
+        assert self._adapter_for("module_name").validate_python("MySpec") == "MySpec"
+
+    def test_title_rejects_empty_string(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("title").validate_python("")
+
+    def test_type_rejects_empty_string(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("type").validate_python("")
+
+    def test_home_page_content_rejects_overlong_input(self) -> None:
+        adapter = self._adapter_for("home_page_content")
+        assert adapter.validate_python("hello") == "hello"
+        with pytest.raises(ValidationError):
+            adapter.validate_python("x" * (2_000_000 + 1))
+
+
+class TestCreateDocumentRegistration:
+    """The tool must be registered on the FastMCP server instance."""
+
+    async def test_create_document_tool_registered(self) -> None:
+        tools = await mcp.list_tools()
+        assert any(tool.name == "create_document" for tool in tools)
+
+
+class TestCreateDocumentDocstringGuidance:
+    """Verify enum-resolution and ghost-write guidance lives in the docstring.
+
+    Per CLAUDE.md, the write tools' docstrings are the only enforcement
+    against ghost-enum writes — the server does not validate enum IDs.
+    """
+
+    def test_docstring_mentions_list_document_enum_options(self) -> None:
+        document = create_document.__doc__ or ""
+        assert "list_document_enum_options" in document
+
+    def test_docstring_mentions_ghost_writes(self) -> None:
+        document = create_document.__doc__ or ""
+        assert "ghost" in document.lower()
+
+    def test_docstring_mentions_module_name_uniqueness(self) -> None:
+        document = create_document.__doc__ or ""
+        assert "unique" in document.lower()
+        assert "409" in document or "conflict" in document.lower()
