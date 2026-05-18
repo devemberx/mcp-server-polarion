@@ -2879,6 +2879,29 @@ class TestListWorkItems:
         _, kwargs = mock_client.get.call_args
         assert "query" not in kwargs["params"]
 
+    async def test_sql_prefix_query_passed_verbatim(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        sql_query = (
+            "SQL:(SELECT item.* FROM POLARION.WORKITEM item "
+            "WHERE item.C_TYPE = 'requirement')"
+        )
+        mock_client.get.return_value = {
+            "data": [],
+            "meta": {"totalCount": 0},
+        }
+
+        await list_work_items(
+            mock_ctx,
+            project_id="proj1",
+            query=sql_query,
+            page_size=100,
+            page_number=1,
+        )
+
+        _, kwargs = mock_client.get.call_args
+        assert kwargs["params"]["query"] == sql_query
+
     async def test_query_returns_matching_items(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
