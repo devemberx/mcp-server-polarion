@@ -537,7 +537,12 @@ class WorkItemRead(WorkItemSummary):
 
 
 class WorkItemLink(BaseModel):
-    """A work item link (outgoing or incoming) with the target's summary metadata."""
+    """A work item link with the target's summary metadata.
+
+    ``direction='forward'`` is an outgoing link (this work item links to
+    the target); ``'back'`` is an incoming link (the target links to this
+    work item).
+    """
 
     id: str = Field(
         description="Linked Work Item ID (e.g. 'MCPT-002').",
@@ -548,12 +553,8 @@ class WorkItemLink(BaseModel):
     role: str | None = Field(
         default=None,
         description=(
-            "Link role identifier (e.g. 'parent', 'relates_to', "
-            "'verifies'). ``None`` for back-direction links because "
-            "Polarion's ``linkedWorkItems:`` query does not expose the "
-            "originating link's role on this server version. May be "
-            "filled in once the ``backlinkedworkitems`` endpoint becomes "
-            "available."
+            "Link role (e.g. 'parent', 'relates_to', 'verifies'); "
+            "``None`` for back-direction links."
         ),
     )
     direction: Literal["forward", "back"] = Field(
