@@ -21,8 +21,8 @@ from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.models import (
     Hyperlink,
     JsonValue,
-    LinkedWorkItemSummary,
     WorkItemDetail,
+    WorkItemLink,
     WorkItemSummary,
 )
 
@@ -540,14 +540,14 @@ def parse_work_item_detail(
     )
 
 
-def summary_to_back_linked(summary: WorkItemSummary) -> LinkedWorkItemSummary:
+def summary_to_back_linked(summary: WorkItemSummary) -> WorkItemLink:
     """Lift a ``linkedWorkItems:`` query result to a back-direction link.
 
     The ``linkedWorkItems:`` query exposes no role or suspect flag, so
     both come back as ``role=None`` (unknown, not absent) and
     ``suspect=False``.
     """
-    return LinkedWorkItemSummary(
+    return WorkItemLink(
         id=summary.id,
         title=summary.title,
         role=None,

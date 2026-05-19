@@ -25,10 +25,10 @@ from mcp_server_polarion.models import (
     DocumentPart,
     DocumentReadResult,
     EnumOption,
-    LinkedWorkItemSummary,
     PaginatedResult,
     ProjectSummary,
     WorkItemDetail,
+    WorkItemLink,
     WorkItemRead,
 )
 from mcp_server_polarion.server import mcp
@@ -39,7 +39,7 @@ from mcp_server_polarion.tools import read as _read_mod
 get_document = _read_mod.get_document
 list_document_enum_options = _read_mod.list_document_enum_options
 read_document_parts = _read_mod.read_document_parts
-get_linked_work_items = _read_mod.get_linked_work_items
+list_work_item_links = _read_mod.list_work_item_links
 get_work_item = _read_mod.get_work_item
 list_documents = _read_mod.list_documents
 list_projects = _read_mod.list_projects
@@ -3512,8 +3512,8 @@ class TestReadWorkItem:
         assert not hasattr(result, "description_html")
 
 
-class TestGetLinkedWorkItems:
-    """Tests for the ``get_linked_work_items`` tool.
+class TestListWorkItemLinks:
+    """Tests for the ``list_work_item_links`` tool.
 
     Each call returns a single page in a single direction (``forward`` or
     ``back``). Pagination matches the convention used by other list tools.
@@ -3559,7 +3559,7 @@ class TestGetLinkedWorkItems:
             "meta": {"totalCount": 1},
         }
 
-        result = await get_linked_work_items(
+        result = await list_work_item_links(
             mock_ctx,
             project_id="proj1",
             work_item_id="MCPT-001",
@@ -3576,7 +3576,7 @@ class TestGetLinkedWorkItems:
         assert len(result.items) == 1
 
         fwd = result.items[0]
-        assert isinstance(fwd, LinkedWorkItemSummary)
+        assert isinstance(fwd, WorkItemLink)
         assert fwd.direction == "forward"
         assert fwd.id == "MCPT-010"
         assert fwd.role == "parent"
@@ -3624,7 +3624,7 @@ class TestGetLinkedWorkItems:
             "meta": {"totalCount": 5},
         }
 
-        result = await get_linked_work_items(
+        result = await list_work_item_links(
             mock_ctx,
             project_id="proj1",
             work_item_id="MCPT-001",
@@ -3644,7 +3644,7 @@ class TestGetLinkedWorkItems:
     ) -> None:
         mock_client.get.return_value = {"data": []}
 
-        await get_linked_work_items(
+        await list_work_item_links(
             mock_ctx,
             project_id="proj1",
             work_item_id="MCPT-001",
@@ -3695,7 +3695,7 @@ class TestGetLinkedWorkItems:
             "meta": {"totalCount": 2},
         }
 
-        result = await get_linked_work_items(
+        result = await list_work_item_links(
             mock_ctx,
             project_id="proj1",
             work_item_id="MCPT-001",
@@ -3725,7 +3725,7 @@ class TestGetLinkedWorkItems:
     ) -> None:
         mock_client.get.return_value = {"data": []}
 
-        await get_linked_work_items(
+        await list_work_item_links(
             mock_ctx,
             project_id="proj1",
             work_item_id="MCPT-001",
@@ -3747,7 +3747,7 @@ class TestGetLinkedWorkItems:
     ) -> None:
         mock_client.get.return_value = {"data": []}
 
-        result = await get_linked_work_items(
+        result = await list_work_item_links(
             mock_ctx,
             project_id="proj1",
             work_item_id="MCPT-001",
@@ -3769,7 +3769,7 @@ class TestGetLinkedWorkItems:
         )
 
         with pytest.raises(ValueError, match="not found"):
-            await get_linked_work_items(
+            await list_work_item_links(
                 mock_ctx,
                 project_id="proj1",
                 work_item_id="MCPT-999",
@@ -3787,7 +3787,7 @@ class TestGetLinkedWorkItems:
         )
 
         with pytest.raises(ValueError, match="not found"):
-            await get_linked_work_items(
+            await list_work_item_links(
                 mock_ctx,
                 project_id="proj1",
                 work_item_id="MCPT-999",
@@ -3805,7 +3805,7 @@ class TestGetLinkedWorkItems:
         )
 
         with pytest.raises(PermissionError, match="POLARION_TOKEN"):
-            await get_linked_work_items(
+            await list_work_item_links(
                 mock_ctx,
                 project_id="proj1",
                 work_item_id="MCPT-001",
@@ -3823,7 +3823,7 @@ class TestGetLinkedWorkItems:
         )
 
         with pytest.raises(RuntimeError, match="Backlink query failed"):
-            await get_linked_work_items(
+            await list_work_item_links(
                 mock_ctx,
                 project_id="proj1",
                 work_item_id="MCPT-001",
@@ -3844,7 +3844,7 @@ class TestGetLinkedWorkItems:
         zero-arg call path.
         """
         tools = await mcp.list_tools()
-        tool = next(t for t in tools if t.name == "get_linked_work_items")
+        tool = next(t for t in tools if t.name == "list_work_item_links")
         direction_schema = tool.parameters["properties"]["direction"]
         assert direction_schema["default"] == "forward"
         assert direction_schema["enum"] == ["forward", "back"]

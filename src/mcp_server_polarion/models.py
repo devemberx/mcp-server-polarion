@@ -224,7 +224,7 @@ class DocumentPart(BaseModel):
             "Short Work Item ID of the linked work item "
             "(e.g. 'MCPT-001'). Populated for 'workitem' and 'heading' "
             "parts; empty for other part types. Use this directly with "
-            "``get_work_item`` or ``get_linked_work_items``."
+            "``get_work_item`` or ``list_work_item_links``."
         ),
     )
     work_item_type: str = Field(
@@ -536,8 +536,8 @@ class WorkItemRead(WorkItemSummary):
     )
 
 
-class LinkedWorkItemSummary(BaseModel):
-    """A single linked work item with its link metadata."""
+class WorkItemLink(BaseModel):
+    """A work item link (outgoing or incoming) with the target's summary metadata."""
 
     id: str = Field(
         description="Linked Work Item ID (e.g. 'MCPT-002').",
@@ -811,11 +811,11 @@ __all__: list[str] = [
     "Hyperlink",
     "JsonValue",
     "LinkResult",
-    "LinkedWorkItemSummary",
     "PaginatedResult",
     "ProjectSummary",
     "WorkItemCreateResult",
     "WorkItemDetail",
+    "WorkItemLink",
     "WorkItemMoveResult",
     "WorkItemRead",
     "WorkItemSummary",
