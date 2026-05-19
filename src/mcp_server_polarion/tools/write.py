@@ -1,12 +1,12 @@
 """Write MCP tools for Polarion ALM.
 
 Currently provides ``create_work_item``, ``update_work_item``,
-``move_work_item_to_document``, ``update_document``, and
-``create_document``. All write tools follow the strict patterns
-documented in ``CLAUDE.md``: they convert Markdown input to sanitized
-HTML, build minimal request payloads (skipping unset fields rather
-than sending empty values), and map domain exceptions to user-facing
-ones at the tool layer.
+``move_work_item_to_document``, ``update_document``,
+``create_document``, and ``create_work_item_link``. All write tools
+follow the strict patterns documented in ``CLAUDE.md``: they convert
+Markdown input to sanitized HTML, build minimal request payloads
+(skipping unset fields rather than sending empty values), and map
+domain exceptions to user-facing ones at the tool layer.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from mcp_server_polarion.models import (
     Hyperlink,
     JsonValue,
     WorkItemCreateResult,
+    WorkItemLinkCreateResult,
     WorkItemMoveResult,
     WorkItemUpdateResult,
 )
@@ -163,6 +164,53 @@ def _extract_created_module_name(response: dict[str, object]) -> str | None:
         return None
     _, document_name = split_module_id(full_id)
     return document_name or None
+
+
+def _extract_created_link_id(response: dict[str, object]) -> str | None:
+    """Return the composite link id verbatim from a 201 link-create response.
+
+    Polarion returns ``{"data": [{"type": "linkedworkitems",
+    "id": "<srcProj>/<srcWI>/<role>/<tgtProj>/<tgtWI>", ...}]}``. The
+    five-segment id is the path identifier for subsequent PATCH / DELETE
+    of the same link, so it is preserved verbatim with no short-id
+    conversion.
+    """
+    return _extract_first_resource_id(response)
+
+
+def _build_create_link_payload(
+    *,
+    role: str,
+    target_project_id: str,
+    target_work_item_id: str,
+    suspect: bool,
+    revision: str | None,
+) -> dict[str, JsonValue]:
+    """Build the JSON:API body for the create-link POST endpoint.
+
+    Mirrors ``_build_work_item_payload`` — wraps the new resource in
+    ``{"data": [...]}``  and skips unset optional values so we never send
+    an empty ``revision`` that Polarion might interpret as a clear-default.
+    The target work item is identified through the to-one ``workItem``
+    relationship using the ``"{project}/{wi}"`` composite id.
+    """
+    attributes: dict[str, JsonValue] = {"role": role, "suspect": suspect}
+    if revision:
+        attributes["revision"] = revision
+
+    item: dict[str, JsonValue] = {
+        "type": "linkedworkitems",
+        "attributes": attributes,
+        "relationships": {
+            "workItem": {
+                "data": {
+                    "type": "workitems",
+                    "id": f"{target_project_id}/{target_work_item_id}",
+                }
+            }
+        },
+    }
+    return {"data": [item]}
 
 
 def _build_update_work_item_payload(  # noqa: PLR0913
@@ -1350,5 +1398,150 @@ async def create_document(  # noqa: PLR0913
         created=True,
         dry_run=False,
         document_name=new_name,
+        payload_preview=None,
+    )
+
+
+@mcp.tool(
+    tags={"write"},
+    timeout=60.0,
+    annotations={
+        # Pure additive operation per MCP spec -- adds a link record without
+        # mutating existing work items. Not idempotent because retrying the
+        # same (role, target) returns HTTP 409.
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    },
+)
+async def create_work_item_link(  # noqa: PLR0913
+    ctx: Context,
+    project_id: str = Field(min_length=1, description="Source work item's project ID."),
+    work_item_id: str = Field(
+        min_length=1,
+        description="Source work item ID (the link's outgoing endpoint).",
+    ),
+    role: str = Field(
+        min_length=1,
+        description=(
+            "Link role id (e.g. 'parent', 'relates_to', 'verifies'); "
+            "project-specific with no server-side validation."
+        ),
+    ),
+    target_work_item_id: str = Field(
+        min_length=1,
+        description="Target work item ID (the link's incoming endpoint).",
+    ),
+    target_project_id: str | None = Field(
+        default=None,
+        description=(
+            "Target's project; defaults to ``project_id`` for same-project links."
+        ),
+    ),
+    suspect: bool = Field(
+        default=False,
+        description="Mark the link as suspect (target changed since last review).",
+    ),
+    revision: str | None = Field(
+        default=None,
+        description="Optional revision pin (e.g. '1234'); current HEAD when omitted.",
+    ),
+    dry_run: bool = Field(
+        default=False,
+        description="When True, return payload preview without calling Polarion.",
+    ),
+) -> WorkItemLinkCreateResult:
+    """Create a direct outgoing link from one work item to another.
+
+    Adds a single link record under the source work item, pointing to the
+    target through the ``workItem`` to-one relationship. The orientation
+    matches ``list_work_item_links(direction="forward")`` on the source.
+
+    Polarion does not validate link roles server-side. An unknown ``role``
+    id is stored verbatim and never matches subsequent queries, so resolve
+    the valid role ids for the project beforehand by reading an existing
+    link with ``list_work_item_links(direction="forward")`` on a similar
+    work item in the same project.
+
+    ``target_project_id`` defaults to ``project_id`` for the common
+    same-project case; pass it explicitly only for cross-project
+    traceability links. ``revision`` pins the link to a specific Polarion
+    revision when set, otherwise the link targets the current HEAD.
+
+    The returned ``link_id`` is the five-segment composite
+    ``<srcProj>/<srcWI>/<role>/<tgtProj>/<tgtWI>`` and is the path
+    identifier for any future PATCH or DELETE of the same link.
+
+    Args:
+        ctx: MCP tool context (injected automatically).
+        project_id: Source work item's project ID.
+        work_item_id: Source work item ID.
+        role: Link role id (project-specific; e.g. 'parent', 'relates_to').
+        target_work_item_id: Target work item ID.
+        target_project_id: Target's project; defaults to ``project_id``.
+        suspect: Mark the link as suspect (usually False for new links).
+        revision: Optional revision pin; current HEAD when None.
+        dry_run: When True, return payload preview only.
+
+    Returns:
+        WorkItemLinkCreateResult with ``created``, ``dry_run``,
+        ``link_id`` (composite five-segment id, None on dry-run), and
+        ``payload_preview`` (populated on dry-run; None on real create).
+
+    Raises:
+        ValueError: Source project or work item not found.
+        PermissionError: Token lacks permission.
+        RuntimeError: Other Polarion API errors (including duplicate link),
+            or accepted-but-no-ID response.
+    """
+    tgt_proj = target_project_id if target_project_id is not None else project_id
+
+    payload = _build_create_link_payload(
+        role=role,
+        target_project_id=tgt_proj,
+        target_work_item_id=target_work_item_id,
+        suspect=suspect,
+        revision=revision,
+    )
+
+    if dry_run:
+        return WorkItemLinkCreateResult(
+            created=False,
+            dry_run=True,
+            link_id=None,
+            payload_preview=payload,
+        )
+
+    client = get_client(ctx)
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/workitems/{encode_path_segment(work_item_id)}/linkedworkitems"
+    )
+    try:
+        response = await client.post(path, json=cast(dict[str, object], payload))
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot create work item link -- check your POLARION_TOKEN permissions."
+        ) from exc
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Work item '{work_item_id}' not found in project '{project_id}'. "
+            "Use `list_work_items` to discover valid IDs."
+        ) from exc
+    except PolarionError as exc:
+        raise RuntimeError(f"Failed to create work item link: {exc.message}") from exc
+
+    link_id = _extract_created_link_id(response)
+    if link_id is None:
+        raise RuntimeError(
+            "Polarion accepted the create-link request but returned no link id. "
+            "The link may or may not exist; verify with list_work_item_links."
+        )
+
+    return WorkItemLinkCreateResult(
+        created=True,
+        dry_run=False,
+        link_id=link_id,
         payload_preview=None,
     )

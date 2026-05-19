@@ -64,7 +64,7 @@ from mcp_server_polarion.tools._helpers import (
     parse_work_item_summaries,
     safe_str,
     split_module_id,
-    summary_to_back_linked,
+    summary_to_back_link,
 )
 from mcp_server_polarion.utils import html_to_markdown
 
@@ -330,7 +330,7 @@ def _decorate_wikiblock(content: str) -> str:
     return f"```{macro}\n{body}\n```"
 
 
-def _parse_linked_items(
+def _parse_work_item_links(
     response: dict[str, object],
     *,
     direction: Literal["forward", "back"],
@@ -1683,14 +1683,14 @@ async def list_work_item_links(  # noqa: PLR0913
     client = get_client(ctx)
 
     if direction == "forward":
-        return await _get_forward_linked_page(
+        return await _get_forward_link_page(
             client,
             project_id=project_id,
             work_item_id=work_item_id,
             page_size=page_size,
             page_number=page_number,
         )
-    return await _get_back_linked_page(
+    return await _get_back_link_page(
         client,
         project_id=project_id,
         work_item_id=work_item_id,
@@ -1699,7 +1699,7 @@ async def list_work_item_links(  # noqa: PLR0913
     )
 
 
-async def _get_forward_linked_page(
+async def _get_forward_link_page(
     client: PolarionClient,
     *,
     project_id: str,
@@ -1735,7 +1735,7 @@ async def _get_forward_linked_page(
             f"Failed to get linked work items for '{work_item_id}': {exc.message}"
         ) from exc
 
-    items = _parse_linked_items(response, direction="forward")
+    items = _parse_work_item_links(response, direction="forward")
 
     raw_total = extract_total_count(response)
     total = raw_total
@@ -1753,7 +1753,7 @@ async def _get_forward_linked_page(
     )
 
 
-async def _get_back_linked_page(
+async def _get_back_link_page(
     client: PolarionClient,
     *,
     project_id: str,
@@ -1788,7 +1788,7 @@ async def _get_back_linked_page(
         ) from exc
 
     summaries = parse_work_item_summaries(response.get("data", []))
-    items = [summary_to_back_linked(s) for s in summaries]
+    items = [summary_to_back_link(s) for s in summaries]
 
     raw_total = extract_total_count(response)
     total = raw_total

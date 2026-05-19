@@ -12,12 +12,12 @@ from mcp_server_polarion.models import (
     DocumentPartCreateResult,
     DocumentSummary,
     Hyperlink,
-    LinkResult,
     PaginatedResult,
     ProjectSummary,
     WorkItemCreateResult,
     WorkItemDetail,
     WorkItemLink,
+    WorkItemLinkCreateResult,
     WorkItemRead,
     WorkItemSummary,
     WorkItemUpdateResult,
@@ -630,17 +630,19 @@ class TestCommentResult:
         assert result.comment_id is None
 
 
-class TestLinkResult:
+class TestWorkItemLinkCreateResult:
     def test_successful_create(self):
-        result = LinkResult(
+        result = WorkItemLinkCreateResult(
             created=True,
             dry_run=False,
+            link_id="MyProj/MCPT-1/parent/MyProj/MCPT-2",
             payload_preview=None,
         )
         assert result.created is True
+        assert result.link_id == "MyProj/MCPT-1/parent/MyProj/MCPT-2"
 
     def test_dry_run(self):
-        result = LinkResult(
+        result = WorkItemLinkCreateResult(
             created=False,
             dry_run=True,
             payload_preview={
@@ -653,7 +655,16 @@ class TestLinkResult:
             },
         )
         assert result.dry_run is True
+        assert result.link_id is None
         assert result.payload_preview is not None
+
+    def test_link_id_default_none(self):
+        result = WorkItemLinkCreateResult(
+            created=False,
+            dry_run=True,
+            payload_preview=None,
+        )
+        assert result.link_id is None
 
 
 class TestDocumentPartCreateResult:
@@ -780,7 +791,7 @@ class TestCrossModelIntegration:
             WorkItemCreateResult,
             WorkItemUpdateResult,
             CommentResult,
-            LinkResult,
+            WorkItemLinkCreateResult,
             DocumentPartCreateResult,
         ]
         for model_cls in models:

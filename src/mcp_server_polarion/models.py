@@ -685,22 +685,26 @@ class CommentResult(BaseModel):
     )
 
 
-class LinkResult(BaseModel):
-    """Result of a ``link_work_items`` operation."""
+class WorkItemLinkCreateResult(BaseModel):
+    """Result of a ``create_work_item_link`` operation."""
 
     created: bool = Field(
-        description=(
-            "True if the link was actually created. False when dry_run is True."
-        ),
+        description="True if the link was created. False when dry_run is True.",
     )
     dry_run: bool = Field(
         description="Whether this was a dry-run (preview only, no mutation).",
     )
+    link_id: str | None = Field(
+        default=None,
+        description=(
+            "Composite link id (``<srcProj>/<srcWI>/<role>/<tgtProj>/<tgtWI>``);"
+            " None on dry-run."
+        ),
+    )
     payload_preview: dict[str, JsonValue] | None = Field(
         description=(
-            "JSON:API request payload that was (or would be) sent. "
-            "Usually populated for dry-run previews and may be None "
-            "after a successful real operation."
+            "JSON:API payload that was (or would be) sent;"
+            " populated for dry-run, None after a real create."
         ),
     )
 
@@ -811,12 +815,12 @@ __all__: list[str] = [
     "DocumentUpdateResult",
     "Hyperlink",
     "JsonValue",
-    "LinkResult",
     "PaginatedResult",
     "ProjectSummary",
     "WorkItemCreateResult",
     "WorkItemDetail",
     "WorkItemLink",
+    "WorkItemLinkCreateResult",
     "WorkItemMoveResult",
     "WorkItemRead",
     "WorkItemSummary",

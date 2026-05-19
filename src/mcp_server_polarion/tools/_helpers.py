@@ -540,7 +540,7 @@ def parse_work_item_detail(
     )
 
 
-def summary_to_back_linked(summary: WorkItemSummary) -> WorkItemLink:
+def summary_to_back_link(summary: WorkItemSummary) -> WorkItemLink:
     """Lift a ``linkedWorkItems:`` query result to a back-direction link.
 
     The ``linkedWorkItems:`` query exposes no role or suspect flag, so
@@ -607,5 +607,5 @@ __all__: list[str] = [
     "parse_work_item_summaries",
     "safe_str",
     "split_module_id",
-    "summary_to_back_linked",
+    "summary_to_back_link",
 ]
