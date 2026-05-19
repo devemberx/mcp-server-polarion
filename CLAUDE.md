@@ -22,7 +22,7 @@ CI runs: `ruff check` → `ruff format --check` → `mypy` → `pytest`.
 ## Architecture
 
 - **`core/`** — `client.py` (async httpx wrapper, 429/5xx backoff, post-mutation delay, maps responses to `PolarionError` / `PolarionAuthError` / `PolarionNotFoundError`), `config.py` (Pydantic settings: `POLARION_URL`, `POLARION_TOKEN`, `POLARION_VERIFY_SSL`), `logging.py` (stderr-only configuration; called from server lifespan, never from tool code), `exceptions.py`. Every module obtains its logger via `logging.getLogger("mcp_server_polarion.<module>")`.
-- **`tools/`** — `read.py` (11 read tools incl. `read_document` for flowing Markdown, `read_work_item` for a single work item's Markdown body, and `list_document_enum_options` / `list_work_item_enum_options` for resolving valid enum ids before writes), `write.py` (4 write tools, each with its `_build_*_payload` helper), `_helpers.py` (sparse-fieldset constants, JSON:API extractors, pagination helpers, custom-field merge).
+- **`tools/`** — `read.py` (11 read tools incl. `read_document` for flowing Markdown, `read_work_item` for a single work item's Markdown body, and `list_document_enum_options` / `list_work_item_enum_options` for resolving valid enum ids before writes), `write.py` (5 write tools, each with its `_build_*_payload` helper), `_helpers.py` (sparse-fieldset constants, JSON:API extractors, pagination helpers, custom-field merge).
 - **`utils/html.py`** — Markdown ↔ HTML (markdownify + BeautifulSoup4 sanitization).
 - **`models.py`** — Pydantic v2 models. `PaginatedResult[T]` wraps all list responses.
 - **`server.py`** — FastMCP instance with lifespan that opens/closes `PolarionClient`.
@@ -34,7 +34,7 @@ CI runs: `ruff check` → `ruff format --check` → `mypy` → `pytest`.
 - All functions: full type annotations + `from __future__ import annotations`. All tool functions: `async def`. All tool returns: Pydantic models, never raw `dict`.
 - **Body fields are asymmetric by tool purpose**:
   - **Round-trip pair** (lossless): `get_*(include_*_html=True)` returns raw Polarion HTML; matching `update_*(*_html=...)` accepts the same shape verbatim — no sanitization, no Markdown conversion. XSS filtering is delegated to Polarion's renderer, so never route untrusted input through these parameters.
-  - **Greenfield create** (Markdown): `create_work_item(description=...)` accepts Markdown; runs through `markdown_to_html` + `sanitize_html` before storage.
+  - **Greenfield create** (Markdown): `create_work_item(description=...)` and `create_document(home_page_content=...)` accept Markdown; both run through `markdown_to_html` + `sanitize_html` before storage. After creation the round-trip pair switches to raw HTML (`update_work_item(description_html=...)` / `update_document(home_page_content_html=...)`) — the two formats never mix.
   - **Synthesis paths** (Markdown): `read_document` / `read_document_parts` / `read_work_item` convert HTML→Markdown via `html_to_markdown()`. Output is READ-ONLY — feeding it back to a write tool loses Polarion-specific markup.
 - **Write payloads** — skip `None`/empty values; Polarion may interpret empty as "clear default". JSON:API resource POSTs (`/workitems`) wrap in `{"data": [...]}`; **action endpoints** (`.../actions/<name>`) take a flat object — do NOT wrap. The `cast(dict[str, object], payload)` shim at the `client.post(json=...)` call site is intentional (dict invariance vs `JsonValue`).
 - Every list tool must support `page_size` (max 100) and `page_number`; return `PaginatedResult[T]` with `has_more`.

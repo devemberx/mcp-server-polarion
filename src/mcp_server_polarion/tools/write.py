@@ -1,11 +1,12 @@
 """Write MCP tools for Polarion ALM.
 
 Currently provides ``create_work_item``, ``update_work_item``,
-``move_work_item_to_document``, and ``update_document``. All write
-tools follow the strict patterns documented in ``CLAUDE.md``: they
-convert Markdown input to sanitized HTML, build minimal request
-payloads (skipping unset fields rather than sending empty values),
-and map domain exceptions to user-facing ones at the tool layer.
+``move_work_item_to_document``, ``update_document``, and
+``create_document``. All write tools follow the strict patterns
+documented in ``CLAUDE.md``: they convert Markdown input to sanitized
+HTML, build minimal request payloads (skipping unset fields rather
+than sending empty values), and map domain exceptions to user-facing
+ones at the tool layer.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from mcp_server_polarion.core.exceptions import (
     PolarionNotFoundError,
 )
 from mcp_server_polarion.models import (
+    DocumentCreateResult,
     DocumentUpdateResult,
     Hyperlink,
     JsonValue,
@@ -40,6 +42,7 @@ from mcp_server_polarion.tools._helpers import (
     merge_custom_fields,
     parse_work_item_detail,
     safe_str,
+    split_module_id,
 )
 from mcp_server_polarion.utils import markdown_to_html, sanitize_html
 
@@ -118,12 +121,11 @@ def _build_work_item_payload(  # noqa: PLR0913
     return {"data": [item]}
 
 
-def _extract_created_id(response: dict[str, object]) -> str | None:
-    """Extract the short work-item ID from a 201 create response.
+def _extract_first_resource_id(response: dict[str, object]) -> str | None:
+    """Pull the first resource ID out of a JSON:API ``{"data": [...]}`` body.
 
-    Polarion returns ``{"data": [{"type": "workitems",
-    "id": "projectId/MCPT-042", ...}]}``.  Returns the short ID
-    (``"MCPT-042"``) or ``None`` if the response shape is unexpected.
+    Returns ``None`` when ``data`` is missing, not a non-empty list, or its
+    first entry has no ``id`` string.
     """
     data = response.get("data")
     if not isinstance(data, list) or not data:
@@ -132,9 +134,35 @@ def _extract_created_id(response: dict[str, object]) -> str | None:
     if not isinstance(first, dict):
         return None
     full_id = safe_str(first.get("id", ""))
-    if not full_id:
+    return full_id or None
+
+
+def _extract_created_id(response: dict[str, object]) -> str | None:
+    """Extract the short work-item ID from a 201 create response.
+
+    Polarion returns ``{"data": [{"type": "workitems",
+    "id": "projectId/MCPT-042", ...}]}``.  Returns the short ID
+    (``"MCPT-042"``) or ``None`` if the response shape is unexpected.
+    """
+    full_id = _extract_first_resource_id(response)
+    if full_id is None:
         return None
     return extract_short_id(full_id)
+
+
+def _extract_created_module_name(response: dict[str, object]) -> str | None:
+    """Extract the document name from a 201 document-create response.
+
+    Polarion returns ``{"data": [{"type": "documents",
+    "id": "projectId/spaceId/documentName", ...}]}`` where
+    ``documentName`` itself may contain ``/``. Returns the document-name
+    segment or ``None`` if the response shape is unexpected.
+    """
+    full_id = _extract_first_resource_id(response)
+    if full_id is None:
+        return None
+    _, document_name = split_module_id(full_id)
+    return document_name or None
 
 
 def _build_update_work_item_payload(  # noqa: PLR0913
@@ -291,6 +319,46 @@ def _build_update_document_payload(  # noqa: PLR0913
         item["attributes"] = attributes
 
     return {"data": item}
+
+
+def _build_create_document_payload(  # noqa: PLR0913
+    *,
+    module_name: str,
+    title: str,
+    type: str,
+    home_page_content_html: str,
+    status: str | None,
+    custom_fields: dict[str, object] | None = None,
+) -> dict[str, JsonValue]:
+    """Build the JSON:API request body for ``POST .../spaces/{s}/documents``.
+
+    Mirrors ``_build_work_item_payload``'s POST shape: ``data`` is a
+    single-element list with ``type=documents`` and inline ``attributes``.
+    Only attaches keys for values that are explicitly set -- ``None`` and
+    empty strings are skipped so we never overwrite Polarion defaults
+    with empty values on creation. ``custom_fields`` entries are inlined
+    into ``attributes`` alongside the standard fields via
+    ``merge_custom_fields``; colliding keys raise ``ValueError``.
+    """
+    attributes: dict[str, JsonValue] = {
+        "moduleName": module_name,
+        "title": title,
+        "type": type,
+    }
+    if status:
+        attributes["status"] = status
+    if home_page_content_html:
+        attributes["homePageContent"] = {
+            "type": "text/html",
+            "value": home_page_content_html,
+        }
+    merge_custom_fields(attributes, custom_fields, STANDARD_DOCUMENT_ATTRIBUTES)
+
+    item: dict[str, JsonValue] = {
+        "type": "documents",
+        "attributes": attributes,
+    }
+    return {"data": [item]}
 
 
 # ---------------------------------------------------------------------------
@@ -1117,5 +1185,170 @@ async def update_document(  # noqa: PLR0913
     return DocumentUpdateResult(
         updated=True,
         dry_run=False,
+        payload_preview=None,
+    )
+
+
+@mcp.tool(
+    tags={"write"},
+    timeout=60.0,
+    annotations={
+        # Pure additive operation per MCP spec -- creates a new document without
+        # mutating existing data, so destructiveHint is False. Not idempotent
+        # because retrying with the same module_name returns HTTP 409.
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    },
+)
+async def create_document(  # noqa: PLR0913
+    ctx: Context,
+    project_id: str = Field(min_length=1, description="Polarion project ID."),
+    space_id: str = Field(
+        min_length=1,
+        description="Space ID (use '_default' for the default space).",
+    ),
+    module_name: str = Field(
+        min_length=1,
+        description=(
+            "Polarion document identifier (e.g. 'MySpecV1'); "
+            "must be unique within ``space_id`` and appears in the document URL."
+        ),
+    ),
+    title: str = Field(
+        min_length=1,
+        description="Human-readable document title (required, non-empty).",
+    ),
+    type: str = Field(
+        min_length=1,
+        description="Document type (e.g. 'req_specification', 'generic').",
+    ),
+    status: str | None = Field(
+        default=None,
+        description=(
+            "Optional initial workflow status (project default applies if omitted)."
+        ),
+    ),
+    home_page_content: str | None = Field(
+        default=None,
+        max_length=MAX_BODY_HTML_LEN,
+        description="Optional Markdown body; converted to sanitized HTML on write.",
+    ),
+    custom_fields: dict[str, object] | None = Field(  # noqa: B008
+        default=None,
+        description=(
+            "Optional custom fields keyed by Polarion field ID; "
+            "rich-text values must be ``{'type':'text/html','value':...}``."
+        ),
+    ),
+    dry_run: bool = Field(
+        default=False,
+        description="When True, return payload preview without calling Polarion.",
+    ),
+) -> DocumentCreateResult:
+    """Create a new Polarion document in a space.
+
+    Greenfield document creation. The document starts empty (or with the
+    optional ``home_page_content`` body) and headings / work item parts
+    can be added later via ``update_document`` and
+    ``move_work_item_to_document``.
+
+    Format asymmetry: ``home_page_content`` here is Markdown (converted
+    to sanitized HTML on write) because greenfield authoring is natural
+    for LLMs. After creation the round-trip pair is
+    ``get_document(include_homepage_content_html=True)`` ↔
+    ``update_document(home_page_content_html=...)`` which speaks raw HTML
+    verbatim. The two formats never mix.
+
+    ``module_name`` is Polarion's persistent identifier within the space
+    and is used in every subsequent URL (``get_document``,
+    ``update_document``, etc.). It must be unique within ``space_id``;
+    a duplicate name causes Polarion to return HTTP 409, surfaced here
+    as ``RuntimeError``.
+
+    Polarion does NOT validate enum membership server-side. Unknown
+    ``type`` / ``status`` ids are stored verbatim as ghost values that
+    look real on later reads but never match Lucene queries. Resolve
+    valid ids first via ``list_document_enum_options(project_id,
+    field_id, document_type)``. ``custom_fields`` is the same story:
+    unknown field IDs silently persist as ghost attributes -- pass keys
+    taken from a prior ``get_document``.
+
+    Args:
+        ctx: MCP tool context (injected automatically).
+        project_id: Polarion project ID.
+        space_id: Space ID containing the new document.
+        module_name: Polarion document identifier (unique within space).
+        title: Human-readable document title.
+        type: Document type.
+        status: Optional initial workflow status.
+        home_page_content: Optional Markdown body.
+        custom_fields: Optional custom-field dict.
+        dry_run: When True, return payload preview only.
+
+    Returns:
+        DocumentCreateResult with ``created``, ``dry_run``,
+        ``document_name`` (None on dry-run), and ``payload_preview``
+        (populated on dry-run; None on real create).
+
+    Raises:
+        ValueError: Project or space not found, or custom-field key
+            collides with a standard Polarion attribute.
+        PermissionError: Token lacks permission.
+        RuntimeError: Other Polarion API errors (including duplicate
+            ``module_name``), or accepted-but-no-ID response.
+    """
+    home_page_content_html = (
+        sanitize_html(markdown_to_html(home_page_content)) if home_page_content else ""
+    )
+
+    payload = _build_create_document_payload(
+        module_name=module_name,
+        title=title,
+        type=type,
+        home_page_content_html=home_page_content_html,
+        status=status,
+        custom_fields=custom_fields,
+    )
+
+    if dry_run:
+        return DocumentCreateResult(
+            created=False,
+            dry_run=True,
+            document_name=None,
+            payload_preview=payload,
+        )
+
+    client = get_client(ctx)
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/spaces/{encode_path_segment(space_id)}/documents"
+    )
+    try:
+        response = await client.post(path, json=cast(dict[str, object], payload))
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot create document -- check your POLARION_TOKEN permissions."
+        ) from exc
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Project '{project_id}' or space '{space_id}' not found. "
+            "Use `list_projects` and `list_documents` to discover valid IDs."
+        ) from exc
+    except PolarionError as exc:
+        raise RuntimeError(f"Failed to create document: {exc.message}") from exc
+
+    new_name = _extract_created_module_name(response)
+    if new_name is None:
+        raise RuntimeError(
+            "Polarion accepted the create request but returned no document name. "
+            "The document may or may not exist; verify with list_documents."
+        )
+
+    return DocumentCreateResult(
+        created=True,
+        dry_run=False,
+        document_name=new_name,
         payload_preview=None,
     )

@@ -154,6 +154,7 @@ All list tools support pagination via `page_size` (1–100) and `page_number` pa
 | `create_work_item` | Create a new work item |
 | `update_work_item` | Update an existing work item |
 | `move_work_item_to_document` | Move an existing work item into a Polarion document at a specific outline position |
+| `create_document` | Create a new document in a space with optional Markdown body |
 | `update_document` | Update document metadata (title / status / type), optionally the body (`home_page_content_html`), and apply workflow actions |
 
 ## Example Prompts
