@@ -121,12 +121,11 @@ def _build_work_item_payload(  # noqa: PLR0913
     return {"data": [item]}
 
 
-def _extract_created_id(response: dict[str, object]) -> str | None:
-    """Extract the short work-item ID from a 201 create response.
+def _extract_first_resource_id(response: dict[str, object]) -> str | None:
+    """Pull the first resource ID out of a JSON:API ``{"data": [...]}`` body.
 
-    Polarion returns ``{"data": [{"type": "workitems",
-    "id": "projectId/MCPT-042", ...}]}``.  Returns the short ID
-    (``"MCPT-042"``) or ``None`` if the response shape is unexpected.
+    Returns ``None`` when ``data`` is missing, not a non-empty list, or its
+    first entry has no ``id`` string.
     """
     data = response.get("data")
     if not isinstance(data, list) or not data:
@@ -135,9 +134,35 @@ def _extract_created_id(response: dict[str, object]) -> str | None:
     if not isinstance(first, dict):
         return None
     full_id = safe_str(first.get("id", ""))
-    if not full_id:
+    return full_id or None
+
+
+def _extract_created_id(response: dict[str, object]) -> str | None:
+    """Extract the short work-item ID from a 201 create response.
+
+    Polarion returns ``{"data": [{"type": "workitems",
+    "id": "projectId/MCPT-042", ...}]}``.  Returns the short ID
+    (``"MCPT-042"``) or ``None`` if the response shape is unexpected.
+    """
+    full_id = _extract_first_resource_id(response)
+    if full_id is None:
         return None
     return extract_short_id(full_id)
+
+
+def _extract_created_module_name(response: dict[str, object]) -> str | None:
+    """Extract the document name from a 201 document-create response.
+
+    Polarion returns ``{"data": [{"type": "documents",
+    "id": "projectId/spaceId/documentName", ...}]}`` where
+    ``documentName`` itself may contain ``/``. Returns the document-name
+    segment or ``None`` if the response shape is unexpected.
+    """
+    full_id = _extract_first_resource_id(response)
+    if full_id is None:
+        return None
+    _, document_name = split_module_id(full_id)
+    return document_name or None
 
 
 def _build_update_work_item_payload(  # noqa: PLR0913
@@ -1314,12 +1339,7 @@ async def create_document(  # noqa: PLR0913
     except PolarionError as exc:
         raise RuntimeError(f"Failed to create document: {exc.message}") from exc
 
-    new_name: str | None = None
-    data = response.get("data")
-    if isinstance(data, list) and data and isinstance(data[0], dict):
-        _, extracted = split_module_id(safe_str(data[0].get("id", "")))
-        new_name = extracted or None
-
+    new_name = _extract_created_module_name(response)
     if new_name is None:
         raise RuntimeError(
             "Polarion accepted the create request but returned no document name. "
