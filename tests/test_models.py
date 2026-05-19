@@ -12,12 +12,12 @@ from mcp_server_polarion.models import (
     DocumentPartCreateResult,
     DocumentSummary,
     Hyperlink,
-    LinkedWorkItemSummary,
     LinkResult,
     PaginatedResult,
     ProjectSummary,
     WorkItemCreateResult,
     WorkItemDetail,
+    WorkItemLink,
     WorkItemRead,
     WorkItemSummary,
     WorkItemUpdateResult,
@@ -466,9 +466,9 @@ class TestHyperlink:
             Hyperlink(role="ref_ext")  # type: ignore[call-arg]
 
 
-class TestLinkedWorkItemSummary:
+class TestWorkItemLink:
     def test_forward_link(self):
-        link = LinkedWorkItemSummary(
+        link = WorkItemLink(
             id="MCPT-002",
             title="Child Requirement",
             role="parent",
@@ -479,7 +479,7 @@ class TestLinkedWorkItemSummary:
         assert link.suspect is False
 
     def test_back_link_suspect(self):
-        link = LinkedWorkItemSummary(
+        link = WorkItemLink(
             id="MCPT-003",
             title="Changed Requirement",
             role="verifies",
@@ -491,7 +491,7 @@ class TestLinkedWorkItemSummary:
 
     def test_invalid_direction_rejected(self):
         with pytest.raises(ValidationError):
-            LinkedWorkItemSummary(
+            WorkItemLink(
                 id="MCPT-004",
                 title="Bad",
                 role="parent",
@@ -500,7 +500,7 @@ class TestLinkedWorkItemSummary:
             )
 
     def test_role_defaults_none_and_metadata_defaults_empty(self):
-        link = LinkedWorkItemSummary(
+        link = WorkItemLink(
             id="MCPT-005",
             title="Minimal",
             direction="back",
@@ -513,7 +513,7 @@ class TestLinkedWorkItemSummary:
         assert link.document_name == ""
 
     def test_full_metadata(self):
-        link = LinkedWorkItemSummary(
+        link = WorkItemLink(
             id="MCPT-006",
             title="Login Feature",
             role="verifies",
@@ -776,7 +776,7 @@ class TestCrossModelIntegration:
             WorkItemSummary,
             WorkItemDetail,
             WorkItemRead,
-            LinkedWorkItemSummary,
+            WorkItemLink,
             WorkItemCreateResult,
             WorkItemUpdateResult,
             CommentResult,

@@ -37,10 +37,10 @@ from mcp_server_polarion.models import (
     DocumentReadResult,
     DocumentSummary,
     EnumOption,
-    LinkedWorkItemSummary,
     PaginatedResult,
     ProjectSummary,
     WorkItemDetail,
+    WorkItemLink,
     WorkItemRead,
     WorkItemSummary,
 )
@@ -334,7 +334,7 @@ def _parse_linked_items(
     response: dict[str, object],
     *,
     direction: Literal["forward", "back"],
-) -> list[LinkedWorkItemSummary]:
+) -> list[WorkItemLink]:
     """Parse linked work items from a JSON:API response.
 
     Uses ``attributes.role`` for the link role, ``attributes.suspect``
@@ -356,11 +356,11 @@ def _parse_linked_items(
         direction: Link direction ('forward' or 'back').
 
     Returns:
-        List of parsed ``LinkedWorkItemSummary`` instances.
+        List of parsed ``WorkItemLink`` instances.
     """
     work_item_map = build_included_work_item_map(response)
 
-    items: list[LinkedWorkItemSummary] = []
+    items: list[WorkItemLink] = []
     data = response.get("data", [])
     if not isinstance(data, list):
         return items
@@ -406,7 +406,7 @@ def _parse_linked_items(
             )
 
         items.append(
-            LinkedWorkItemSummary(
+            WorkItemLink(
                 id=work_item_id,
                 title=title,
                 role=role,
@@ -1626,7 +1626,7 @@ async def read_work_item(
     timeout=60.0,
     annotations={"readOnlyHint": True},
 )
-async def get_linked_work_items(  # noqa: PLR0913
+async def list_work_item_links(  # noqa: PLR0913
     ctx: Context,
     project_id: str = Field(description="Polarion project ID."),
     work_item_id: str = Field(description="Work Item ID (e.g. 'MCPT-001')."),
@@ -1647,12 +1647,20 @@ async def get_linked_work_items(  # noqa: PLR0913
         ge=1,
         description="Page number to retrieve (1-based, default 1).",
     ),
-) -> PaginatedResult[LinkedWorkItemSummary]:
-    """Get linked work items (forward or back) for a work item.
+) -> PaginatedResult[WorkItemLink]:
+    """List a work item's outgoing or incoming links.
 
-    A single call returns one direction; call twice when both are needed.
-    The ``suspect`` flag indicates whether the linked item has changed
-    since the link was last reviewed (forward only).
+    A single call returns one direction; call twice (``direction="forward"``
+    then ``direction="back"``) when both sides of the traceability graph are
+    needed. Forward links use the ``/linkedworkitems`` endpoint and expose
+    the originating ``role`` (e.g. ``parent``, ``relates_to``, ``verifies``).
+    Back links fall back to a ``linkedWorkItems:`` Lucene query that does
+    not surface the originating role on this server, so ``role`` is ``None``
+    for every back-direction item — recover it by calling forward on the
+    source work item.
+
+    The ``suspect`` flag marks links whose target has changed since the
+    link was last reviewed; it is only meaningful in the forward direction.
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -1663,13 +1671,9 @@ async def get_linked_work_items(  # noqa: PLR0913
         page_number: 1-based page number (default 1).
 
     Returns:
-        PaginatedResult of ``LinkedWorkItemSummary`` items with ``id``,
-        ``title``, ``direction``, ``role``, ``suspect``, ``type``,
-        ``status``, ``space_id``, and ``document_name``.
-
-        ``role`` is ``None`` for back-direction links — Polarion's
-        ``linkedWorkItems:`` query does not expose the originating role
-        on this server. Recover it by calling forward on the source work item.
+        PaginatedResult of ``WorkItemLink`` items with ``id``, ``title``,
+        ``role``, ``direction``, ``suspect``, ``type``, ``status``,
+        ``space_id``, and ``document_name``.
 
     Raises:
         ValueError: Work item or project not found.
@@ -1702,7 +1706,7 @@ async def _get_forward_linked_page(
     work_item_id: str,
     page_size: int,
     page_number: int,
-) -> PaginatedResult[LinkedWorkItemSummary]:
+) -> PaginatedResult[WorkItemLink]:
     """Fetch a single page of forward (outgoing) links."""
     path = f"/projects/{project_id}/workitems/{work_item_id}/linkedworkitems"
     try:
@@ -1738,7 +1742,7 @@ async def _get_forward_linked_page(
     if total <= 0 and items:
         total = (page_number - 1) * page_size + len(items)
 
-    return PaginatedResult[LinkedWorkItemSummary](
+    return PaginatedResult[WorkItemLink](
         items=items,
         total_count=total,
         page=page_number,
@@ -1756,7 +1760,7 @@ async def _get_back_linked_page(
     work_item_id: str,
     page_size: int,
     page_number: int,
-) -> PaginatedResult[LinkedWorkItemSummary]:
+) -> PaginatedResult[WorkItemLink]:
     """Fetch a single page of back (incoming) links via Lucene query."""
     try:
         response = await client.get(
@@ -1791,7 +1795,7 @@ async def _get_back_linked_page(
     if total <= 0 and items:
         total = (page_number - 1) * page_size + len(items)
 
-    return PaginatedResult[LinkedWorkItemSummary](
+    return PaginatedResult[WorkItemLink](
         items=items,
         total_count=total,
         page=page_number,

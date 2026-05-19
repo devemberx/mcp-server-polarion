@@ -143,7 +143,7 @@ claude mcp add mcp-server-polarion \
 | `list_work_items` | Search work items with Lucene queries; results include priority, last-modified time, owning document, and assignees |
 | `get_work_item` | Get full work item details (description, author, created/updated timestamps, severity, resolution, outline number, hyperlinks); body is raw Polarion HTML for round-trip editing |
 | `read_work_item` | Same metadata as `get_work_item`, with the body rendered as Markdown instead of raw HTML — read-only synthesis for LLM consumption |
-| `get_linked_work_items` | Get forward and back links with each linked item's type, status, and owning document for traceability analysis |
+| `list_work_item_links` | List a work item's outgoing or incoming links with each target's type, status, and owning document for traceability analysis |
 
 All list tools support pagination via `page_size` (1–100) and `page_number` parameters.
 
