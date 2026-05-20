@@ -1123,9 +1123,8 @@ async def move_work_item_from_document(
         "/actions/moveFromDocument"
     )
     try:
-        # moveFromDocument takes no body per the Polarion REST API spec;
-        # explicitly pass json=None so no Content-Type is set.
-        await client.post(path, json=None)
+        # moveFromDocument takes no body per the Polarion REST API spec.
+        await client.post(path)
     except PolarionAuthError as exc:
         raise PermissionError(
             "Cannot detach work item -- check your POLARION_TOKEN permissions."

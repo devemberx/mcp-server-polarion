@@ -785,6 +785,7 @@ class TestMoveWorkItemToDocumentPositionValidation:
         assert result.payload_preview is not None
         assert "previousPart" not in result.payload_preview
         assert "nextPart" not in result.payload_preview
+        mock_client.post.assert_not_called()
 
     async def test_both_positions_raise_value_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
