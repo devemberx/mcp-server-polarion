@@ -1374,17 +1374,20 @@ async def list_work_items(
     **SQL prefix.** A ``query`` starting with ``SQL:(`` runs as native
     SQL, unlocking patterns Lucene cannot express: module-scoped lookup,
     leading-wildcard ``LIKE``, custom-field joins, and role-preserving
-    traceability. Escape ``'`` as ``''`` in string literals.
+    traceability. Escape ``'`` as ``''`` in string literals; Polarion's
+    REST ``query`` does not support bind parameters, so any user-supplied
+    value substituted into a recipe must be escaped before sending.
     ``C_DESCRIPTION LIKE`` does NOT match (CLOB stored elsewhere; use
-    ``read_document_parts`` for body search). ``LIKE`` is rejected inside
-    ``EXISTS (SELECT ...)`` — keep ``LIKE`` in the top-level ``WHERE``
-    by using ``INNER JOIN``, as the recipes below do.
+    ``read_document_parts`` for body search). On this server ``LIKE`` is
+    rejected inside ``EXISTS (SELECT ...)`` ("Restricted SQL commands:
+    LIKE") — keep ``LIKE`` in the top-level ``WHERE`` by using
+    ``INNER JOIN`` as the recipes below do (works everywhere).
 
     Schema (tables are ``POLARION.<name>``; columns shown are the ones
     used for JOINs and filtering)::
 
         WORKITEM     c_uri, c_id, c_type, c_title, c_status,
-                     c_description, fk_uri_module, fk_uri_project
+                     fk_uri_module, fk_uri_project
         MODULE       c_uri, c_id, c_modulefolder, fk_uri_project
         PROJECT      c_uri, c_id
         REL_MODULE_WORKITEM   fk_uri_module, fk_uri_workitem
@@ -1408,9 +1411,13 @@ async def list_work_items(
         AND doc.C_ID = '<document>'
         AND item.FK_URI_MODULE = doc.C_URI)
 
+    The trailing ``item.FK_URI_MODULE = doc.C_URI`` predicate is what
+    excludes Referenced Work Items and Recycle Bin entries; drop it to
+    include them.
+
     Common adjustments on Recipe 1: exclude headings with
-    ``AND item.C_TYPE != 'heading'`` (the case ``read_document_parts``
-    over-fetches), filter type with
+    ``AND item.C_TYPE != 'heading'`` (``read_document_parts`` returns
+    all parts including headings), filter type with
     ``AND item.C_TYPE IN ('requirement','testcase')``, or substring-match
     the title with ``AND LOWER(item.C_TITLE) LIKE '%foo%'`` (Lucene
     rejects leading ``*``).
@@ -1441,9 +1448,17 @@ async def list_work_items(
     (Lucene fallback, drops the role), this preserves ``c_role``.
 
     Recipe 4 — forward-traceability (work items linked from
-    ``<source-id>``, e.g. testcases a requirement verifies). Same as
-    Recipe 3 but swap the two ``FK_*_WORKITEM`` columns in both JOIN
-    conditions and filter on ``source.C_ID``.
+    ``<source-id>``, e.g. testcases a requirement verifies)::
+
+        SQL:(SELECT DISTINCT item.* FROM POLARION.WORKITEM item
+        INNER JOIN POLARION.STRUCT_WORKITEM_LINKEDWORKITEMS link
+            ON link.FK_URI_WORKITEM = item.C_URI
+        INNER JOIN POLARION.WORKITEM source
+            ON source.C_URI = link.FK_URI_P_WORKITEM
+        WHERE source.C_ID = '<source-id>' AND link.C_ROLE = '<role>')
+
+    Mirror of Recipe 3 with the two ``FK_*_WORKITEM`` columns swapped
+    in both JOIN conditions.
 
     Other patterns (testrun / timepoint / assignee joins, the
     ``LUCENE_QUERY`` table function) live in the Polarion SDK at
