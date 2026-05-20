@@ -295,16 +295,17 @@ def _build_move_to_document_payload(
     """Build the request body for the ``moveToDocument`` action endpoint.
 
     Note: this endpoint is NOT JSON:API — the body is a flat object
-    with ``targetDocument``, plus exactly one of ``previousPart`` or
-    ``nextPart``. The tool layer validates the exactly-one invariant
-    before calling this helper, but we re-check here so a future
-    direct caller cannot accidentally produce a ``".../None"``
-    literal-string payload.
+    with ``targetDocument``, plus AT MOST one of ``previousPart`` or
+    ``nextPart``. Both omitted is valid and means "append at end" per
+    the Polarion REST API. The tool layer validates the at-most-one
+    invariant before calling this helper, but we re-check here so a
+    future direct caller cannot ship a body Polarion would reject.
     """
-    if (previous_part_id is None) == (next_part_id is None):
+    if previous_part_id is not None and next_part_id is not None:
         msg = (
-            "_build_move_to_document_payload requires exactly one of "
-            "previous_part_id or next_part_id to be set."
+            "_build_move_to_document_payload accepts at most one of "
+            "previous_part_id or next_part_id; both being set is rejected "
+            "by Polarion."
         )
         raise ValueError(msg)
 
@@ -312,7 +313,7 @@ def _build_move_to_document_payload(
     payload: dict[str, JsonValue] = {"targetDocument": target_doc}
     if previous_part_id is not None:
         payload["previousPart"] = f"{target_doc}/{previous_part_id}"
-    else:
+    elif next_part_id is not None:
         payload["nextPart"] = f"{target_doc}/{next_part_id}"
     return payload
 
@@ -490,7 +491,12 @@ async def create_work_item(  # noqa: PLR0913
 
     The work item is created free-floating — to place it inside a
     document at a specific outline position, follow up with
-    ``move_work_item_to_document``.
+    ``move_work_item_to_document``. Direct creation into a document via
+    the ``module`` relationship is intentionally NOT exposed: per the
+    Polarion API, such work items land in the document's recycle bin
+    until a separate Document Part is created, leaving them invisible
+    in the document body. Always pair create + move for a single,
+    visible result.
 
     Format asymmetry: ``description`` here is Markdown (converted to
     sanitized HTML on write) because greenfield authoring is natural for
@@ -710,6 +716,11 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     keys are preserved. Unknown custom-field IDs are silently stored as
     ghost attributes; pass keys from a prior read to avoid creating them.
 
+    The ``module`` relationship is NOT exposed here: Polarion rejects
+    PATCHes that attempt to modify it. To attach, detach, or move a
+    work item between documents, use ``move_work_item_to_document`` /
+    ``move_work_item_from_document``.
+
     Prefer ``workflow_action`` over a raw ``status`` edit so the project's
     transition rules run. ``workflow_action`` and ``change_type_to`` MUST
     be paired with at least one body field — Polarion rejects empty PATCH
@@ -923,13 +934,15 @@ async def move_work_item_to_document(  # noqa: PLR0913
     previous_part_id: str | None = Field(
         default=None,
         description=(
-            "Insert AFTER this part ID (mutually exclusive with ``next_part_id``)."
+            "Insert AFTER this part ID; mutually exclusive with ``next_part_id``. "
+            "Omit both to append at the end of the target document."
         ),
     ),
     next_part_id: str | None = Field(
         default=None,
         description=(
-            "Insert BEFORE this part ID (mutually exclusive with ``previous_part_id``)."
+            "Insert BEFORE this part ID; mutually exclusive with ``previous_part_id``. "
+            "Omit both to append at the end of the target document."
         ),
     ),
     dry_run: bool = Field(
@@ -949,11 +962,15 @@ async def move_work_item_to_document(  # noqa: PLR0913
     Heading-type work items are rejected (HTTP 400 "Cannot move
     headings"); headings must be created inside their target document.
     If the work item is already in a different document, this detaches it from
-    the source — the operation is a move, not a copy.
+    the source — the operation is a move, not a copy. To detach a work
+    item back to free-floating (no document), use
+    ``move_work_item_from_document`` — the ``module`` relationship
+    cannot be cleared via PATCH.
 
-    Exactly one of ``previous_part_id`` (insert AFTER) / ``next_part_id``
-    (insert BEFORE) must be provided. Discover part IDs with
-    ``read_document_parts``.
+    Provide AT MOST one of ``previous_part_id`` (insert AFTER) /
+    ``next_part_id`` (insert BEFORE); if both are omitted the work item
+    is appended at the end of the target document. Discover part IDs
+    with ``read_document_parts``.
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -971,17 +988,18 @@ async def move_work_item_to_document(  # noqa: PLR0913
         on success — call ``read_document_parts`` for the new part ID.
 
     Raises:
-        ValueError: Position not exactly one of two, heading work item,
-            or work item / document / part not found.
+        ValueError: Both positions supplied, heading work item, or
+            work item / document / part not found.
         PermissionError: Token lacks permission.
         RuntimeError: Other Polarion API errors.
     """
-    if (previous_part_id is None) == (next_part_id is None):
+    if previous_part_id is not None and next_part_id is not None:
         raise ValueError(
-            "Exactly one of previous_part_id or next_part_id must be "
-            "provided. Use previous_part_id to insert AFTER an existing "
-            "part, or next_part_id to insert BEFORE an existing part. "
-            "Discover existing part IDs with `read_document_parts`."
+            "Provide at most one of previous_part_id or next_part_id. "
+            "Use previous_part_id to insert AFTER an existing part, or "
+            "next_part_id to insert BEFORE; omit both to append at the "
+            "end of the target document. Discover existing part IDs with "
+            "`read_document_parts`."
         )
 
     payload = _build_move_to_document_payload(
@@ -1021,6 +1039,104 @@ async def move_work_item_to_document(  # noqa: PLR0913
         ) from exc
     except PolarionError as exc:
         raise RuntimeError(f"Failed to move work item: {exc.message}") from exc
+
+    return WorkItemMoveResult(
+        moved=True,
+        dry_run=False,
+        payload_preview=None,
+    )
+
+
+@mcp.tool(
+    tags={"write"},
+    timeout=60.0,
+    annotations={
+        # idempotentHint=False: calling moveFromDocument twice against the
+        # same work item returns HTTP 400 the second time (the work item
+        # is already free-floating).
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    },
+)
+async def move_work_item_from_document(
+    ctx: Context,
+    project_id: str = Field(description="Project containing the work item."),
+    work_item_id: str = Field(
+        min_length=1,
+        description="Short ID of an EXISTING work item (e.g. 'MCPT-042').",
+    ),
+    dry_run: bool = Field(
+        default=False,
+        description="When True, return payload preview without calling Polarion.",
+    ),
+) -> WorkItemMoveResult:
+    """Detach a work item from its document, returning it to free-floating state.
+
+    Inverse of ``move_work_item_to_document``. Calls the
+    ``moveFromDocument`` action endpoint, which clears the work item's
+    ``module`` relationship and removes the corresponding document part.
+    This is the ONLY supported detach path because Polarion rejects PATCH
+    attempts on the ``module`` relationship.
+
+    The work item resource itself is preserved (with all history, links,
+    and attributes) and reappears as a free-floating work item visible to
+    ``list_work_items`` but not to any document. To re-attach, call
+    ``move_work_item_to_document``.
+
+    Calling this on a work item that is already free-floating returns
+    HTTP 400, surfaced here as ``RuntimeError`` — not idempotent.
+    Heading-type work items CAN be detached; the heading becomes a
+    free-floating work item with ``space_id=""`` and ``outline_number=""``
+    (orphan-like state, but the work item is intact).
+
+    Args:
+        ctx: MCP tool context (injected automatically).
+        project_id: Project containing the work item.
+        work_item_id: Short ID of an existing work item.
+        dry_run: When True, return payload preview only.
+
+    Returns:
+        WorkItemMoveResult with ``moved``, ``dry_run``, and
+        ``payload_preview`` (an empty dict on dry-run; None on real
+        execution). Polarion returns 204 on success — confirm with
+        ``get_work_item`` showing ``space_id=""``.
+
+    Raises:
+        ValueError: Project or work item not found.
+        PermissionError: Token lacks permission.
+        RuntimeError: Other Polarion API errors, including the 400
+            returned when the work item is already free-floating.
+    """
+    if dry_run:
+        return WorkItemMoveResult(
+            moved=False,
+            dry_run=True,
+            payload_preview={},
+        )
+
+    client = get_client(ctx)
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/workitems/{encode_path_segment(work_item_id)}"
+        "/actions/moveFromDocument"
+    )
+    try:
+        # moveFromDocument takes no body per the Polarion REST API spec;
+        # explicitly pass json=None so no Content-Type is set.
+        await client.post(path, json=None)
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot detach work item -- check your POLARION_TOKEN permissions."
+        ) from exc
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Work item '{work_item_id}' in project '{project_id}' not found. "
+            "Use `list_work_items` to discover valid IDs."
+        ) from exc
+    except PolarionError as exc:
+        raise RuntimeError(f"Failed to detach work item: {exc.message}") from exc
 
     return WorkItemMoveResult(
         moved=True,

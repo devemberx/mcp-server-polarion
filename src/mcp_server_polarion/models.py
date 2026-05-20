@@ -738,12 +738,13 @@ class DocumentPartCreateResult(BaseModel):
 
 
 class WorkItemMoveResult(BaseModel):
-    """Result of a ``move_work_item_to_document`` operation."""
+    """Result of a ``move_work_item_to_document`` or sibling move-document call."""
 
     moved: bool = Field(
         description=(
-            "True if the work item was actually moved into the target "
-            "document. False when dry_run is True."
+            "True if the work item was actually moved (into the target "
+            "document for moveToDocument, or detached to free-floating for "
+            "moveFromDocument). False when dry_run is True."
         ),
     )
     dry_run: bool = Field(
