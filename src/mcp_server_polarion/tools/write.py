@@ -45,7 +45,7 @@ from mcp_server_polarion.tools._helpers import (
     safe_str,
     split_module_id,
 )
-from mcp_server_polarion.utils import markdown_to_html, sanitize_html
+from mcp_server_polarion.utils import markdown_to_html, sanitize_html, stamp_block_ids
 
 # Caps tool-layer body payloads so a prompt-injected caller cannot ship a
 # multi-megabyte blob to Polarion. Observed real document bodies stay
@@ -1113,9 +1113,14 @@ async def update_document(  # noqa: PLR0913
       <p>Body</p>`` lets the PATCH succeed but the next
       ``read_document_parts`` returns HTTP 500. Polarion's stored
       paragraphs all carry ``id="polarion_..."`` anchors; raw ``<p>``
-      breaks server-side part derivation. For body text, create a new
-      work item and attach via ``create_work_item`` +
-      ``move_work_item_to_document``.
+      breaks server-side part derivation. The same applies to anchorless
+      ``<ul>``, ``<ol>``, ``<table>``, ``<div>``, ``<blockquote>``, and
+      ``<pre>``. The caller is responsible for stamping a unique
+      non-empty ``id=`` on every such block before PATCH; ``<h1>..<h4>``
+      do not need ids (Polarion rewrites them to a macro form on save).
+      Unlike ``create_document`` no Markdown auto-stamping convenience is
+      available on this path. For body text, create a new work item and
+      attach via ``create_work_item`` + ``move_work_item_to_document``.
     - **DO NOT inject work item macro references**: appending
       ``<div id="polarion_wiki macro name=module-workitem;params=id=NEW">``
       creates a ``workitem_<NEW>`` part visible in
@@ -1309,6 +1314,15 @@ async def create_document(  # noqa: PLR0913
     ``update_document(home_page_content_html=...)`` which speaks raw HTML
     verbatim. The two formats never mix.
 
+    When ``home_page_content`` is provided, every block-level element of
+    the rendered HTML (``<p>``, ``<ul>``, ``<ol>``, ``<table>``, ``<div>``,
+    ``<blockquote>``, ``<pre>``) is stamped with a unique
+    ``id="polarion_mcp_N"`` anchor. Without these ids the document saves
+    but the next ``read_document_parts`` returns HTTP 500. Headings
+    ``<h1>..<h4>`` are intentionally skipped — Polarion rewrites their
+    ids into a ``polarion_wiki macro name=module-workitem`` macro form on
+    save.
+
     ``module_name`` is Polarion's persistent identifier within the space
     and is used in every subsequent URL (``get_document``,
     ``update_document``, etc.). It must be unique within ``space_id``;
@@ -1348,7 +1362,9 @@ async def create_document(  # noqa: PLR0913
             ``module_name``), or accepted-but-no-ID response.
     """
     home_page_content_html = (
-        sanitize_html(markdown_to_html(home_page_content)) if home_page_content else ""
+        stamp_block_ids(sanitize_html(markdown_to_html(home_page_content)))
+        if home_page_content
+        else ""
     )
 
     payload = _build_create_document_payload(

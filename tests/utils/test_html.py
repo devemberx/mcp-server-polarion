@@ -10,6 +10,7 @@ from mcp_server_polarion.utils.html import (
     html_to_markdown,
     markdown_to_html,
     sanitize_html,
+    stamp_block_ids,
 )
 
 # ---------------------------------------------------------------------------
@@ -725,3 +726,63 @@ class TestRoundTrip:
             word_clean = word.strip("#-*")
             if word_clean:
                 assert word_clean in recovered
+
+
+class TestStampBlockIds:
+    """Verify ``stamp_block_ids`` covers exactly the blocks Polarion's
+    ``/parts`` derivation requires and leaves headings alone."""
+
+    def test_each_block_tag_gets_unique_sequential_id(self) -> None:
+        html = (
+            "<p>p</p><ul><li>x</li></ul><ol><li>y</li></ol>"
+            "<table><tbody><tr><td>c</td></tr></tbody></table>"
+            "<div>d</div><blockquote>q</blockquote><pre>code</pre>"
+        )
+        result = stamp_block_ids(html)
+        for i, tag in enumerate(["p", "ul", "ol", "table", "div", "blockquote", "pre"]):
+            assert f'<{tag} id="polarion_mcp_{i}"' in result
+
+    def test_headings_are_not_stamped(self) -> None:
+        result = stamp_block_ids("<h1>a</h1><h2>b</h2><h3>c</h3><h4>d</h4>")
+        for level in (1, 2, 3, 4):
+            assert f"<h{level}>" in result
+            assert f"<h{level} id=" not in result
+
+    def test_existing_id_is_preserved(self) -> None:
+        html = '<p id="existing">a</p><p>b</p>'
+        result = stamp_block_ids(html)
+        assert '<p id="existing">a</p>' in result
+        # Counter starts at 0 even when the prior block had a caller-provided id.
+        assert '<p id="polarion_mcp_0">b</p>' in result
+
+    def test_existing_polarion_mcp_id_avoids_collision(self) -> None:
+        """A pre-existing ``polarion_mcp_N`` anchor (e.g. raw HTML embedded
+        in Markdown) must not be duplicated by the counter, otherwise
+        Polarion rejects the PATCH with HTTP 400."""
+        html = (
+            '<p id="polarion_mcp_0">manual0</p>'
+            "<p>auto-a</p>"
+            '<p id="polarion_mcp_2">manual2</p>'
+            "<p>auto-b</p>"
+        )
+        result = stamp_block_ids(html)
+        assert '<p id="polarion_mcp_0">manual0</p>' in result
+        assert '<p id="polarion_mcp_1">auto-a</p>' in result
+        assert '<p id="polarion_mcp_2">manual2</p>' in result
+        assert '<p id="polarion_mcp_3">auto-b</p>' in result
+
+    def test_inline_elements_are_not_stamped(self) -> None:
+        result = stamp_block_ids("<p>x <span>y</span> <strong>z</strong></p>")
+        assert "<span>y</span>" in result
+        assert "<strong>z</strong>" in result
+        assert "<span id=" not in result
+        assert "<strong id=" not in result
+
+    def test_custom_prefix(self) -> None:
+        result = stamp_block_ids("<p>x</p><p>y</p>", prefix="anchor")
+        assert '<p id="anchor_0">x</p>' in result
+        assert '<p id="anchor_1">y</p>' in result
+
+    @pytest.mark.parametrize("value", ["", "   ", "\n\t"])
+    def test_empty_or_whitespace_input_returns_empty(self, value: str) -> None:
+        assert stamp_block_ids(value) == ""
