@@ -755,6 +755,22 @@ class TestStampBlockIds:
         # Counter starts at 0 even when the prior block had a caller-provided id.
         assert '<p id="polarion_mcp_0">b</p>' in result
 
+    def test_existing_polarion_mcp_id_avoids_collision(self) -> None:
+        """A pre-existing ``polarion_mcp_N`` anchor (e.g. raw HTML embedded
+        in Markdown) must not be duplicated by the counter, otherwise
+        Polarion rejects the PATCH with HTTP 400."""
+        html = (
+            '<p id="polarion_mcp_0">manual0</p>'
+            "<p>auto-a</p>"
+            '<p id="polarion_mcp_2">manual2</p>'
+            "<p>auto-b</p>"
+        )
+        result = stamp_block_ids(html)
+        assert '<p id="polarion_mcp_0">manual0</p>' in result
+        assert '<p id="polarion_mcp_1">auto-a</p>' in result
+        assert '<p id="polarion_mcp_2">manual2</p>' in result
+        assert '<p id="polarion_mcp_3">auto-b</p>' in result
+
     def test_inline_elements_are_not_stamped(self) -> None:
         result = stamp_block_ids("<p>x <span>y</span> <strong>z</strong></p>")
         assert "<span>y</span>" in result

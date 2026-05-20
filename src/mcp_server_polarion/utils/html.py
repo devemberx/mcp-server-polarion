@@ -444,11 +444,14 @@ def stamp_block_ids(html: str, prefix: str = "polarion_mcp") -> str:
     Polarion's REST API stores ``homePageContent`` HTML verbatim and does
     not auto-assign ids the way the web editor does. An anchorless ``<p>``
     (or any other tag in ``_BLOCK_TAGS_NEEDING_IDS``) saves successfully
-    but makes the next ``GET .../parts`` return HTTP 500. Headings
-    ``<h1>..<h4>`` are not stamped: Polarion rewrites their ids into the
-    ``polarion_wiki macro name=module-workitem;params=id=MCPT-N`` macro
-    form on save anyway. Existing non-empty ``id=`` attributes are
-    preserved so callers can pre-anchor specific blocks.
+    but makes the next ``GET .../parts`` return HTTP 500. All heading
+    tags (``<h1>..<h6>``) are skipped: Polarion rewrites their ids into
+    the ``polarion_wiki macro name=module-workitem;params=id=MCPT-N``
+    macro form on save anyway. Existing non-empty ``id=`` attributes are
+    preserved so callers can pre-anchor specific blocks; generated ids
+    skip any value already present in the document (including
+    ``{prefix}_N`` ids the caller embedded via raw HTML in Markdown) so
+    the PATCH never trips Polarion's HTTP 400 duplicate-id rule.
 
     Args:
         html: HTML string (typically the output of ``sanitize_html``).
@@ -462,10 +465,20 @@ def stamp_block_ids(html: str, prefix: str = "polarion_mcp") -> str:
         return ""
 
     soup = BeautifulSoup(html, "html.parser")
+    used_ids: set[str] = set()
+    for tagged in soup.find_all(id=True):
+        existing = tagged.get("id")
+        if isinstance(existing, str):
+            used_ids.add(existing)
+
     counter = 0
     for tag in soup.find_all(list(_BLOCK_TAGS_NEEDING_IDS)):
         if tag.get("id"):
             continue
-        tag["id"] = f"{prefix}_{counter}"
+        while f"{prefix}_{counter}" in used_ids:
+            counter += 1
+        new_id = f"{prefix}_{counter}"
+        tag["id"] = new_id
+        used_ids.add(new_id)
         counter += 1
     return str(soup)
