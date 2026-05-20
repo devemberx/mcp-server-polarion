@@ -8,6 +8,8 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for **P
 
 ## Prerequisites
 
+> **Polarion 2506 or higher** is required. Earlier versions lack REST API endpoints this server depends on.
+
 This server is distributed as a Python package and requires [**uv**](https://docs.astral.sh/uv/) to run.
 
 **Install uv** (if not already installed):
@@ -133,17 +135,17 @@ claude mcp add mcp-server-polarion \
 
 | Tool | Description |
 |---|---|
-| `list_projects` | List all accessible Polarion projects (supports Lucene query filtering) |
-| `list_documents` | List documents in a project (with optional name/space filtering) |
-| `read_document` | Render a document end-to-end as flowing Markdown |
-| `get_document` | Get document metadata (title / type / status); optionally returns the raw `homePageContent` source for round-trip editing |
-| `read_document_parts` | List structural parts with linked work-item metadata (type, status, `external` flag) — use for part IDs and structural traversal, not for reading |
-| `list_document_enum_options` | List the valid enum values (id / name / default / hidden / terminal) for a document field on a given document type — resolve allowed `status` / `type` / custom enum ids before calling `update_document` |
-| `list_work_item_enum_options` | List the valid enum values for a work item field on a given work item type — resolve allowed `type` / `status` / `severity` / `priority` / custom enum ids before calling `create_work_item` / `update_work_item` |
-| `list_work_items` | Search work items with Lucene queries; results include priority, last-modified time, owning document, and assignees |
-| `get_work_item` | Get full work item details (description, author, created/updated timestamps, severity, resolution, outline number, hyperlinks); body is raw Polarion HTML for round-trip editing |
-| `read_work_item` | Same metadata as `get_work_item`, with the body rendered as Markdown instead of raw HTML — read-only synthesis for LLM consumption |
-| `list_work_item_links` | List a work item's outgoing or incoming links with each target's type, status, and owning document for traceability analysis |
+| `list_projects` | List accessible projects |
+| `list_documents` | List documents in a project |
+| `list_work_items` | Search work items with Lucene or SQL queries |
+| `get_document` | Get document metadata, optionally with the raw body HTML |
+| `read_document` | Render a document end-to-end as Markdown |
+| `read_document_parts` | List a document's structural parts with embedded work item metadata |
+| `get_work_item` | Get work item details with the body as raw HTML |
+| `read_work_item` | Get work item details with the body as Markdown |
+| `list_work_item_links` | List a work item's outgoing or incoming links |
+| `list_document_enum_options` | Resolve valid enum ids for a document field |
+| `list_work_item_enum_options` | Resolve valid enum ids for a work item field |
 
 All list tools support pagination via `page_size` (1–100) and `page_number` parameters.
 
@@ -153,30 +155,35 @@ All list tools support pagination via `page_size` (1–100) and `page_number` pa
 |---|---|
 | `create_work_item` | Create a new work item |
 | `update_work_item` | Update an existing work item |
-| `move_work_item_to_document` | Move an existing work item into a Polarion document at a specific outline position |
-| `create_document` | Create a new document in a space with optional Markdown body |
-| `update_document` | Update document metadata (title / status / type), optionally the body (`home_page_content_html`), and apply workflow actions |
-| `create_work_item_link` | Create a direct outgoing link from one work item to another (e.g. parent, relates_to, verifies) — supports cross-project targets and dry-run preview |
+| `create_document` | Create a new document |
+| `update_document` | Update document metadata, body, or workflow status |
+| `create_work_item_link` | Create an outgoing link between two work items |
+| `move_work_item_to_document` | Attach a work item to a document at a chosen position |
+| `move_work_item_from_document` | Detach a work item from its document |
 
 ## Example Prompts
 
-> "List all projects in Polarion"
+> "List the documents in space 'Specifications' of project MCPT."
 
-> "Show me the documents in project MCPT"
+> "Read the SRS document of project MCPT and summarize each open requirement."
 
-> "Read the Software Requirement Specification document in project MCPT"
+> "Find every approved requirement in project MCPT whose title starts with 'Auth' and show me their owning document."
 
-> "Find all approved requirements in project MCPT"
+> "Show the outgoing and incoming links for MCPT-042 and flag any child task that is still open."
 
-> "What work items are linked to MCPT-001?"
+> "Which requirements in the SRS document have no 'verifies' back link from a test case?"
 
-> "Create a task in project MCPT titled 'Refactor authentication module'"
+> "List the valid status values for a defect in project MCPT, then move MCPT-077 to 'in_review'."
 
-> "Update MCPT-042's status to approved and bump priority to 90."
+> "Create a task in project MCPT titled 'Refactor authentication module' and link it to MCPT-042 as 'relates_to'."
 
-> "Move work item MCPT-042 to the appropriate section of the SRS document."
+> "Add a new requirement under section 3.2 of the SRS document with the body I just drafted."
 
-> "Mark the SRS document of project MCPT as approved."
+> "Move MCPT-201 into the SRS document right after MCPT-150."
+
+> "Detach MCPT-077 from its document so I can rework it as a standalone task."
+
+> "Bump MCPT-042's priority to 90, set severity to 'major', and approve the workflow."
 
 ## License
 
