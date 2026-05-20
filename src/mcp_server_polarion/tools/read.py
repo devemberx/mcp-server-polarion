@@ -1145,6 +1145,12 @@ async def read_document_parts(  # noqa: PLR0913
     ``get_work_item`` is unnecessary when scanning bodies. For plain
     reading prefer ``read_document``.
 
+    If you only need work items filtered by type/status/title/custom-field
+    or a subset of the document (e.g. "non-heading work items only"),
+    prefer ``list_work_items`` with a ``SQL:(...)`` query — see that
+    tool's docstring for a recipe gallery. Smaller payload than this
+    tool, no per-part pagination.
+
     Args:
         ctx: MCP tool context (injected automatically).
         project_id: Polarion project ID.
@@ -1284,6 +1290,11 @@ async def read_document(  # noqa: PLR0913
     ``get_document(include_homepage_content_html=True)`` for round-trip
     editing of the raw HTML source.
 
+    For metadata-only extraction (work item IDs / types / statuses /
+    custom fields) prefer ``list_work_items`` with a ``SQL:(...)`` query
+    — this tool always materializes the full body Markdown for every
+    part, which is wasteful when the caller only wants a filtered list.
+
     Args:
         ctx: MCP tool context (injected automatically).
         project_id: Polarion project ID.
@@ -1360,25 +1371,98 @@ async def list_work_items(
     ``read_document_parts`` (each ``workitem`` part already carries its
     description) or use ``read_document`` for end-to-end reading.
 
-    **SQL prefix.** If ``query`` starts with ``SQL:(``, Polarion runs it as
-    native SQL against the schema (tables: ``POLARION.WORKITEM``,
-    ``POLARION.MODULE``, ``POLARION.PROJECT``, ``POLARION.REL_MODULE_WORKITEM``).
-    This unlocks two Lucene-impossible patterns: module-scoped lookup
-    (``module`` column is not indexed by Lucene) and leading-wildcard ``LIKE``
-    (``C_TITLE LIKE '%foo%'`` works; Lucene rejects ``*foo*``). Escape ``'``
-    as ``''`` inside string literals to avoid breaking out of the SQL string.
-    ``C_DESCRIPTION LIKE`` does NOT match — body content is stored as a
-    CLOB outside this column; use ``read_document_parts`` for body search.
+    **SQL prefix.** A ``query`` starting with ``SQL:(`` runs as native
+    SQL, unlocking patterns Lucene cannot express: module-scoped lookup,
+    leading-wildcard ``LIKE``, custom-field joins, and role-preserving
+    traceability. Escape ``'`` as ``''`` in string literals; Polarion's
+    REST ``query`` does not support bind parameters, so any user-supplied
+    value substituted into a recipe must be escaped before sending.
+    ``C_DESCRIPTION LIKE`` does NOT match (CLOB stored elsewhere; use
+    ``read_document_parts`` for body search). On this server ``LIKE`` is
+    rejected inside ``EXISTS (SELECT ...)`` ("Restricted SQL commands:
+    LIKE") — keep ``LIKE`` in the top-level ``WHERE`` by using
+    ``INNER JOIN`` as the recipes below do (works everywhere).
 
-    Module-scoped template (returns work items belonging to one document)::
+    Schema (tables are ``POLARION.<name>``; columns shown are the ones
+    used for JOINs and filtering)::
 
-        SQL:(SELECT item.* FROM POLARION.WORKITEM item, POLARION.MODULE doc,
-        POLARION.PROJECT proj WHERE proj.C_ID = '<project>'
-        AND doc.FK_PROJECT = proj.C_PK AND doc.C_MODULEFOLDER = '<space>'
-        AND doc.C_ID = '<document>' AND EXISTS (SELECT rel1.*
-        FROM POLARION.REL_MODULE_WORKITEM rel1
-        WHERE rel1.FK_URI_MODULE = doc.C_URI
-        AND rel1.FK_URI_WORKITEM = item.C_URI))
+        WORKITEM     c_uri, c_id, c_type, c_title, c_status,
+                     fk_uri_module, fk_uri_project
+        MODULE       c_uri, c_id, c_modulefolder, fk_uri_project
+        PROJECT      c_uri, c_id
+        REL_MODULE_WORKITEM   fk_uri_module, fk_uri_workitem
+        CF_WORKITEM           fk_uri_workitem, c_name,
+                              c_string_value | c_boolean_value |
+                              c_durationtime_value | ...
+        STRUCT_WORKITEM_LINKEDWORKITEMS
+                     fk_uri_p_workitem (source / role-holder),
+                     fk_uri_workitem   (target), c_role
+
+    Recipe 1 — work items belonging to a document (excludes Recycle Bin
+    and Referenced Work Items, matches ``read_document_parts`` scope)::
+
+        SQL:(SELECT item.* FROM POLARION.MODULE doc
+        INNER JOIN POLARION.PROJECT proj ON doc.FK_URI_PROJECT = proj.C_URI
+        INNER JOIN POLARION.REL_MODULE_WORKITEM rel
+            ON rel.FK_URI_MODULE = doc.C_URI
+        INNER JOIN POLARION.WORKITEM item
+            ON item.C_URI = rel.FK_URI_WORKITEM
+        WHERE proj.C_ID = '<project>' AND doc.C_MODULEFOLDER = '<space>'
+        AND doc.C_ID = '<document>'
+        AND item.FK_URI_MODULE = doc.C_URI)
+
+    The trailing ``item.FK_URI_MODULE = doc.C_URI`` predicate is what
+    excludes Referenced Work Items and Recycle Bin entries; drop it to
+    include them.
+
+    Common adjustments on Recipe 1: exclude headings with
+    ``AND item.C_TYPE != 'heading'`` (``read_document_parts`` returns
+    all parts including headings), filter type with
+    ``AND item.C_TYPE IN ('requirement','testcase')``, or substring-match
+    the title with ``AND LOWER(item.C_TITLE) LIKE '%foo%'`` (Lucene
+    rejects leading ``*``).
+
+    Recipe 2 — custom-field value search (``=`` or ``LIKE``)::
+
+        SQL:(SELECT item.* FROM POLARION.WORKITEM item
+        INNER JOIN POLARION.CF_WORKITEM cf ON cf.FK_URI_WORKITEM = item.C_URI
+        WHERE cf.C_NAME = '<field>'
+        AND cf.C_STRING_VALUE LIKE '%<value>%')
+
+    Use ``c_boolean_value`` / ``c_durationtime_value`` (etc.) for non-string
+    customs. Rich text customs (``{type: "text/plain", value: ...}``) are
+    CLOB-stored — read them via ``get_work_item`` instead.
+
+    Recipe 3 — back-traceability (work items whose role link points to
+    ``<target-id>``, e.g. all children of a given parent)::
+
+        SQL:(SELECT DISTINCT item.* FROM POLARION.WORKITEM item
+        INNER JOIN POLARION.STRUCT_WORKITEM_LINKEDWORKITEMS link
+            ON link.FK_URI_P_WORKITEM = item.C_URI
+        INNER JOIN POLARION.WORKITEM target
+            ON target.C_URI = link.FK_URI_WORKITEM
+        WHERE target.C_ID = '<target-id>' AND link.C_ROLE = '<role>')
+
+    ``fk_uri_p_workitem`` is the source (role-holder), ``fk_uri_workitem``
+    is the target. Unlike ``list_work_item_links(direction='back')``
+    (Lucene fallback, drops the role), this preserves ``c_role``.
+
+    Recipe 4 — forward-traceability (work items linked from
+    ``<source-id>``, e.g. testcases a requirement verifies)::
+
+        SQL:(SELECT DISTINCT item.* FROM POLARION.WORKITEM item
+        INNER JOIN POLARION.STRUCT_WORKITEM_LINKEDWORKITEMS link
+            ON link.FK_URI_WORKITEM = item.C_URI
+        INNER JOIN POLARION.WORKITEM source
+            ON source.C_URI = link.FK_URI_P_WORKITEM
+        WHERE source.C_ID = '<source-id>' AND link.C_ROLE = '<role>')
+
+    Mirror of Recipe 3 with the two ``FK_*_WORKITEM`` columns swapped
+    in both JOIN conditions.
+
+    Other patterns (testrun / timepoint / assignee joins, the
+    ``LUCENE_QUERY`` table function) live in the Polarion SDK at
+    ``polarion/sdk/doc/database/SQLQueryExamples.pdf``.
 
     Args:
         ctx: MCP tool context (injected automatically).
