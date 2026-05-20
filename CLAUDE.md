@@ -22,7 +22,7 @@ CI runs: `ruff check` → `ruff format --check` → `mypy` → `pytest`.
 ## Architecture
 
 - **`core/`** — `client.py` (async httpx wrapper, 429/5xx backoff, post-mutation delay, maps responses to `PolarionError` / `PolarionAuthError` / `PolarionNotFoundError`), `config.py` (Pydantic settings: `POLARION_URL`, `POLARION_TOKEN`, `POLARION_VERIFY_SSL`), `logging.py` (stderr-only configuration; called from server lifespan, never from tool code), `exceptions.py`. Every module obtains its logger via `logging.getLogger("mcp_server_polarion.<module>")`.
-- **`tools/`** — `read.py` (11 read tools incl. `read_document` for flowing Markdown, `read_work_item` for a single work item's Markdown body, and `list_document_enum_options` / `list_work_item_enum_options` for resolving valid enum ids before writes), `write.py` (6 write tools, each with its `_build_*_payload` helper), `_helpers.py` (sparse-fieldset constants, JSON:API extractors, pagination helpers, custom-field merge).
+- **`tools/`** — `read.py` (11 read tools incl. `read_document` for flowing Markdown, `read_work_item` for a single work item's Markdown body, `list_work_items` with a `SQL:(...)` recipe gallery for module-scoped / custom-field / traceability searches Lucene cannot express, and `list_document_enum_options` / `list_work_item_enum_options` for resolving valid enum ids before writes), `write.py` (6 write tools, each with its `_build_*_payload` helper), `_helpers.py` (sparse-fieldset constants, JSON:API extractors, pagination helpers, custom-field merge).
 - **`utils/html.py`** — Markdown ↔ HTML (markdownify + BeautifulSoup4 sanitization).
 - **`models.py`** — Pydantic v2 models. `PaginatedResult[T]` wraps all list responses.
 - **`server.py`** — FastMCP instance with lifespan that opens/closes `PolarionClient`.
@@ -59,7 +59,7 @@ Applies to ALL comments / docstrings (tool docstrings, helpers, inline, CLAUDE.m
 - **HTML payloads**: stored as `{"type": "text/html", "value": "..."}`.
 - **Linked work item IDs**: 5 segments — derive the target via `relationships.workItem.data.id`, never by parsing.
 - **Module IDs**: 3 segments and document names may contain `/`, so always use `split_module_id` (splits on the first two slashes only).
-- **Lucene**: trailing wildcards (`title:SRS*`) work; leading wildcards return HTTP 400. The `module` field is not indexed. Workaround: pass `query="SQL:(...)"` to `list_work_items` for native SQL — module-scoped joins via `POLARION.REL_MODULE_WORKITEM` and leading-wildcard `LIKE` both work. See the `list_work_items` docstring for the template.
+- **Lucene**: trailing wildcards (`title:SRS*`) work; leading wildcards return HTTP 400. The `module` field is not indexed. Workaround: pass `query="SQL:(...)"` to `list_work_items` for native SQL — module-scoped joins (`POLARION.REL_MODULE_WORKITEM`), leading-wildcard `LIKE`, custom-field joins (`POLARION.CF_WORKITEM`), and role-preserving traceability traversals (`POLARION.STRUCT_WORKITEM_LINKEDWORKITEMS`) all work. The `list_work_items` docstring carries a recipe gallery (7 patterns); the Polarion SDK's [`SQLQueryExamples.pdf`](https://testdrive.polarion.com/polarion/sdk/doc/database/SQLQueryExamples.pdf) documents the schema and additional patterns (testrun / timepoint joins, `LUCENE_QUERY` table function, assignee joins). One server-side restriction: `LIKE` is rejected inside `EXISTS (SELECT ...)` ("Restricted SQL commands: LIKE") — use `INNER JOIN` so all `LIKE` filters live in the top-level `WHERE`.
 - **Server limits**: ≤3 API calls/second, no concurrent requests; `PolarionClient` retries 429/5xx with backoff but does NOT serialize client-side.
 
 ### JSON:API quirks
@@ -84,6 +84,7 @@ Polarion Lucene does NOT index `description`, so `list_work_items` cannot filter
 
 | Goal | Tool | Notes |
 |---|---|---|
+| Filter work items inside a document by type/status/title/custom-field/links | `list_work_items` with `SQL:(...)` | Module-scoped joins via `REL_MODULE_WORKITEM`, custom-field joins via `CF_WORKITEM`, role-preserving traceability via `STRUCT_WORKITEM_LINKEDWORKITEMS`. Far smaller payload than `read_document_parts` when only metadata is needed. Recipe gallery in the tool's docstring; schema in the [SDK doc](https://testdrive.polarion.com/polarion/sdk/doc/database/SQLQueryExamples.pdf). |
 | Find work items by metadata (title/type/status) | `list_work_items` | Lucene query against `title`, `type`, `status`, etc. — not `description`. |
 | Read the document end-to-end | `read_document` | Renders interleaved headings + embedded work item bodies + prose as flowing Markdown. Paginated by part (default 100/page). The canonical "let me read this document" tool. |
 | Get document metadata only | `get_document` | Title/type/status. `include_homepage_content_html=True` returns the `homePageContent` as **raw Polarion HTML** in `content_html` for round-trip editing via `update_document(home_page_content_html=...)`. Incomplete for end-to-end reading (heading text + embedded work item bodies live in separate work items, not in `homePageContent`) — use `read_document` for that. |
