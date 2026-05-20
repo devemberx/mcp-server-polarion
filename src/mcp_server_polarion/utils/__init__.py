@@ -6,10 +6,12 @@ from mcp_server_polarion.utils.html import (
     html_to_markdown,
     markdown_to_html,
     sanitize_html,
+    stamp_block_ids,
 )
 
 __all__: list[str] = [
     "html_to_markdown",
     "markdown_to_html",
     "sanitize_html",
+    "stamp_block_ids",
 ]

@@ -430,3 +430,42 @@ def sanitize_html(html: str) -> str:
                 del anchor["href"]
 
     return str(soup)
+
+
+_BLOCK_TAGS_NEEDING_IDS: Final[frozenset[str]] = frozenset(
+    {"p", "ul", "ol", "table", "div", "blockquote", "pre"}
+)
+
+
+def stamp_block_ids(html: str, prefix: str = "polarion_mcp") -> str:
+    """Stamp unique ``id=`` attributes on the block-level elements that
+    Polarion's ``/parts`` derivation requires.
+
+    Polarion's REST API stores ``homePageContent`` HTML verbatim and does
+    not auto-assign ids the way the web editor does. An anchorless ``<p>``
+    (or any other tag in ``_BLOCK_TAGS_NEEDING_IDS``) saves successfully
+    but makes the next ``GET .../parts`` return HTTP 500. Headings
+    ``<h1>..<h4>`` are not stamped: Polarion rewrites their ids into the
+    ``polarion_wiki macro name=module-workitem;params=id=MCPT-N`` macro
+    form on save anyway. Existing non-empty ``id=`` attributes are
+    preserved so callers can pre-anchor specific blocks.
+
+    Args:
+        html: HTML string (typically the output of ``sanitize_html``).
+        prefix: Base for generated ids; final form is ``"{prefix}_{N}"``.
+
+    Returns:
+        HTML with a unique ``id`` on every block-level element from the
+        target set. Returns an empty string when given empty input.
+    """
+    if not html or not html.strip():
+        return ""
+
+    soup = BeautifulSoup(html, "html.parser")
+    counter = 0
+    for tag in soup.find_all(list(_BLOCK_TAGS_NEEDING_IDS)):
+        if tag.get("id"):
+            continue
+        tag["id"] = f"{prefix}_{counter}"
+        counter += 1
+    return str(soup)

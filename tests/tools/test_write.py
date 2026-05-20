@@ -2899,6 +2899,37 @@ class TestCreateDocumentHappyPath:
         assert "<strong>bold</strong>" in body["value"]
         assert 'href="https://example.com"' in body["value"]
 
+    async def test_home_page_content_stamps_unique_block_ids(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Every block-level element from the target set gets a unique
+        ``polarion_mcp_N`` id; headings are intentionally left bare so
+        Polarion can rewrite them to the macro form on save."""
+        mock_client.post.return_value = {
+            "data": [{"type": "documents", "id": "MyProj/_default/MySpec"}]
+        }
+
+        await create_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="_default",
+            module_name="MySpec",
+            title="t",
+            type="generic",
+            status=None,
+            home_page_content="# H\n\npara1\n\n* item\n\npara2",
+            custom_fields=None,
+            dry_run=False,
+        )
+
+        _, kwargs = mock_client.post.call_args
+        body_html = kwargs["json"]["data"][0]["attributes"]["homePageContent"]["value"]
+        assert '<p id="polarion_mcp_0">' in body_html
+        assert '<ul id="polarion_mcp_1">' in body_html
+        assert '<p id="polarion_mcp_2">' in body_html
+        assert "<h1>" in body_html
+        assert "<h1 id=" not in body_html
+
     async def test_home_page_content_strips_dangerous_link_schemes(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
