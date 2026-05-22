@@ -2,7 +2,8 @@
 
 Currently provides ``create_work_item``, ``update_work_item``,
 ``move_work_item_to_document``, ``update_document``,
-``create_document``, and ``create_work_item_link``. All write tools
+``create_document``, ``create_work_item_links``, and
+``delete_work_item_links``. All write tools
 follow the strict patterns documented in ``CLAUDE.md``: they convert
 Markdown input to sanitized HTML, build minimal request payloads
 (skipping unset fields rather than sending empty values), and map
@@ -28,7 +29,10 @@ from mcp_server_polarion.models import (
     Hyperlink,
     JsonValue,
     WorkItemCreateResult,
-    WorkItemLinkCreateResult,
+    WorkItemLinkRef,
+    WorkItemLinksCreateResult,
+    WorkItemLinksDeleteResult,
+    WorkItemLinkSpec,
     WorkItemMoveResult,
     WorkItemUpdateResult,
 )
@@ -166,51 +170,96 @@ def _extract_created_module_name(response: dict[str, object]) -> str | None:
     return document_name or None
 
 
-def _extract_created_link_id(response: dict[str, object]) -> str | None:
-    """Return the composite link id verbatim from a 201 link-create response.
+def _extract_created_link_ids(response: dict[str, object]) -> list[str]:
+    """Return composite link ids verbatim from a bulk create-link response.
 
     Polarion returns ``{"data": [{"type": "linkedworkitems",
-    "id": "<srcProj>/<srcWI>/<role>/<tgtProj>/<tgtWI>", ...}]}``. The
-    five-segment id is the path identifier for subsequent PATCH / DELETE
-    of the same link, so it is preserved verbatim with no short-id
-    conversion.
+    "id": "<srcProj>/<srcWI>/<role>/<tgtProj>/<tgtWI>", ...}, ...]}``.
+    Preserves input order and is the path identifier for subsequent
+    PATCH / DELETE of the same links. Empty list on malformed shapes;
+    callers should treat empty as a failure.
     """
-    return _extract_first_resource_id(response)
+    data = response.get("data")
+    if not isinstance(data, list):
+        return []
+    ids: list[str] = []
+    for item in data:
+        if isinstance(item, dict):
+            item_id = item.get("id")
+            if isinstance(item_id, str):
+                ids.append(item_id)
+    return ids
 
 
-def _build_create_link_payload(
+def _build_create_links_payload(
     *,
-    role: str,
-    target_project_id: str,
-    target_work_item_id: str,
-    suspect: bool,
-    revision: str | None,
+    source_project_id: str,
+    links: list[WorkItemLinkSpec],
 ) -> dict[str, JsonValue]:
-    """Build the JSON:API body for the create-link POST endpoint.
+    """Build the JSON:API body for bulk create-link POST.
 
-    Mirrors ``_build_work_item_payload`` — wraps the new resource in
-    ``{"data": [...]}``  and skips unset optional values so we never send
-    an empty ``revision`` that Polarion might interpret as a clear-default.
-    The target work item is identified through the to-one ``workItem``
-    relationship using the ``"{project}/{wi}"`` composite id.
+    Each spec produces one ``{"type": "linkedworkitems", "attributes": ...,
+    "relationships": ...}`` resource; all are sent in a single ``data``
+    array. ``revision`` is skipped when unset so Polarion does not
+    interpret an empty string as a clear-default. ``target_project_id``
+    defaults to the source's project per spec when None.
     """
-    attributes: dict[str, JsonValue] = {"role": role, "suspect": suspect}
-    if revision:
-        attributes["revision"] = revision
-
-    item: dict[str, JsonValue] = {
-        "type": "linkedworkitems",
-        "attributes": attributes,
-        "relationships": {
-            "workItem": {
-                "data": {
-                    "type": "workitems",
-                    "id": f"{target_project_id}/{target_work_item_id}",
-                }
+    data: list[JsonValue] = []
+    for spec in links:
+        tgt_proj = (
+            spec.target_project_id
+            if spec.target_project_id is not None
+            else source_project_id
+        )
+        attributes: dict[str, JsonValue] = {"role": spec.role, "suspect": spec.suspect}
+        if spec.revision:
+            attributes["revision"] = spec.revision
+        data.append(
+            {
+                "type": "linkedworkitems",
+                "attributes": attributes,
+                "relationships": {
+                    "workItem": {
+                        "data": {
+                            "type": "workitems",
+                            "id": f"{tgt_proj}/{spec.target_work_item_id}",
+                        }
+                    }
+                },
             }
-        },
-    }
-    return {"data": [item]}
+        )
+    return {"data": data}
+
+
+def _build_delete_links_payload(
+    *,
+    source_project_id: str,
+    source_work_item_id: str,
+    links: list[WorkItemLinkRef],
+) -> tuple[list[str], dict[str, JsonValue]]:
+    """Build the composite ids and JSON:API body for bulk delete-link DELETE.
+
+    Polarion identifies each link by its five-segment composite id
+    ``<srcProj>/<srcWI>/<role>/<tgtProj>/<tgtWI>``. We construct each id
+    from the validated structured ref so the LLM never sees the raw
+    composite form. Returns the id list (echoed in the result) and the
+    JSON:API body to send.
+    """
+    link_ids: list[str] = []
+    data: list[JsonValue] = []
+    for ref in links:
+        tgt_proj = (
+            ref.target_project_id
+            if ref.target_project_id is not None
+            else source_project_id
+        )
+        link_id = (
+            f"{source_project_id}/{source_work_item_id}/{ref.role}/"
+            f"{tgt_proj}/{ref.target_work_item_id}"
+        )
+        link_ids.append(link_id)
+        data.append({"type": "linkedworkitems", "id": link_id})
+    return link_ids, {"data": data}
 
 
 def _build_update_work_item_payload(  # noqa: PLR0913
@@ -1537,88 +1586,72 @@ async def create_document(  # noqa: PLR0913
     tags={"write"},
     timeout=60.0,
     annotations={
-        # Pure additive operation per MCP spec -- adds a link record without
-        # mutating existing work items. Not idempotent because retrying the
-        # same (role, target) returns HTTP 409.
+        # Pure additive operation per MCP spec -- adds link records without
+        # mutating existing work items. Not idempotent: retrying the same
+        # (role, target) on an already-linked pair returns HTTP 409.
         "readOnlyHint": False,
         "destructiveHint": False,
         "idempotentHint": False,
         "openWorldHint": True,
     },
 )
-async def create_work_item_link(  # noqa: PLR0913
+async def create_work_item_links(
     ctx: Context,
     project_id: str = Field(min_length=1, description="Source work item's project ID."),
     work_item_id: str = Field(
         min_length=1,
-        description="Source work item ID (the link's outgoing endpoint).",
+        description="Source work item ID (the links' outgoing endpoint).",
     ),
-    role: str = Field(
+    links: list[WorkItemLinkSpec] = Field(  # noqa: B008
         min_length=1,
-        description=(
-            "Link role id (e.g. 'parent', 'relates_to', 'verifies'); "
-            "project-specific with no server-side validation."
-        ),
-    ),
-    target_work_item_id: str = Field(
-        min_length=1,
-        description="Target work item ID (the link's incoming endpoint).",
-    ),
-    target_project_id: str | None = Field(
-        default=None,
-        description=(
-            "Target's project; defaults to ``project_id`` for same-project links."
-        ),
-    ),
-    suspect: bool = Field(
-        default=False,
-        description="Mark the link as suspect (target changed since last review).",
-    ),
-    revision: str | None = Field(
-        default=None,
-        description="Optional revision pin (e.g. '1234'); current HEAD when omitted.",
+        description="One or more links to create under the source work item.",
     ),
     dry_run: bool = Field(
         default=False,
         description="When True, return payload preview without calling Polarion.",
     ),
-) -> WorkItemLinkCreateResult:
-    """Create a direct outgoing link from one work item to another.
+) -> WorkItemLinksCreateResult:
+    """Create one or more outgoing links from a single source work item.
 
-    Adds a single link record under the source work item, pointing to the
-    target through the ``workItem`` to-one relationship. The orientation
-    matches ``list_work_item_links(direction="forward")`` on the source.
-
-    Polarion does not validate link roles server-side. An unknown ``role``
-    id is stored verbatim and never matches subsequent queries, so resolve
-    the valid role ids for the project beforehand by reading an existing
-    link with ``list_work_item_links(direction="forward")`` on a similar
-    work item in the same project.
-
+    All links share the same source (``project_id`` / ``work_item_id``)
+    and are sent as a single bulk JSON:API request. For each spec
     ``target_project_id`` defaults to ``project_id`` for the common
-    same-project case; pass it explicitly only for cross-project
-    traceability links. ``revision`` pins the link to a specific Polarion
-    revision when set, otherwise the link targets the current HEAD.
+    same-project case; pass it explicitly only for cross-project links.
+    The orientation matches ``list_work_item_links(direction="forward")``
+    on the source.
 
-    The returned ``link_id`` is the five-segment composite
-    ``<srcProj>/<srcWI>/<role>/<tgtProj>/<tgtWI>`` and is the path
-    identifier for any future PATCH or DELETE of the same link.
+    Polarion does not validate link roles server-side: an unknown ``role``
+    is stored verbatim and never matches subsequent queries. Resolve valid
+    roles by reading an existing link with
+    ``list_work_item_links(direction="forward")`` on a similar work item
+    in the same project.
+
+    Each spec's ``revision`` pins the link to a specific Polarion revision
+    when set, otherwise the link targets the current HEAD. ``suspect``
+    marks the link as needing re-review (usually False for new links).
+
+    The returned ``link_ids`` are five-segment composites
+    ``<srcProj>/<srcWI>/<role>/<tgtProj>/<tgtWI>`` in input order, and
+    are the path identifiers for future delete/PATCH of the same links
+    via ``delete_work_item_links``.
+
+    Bulk semantics: behavior on mixed-success (e.g. one duplicate among
+    valid links) is not currently characterised on this server. If you
+    need per-link diagnostics, send one spec per call.
 
     Args:
         ctx: MCP tool context (injected automatically).
         project_id: Source work item's project ID.
         work_item_id: Source work item ID.
-        role: Link role id (project-specific; e.g. 'parent', 'relates_to').
-        target_work_item_id: Target work item ID.
-        target_project_id: Target's project; defaults to ``project_id``.
-        suspect: Mark the link as suspect (usually False for new links).
-        revision: Optional revision pin; current HEAD when None.
+        links: One or more ``WorkItemLinkSpec`` (role + target + optional
+            target_project_id / suspect / revision).
         dry_run: When True, return payload preview only.
 
     Returns:
-        WorkItemLinkCreateResult with ``created``, ``dry_run``,
-        ``link_id`` (composite five-segment id, None on dry-run), and
-        ``payload_preview`` (populated on dry-run; None on real create).
+        WorkItemLinksCreateResult with ``created``, ``dry_run``,
+        ``link_ids`` (composite five-segment ids in input order; empty
+        on dry-run), and ``payload_preview`` (populated on dry-run;
+        None on real create).
 
     Raises:
         ValueError: Source project or work item not found.
@@ -1626,21 +1659,16 @@ async def create_work_item_link(  # noqa: PLR0913
         RuntimeError: Other Polarion API errors (including duplicate link),
             or accepted-but-no-ID response.
     """
-    tgt_proj = target_project_id if target_project_id is not None else project_id
-
-    payload = _build_create_link_payload(
-        role=role,
-        target_project_id=tgt_proj,
-        target_work_item_id=target_work_item_id,
-        suspect=suspect,
-        revision=revision,
+    payload = _build_create_links_payload(
+        source_project_id=project_id,
+        links=links,
     )
 
     if dry_run:
-        return WorkItemLinkCreateResult(
+        return WorkItemLinksCreateResult(
             created=False,
             dry_run=True,
-            link_id=None,
+            link_ids=[],
             payload_preview=payload,
         )
 
@@ -1653,7 +1681,7 @@ async def create_work_item_link(  # noqa: PLR0913
         response = await client.post(path, json=cast(dict[str, object], payload))
     except PolarionAuthError as exc:
         raise PermissionError(
-            "Cannot create work item link -- check your POLARION_TOKEN permissions."
+            "Cannot create work item links -- check your POLARION_TOKEN permissions."
         ) from exc
     except PolarionNotFoundError as exc:
         raise ValueError(
@@ -1661,18 +1689,140 @@ async def create_work_item_link(  # noqa: PLR0913
             "Use `list_work_items` to discover valid IDs."
         ) from exc
     except PolarionError as exc:
-        raise RuntimeError(f"Failed to create work item link: {exc.message}") from exc
+        raise RuntimeError(f"Failed to create work item links: {exc.message}") from exc
 
-    link_id = _extract_created_link_id(response)
-    if link_id is None:
+    link_ids = _extract_created_link_ids(response)
+    if not link_ids:
         raise RuntimeError(
-            "Polarion accepted the create-link request but returned no link id. "
-            "The link may or may not exist; verify with list_work_item_links."
+            "Polarion accepted the bulk create-link request but returned no "
+            "link ids. The links may or may not exist; verify with "
+            "list_work_item_links."
         )
 
-    return WorkItemLinkCreateResult(
+    return WorkItemLinksCreateResult(
         created=True,
         dry_run=False,
-        link_id=link_id,
+        link_ids=link_ids,
+        payload_preview=None,
+    )
+
+
+@mcp.tool(
+    tags={"write"},
+    timeout=60.0,
+    annotations={
+        # Destructive: removes existing link records. Idempotent at the
+        # body level -- Polarion silently ignores ids that don't match
+        # an existing link and returns 204 regardless.
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def delete_work_item_links(
+    ctx: Context,
+    project_id: str = Field(min_length=1, description="Source work item's project ID."),
+    work_item_id: str = Field(
+        min_length=1,
+        description="Source work item ID (the links' outgoing endpoint).",
+    ),
+    links: list[WorkItemLinkRef] = Field(  # noqa: B008
+        min_length=1,
+        description="One or more existing outgoing links to delete.",
+    ),
+    dry_run: bool = Field(
+        default=False,
+        description="When True, return payload preview without calling Polarion.",
+    ),
+) -> WorkItemLinksDeleteResult:
+    """Delete one or more outgoing links from a single source work item.
+
+    Mirrors ``create_work_item_links``: same source coordinates, structured
+    refs for each target. Only **outgoing** ("forward") links are removed
+    through this endpoint. Back links are removed by calling this tool on
+    the *other* work item (the one owning the outgoing side). External
+    hyperlinks live on ``hyperlinks`` and are managed via
+    ``update_work_item``.
+
+    How to identify links:
+    - From a prior ``create_work_item_links`` call: reuse the same specs
+      (drop ``suspect`` / ``revision`` -- delete needs only role + target).
+    - From ``list_work_item_links(direction="forward")``: each item's
+      ``role`` and ``id`` (the target's short ID) form one ref;
+      ``target_project_id`` defaults to ``project_id`` for same-project.
+
+    Idempotent at the body level: Polarion silently ignores refs whose
+    composite id does not match an existing link, deletes any refs that
+    do match, and returns 204 either way. So re-deleting an
+    already-removed link is a no-op, and a mixed batch (some real,
+    some stale) succeeds for the real ones without surfacing the
+    stale ones. ``ValueError`` is reserved for path-level 404 -- the
+    source work item itself does not exist; the body-level "link not
+    found" case never reaches the tool layer.
+
+    Args:
+        ctx: MCP tool context (injected automatically).
+        project_id: Source work item's project ID.
+        work_item_id: Source work item ID.
+        links: One or more ``WorkItemLinkRef`` (role + target + optional
+            target_project_id).
+        dry_run: When True, return payload preview only.
+
+    Returns:
+        WorkItemLinksDeleteResult with ``deleted``, ``dry_run``,
+        ``link_ids`` (composite ids that were/would be deleted, in input
+        order, always populated since they are reconstructed from the
+        request), and ``payload_preview`` (populated on dry-run; None on
+        real delete).
+
+    Raises:
+        ValueError: Source work item itself not found (path-level 404).
+            Body-level "link not found" is silently ignored by Polarion
+            and does not raise.
+        PermissionError: Token lacks permission.
+        RuntimeError: Other Polarion API errors (e.g. 400 on a malformed
+            composite id -- but this tool constructs valid ids from
+            structured refs, so 400 should be unreachable).
+    """
+    link_ids, payload = _build_delete_links_payload(
+        source_project_id=project_id,
+        source_work_item_id=work_item_id,
+        links=links,
+    )
+
+    if dry_run:
+        return WorkItemLinksDeleteResult(
+            deleted=False,
+            dry_run=True,
+            link_ids=link_ids,
+            payload_preview=payload,
+        )
+
+    client = get_client(ctx)
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/workitems/{encode_path_segment(work_item_id)}/linkedworkitems"
+    )
+    try:
+        await client.delete(path, json=cast(dict[str, object], payload))
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot delete work item links -- check your POLARION_TOKEN permissions."
+        ) from exc
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Source work item '{work_item_id}' not found in project "
+            f"'{project_id}'. (Body-level 'link not found' is silently "
+            "ignored by Polarion; this error means the source WI itself "
+            "is missing. Use `list_work_items` to discover valid IDs.)"
+        ) from exc
+    except PolarionError as exc:
+        raise RuntimeError(f"Failed to delete work item links: {exc.message}") from exc
+
+    return WorkItemLinksDeleteResult(
+        deleted=True,
+        dry_run=False,
+        link_ids=link_ids,
         payload_preview=None,
     )

@@ -685,26 +685,96 @@ class CommentResult(BaseModel):
     )
 
 
-class WorkItemLinkCreateResult(BaseModel):
-    """Result of a ``create_work_item_link`` operation."""
+class WorkItemLinkSpec(BaseModel):
+    """One link to create under a source work item."""
+
+    role: str = Field(
+        min_length=1,
+        description="Link role id (e.g. 'parent', 'relates_to', 'verifies').",
+    )
+    target_work_item_id: str = Field(
+        min_length=1,
+        description="Target work item ID (the link's incoming endpoint).",
+    )
+    target_project_id: str | None = Field(
+        default=None,
+        description="Target's project; defaults to the source's project.",
+    )
+    suspect: bool = Field(
+        default=False,
+        description="Mark the link as suspect (target changed since last review).",
+    )
+    revision: str | None = Field(
+        default=None,
+        description="Optional revision pin (current HEAD when omitted).",
+    )
+
+
+class WorkItemLinkRef(BaseModel):
+    """One existing link identified for deletion."""
+
+    role: str = Field(
+        min_length=1,
+        description="Link role id of the existing link; must match exactly.",
+    )
+    target_work_item_id: str = Field(
+        min_length=1,
+        description="Target work item ID (the link's incoming endpoint).",
+    )
+    target_project_id: str | None = Field(
+        default=None,
+        description="Target's project; defaults to the source's project.",
+    )
+
+
+class WorkItemLinksCreateResult(BaseModel):
+    """Result of a ``create_work_item_links`` operation."""
 
     created: bool = Field(
-        description="True if the link was created. False when dry_run is True.",
+        description="True if Polarion accepted the bulk create. False on dry_run.",
     )
     dry_run: bool = Field(
         description="Whether this was a dry-run (preview only, no mutation).",
     )
-    link_id: str | None = Field(
-        default=None,
+    link_ids: list[str] = Field(
+        default_factory=list,
         description=(
-            "Composite link id (``<srcProj>/<srcWI>/<role>/<tgtProj>/<tgtWI>``);"
-            " None on dry-run."
+            "Composite 5-segment link ids"
+            " (``<srcProj>/<srcWI>/<role>/<tgtProj>/<tgtWI>``)"
+            " returned by Polarion, in input order; empty on dry-run."
         ),
     )
     payload_preview: dict[str, JsonValue] | None = Field(
+        default=None,
         description=(
             "JSON:API payload that was (or would be) sent;"
             " populated for dry-run, None after a real create."
+        ),
+    )
+
+
+class WorkItemLinksDeleteResult(BaseModel):
+    """Result of a ``delete_work_item_links`` operation."""
+
+    deleted: bool = Field(
+        description="True if Polarion accepted the bulk delete. False on dry_run.",
+    )
+    dry_run: bool = Field(
+        description="Whether this was a dry-run (preview only, no mutation).",
+    )
+    link_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Composite 5-segment link ids that were (or would be) deleted, "
+            "in input order; always populated since they are reconstructed "
+            "from the request."
+        ),
+    )
+    payload_preview: dict[str, JsonValue] | None = Field(
+        default=None,
+        description=(
+            "JSON:API payload that was (or would be) sent;"
+            " populated for dry-run, None after a real delete."
         ),
     )
 
@@ -821,7 +891,10 @@ __all__: list[str] = [
     "WorkItemCreateResult",
     "WorkItemDetail",
     "WorkItemLink",
-    "WorkItemLinkCreateResult",
+    "WorkItemLinkRef",
+    "WorkItemLinkSpec",
+    "WorkItemLinksCreateResult",
+    "WorkItemLinksDeleteResult",
     "WorkItemMoveResult",
     "WorkItemRead",
     "WorkItemSummary",
