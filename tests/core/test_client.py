@@ -6,6 +6,7 @@ is needed.  The client uses ``write_delay=0`` to avoid sleeping.
 
 from __future__ import annotations
 
+import json
 from unittest.mock import patch
 
 import httpx
@@ -151,6 +152,59 @@ class TestSuccessfulResponses:
             # 204 No Content → empty dict
             assert result == {}
 
+    async def test_delete_returns_empty_on_204(self) -> None:
+        with respx.mock(base_url=BASE) as mock:
+            mock.delete("/projects/P1/workitems/WI-001/linkedworkitems").mock(
+                return_value=httpx.Response(204),
+            )
+
+            async with PolarionClient(_config(), write_delay=0) as client:
+                result = await client.delete(
+                    "/projects/P1/workitems/WI-001/linkedworkitems",
+                    json={
+                        "data": [
+                            {
+                                "type": "linkedworkitems",
+                                "id": "P1/WI-001/parent/P1/WI-002",
+                            }
+                        ]
+                    },
+                )
+
+            # 204 No Content → empty dict
+            assert result == {}
+
+    async def test_delete_sends_json_body(self) -> None:
+        """DELETE-with-body: the JSON payload must reach the wire."""
+        with respx.mock(base_url=BASE) as mock:
+            route = mock.delete("/projects/P1/workitems/WI-001/linkedworkitems").mock(
+                return_value=httpx.Response(204)
+            )
+
+            async with PolarionClient(_config(), write_delay=0) as client:
+                await client.delete(
+                    "/projects/P1/workitems/WI-001/linkedworkitems",
+                    json={
+                        "data": [
+                            {
+                                "type": "linkedworkitems",
+                                "id": "P1/WI-001/parent/P1/WI-002",
+                            }
+                        ]
+                    },
+                )
+
+            request = route.calls.last.request
+            sent = json.loads(request.content)
+            assert sent == {
+                "data": [
+                    {
+                        "type": "linkedworkitems",
+                        "id": "P1/WI-001/parent/P1/WI-002",
+                    }
+                ]
+            }
+
     async def test_non_dict_body_wrapped(self) -> None:
         """If the response body is a list, wrap it in ``{"data": ...}``."""
         with respx.mock(base_url=BASE) as mock:
@@ -214,6 +268,31 @@ class TestErrorMapping:
             async with PolarionClient(_config(), write_delay=0) as client:
                 with pytest.raises(PolarionNotFoundError) as exc_info:
                     await client.get("/projects/MISSING/workitems/WI-999")
+
+            assert exc_info.value.status_code == 404
+
+    async def test_delete_404_raises_not_found_error(self) -> None:
+        with respx.mock(base_url=BASE) as mock:
+            mock.delete("/projects/P1/workitems/WI-001/linkedworkitems").mock(
+                return_value=httpx.Response(
+                    404,
+                    json={"error": "Not Found"},
+                ),
+            )
+
+            async with PolarionClient(_config(), write_delay=0) as client:
+                with pytest.raises(PolarionNotFoundError) as exc_info:
+                    await client.delete(
+                        "/projects/P1/workitems/WI-001/linkedworkitems",
+                        json={
+                            "data": [
+                                {
+                                    "type": "linkedworkitems",
+                                    "id": "P1/WI-001/parent/P1/WI-999",
+                                }
+                            ]
+                        },
+                    )
 
             assert exc_info.value.status_code == 404
 

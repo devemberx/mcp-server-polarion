@@ -217,6 +217,30 @@ class PolarionClient:
         await asyncio.sleep(self._write_delay)
         return result
 
+    async def delete(
+        self,
+        path: str,
+        *,
+        json: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        """Send a ``DELETE`` request (write operation).
+
+        Polarion's bulk-delete endpoints require a JSON:API body listing
+        the resource ids to remove; ``httpx`` permits a body on DELETE
+        and Polarion's REST gateway accepts it. A short delay is applied
+        **after** the request succeeds, same as ``post`` / ``patch``.
+
+        Args:
+            path: URL path relative to the base API URL.
+            json: JSON request body (required for bulk-delete endpoints).
+
+        Returns:
+            Decoded JSON response body (``{}`` for 204 No Content).
+        """
+        result = await self._request("DELETE", path, json=json)
+        await asyncio.sleep(self._write_delay)
+        return result
+
     async def _request(
         self,
         method: str,
@@ -232,7 +256,7 @@ class PolarionClient:
         immediately.
 
         Args:
-            method: HTTP method (GET, POST, PATCH).
+            method: HTTP method (GET, POST, PATCH, DELETE).
             path: URL path relative to the base API URL.
             params: Optional query parameters.
             json: Optional JSON body.

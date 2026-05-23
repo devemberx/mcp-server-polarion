@@ -25,7 +25,10 @@ from mcp_server_polarion.models import (
     DocumentUpdateResult,
     Hyperlink,
     WorkItemCreateResult,
-    WorkItemLinkCreateResult,
+    WorkItemLinkRef,
+    WorkItemLinksCreateResult,
+    WorkItemLinksDeleteResult,
+    WorkItemLinkSpec,
     WorkItemMoveResult,
     WorkItemUpdateResult,
 )
@@ -36,19 +39,21 @@ from mcp_server_polarion.tools import write as _write_mod
 # (not a FunctionTool wrapper), so we reference them directly.
 create_document = _write_mod.create_document
 create_work_item = _write_mod.create_work_item
-create_work_item_link = _write_mod.create_work_item_link
+create_work_item_links = _write_mod.create_work_item_links
+delete_work_item_links = _write_mod.delete_work_item_links
 move_work_item_from_document = _write_mod.move_work_item_from_document
 move_work_item_to_document = _write_mod.move_work_item_to_document
 update_document = _write_mod.update_document
 update_work_item = _write_mod.update_work_item
 _build_create_document_payload = _write_mod._build_create_document_payload
-_build_create_link_payload = _write_mod._build_create_link_payload
+_build_create_links_payload = _write_mod._build_create_links_payload
+_build_delete_links_payload = _write_mod._build_delete_links_payload
 _build_move_to_document_payload = _write_mod._build_move_to_document_payload
 _build_update_document_payload = _write_mod._build_update_document_payload
 _build_update_work_item_payload = _write_mod._build_update_work_item_payload
 _build_work_item_payload = _write_mod._build_work_item_payload
 _extract_created_id = _write_mod._extract_created_id
-_extract_created_link_id = _write_mod._extract_created_link_id
+_extract_created_link_ids = _write_mod._extract_created_link_ids
 
 
 @pytest.fixture
@@ -58,6 +63,7 @@ def mock_client() -> AsyncMock:
     client.post = AsyncMock()
     client.patch = AsyncMock()
     client.get = AsyncMock()
+    client.delete = AsyncMock()
     return client
 
 
@@ -2768,6 +2774,24 @@ class TestWriteToolAnnotations:
                     "openWorldHint": True,
                 },
             ),
+            (
+                "create_work_item_links",
+                {
+                    "readOnlyHint": False,
+                    "destructiveHint": False,
+                    "idempotentHint": False,
+                    "openWorldHint": True,
+                },
+            ),
+            (
+                "delete_work_item_links",
+                {
+                    "readOnlyHint": False,
+                    "destructiveHint": True,
+                    "idempotentHint": True,
+                    "openWorldHint": True,
+                },
+            ),
         ],
     )
     async def test_write_tool_annotation(
@@ -3347,19 +3371,20 @@ class TestCreateDocumentDocstringGuidance:
         assert "409" in document or "conflict" in document.lower()
 
 
-class TestBuildCreateLinkPayload:
-    """Tests for the private ``_build_create_link_payload`` helper."""
+class TestBuildCreateLinksPayload:
+    """Tests for the private ``_build_create_links_payload`` helper."""
 
-    def test_minimal_payload_skips_revision(self) -> None:
-        payload = _build_create_link_payload(
-            role="parent",
-            target_project_id="MyProj",
-            target_work_item_id="MCPT-2",
-            suspect=False,
-            revision=None,
+    def test_single_spec_minimal_skips_revision(self) -> None:
+        payload = _build_create_links_payload(
+            source_project_id="MyProj",
+            links=[
+                WorkItemLinkSpec(role="parent", target_work_item_id="MCPT-2"),
+            ],
         )
 
-        item = cast(list[dict[str, object]], payload["data"])[0]
+        data = cast(list[dict[str, object]], payload["data"])
+        assert len(data) == 1
+        item = data[0]
         assert item["type"] == "linkedworkitems"
         attrs = cast(dict[str, object], item["attributes"])
         assert attrs == {"role": "parent", "suspect": False}
@@ -3368,12 +3393,16 @@ class TestBuildCreateLinkPayload:
         assert wi_rel["data"] == {"type": "workitems", "id": "MyProj/MCPT-2"}
 
     def test_revision_inlined_when_set(self) -> None:
-        payload = _build_create_link_payload(
-            role="verifies",
-            target_project_id="MyProj",
-            target_work_item_id="MCPT-2",
-            suspect=True,
-            revision="r1234",
+        payload = _build_create_links_payload(
+            source_project_id="MyProj",
+            links=[
+                WorkItemLinkSpec(
+                    role="verifies",
+                    target_work_item_id="MCPT-2",
+                    suspect=True,
+                    revision="r1234",
+                ),
+            ],
         )
 
         attrs = cast(
@@ -3383,12 +3412,15 @@ class TestBuildCreateLinkPayload:
         assert attrs == {"role": "verifies", "suspect": True, "revision": "r1234"}
 
     def test_cross_project_target_in_relationship_id(self) -> None:
-        payload = _build_create_link_payload(
-            role="relates_to",
-            target_project_id="OtherProj",
-            target_work_item_id="MCPT-99",
-            suspect=False,
-            revision=None,
+        payload = _build_create_links_payload(
+            source_project_id="MyProj",
+            links=[
+                WorkItemLinkSpec(
+                    role="relates_to",
+                    target_work_item_id="MCPT-99",
+                    target_project_id="OtherProj",
+                ),
+            ],
         )
 
         rels = cast(
@@ -3398,30 +3430,88 @@ class TestBuildCreateLinkPayload:
         wi_rel = cast(dict[str, object], rels["workItem"])
         assert wi_rel["data"] == {"type": "workitems", "id": "OtherProj/MCPT-99"}
 
+    def test_multiple_specs_preserve_order(self) -> None:
+        payload = _build_create_links_payload(
+            source_project_id="MyProj",
+            links=[
+                WorkItemLinkSpec(role="parent", target_work_item_id="MCPT-2"),
+                WorkItemLinkSpec(role="verifies", target_work_item_id="MCPT-3"),
+                WorkItemLinkSpec(
+                    role="relates_to",
+                    target_work_item_id="MCPT-9",
+                    target_project_id="OtherProj",
+                ),
+            ],
+        )
 
-class TestCreateWorkItemLinkDryRun:
-    """Tests for ``create_work_item_link`` with ``dry_run=True``."""
+        data = cast(list[dict[str, object]], payload["data"])
+        assert len(data) == 3
+        roles = [cast(dict[str, object], item["attributes"])["role"] for item in data]
+        assert roles == ["parent", "verifies", "relates_to"]
+        target_ids = [
+            cast(
+                dict[str, object],
+                cast(dict[str, object], item["relationships"])["workItem"],
+            )["data"]
+            for item in data
+        ]
+        assert target_ids == [
+            {"type": "workitems", "id": "MyProj/MCPT-2"},
+            {"type": "workitems", "id": "MyProj/MCPT-3"},
+            {"type": "workitems", "id": "OtherProj/MCPT-9"},
+        ]
+
+
+class TestExtractCreatedLinkIds:
+    """Tests for the private ``_extract_created_link_ids`` helper."""
+
+    def test_extracts_in_order(self) -> None:
+        response: dict[str, object] = {
+            "data": [
+                {"type": "linkedworkitems", "id": "P/WI-1/parent/P/WI-2"},
+                {"type": "linkedworkitems", "id": "P/WI-1/verifies/P/WI-3"},
+            ]
+        }
+        assert _extract_created_link_ids(response) == [
+            "P/WI-1/parent/P/WI-2",
+            "P/WI-1/verifies/P/WI-3",
+        ]
+
+    def test_skips_entries_missing_id(self) -> None:
+        response: dict[str, object] = {
+            "data": [
+                {"type": "linkedworkitems", "id": "P/WI-1/parent/P/WI-2"},
+                {"type": "linkedworkitems"},
+            ]
+        }
+        assert _extract_created_link_ids(response) == ["P/WI-1/parent/P/WI-2"]
+
+    def test_returns_empty_on_missing_data(self) -> None:
+        assert _extract_created_link_ids({}) == []
+
+    def test_returns_empty_on_non_list_data(self) -> None:
+        assert _extract_created_link_ids({"data": "oops"}) == []
+
+
+class TestCreateWorkItemLinksDryRun:
+    """Tests for ``create_work_item_links`` with ``dry_run=True``."""
 
     async def test_dry_run_returns_payload_without_calling_post(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        result = await create_work_item_link(
+        result = await create_work_item_links(
             mock_ctx,
             project_id="MyProj",
             work_item_id="MCPT-1",
-            role="parent",
-            target_work_item_id="MCPT-2",
-            target_project_id=None,
-            suspect=False,
-            revision=None,
+            links=[WorkItemLinkSpec(role="parent", target_work_item_id="MCPT-2")],
             dry_run=True,
         )
 
         mock_client.post.assert_not_called()
-        assert isinstance(result, WorkItemLinkCreateResult)
+        assert isinstance(result, WorkItemLinksCreateResult)
         assert result.dry_run is True
         assert result.created is False
-        assert result.link_id is None
+        assert result.link_ids == []
         assert result.payload_preview is not None
         item = cast(list[dict[str, object]], result.payload_preview["data"])[0]
         attrs = cast(dict[str, object], item["attributes"])
@@ -3432,10 +3522,10 @@ class TestCreateWorkItemLinkDryRun:
         assert wi_rel["data"] == {"type": "workitems", "id": "MyProj/MCPT-2"}
 
 
-class TestCreateWorkItemLinkHappyPath:
-    """Tests for a successful ``create_work_item_link`` call."""
+class TestCreateWorkItemLinksHappyPath:
+    """Tests for a successful ``create_work_item_links`` call."""
 
-    async def test_returns_composite_link_id_on_201(
+    async def test_returns_composite_link_ids_on_201(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.post.return_value = {
@@ -3444,26 +3534,32 @@ class TestCreateWorkItemLinkHappyPath:
                     "type": "linkedworkitems",
                     "id": "MyProj/MCPT-1/parent/MyProj/MCPT-2",
                     "links": {"self": "..."},
-                }
+                },
+                {
+                    "type": "linkedworkitems",
+                    "id": "MyProj/MCPT-1/verifies/MyProj/MCPT-3",
+                },
             ]
         }
 
-        result = await create_work_item_link(
+        result = await create_work_item_links(
             mock_ctx,
             project_id="MyProj",
             work_item_id="MCPT-1",
-            role="parent",
-            target_work_item_id="MCPT-2",
-            target_project_id=None,
-            suspect=False,
-            revision=None,
+            links=[
+                WorkItemLinkSpec(role="parent", target_work_item_id="MCPT-2"),
+                WorkItemLinkSpec(role="verifies", target_work_item_id="MCPT-3"),
+            ],
             dry_run=False,
         )
 
-        assert isinstance(result, WorkItemLinkCreateResult)
+        assert isinstance(result, WorkItemLinksCreateResult)
         assert result.created is True
         assert result.dry_run is False
-        assert result.link_id == "MyProj/MCPT-1/parent/MyProj/MCPT-2"
+        assert result.link_ids == [
+            "MyProj/MCPT-1/parent/MyProj/MCPT-2",
+            "MyProj/MCPT-1/verifies/MyProj/MCPT-3",
+        ]
         assert result.payload_preview is None
 
     async def test_post_called_with_correct_path_and_body(
@@ -3478,15 +3574,13 @@ class TestCreateWorkItemLinkHappyPath:
             ]
         }
 
-        await create_work_item_link(
+        await create_work_item_links(
             mock_ctx,
             project_id="MyProj",
             work_item_id="MCPT-1",
-            role="relates_to",
-            target_work_item_id="MCPT-2",
-            target_project_id=None,
-            suspect=False,
-            revision=None,
+            links=[
+                WorkItemLinkSpec(role="relates_to", target_work_item_id="MCPT-2"),
+            ],
             dry_run=False,
         )
 
@@ -3510,19 +3604,21 @@ class TestCreateWorkItemLinkHappyPath:
             ]
         }
 
-        result = await create_work_item_link(
+        result = await create_work_item_links(
             mock_ctx,
             project_id="MyProj",
             work_item_id="MCPT-1",
-            role="verifies",
-            target_work_item_id="MCPT-9",
-            target_project_id="OtherProj",
-            suspect=False,
-            revision=None,
+            links=[
+                WorkItemLinkSpec(
+                    role="verifies",
+                    target_work_item_id="MCPT-9",
+                    target_project_id="OtherProj",
+                ),
+            ],
             dry_run=False,
         )
 
-        assert result.link_id == "MyProj/MCPT-1/verifies/OtherProj/MCPT-9"
+        assert result.link_ids == ["MyProj/MCPT-1/verifies/OtherProj/MCPT-9"]
         _, kwargs = mock_client.post.call_args
         assert (
             kwargs["json"]["data"][0]["relationships"]["workItem"]["data"]["id"]
@@ -3530,7 +3626,7 @@ class TestCreateWorkItemLinkHappyPath:
         )
 
 
-class TestCreateWorkItemLinkErrorMapping:
+class TestCreateWorkItemLinksErrorMapping:
     """Tests that domain exceptions are mapped at the tool layer."""
 
     async def test_401_raises_permission_error(
@@ -3539,15 +3635,13 @@ class TestCreateWorkItemLinkErrorMapping:
         mock_client.post.side_effect = PolarionAuthError("auth", status_code=401)
 
         with pytest.raises(PermissionError):
-            await create_work_item_link(
+            await create_work_item_links(
                 mock_ctx,
                 project_id="MyProj",
                 work_item_id="MCPT-1",
-                role="parent",
-                target_work_item_id="MCPT-2",
-                target_project_id=None,
-                suspect=False,
-                revision=None,
+                links=[
+                    WorkItemLinkSpec(role="parent", target_work_item_id="MCPT-2"),
+                ],
                 dry_run=False,
             )
 
@@ -3559,15 +3653,13 @@ class TestCreateWorkItemLinkErrorMapping:
         )
 
         with pytest.raises(ValueError, match="list_work_items"):
-            await create_work_item_link(
+            await create_work_item_links(
                 mock_ctx,
                 project_id="MyProj",
                 work_item_id="MCPT-1",
-                role="parent",
-                target_work_item_id="MCPT-2",
-                target_project_id=None,
-                suspect=False,
-                revision=None,
+                links=[
+                    WorkItemLinkSpec(role="parent", target_work_item_id="MCPT-2"),
+                ],
                 dry_run=False,
             )
 
@@ -3576,21 +3668,19 @@ class TestCreateWorkItemLinkErrorMapping:
     ) -> None:
         mock_client.post.side_effect = PolarionError("duplicate link", status_code=409)
 
-        with pytest.raises(RuntimeError, match="create work item link"):
-            await create_work_item_link(
+        with pytest.raises(RuntimeError, match="create work item links"):
+            await create_work_item_links(
                 mock_ctx,
                 project_id="MyProj",
                 work_item_id="MCPT-1",
-                role="parent",
-                target_work_item_id="MCPT-2",
-                target_project_id=None,
-                suspect=False,
-                revision=None,
+                links=[
+                    WorkItemLinkSpec(role="parent", target_work_item_id="MCPT-2"),
+                ],
                 dry_run=False,
             )
 
 
-class TestCreateWorkItemLinkResponseParsing:
+class TestCreateWorkItemLinksResponseParsing:
     """Tests for unexpected 2xx response shapes from Polarion."""
 
     async def test_empty_data_array_raises_runtime_error(
@@ -3598,16 +3688,14 @@ class TestCreateWorkItemLinkResponseParsing:
     ) -> None:
         mock_client.post.return_value = {"data": []}
 
-        with pytest.raises(RuntimeError, match="no link id"):
-            await create_work_item_link(
+        with pytest.raises(RuntimeError, match="no link ids"):
+            await create_work_item_links(
                 mock_ctx,
                 project_id="MyProj",
                 work_item_id="MCPT-1",
-                role="parent",
-                target_work_item_id="MCPT-2",
-                target_project_id=None,
-                suspect=False,
-                revision=None,
+                links=[
+                    WorkItemLinkSpec(role="parent", target_work_item_id="MCPT-2"),
+                ],
                 dry_run=False,
             )
 
@@ -3616,27 +3704,25 @@ class TestCreateWorkItemLinkResponseParsing:
     ) -> None:
         mock_client.post.return_value = {"data": [{"type": "linkedworkitems"}]}
 
-        with pytest.raises(RuntimeError, match="no link id"):
-            await create_work_item_link(
+        with pytest.raises(RuntimeError, match="no link ids"):
+            await create_work_item_links(
                 mock_ctx,
                 project_id="MyProj",
                 work_item_id="MCPT-1",
-                role="parent",
-                target_work_item_id="MCPT-2",
-                target_project_id=None,
-                suspect=False,
-                revision=None,
+                links=[
+                    WorkItemLinkSpec(role="parent", target_work_item_id="MCPT-2"),
+                ],
                 dry_run=False,
             )
 
 
-class TestCreateWorkItemLinkFieldValidation:
+class TestCreateWorkItemLinksFieldValidation:
     """Verify ``min_length=1`` constraints on the required parameters."""
 
     @staticmethod
     def _adapter_for(param_name: str) -> TypeAdapter[object]:
-        hints = get_type_hints(create_work_item_link)
-        sig = inspect.signature(create_work_item_link)
+        hints = get_type_hints(create_work_item_links)
+        sig = inspect.signature(create_work_item_links)
         field_info = sig.parameters[param_name].default
         return TypeAdapter(Annotated[hints[param_name], field_info])
 
@@ -3648,19 +3734,265 @@ class TestCreateWorkItemLinkFieldValidation:
         with pytest.raises(ValidationError):
             self._adapter_for("work_item_id").validate_python("")
 
-    def test_role_rejects_empty(self) -> None:
+    def test_links_rejects_empty_list(self) -> None:
         with pytest.raises(ValidationError):
-            self._adapter_for("role").validate_python("")
+            self._adapter_for("links").validate_python([])
 
-    def test_target_work_item_id_rejects_empty(self) -> None:
+    def test_spec_role_rejects_empty(self) -> None:
         with pytest.raises(ValidationError):
-            self._adapter_for("target_work_item_id").validate_python("")
+            WorkItemLinkSpec(role="", target_work_item_id="MCPT-2")
 
-    def test_required_fields_accept_non_empty(self) -> None:
-        for name in (
-            "project_id",
-            "work_item_id",
-            "role",
-            "target_work_item_id",
-        ):
+    def test_spec_target_work_item_id_rejects_empty(self) -> None:
+        with pytest.raises(ValidationError):
+            WorkItemLinkSpec(role="parent", target_work_item_id="")
+
+    def test_required_string_fields_accept_non_empty(self) -> None:
+        for name in ("project_id", "work_item_id"):
+            assert self._adapter_for(name).validate_python("x") == "x"
+
+
+class TestBuildDeleteLinksPayload:
+    """Tests for the private ``_build_delete_links_payload`` helper."""
+
+    def test_single_ref_composite_id_same_project(self) -> None:
+        link_ids, payload = _build_delete_links_payload(
+            source_project_id="MyProj",
+            source_work_item_id="MCPT-1",
+            links=[WorkItemLinkRef(role="parent", target_work_item_id="MCPT-2")],
+        )
+
+        assert link_ids == ["MyProj/MCPT-1/parent/MyProj/MCPT-2"]
+        data = cast(list[dict[str, object]], payload["data"])
+        assert data == [
+            {
+                "type": "linkedworkitems",
+                "id": "MyProj/MCPT-1/parent/MyProj/MCPT-2",
+            }
+        ]
+
+    def test_cross_project_composite_id(self) -> None:
+        link_ids, _payload = _build_delete_links_payload(
+            source_project_id="MyProj",
+            source_work_item_id="MCPT-1",
+            links=[
+                WorkItemLinkRef(
+                    role="verifies",
+                    target_work_item_id="MCPT-9",
+                    target_project_id="OtherProj",
+                ),
+            ],
+        )
+
+        assert link_ids == ["MyProj/MCPT-1/verifies/OtherProj/MCPT-9"]
+
+    def test_multiple_refs_preserve_order(self) -> None:
+        link_ids, payload = _build_delete_links_payload(
+            source_project_id="MyProj",
+            source_work_item_id="MCPT-1",
+            links=[
+                WorkItemLinkRef(role="parent", target_work_item_id="MCPT-2"),
+                WorkItemLinkRef(role="verifies", target_work_item_id="MCPT-3"),
+            ],
+        )
+
+        assert link_ids == [
+            "MyProj/MCPT-1/parent/MyProj/MCPT-2",
+            "MyProj/MCPT-1/verifies/MyProj/MCPT-3",
+        ]
+        ids_in_body = [
+            cast(dict[str, object], item)["id"]
+            for item in cast(list[dict[str, object]], payload["data"])
+        ]
+        assert ids_in_body == link_ids
+
+
+class TestDeleteWorkItemLinksDryRun:
+    """Tests for ``delete_work_item_links`` with ``dry_run=True``."""
+
+    async def test_dry_run_returns_payload_without_calling_delete(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        result = await delete_work_item_links(
+            mock_ctx,
+            project_id="MyProj",
+            work_item_id="MCPT-1",
+            links=[
+                WorkItemLinkRef(role="parent", target_work_item_id="MCPT-2"),
+                WorkItemLinkRef(role="verifies", target_work_item_id="MCPT-3"),
+            ],
+            dry_run=True,
+        )
+
+        mock_client.delete.assert_not_called()
+        assert isinstance(result, WorkItemLinksDeleteResult)
+        assert result.dry_run is True
+        assert result.deleted is False
+        # link_ids are always populated since they are reconstructed from input.
+        assert result.link_ids == [
+            "MyProj/MCPT-1/parent/MyProj/MCPT-2",
+            "MyProj/MCPT-1/verifies/MyProj/MCPT-3",
+        ]
+        assert result.payload_preview is not None
+        body_ids = [
+            cast(dict[str, object], item)["id"]
+            for item in cast(list[dict[str, object]], result.payload_preview["data"])
+        ]
+        assert body_ids == result.link_ids
+
+
+class TestDeleteWorkItemLinksHappyPath:
+    """Tests for a successful ``delete_work_item_links`` call."""
+
+    async def test_returns_deleted_true_on_204(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.delete.return_value = {}
+
+        result = await delete_work_item_links(
+            mock_ctx,
+            project_id="MyProj",
+            work_item_id="MCPT-1",
+            links=[WorkItemLinkRef(role="parent", target_work_item_id="MCPT-2")],
+            dry_run=False,
+        )
+
+        assert isinstance(result, WorkItemLinksDeleteResult)
+        assert result.deleted is True
+        assert result.dry_run is False
+        assert result.link_ids == ["MyProj/MCPT-1/parent/MyProj/MCPT-2"]
+        assert result.payload_preview is None
+
+    async def test_delete_called_with_correct_path_and_body(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.delete.return_value = {}
+
+        await delete_work_item_links(
+            mock_ctx,
+            project_id="MyProj",
+            work_item_id="MCPT-1",
+            links=[
+                WorkItemLinkRef(role="parent", target_work_item_id="MCPT-2"),
+                WorkItemLinkRef(role="verifies", target_work_item_id="MCPT-3"),
+            ],
+            dry_run=False,
+        )
+
+        args, kwargs = mock_client.delete.call_args
+        assert args == ("/projects/MyProj/workitems/MCPT-1/linkedworkitems",)
+        body = kwargs["json"]
+        ids = [item["id"] for item in body["data"]]
+        assert ids == [
+            "MyProj/MCPT-1/parent/MyProj/MCPT-2",
+            "MyProj/MCPT-1/verifies/MyProj/MCPT-3",
+        ]
+
+    async def test_target_project_defaults_to_source(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.delete.return_value = {}
+
+        result = await delete_work_item_links(
+            mock_ctx,
+            project_id="MyProj",
+            work_item_id="MCPT-1",
+            links=[WorkItemLinkRef(role="parent", target_work_item_id="MCPT-2")],
+            dry_run=False,
+        )
+
+        assert result.link_ids == ["MyProj/MCPT-1/parent/MyProj/MCPT-2"]
+
+
+class TestDeleteWorkItemLinksErrorMapping:
+    """Tests that domain exceptions are mapped at the tool layer."""
+
+    async def test_401_raises_permission_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.delete.side_effect = PolarionAuthError("auth", status_code=401)
+
+        with pytest.raises(PermissionError):
+            await delete_work_item_links(
+                mock_ctx,
+                project_id="MyProj",
+                work_item_id="MCPT-1",
+                links=[
+                    WorkItemLinkRef(role="parent", target_work_item_id="MCPT-2"),
+                ],
+                dry_run=False,
+            )
+
+    async def test_404_raises_value_error_about_source_wi(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Path-level 404 means the source WI itself is missing.
+
+        Body-level 'link not found' is silently ignored by Polarion
+        (confirmed against the testdrive instance, 2026-05-22), so the
+        only 404 the tool layer sees is the source-WI variant.
+        """
+        mock_client.delete.side_effect = PolarionNotFoundError(
+            "not found", status_code=404
+        )
+
+        with pytest.raises(ValueError, match="Source work item 'MCPT-1' not found"):
+            await delete_work_item_links(
+                mock_ctx,
+                project_id="MyProj",
+                work_item_id="MCPT-1",
+                links=[
+                    WorkItemLinkRef(role="parent", target_work_item_id="MCPT-2"),
+                ],
+                dry_run=False,
+            )
+
+    async def test_generic_polarion_error_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.delete.side_effect = PolarionError("server error", status_code=500)
+
+        with pytest.raises(RuntimeError, match="delete work item links"):
+            await delete_work_item_links(
+                mock_ctx,
+                project_id="MyProj",
+                work_item_id="MCPT-1",
+                links=[
+                    WorkItemLinkRef(role="parent", target_work_item_id="MCPT-2"),
+                ],
+                dry_run=False,
+            )
+
+
+class TestDeleteWorkItemLinksFieldValidation:
+    """Verify ``min_length=1`` constraints on the required parameters."""
+
+    @staticmethod
+    def _adapter_for(param_name: str) -> TypeAdapter[object]:
+        hints = get_type_hints(delete_work_item_links)
+        sig = inspect.signature(delete_work_item_links)
+        field_info = sig.parameters[param_name].default
+        return TypeAdapter(Annotated[hints[param_name], field_info])
+
+    def test_project_id_rejects_empty(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("project_id").validate_python("")
+
+    def test_work_item_id_rejects_empty(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("work_item_id").validate_python("")
+
+    def test_links_rejects_empty_list(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("links").validate_python([])
+
+    def test_ref_role_rejects_empty(self) -> None:
+        with pytest.raises(ValidationError):
+            WorkItemLinkRef(role="", target_work_item_id="MCPT-2")
+
+    def test_ref_target_work_item_id_rejects_empty(self) -> None:
+        with pytest.raises(ValidationError):
+            WorkItemLinkRef(role="parent", target_work_item_id="")
+
+    def test_required_string_fields_accept_non_empty(self) -> None:
+        for name in ("project_id", "work_item_id"):
             assert self._adapter_for(name).validate_python("x") == "x"
