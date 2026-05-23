@@ -765,9 +765,12 @@ class WorkItemLinksDeleteResult(BaseModel):
     link_ids: list[str] = Field(
         default_factory=list,
         description=(
-            "Composite 5-segment link ids that were (or would be) deleted, "
-            "in input order; always populated since they are reconstructed "
-            "from the request."
+            "Composite 5-segment link ids REQUESTED for deletion, in input"
+            " order, reconstructed from the input refs. Polarion silently"
+            " ignores body-level refs that do not match an existing link,"
+            " so this echoes the request -- not necessarily what was"
+            " actually deleted. Cross-check with ``list_work_item_links``"
+            " if exact accounting is required."
         ),
     )
     payload_preview: dict[str, JsonValue] | None = Field(

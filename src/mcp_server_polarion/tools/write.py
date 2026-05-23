@@ -1635,8 +1635,11 @@ async def create_work_item_links(
     are the path identifiers for future delete/PATCH of the same links
     via ``delete_work_item_links``.
 
-    Bulk semantics: behavior on mixed-success (e.g. one duplicate among
-    valid links) is not currently characterised on this server. If you
+    Bulk semantics -- partial-failure hazard: behavior on mixed-success
+    (e.g. one duplicate among otherwise valid links) is not currently
+    characterised on this server. On any 4xx response, assume nothing was
+    committed and re-query with
+    ``list_work_item_links(direction="forward")`` before retrying. If you
     need per-link diagnostics, send one spec per call.
 
     Args:
