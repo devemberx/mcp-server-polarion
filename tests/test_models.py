@@ -9,7 +9,6 @@ from mcp_server_polarion.models import (
     CommentResult,
     DocumentDetail,
     DocumentPart,
-    DocumentPartCreateResult,
     DocumentSummary,
     Hyperlink,
     PaginatedResult,
@@ -756,39 +755,6 @@ class TestWorkItemLinksDeleteResult:
         assert result.payload_preview is not None
 
 
-class TestDocumentPartCreateResult:
-    def test_successful_create(self):
-        result = DocumentPartCreateResult(
-            created=True,
-            dry_run=False,
-            part_id="workitem_MCPT-042",
-            payload_preview=None,
-        )
-        assert result.created is True
-        assert result.part_id == "workitem_MCPT-042"
-
-    def test_dry_run(self):
-        result = DocumentPartCreateResult(
-            created=False,
-            dry_run=True,
-            part_id=None,
-            payload_preview={
-                "data": [
-                    {
-                        "type": "document_parts",
-                        "relationships": {
-                            "workItem": {
-                                "data": {"type": "workitems", "id": "proj/MCPT-042"}
-                            }
-                        },
-                    }
-                ]
-            },
-        )
-        assert result.dry_run is True
-        assert result.part_id is None
-
-
 class TestCrossModelIntegration:
     """Ensure models compose correctly as they would in real tool usage."""
 
@@ -884,7 +850,6 @@ class TestCrossModelIntegration:
             WorkItemLinkRef,
             WorkItemLinksCreateResult,
             WorkItemLinksDeleteResult,
-            DocumentPartCreateResult,
         ]
         for model_cls in models:
             schema = model_cls.model_json_schema()

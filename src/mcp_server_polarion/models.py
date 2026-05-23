@@ -782,34 +782,6 @@ class WorkItemLinksDeleteResult(BaseModel):
     )
 
 
-class DocumentPartCreateResult(BaseModel):
-    """Result of a ``create_document_part`` operation."""
-
-    created: bool = Field(
-        description=(
-            "True if the document part was actually created. "
-            "False when dry_run is True."
-        ),
-    )
-    dry_run: bool = Field(
-        description="Whether this was a dry-run (preview only, no mutation).",
-    )
-    part_id: str | None = Field(
-        description=(
-            "ID of the created document part "
-            "(e.g. 'workitem_MCPT-042'). "
-            "None when dry_run is True."
-        ),
-    )
-    payload_preview: dict[str, JsonValue] | None = Field(
-        description=(
-            "JSON:API request payload that was (or would be) sent. "
-            "Usually populated for dry-run previews and may be None "
-            "after a successful real operation."
-        ),
-    )
-
-
 class WorkItemMoveResult(BaseModel):
     """Result of a ``move_work_item_to_document`` or sibling move-document call."""
 
@@ -883,7 +855,6 @@ __all__: list[str] = [
     "DocumentCreateResult",
     "DocumentDetail",
     "DocumentPart",
-    "DocumentPartCreateResult",
     "DocumentReadResult",
     "DocumentSummary",
     "DocumentUpdateResult",
