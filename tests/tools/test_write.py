@@ -29,6 +29,8 @@ from mcp_server_polarion.models import (
     WorkItemLinksCreateResult,
     WorkItemLinksDeleteResult,
     WorkItemLinkSpec,
+    WorkItemLinksUpdateResult,
+    WorkItemLinkUpdateSpec,
     WorkItemMoveResult,
     WorkItemUpdateResult,
 )
@@ -45,11 +47,13 @@ move_work_item_from_document = _write_mod.move_work_item_from_document
 move_work_item_to_document = _write_mod.move_work_item_to_document
 update_document = _write_mod.update_document
 update_work_item = _write_mod.update_work_item
+update_work_item_links = _write_mod.update_work_item_links
 _build_create_document_payload = _write_mod._build_create_document_payload
 _build_create_links_payload = _write_mod._build_create_links_payload
 _build_delete_links_payload = _write_mod._build_delete_links_payload
 _build_move_to_document_payload = _write_mod._build_move_to_document_payload
 _build_update_document_payload = _write_mod._build_update_document_payload
+_build_update_link_payload = _write_mod._build_update_link_payload
 _build_update_work_item_payload = _write_mod._build_update_work_item_payload
 _build_work_item_payload = _write_mod._build_work_item_payload
 _extract_created_id = _write_mod._extract_created_id
@@ -3996,3 +4000,348 @@ class TestDeleteWorkItemLinksFieldValidation:
     def test_required_string_fields_accept_non_empty(self) -> None:
         for name in ("project_id", "work_item_id"):
             assert self._adapter_for(name).validate_python("x") == "x"
+
+
+class TestBuildUpdateLinkPayload:
+    """Tests for the private ``_build_update_link_payload`` helper."""
+
+    def test_composite_id_same_project(self) -> None:
+        link_id, path, payload = _build_update_link_payload(
+            source_project_id="MyProj",
+            source_work_item_id="MCPT-1",
+            spec=WorkItemLinkUpdateSpec(
+                role="parent", target_work_item_id="MCPT-2", suspect=False
+            ),
+        )
+
+        assert link_id == "MyProj/MCPT-1/parent/MyProj/MCPT-2"
+        assert path == (
+            "/projects/MyProj/workitems/MCPT-1/linkedworkitems/parent/MyProj/MCPT-2"
+        )
+        data = cast(dict[str, object], payload["data"])
+        assert data["type"] == "linkedworkitems"
+        assert data["id"] == link_id
+
+    def test_cross_project_composite_id(self) -> None:
+        link_id, path, _payload = _build_update_link_payload(
+            source_project_id="MyProj",
+            source_work_item_id="MCPT-1",
+            spec=WorkItemLinkUpdateSpec(
+                role="verifies",
+                target_work_item_id="MCPT-9",
+                target_project_id="OtherProj",
+                suspect=True,
+            ),
+        )
+
+        assert link_id == "MyProj/MCPT-1/verifies/OtherProj/MCPT-9"
+        assert path == (
+            "/projects/MyProj/workitems/MCPT-1/linkedworkitems/verifies/OtherProj/MCPT-9"
+        )
+
+    def test_suspect_only_omits_revision(self) -> None:
+        _link_id, _path, payload = _build_update_link_payload(
+            source_project_id="MyProj",
+            source_work_item_id="MCPT-1",
+            spec=WorkItemLinkUpdateSpec(
+                role="parent", target_work_item_id="MCPT-2", suspect=True
+            ),
+        )
+        attributes = cast(
+            dict[str, object], cast(dict[str, object], payload["data"])["attributes"]
+        )
+        assert attributes == {"suspect": True}
+
+    def test_revision_only_omits_suspect(self) -> None:
+        _link_id, _path, payload = _build_update_link_payload(
+            source_project_id="MyProj",
+            source_work_item_id="MCPT-1",
+            spec=WorkItemLinkUpdateSpec(
+                role="parent", target_work_item_id="MCPT-2", revision="1234"
+            ),
+        )
+        attributes = cast(
+            dict[str, object], cast(dict[str, object], payload["data"])["attributes"]
+        )
+        assert attributes == {"revision": "1234"}
+
+    def test_both_attributes_present(self) -> None:
+        _link_id, _path, payload = _build_update_link_payload(
+            source_project_id="MyProj",
+            source_work_item_id="MCPT-1",
+            spec=WorkItemLinkUpdateSpec(
+                role="parent",
+                target_work_item_id="MCPT-2",
+                suspect=False,
+                revision="HEAD",
+            ),
+        )
+        attributes = cast(
+            dict[str, object], cast(dict[str, object], payload["data"])["attributes"]
+        )
+        assert attributes == {"revision": "HEAD", "suspect": False}
+
+    def test_suspect_false_is_emitted(self) -> None:
+        """``suspect=False`` is a real value (clearing the flag), not omitted."""
+        _link_id, _path, payload = _build_update_link_payload(
+            source_project_id="MyProj",
+            source_work_item_id="MCPT-1",
+            spec=WorkItemLinkUpdateSpec(
+                role="parent", target_work_item_id="MCPT-2", suspect=False
+            ),
+        )
+        attributes = cast(
+            dict[str, object], cast(dict[str, object], payload["data"])["attributes"]
+        )
+        assert attributes == {"suspect": False}
+
+
+class TestUpdateWorkItemLinksDryRun:
+    """Tests for ``update_work_item_links`` with ``dry_run=True``."""
+
+    async def test_dry_run_returns_previews_without_calling_patch(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        result = await update_work_item_links(
+            mock_ctx,
+            project_id="MyProj",
+            work_item_id="MCPT-1",
+            links=[
+                WorkItemLinkUpdateSpec(
+                    role="parent", target_work_item_id="MCPT-2", suspect=True
+                ),
+                WorkItemLinkUpdateSpec(
+                    role="verifies", target_work_item_id="MCPT-3", revision="42"
+                ),
+            ],
+            dry_run=True,
+        )
+
+        mock_client.patch.assert_not_called()
+        assert isinstance(result, WorkItemLinksUpdateResult)
+        assert result.dry_run is True
+        assert result.updated is False
+        assert result.link_ids == []
+        assert result.failed_link_id is None
+        assert result.failed_reason is None
+        assert result.payload_preview is not None
+        assert len(result.payload_preview) == 2
+        ids_in_previews = [
+            cast(dict[str, object], body["data"])["id"]
+            for body in result.payload_preview
+        ]
+        assert ids_in_previews == [
+            "MyProj/MCPT-1/parent/MyProj/MCPT-2",
+            "MyProj/MCPT-1/verifies/MyProj/MCPT-3",
+        ]
+
+
+class TestUpdateWorkItemLinksHappyPath:
+    """Tests for a successful ``update_work_item_links`` call."""
+
+    async def test_single_link_returns_updated_true(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.return_value = {}
+
+        result = await update_work_item_links(
+            mock_ctx,
+            project_id="MyProj",
+            work_item_id="MCPT-1",
+            links=[
+                WorkItemLinkUpdateSpec(
+                    role="parent", target_work_item_id="MCPT-2", suspect=False
+                ),
+            ],
+            dry_run=False,
+        )
+
+        assert isinstance(result, WorkItemLinksUpdateResult)
+        assert result.updated is True
+        assert result.dry_run is False
+        assert result.link_ids == ["MyProj/MCPT-1/parent/MyProj/MCPT-2"]
+        assert result.failed_link_id is None
+        assert result.failed_reason is None
+        assert result.payload_preview is None
+
+    async def test_patch_called_per_link_with_correct_path_and_body(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.return_value = {}
+
+        await update_work_item_links(
+            mock_ctx,
+            project_id="MyProj",
+            work_item_id="MCPT-1",
+            links=[
+                WorkItemLinkUpdateSpec(
+                    role="parent", target_work_item_id="MCPT-2", suspect=True
+                ),
+                WorkItemLinkUpdateSpec(
+                    role="verifies",
+                    target_work_item_id="MCPT-3",
+                    target_project_id="OtherProj",
+                    revision="42",
+                ),
+            ],
+            dry_run=False,
+        )
+
+        assert mock_client.patch.call_count == 2
+
+        first_args, first_kwargs = mock_client.patch.call_args_list[0]
+        assert first_args == (
+            "/projects/MyProj/workitems/MCPT-1/linkedworkitems/parent/MyProj/MCPT-2",
+        )
+        first_data = cast(dict[str, object], first_kwargs["json"]["data"])
+        assert first_data["id"] == "MyProj/MCPT-1/parent/MyProj/MCPT-2"
+        assert first_data["attributes"] == {"suspect": True}
+
+        second_args, second_kwargs = mock_client.patch.call_args_list[1]
+        assert second_args == (
+            "/projects/MyProj/workitems/MCPT-1/linkedworkitems/verifies/OtherProj/MCPT-3",
+        )
+        second_data = cast(dict[str, object], second_kwargs["json"]["data"])
+        assert second_data["id"] == "MyProj/MCPT-1/verifies/OtherProj/MCPT-3"
+        assert second_data["attributes"] == {"revision": "42"}
+
+
+class TestUpdateWorkItemLinksFanOutFailure:
+    """Fail-fast on per-link errors: halt loop, return progress in result."""
+
+    async def test_polarion_error_halts_loop_and_records_progress(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.side_effect = [
+            {},
+            PolarionError("bad revision", status_code=400),
+            {},
+        ]
+
+        result = await update_work_item_links(
+            mock_ctx,
+            project_id="MyProj",
+            work_item_id="MCPT-1",
+            links=[
+                WorkItemLinkUpdateSpec(
+                    role="parent", target_work_item_id="MCPT-2", suspect=True
+                ),
+                WorkItemLinkUpdateSpec(
+                    role="verifies",
+                    target_work_item_id="MCPT-3",
+                    revision="not-a-revision",
+                ),
+                WorkItemLinkUpdateSpec(
+                    role="relates_to", target_work_item_id="MCPT-4", suspect=False
+                ),
+            ],
+            dry_run=False,
+        )
+
+        assert result.updated is False
+        assert result.dry_run is False
+        assert result.link_ids == ["MyProj/MCPT-1/parent/MyProj/MCPT-2"]
+        assert result.failed_link_id == "MyProj/MCPT-1/verifies/MyProj/MCPT-3"
+        assert result.failed_reason == "patch failed (HTTP 400): bad revision"
+        assert result.payload_preview is None
+        # Third link never attempted.
+        assert mock_client.patch.call_count == 2
+
+    async def test_not_found_records_link_not_found_reason(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """A per-link 404 means that role/target pair has no existing link."""
+        mock_client.patch.side_effect = PolarionNotFoundError(
+            "no such link", status_code=404
+        )
+
+        result = await update_work_item_links(
+            mock_ctx,
+            project_id="MyProj",
+            work_item_id="MCPT-1",
+            links=[
+                WorkItemLinkUpdateSpec(
+                    role="nonexistent_role",
+                    target_work_item_id="MCPT-2",
+                    suspect=True,
+                ),
+            ],
+            dry_run=False,
+        )
+
+        assert result.updated is False
+        assert result.link_ids == []
+        assert result.failed_link_id == "MyProj/MCPT-1/nonexistent_role/MyProj/MCPT-2"
+        assert result.failed_reason == "link not found (HTTP 404): no such link"
+
+
+class TestUpdateWorkItemLinksAuthError:
+    """Auth errors halt globally and raise, unlike per-link errors."""
+
+    async def test_auth_error_raises_permission_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.side_effect = PolarionAuthError("auth", status_code=401)
+
+        with pytest.raises(PermissionError):
+            await update_work_item_links(
+                mock_ctx,
+                project_id="MyProj",
+                work_item_id="MCPT-1",
+                links=[
+                    WorkItemLinkUpdateSpec(
+                        role="parent", target_work_item_id="MCPT-2", suspect=True
+                    ),
+                ],
+                dry_run=False,
+            )
+
+
+class TestUpdateWorkItemLinksFieldValidation:
+    """Verify ``min_length=1`` and the at-least-one-attribute validator."""
+
+    @staticmethod
+    def _adapter_for(param_name: str) -> TypeAdapter[object]:
+        hints = get_type_hints(update_work_item_links)
+        sig = inspect.signature(update_work_item_links)
+        field_info = sig.parameters[param_name].default
+        return TypeAdapter(Annotated[hints[param_name], field_info])
+
+    def test_project_id_rejects_empty(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("project_id").validate_python("")
+
+    def test_work_item_id_rejects_empty(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("work_item_id").validate_python("")
+
+    def test_links_rejects_empty_list(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("links").validate_python([])
+
+    def test_spec_role_rejects_empty(self) -> None:
+        with pytest.raises(ValidationError):
+            WorkItemLinkUpdateSpec(role="", target_work_item_id="MCPT-2", suspect=True)
+
+    def test_spec_target_work_item_id_rejects_empty(self) -> None:
+        with pytest.raises(ValidationError):
+            WorkItemLinkUpdateSpec(role="parent", target_work_item_id="", suspect=True)
+
+    def test_spec_rejects_all_attributes_none(self) -> None:
+        """At least one of ``suspect`` / ``revision`` must be set."""
+        with pytest.raises(ValidationError, match="at least one"):
+            WorkItemLinkUpdateSpec(role="parent", target_work_item_id="MCPT-2")
+
+    def test_spec_accepts_suspect_only(self) -> None:
+        spec = WorkItemLinkUpdateSpec(
+            role="parent", target_work_item_id="MCPT-2", suspect=True
+        )
+        assert spec.suspect is True
+        assert spec.revision is None
+
+    def test_spec_accepts_revision_only(self) -> None:
+        spec = WorkItemLinkUpdateSpec(
+            role="parent", target_work_item_id="MCPT-2", revision="HEAD"
+        )
+        assert spec.revision == "HEAD"
+        assert spec.suspect is None

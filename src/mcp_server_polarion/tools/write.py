@@ -2,10 +2,10 @@
 
 Currently provides ``create_work_item``, ``update_work_item``,
 ``move_work_item_to_document``, ``update_document``,
-``create_document``, ``create_work_item_links``, and
-``delete_work_item_links``. All write tools
-follow the strict patterns documented in ``CLAUDE.md``: they convert
-Markdown input to sanitized HTML, build minimal request payloads
+``create_document``, ``create_work_item_links``,
+``delete_work_item_links``, and ``update_work_item_links``. All write
+tools follow the strict patterns documented in ``CLAUDE.md``: they
+convert Markdown input to sanitized HTML, build minimal request payloads
 (skipping unset fields rather than sending empty values), and map
 domain exceptions to user-facing ones at the tool layer.
 """
@@ -33,6 +33,8 @@ from mcp_server_polarion.models import (
     WorkItemLinksCreateResult,
     WorkItemLinksDeleteResult,
     WorkItemLinkSpec,
+    WorkItemLinksUpdateResult,
+    WorkItemLinkUpdateSpec,
     WorkItemMoveResult,
     WorkItemUpdateResult,
 )
@@ -260,6 +262,55 @@ def _build_delete_links_payload(
         link_ids.append(link_id)
         data.append({"type": "linkedworkitems", "id": link_id})
     return link_ids, {"data": data}
+
+
+def _build_update_link_payload(
+    *,
+    source_project_id: str,
+    source_work_item_id: str,
+    spec: WorkItemLinkUpdateSpec,
+) -> tuple[str, str, dict[str, JsonValue]]:
+    """Build the composite id, request path, and JSON:API body for one PATCH.
+
+    Unlike POST/DELETE (server-side bulk on ``.../linkedworkitems``), PATCH
+    is per-link on ``.../linkedworkitems/{role}/{tgtProj}/{tgtWI}`` with a
+    single-resource ``{"data": {...}}`` body. ``suspect`` / ``revision``
+    are only attached when explicitly set so JSON:API omit-preserve takes
+    effect on the server side.
+
+    Returning the request path here (instead of re-deriving it in the
+    caller) keeps the composite id and the path string locked to the same
+    ``tgt_proj`` resolution so the two cannot drift.
+    """
+    tgt_proj = (
+        spec.target_project_id
+        if spec.target_project_id is not None
+        else source_project_id
+    )
+    link_id = (
+        f"{source_project_id}/{source_work_item_id}/{spec.role}/"
+        f"{tgt_proj}/{spec.target_work_item_id}"
+    )
+    path = (
+        f"/projects/{encode_path_segment(source_project_id)}"
+        f"/workitems/{encode_path_segment(source_work_item_id)}"
+        f"/linkedworkitems/{encode_path_segment(spec.role)}"
+        f"/{encode_path_segment(tgt_proj)}"
+        f"/{encode_path_segment(spec.target_work_item_id)}"
+    )
+    attributes: dict[str, JsonValue] = {}
+    if spec.revision is not None:
+        attributes["revision"] = spec.revision
+    if spec.suspect is not None:
+        attributes["suspect"] = spec.suspect
+    payload: dict[str, JsonValue] = {
+        "data": {
+            "type": "linkedworkitems",
+            "id": link_id,
+            "attributes": attributes,
+        }
+    }
+    return link_id, path, payload
 
 
 def _build_update_work_item_payload(  # noqa: PLR0913
@@ -1827,5 +1878,156 @@ async def delete_work_item_links(
         deleted=True,
         dry_run=False,
         link_ids=link_ids,
+        payload_preview=None,
+    )
+
+
+@mcp.tool(
+    tags={"write"},
+    timeout=60.0,
+    annotations={
+        # Not destructive (no deletion). Not idempotent: re-PATCHing with the
+        # same values still increments Polarion's revision history.
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    },
+)
+async def update_work_item_links(
+    ctx: Context,
+    project_id: str = Field(min_length=1, description="Source work item's project ID."),
+    work_item_id: str = Field(
+        min_length=1,
+        description="Source work item ID (the links' outgoing endpoint).",
+    ),
+    links: list[WorkItemLinkUpdateSpec] = Field(  # noqa: B008
+        min_length=1,
+        description="One or more existing outgoing links to update.",
+    ),
+    dry_run: bool = Field(
+        default=False,
+        description=(
+            "When True, return per-link payload previews without calling Polarion."
+        ),
+    ),
+) -> WorkItemLinksUpdateResult:
+    """Update ``suspect`` / ``revision`` on existing outgoing work item links.
+
+    Use this to clear ``suspect`` flags after a reviewer signs off on a
+    batch of impacted links, or to pin links to a specific revision.
+    Identify the links by reading them first with
+    ``list_work_item_links(direction="forward")``: each existing link's
+    ``role`` plus target work item ID forms one ``WorkItemLinkUpdateSpec``.
+
+    Each spec's ``suspect`` and ``revision`` are tri-state: an explicit
+    ``True`` / ``False`` / string value updates that attribute, while
+    ``None`` (the default) leaves the existing server-side value alone.
+    This differs from ``create_work_item_links`` where ``suspect`` defaults
+    to ``False`` (a concrete value). At least one of ``suspect`` /
+    ``revision`` must be set per spec -- an all-``None`` spec is rejected
+    at the Pydantic layer because Polarion would 400 on the empty PATCH
+    body.
+
+    Unlike ``create_work_item_links`` / ``delete_work_item_links`` (one
+    server-side bulk request), the underlying PATCH endpoint is per-link
+    and the tool fans out N sequential PATCH calls. With the
+    ``PolarionClient`` post-mutation delay (~1.5 s), batches above ~30
+    links will not fit inside the 60 s tool timeout.
+
+    Fan-out is fail-fast: on the first per-link error the loop halts
+    immediately. The returned result carries the prefix of links that
+    succeeded in ``link_ids`` and identifies the failing link via
+    ``failed_link_id`` / ``failed_reason``; ``updated`` is ``False``
+    whenever any link failed (or the call was a dry-run). Only
+    ``PolarionAuthError`` still raises (``PermissionError``) because auth
+    failure applies globally rather than per link. Re-query with
+    ``list_work_item_links`` after a partial halt if you need to confirm
+    the exact server state before retrying.
+
+    Polarion does not validate link role ids server-side, so a typo in
+    ``role`` returns 404 for that spec and halts fan-out -- the link
+    simply does not exist under that role.
+
+    Args:
+        ctx: MCP tool context (injected automatically).
+        project_id: Source work item's project ID.
+        work_item_id: Source work item ID.
+        links: One or more ``WorkItemLinkUpdateSpec`` (role + target +
+            optional target_project_id + at least one of suspect /
+            revision).
+        dry_run: When True, return per-link payload previews only.
+
+    Returns:
+        WorkItemLinksUpdateResult with ``updated`` (True iff every link
+        succeeded), ``dry_run``, ``link_ids`` (composite ids of links
+        successfully patched, in input order; the prefix that succeeded
+        before a partial halt), ``failed_link_id`` and ``failed_reason``
+        (None on full success / dry-run), and ``payload_preview`` (list
+        of per-link PATCH bodies on dry-run; None after a real call).
+
+    Raises:
+        PermissionError: Token lacks permission. Aborts before any
+            per-link result is recorded.
+        ValueError: A spec failed Pydantic validation (e.g. both
+            ``suspect`` and ``revision`` unset). Raised before any PATCH
+            is sent.
+    """
+    triples: list[tuple[str, str, dict[str, JsonValue]]] = [
+        _build_update_link_payload(
+            source_project_id=project_id,
+            source_work_item_id=work_item_id,
+            spec=spec,
+        )
+        for spec in links
+    ]
+
+    if dry_run:
+        return WorkItemLinksUpdateResult(
+            updated=False,
+            dry_run=True,
+            link_ids=[],
+            failed_link_id=None,
+            failed_reason=None,
+            payload_preview=[payload for _, _, payload in triples],
+        )
+
+    client = get_client(ctx)
+    succeeded: list[str] = []
+
+    for link_id, path, payload in triples:
+        try:
+            await client.patch(path, json=cast(dict[str, object], payload))
+        except PolarionAuthError as exc:
+            raise PermissionError(
+                "Cannot update work item links --"
+                " check your POLARION_TOKEN permissions."
+            ) from exc
+        except PolarionNotFoundError as exc:
+            return WorkItemLinksUpdateResult(
+                updated=False,
+                dry_run=False,
+                link_ids=succeeded,
+                failed_link_id=link_id,
+                failed_reason=f"link not found (HTTP 404): {exc.message}",
+                payload_preview=None,
+            )
+        except PolarionError as exc:
+            return WorkItemLinksUpdateResult(
+                updated=False,
+                dry_run=False,
+                link_ids=succeeded,
+                failed_link_id=link_id,
+                failed_reason=f"patch failed (HTTP {exc.status_code}): {exc.message}",
+                payload_preview=None,
+            )
+        succeeded.append(link_id)
+
+    return WorkItemLinksUpdateResult(
+        updated=True,
+        dry_run=False,
+        link_ids=succeeded,
+        failed_link_id=None,
+        failed_reason=None,
         payload_preview=None,
     )

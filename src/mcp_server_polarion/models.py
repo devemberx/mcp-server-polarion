@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # Recursive JSON-safe type alias.  Constrains payload previews and change
 # maps to values that are guaranteed to round-trip through JSON-RPC.
@@ -778,6 +778,94 @@ class WorkItemLinksDeleteResult(BaseModel):
         description=(
             "JSON:API payload that was (or would be) sent;"
             " populated for dry-run, None after a real delete."
+        ),
+    )
+
+
+class WorkItemLinkUpdateSpec(BaseModel):
+    """One existing link to update with new attribute values.
+
+    ``suspect`` and ``revision`` are tri-state -- the JSON:API PATCH only
+    carries fields that are explicitly set on the spec, so ``None`` means
+    "leave the existing server-side value unchanged". At least one of the
+    two must be set; an all-``None`` spec would yield an empty PATCH body
+    that Polarion rejects with HTTP 400.
+    """
+
+    role: str = Field(
+        min_length=1,
+        description="Link role id of the existing link; must match exactly.",
+    )
+    target_work_item_id: str = Field(
+        min_length=1,
+        description="Target work item ID (the link's incoming endpoint).",
+    )
+    target_project_id: str | None = Field(
+        default=None,
+        description="Target's project; defaults to the source's project.",
+    )
+    suspect: bool | None = Field(
+        default=None,
+        description="New suspect flag value; None leaves it unchanged.",
+    )
+    revision: str | None = Field(
+        default=None,
+        description="New revision pin; None leaves the existing pin unchanged.",
+    )
+
+    @model_validator(mode="after")
+    def _at_least_one_attribute(self) -> WorkItemLinkUpdateSpec:
+        if self.suspect is None and self.revision is None:
+            msg = (
+                "WorkItemLinkUpdateSpec requires at least one of"
+                " `suspect` / `revision` to be set."
+            )
+            raise ValueError(msg)
+        return self
+
+
+class WorkItemLinksUpdateResult(BaseModel):
+    """Result of an ``update_work_item_links`` operation.
+
+    Fan-out is fail-fast: on the first per-link error the loop halts and
+    ``link_ids`` holds the successfully-patched prefix while
+    ``failed_link_id`` / ``failed_reason`` describe the link that halted
+    the run. ``payload_preview`` is a list (one entry per link) -- unlike
+    create/delete which use a single bulk dict -- because PATCH has no
+    server-side bulk endpoint on Polarion.
+    """
+
+    updated: bool = Field(
+        description=(
+            "True only if ALL links succeeded."
+            " False on dry-run or partial-failure halt."
+        ),
+    )
+    dry_run: bool = Field(
+        description="Whether this was a dry-run (preview only, no mutation).",
+    )
+    link_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Composite 5-segment link ids successfully patched, in input order."
+        ),
+    )
+    failed_link_id: str | None = Field(
+        default=None,
+        description=(
+            "Composite id at which fan-out halted; None on full success or dry-run."
+        ),
+    )
+    failed_reason: str | None = Field(
+        default=None,
+        description="Reason fan-out halted; None on full success or dry-run.",
+    )
+    payload_preview: list[dict[str, JsonValue]] | None = Field(
+        default=None,
+        description=(
+            "Per-link JSON:API PATCH bodies; populated on dry-run, None after"
+            " a real call. List (one entry per link) rather than the single"
+            " dict used by create/delete because PATCH has no bulk endpoint."
         ),
     )
 
