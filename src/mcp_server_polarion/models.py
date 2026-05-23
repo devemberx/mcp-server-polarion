@@ -863,8 +863,9 @@ class WorkItemLinksUpdateResult(BaseModel):
     payload_preview: list[dict[str, JsonValue]] | None = Field(
         default=None,
         description=(
-            "Per-link JSON:API PATCH bodies;"
-            " populated on dry-run, None after a real call."
+            "Per-link JSON:API PATCH bodies; populated on dry-run, None after"
+            " a real call. List (one entry per link) rather than the single"
+            " dict used by create/delete because PATCH has no bulk endpoint."
         ),
     )
 

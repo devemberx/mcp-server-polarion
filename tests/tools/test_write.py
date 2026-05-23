@@ -4006,7 +4006,7 @@ class TestBuildUpdateLinkPayload:
     """Tests for the private ``_build_update_link_payload`` helper."""
 
     def test_composite_id_same_project(self) -> None:
-        link_id, payload = _build_update_link_payload(
+        link_id, path, payload = _build_update_link_payload(
             source_project_id="MyProj",
             source_work_item_id="MCPT-1",
             spec=WorkItemLinkUpdateSpec(
@@ -4015,12 +4015,15 @@ class TestBuildUpdateLinkPayload:
         )
 
         assert link_id == "MyProj/MCPT-1/parent/MyProj/MCPT-2"
+        assert path == (
+            "/projects/MyProj/workitems/MCPT-1/linkedworkitems/parent/MyProj/MCPT-2"
+        )
         data = cast(dict[str, object], payload["data"])
         assert data["type"] == "linkedworkitems"
         assert data["id"] == link_id
 
     def test_cross_project_composite_id(self) -> None:
-        link_id, _payload = _build_update_link_payload(
+        link_id, path, _payload = _build_update_link_payload(
             source_project_id="MyProj",
             source_work_item_id="MCPT-1",
             spec=WorkItemLinkUpdateSpec(
@@ -4032,9 +4035,12 @@ class TestBuildUpdateLinkPayload:
         )
 
         assert link_id == "MyProj/MCPT-1/verifies/OtherProj/MCPT-9"
+        assert path == (
+            "/projects/MyProj/workitems/MCPT-1/linkedworkitems/verifies/OtherProj/MCPT-9"
+        )
 
     def test_suspect_only_omits_revision(self) -> None:
-        _link_id, payload = _build_update_link_payload(
+        _link_id, _path, payload = _build_update_link_payload(
             source_project_id="MyProj",
             source_work_item_id="MCPT-1",
             spec=WorkItemLinkUpdateSpec(
@@ -4047,7 +4053,7 @@ class TestBuildUpdateLinkPayload:
         assert attributes == {"suspect": True}
 
     def test_revision_only_omits_suspect(self) -> None:
-        _link_id, payload = _build_update_link_payload(
+        _link_id, _path, payload = _build_update_link_payload(
             source_project_id="MyProj",
             source_work_item_id="MCPT-1",
             spec=WorkItemLinkUpdateSpec(
@@ -4060,7 +4066,7 @@ class TestBuildUpdateLinkPayload:
         assert attributes == {"revision": "1234"}
 
     def test_both_attributes_present(self) -> None:
-        _link_id, payload = _build_update_link_payload(
+        _link_id, _path, payload = _build_update_link_payload(
             source_project_id="MyProj",
             source_work_item_id="MCPT-1",
             spec=WorkItemLinkUpdateSpec(
@@ -4077,7 +4083,7 @@ class TestBuildUpdateLinkPayload:
 
     def test_suspect_false_is_emitted(self) -> None:
         """``suspect=False`` is a real value (clearing the flag), not omitted."""
-        _link_id, payload = _build_update_link_payload(
+        _link_id, _path, payload = _build_update_link_payload(
             source_project_id="MyProj",
             source_work_item_id="MCPT-1",
             spec=WorkItemLinkUpdateSpec(
@@ -4208,7 +4214,7 @@ class TestUpdateWorkItemLinksFanOutFailure:
     ) -> None:
         mock_client.patch.side_effect = [
             {},
-            PolarionError("HTTP 400: bad revision", status_code=400),
+            PolarionError("bad revision", status_code=400),
             {},
         ]
 
@@ -4236,8 +4242,7 @@ class TestUpdateWorkItemLinksFanOutFailure:
         assert result.dry_run is False
         assert result.link_ids == ["MyProj/MCPT-1/parent/MyProj/MCPT-2"]
         assert result.failed_link_id == "MyProj/MCPT-1/verifies/MyProj/MCPT-3"
-        assert result.failed_reason is not None
-        assert "HTTP 400" in result.failed_reason
+        assert result.failed_reason == "patch failed (HTTP 400): bad revision"
         assert result.payload_preview is None
         # Third link never attempted.
         assert mock_client.patch.call_count == 2
@@ -4267,8 +4272,7 @@ class TestUpdateWorkItemLinksFanOutFailure:
         assert result.updated is False
         assert result.link_ids == []
         assert result.failed_link_id == "MyProj/MCPT-1/nonexistent_role/MyProj/MCPT-2"
-        assert result.failed_reason is not None
-        assert "link not found" in result.failed_reason
+        assert result.failed_reason == "link not found (HTTP 404): no such link"
 
 
 class TestUpdateWorkItemLinksAuthError:

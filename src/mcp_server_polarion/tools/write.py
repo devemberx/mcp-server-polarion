@@ -269,14 +269,18 @@ def _build_update_link_payload(
     source_project_id: str,
     source_work_item_id: str,
     spec: WorkItemLinkUpdateSpec,
-) -> tuple[str, dict[str, JsonValue]]:
-    """Build the composite id and JSON:API body for a single link PATCH.
+) -> tuple[str, str, dict[str, JsonValue]]:
+    """Build the composite id, request path, and JSON:API body for one PATCH.
 
     Unlike POST/DELETE (server-side bulk on ``.../linkedworkitems``), PATCH
     is per-link on ``.../linkedworkitems/{role}/{tgtProj}/{tgtWI}`` with a
     single-resource ``{"data": {...}}`` body. ``suspect`` / ``revision``
     are only attached when explicitly set so JSON:API omit-preserve takes
     effect on the server side.
+
+    Returning the request path here (instead of re-deriving it in the
+    caller) keeps the composite id and the path string locked to the same
+    ``tgt_proj`` resolution so the two cannot drift.
     """
     tgt_proj = (
         spec.target_project_id
@@ -286,6 +290,13 @@ def _build_update_link_payload(
     link_id = (
         f"{source_project_id}/{source_work_item_id}/{spec.role}/"
         f"{tgt_proj}/{spec.target_work_item_id}"
+    )
+    path = (
+        f"/projects/{encode_path_segment(source_project_id)}"
+        f"/workitems/{encode_path_segment(source_work_item_id)}"
+        f"/linkedworkitems/{encode_path_segment(spec.role)}"
+        f"/{encode_path_segment(tgt_proj)}"
+        f"/{encode_path_segment(spec.target_work_item_id)}"
     )
     attributes: dict[str, JsonValue] = {}
     if spec.revision is not None:
@@ -299,7 +310,7 @@ def _build_update_link_payload(
             "attributes": attributes,
         }
     }
-    return link_id, payload
+    return link_id, path, payload
 
 
 def _build_update_work_item_payload(  # noqa: PLR0913
@@ -1962,7 +1973,7 @@ async def update_work_item_links(
             ``suspect`` and ``revision`` unset). Raised before any PATCH
             is sent.
     """
-    pairs: list[tuple[str, dict[str, JsonValue]]] = [
+    triples: list[tuple[str, str, dict[str, JsonValue]]] = [
         _build_update_link_payload(
             source_project_id=project_id,
             source_work_item_id=work_item_id,
@@ -1978,25 +1989,13 @@ async def update_work_item_links(
             link_ids=[],
             failed_link_id=None,
             failed_reason=None,
-            payload_preview=[payload for _, payload in pairs],
+            payload_preview=[payload for _, _, payload in triples],
         )
 
     client = get_client(ctx)
-    encoded_project = encode_path_segment(project_id)
-    encoded_work_item = encode_path_segment(work_item_id)
     succeeded: list[str] = []
 
-    for spec, (link_id, payload) in zip(links, pairs, strict=True):
-        tgt_proj = (
-            spec.target_project_id if spec.target_project_id is not None else project_id
-        )
-        path = (
-            f"/projects/{encoded_project}"
-            f"/workitems/{encoded_work_item}"
-            f"/linkedworkitems/{encode_path_segment(spec.role)}"
-            f"/{encode_path_segment(tgt_proj)}"
-            f"/{encode_path_segment(spec.target_work_item_id)}"
-        )
+    for link_id, path, payload in triples:
         try:
             await client.patch(path, json=cast(dict[str, object], payload))
         except PolarionAuthError as exc:
@@ -2010,7 +2009,7 @@ async def update_work_item_links(
                 dry_run=False,
                 link_ids=succeeded,
                 failed_link_id=link_id,
-                failed_reason=f"link not found: {exc.message}",
+                failed_reason=f"link not found (HTTP 404): {exc.message}",
                 payload_preview=None,
             )
         except PolarionError as exc:
@@ -2019,7 +2018,7 @@ async def update_work_item_links(
                 dry_run=False,
                 link_ids=succeeded,
                 failed_link_id=link_id,
-                failed_reason=exc.message,
+                failed_reason=f"patch failed (HTTP {exc.status_code}): {exc.message}",
                 payload_preview=None,
             )
         succeeded.append(link_id)

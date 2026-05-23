@@ -40,7 +40,7 @@ CI runs: `ruff check` → `ruff format --check` → `mypy` → `pytest`.
 - Every list tool must support `page_size` (max 100) and `page_number`; return `PaginatedResult[T]` with `has_more`.
 - **Every write tool** must support `dry_run: bool = False`. When True, build and return the JSON:API payload in the result model (`dry_run=True`, `payload=…`) without hitting Polarion. The matching `_build_*_payload` helper is the unit-testable seam.
 - Tool docstrings are the LLM's manual — Google-style with Args/Returns/Raises. Keep return-field bullets in sync with the Pydantic model.
-- **Error handling**: Map domain exceptions at the tool layer — `PolarionNotFoundError` → `ValueError`, `PolarionAuthError` → `PermissionError`, `PolarionError` → `RuntimeError`.
+- **Error handling**: Map domain exceptions at the tool layer — `PolarionNotFoundError` → `ValueError`, `PolarionAuthError` → `PermissionError`, `PolarionError` → `RuntimeError`. Exception: per-link fan-out tools (e.g. `update_work_item_links`) return per-link errors structurally on the result (`failed_link_id` / `failed_reason`) so callers can see which link halted the loop; only `PolarionAuthError` still raises because auth failure applies globally rather than per link.
 
 ## Comment & Docstring Style
 
