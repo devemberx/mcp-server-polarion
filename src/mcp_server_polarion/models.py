@@ -948,48 +948,21 @@ class WorkItemLinkUpdateSpec(BaseModel):
         return self
 
 
-class WorkItemLinksUpdateResult(BaseModel):
-    """Result of an ``update_work_item_links`` operation.
-
-    Fan-out is fail-fast: on the first per-link error the loop halts and
-    ``link_ids`` holds the successfully-patched prefix while
-    ``failed_link_id`` / ``failed_reason`` describe the link that halted
-    the run. ``payload_preview`` is a list (one entry per link) -- unlike
-    create/delete which use a single bulk dict -- because PATCH has no
-    server-side bulk endpoint on Polarion.
-    """
+class WorkItemLinkUpdateResult(BaseModel):
+    """Result of an ``update_work_item_links`` operation."""
 
     updated: bool = Field(
-        description=(
-            "True only if ALL links succeeded."
-            " False on dry-run or partial-failure halt."
-        ),
+        description="True if the link was patched. False on dry-run.",
     )
     dry_run: bool = Field(
         description="Whether this was a dry-run (preview only, no mutation).",
     )
-    link_ids: list[str] = Field(
-        default_factory=list,
-        description=(
-            "Composite 5-segment link ids successfully patched, in input order."
-        ),
+    link_id: str = Field(
+        description="Composite 5-segment id of the link (computed from inputs).",
     )
-    failed_link_id: str | None = Field(
-        default=None,
+    payload_preview: dict[str, JsonValue] | None = Field(
         description=(
-            "Composite id at which fan-out halted; None on full success or dry-run."
-        ),
-    )
-    failed_reason: str | None = Field(
-        default=None,
-        description="Reason fan-out halted; None on full success or dry-run.",
-    )
-    payload_preview: list[dict[str, JsonValue]] | None = Field(
-        default=None,
-        description=(
-            "Per-link JSON:API PATCH bodies; populated on dry-run, None after"
-            " a real call. List (one entry per link) rather than the single"
-            " dict used by create/delete because PATCH has no bulk endpoint."
+            "JSON:API PATCH body; populated on dry-run, None after a real call."
         ),
     )
 
