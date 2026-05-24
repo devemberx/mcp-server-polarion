@@ -27,6 +27,7 @@ from mcp_server_polarion.core.exceptions import (
 from mcp_server_polarion.models import (
     DocumentCommentsCreateResult,
     DocumentCommentSpec,
+    DocumentCommentUpdateResult,
     DocumentCreateResult,
     DocumentUpdateResult,
     Hyperlink,
@@ -557,6 +558,33 @@ def _build_document_comments_payload(
         items.append(item)
 
     return {"data": items}
+
+
+def _build_document_comment_update_payload(
+    *,
+    project_id: str,
+    space_id: str,
+    document_name: str,
+    comment_id: str,
+    resolved: bool,
+) -> dict[str, JsonValue]:
+    """Build the JSON:API PATCH body for one document comment.
+
+    Produces a single-resource ``{"data": {...}}`` object (NOT a list — that
+    is the POST/create shape). The ``id`` field is the full 4-segment path
+    ``{project_id}/{space_id}/{document_name}/{comment_id}`` required by the
+    Polarion PATCH endpoint. Only ``resolved`` is patchable per the API.
+    """
+    full_id = f"{project_id}/{space_id}/{document_name}/{comment_id}"
+    return {
+        "data": {
+            "type": "document_comments",
+            "id": full_id,
+            "attributes": {
+                "resolved": resolved,
+            },
+        }
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -2225,5 +2253,123 @@ async def create_document_comments(  # noqa: PLR0913
         created=True,
         dry_run=False,
         comment_ids=comment_ids,
+        payload_preview=None,
+    )
+
+
+@mcp.tool(
+    tags={"write"},
+    timeout=60.0,
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def update_document_comment(  # noqa: PLR0913
+    ctx: Context,
+    project_id: str = Field(min_length=1, description="Polarion project ID."),
+    space_id: str = Field(
+        min_length=1,
+        description="Space ID (use '_default' for the default space).",
+    ),
+    document_name: str = Field(
+        min_length=1,
+        description="Document name within ``space_id``.",
+    ),
+    comment_id: str = Field(
+        min_length=1,
+        description=(
+            "Short comment ID to update (e.g. 'c42' from ``list_document_comments``)."
+        ),
+    ),
+    resolved: bool = Field(description="New resolved state for the comment."),
+    dry_run: bool = Field(
+        default=False,
+        description="When True, return payload preview without calling Polarion.",
+    ),
+) -> DocumentCommentUpdateResult:
+    """Resolve or re-open a single document comment.
+
+    Sends PATCH to
+    ``/projects/{p}/spaces/{s}/documents/{d}/comments/{commentId}``
+    with ``{"resolved": <bool>}`` — the only patchable attribute on a
+    document comment. Use ``list_document_comments`` to discover the
+    short comment ID (last segment of the full 4-part path).
+
+    This operation is idempotent: marking a comment resolved twice leaves
+    the same server state as marking it resolved once.
+
+    Args:
+        ctx: MCP tool context (injected automatically).
+        project_id: Polarion project ID.
+        space_id: Space ID (use '_default' for the default space).
+        document_name: Document name within ``space_id``.
+        comment_id: Short comment ID (e.g. 'c42') from
+            ``list_document_comments``.
+        resolved: ``True`` to mark resolved; ``False`` to re-open.
+        dry_run: When True, build and return the payload without
+            calling Polarion.
+
+    Returns:
+        ``DocumentCommentUpdateResult`` with:
+
+        - ``updated`` — True on success; False on dry-run.
+        - ``dry_run`` — mirrors the input flag.
+        - ``comment_id`` — the short ID patched; None on dry-run.
+        - ``resolved`` — the value sent (or that would be sent).
+        - ``payload_preview`` — JSON:API body; populated on dry-run,
+          None after a real operation.
+
+    Raises:
+        ValueError: Project, space, document, or comment not found.
+        PermissionError: Token lacks permission to update the comment.
+        RuntimeError: Other Polarion API errors.
+    """
+    payload = _build_document_comment_update_payload(
+        project_id=project_id,
+        space_id=space_id,
+        document_name=document_name,
+        comment_id=comment_id,
+        resolved=resolved,
+    )
+
+    if dry_run:
+        return DocumentCommentUpdateResult(
+            updated=False,
+            dry_run=True,
+            comment_id=None,
+            resolved=resolved,
+            payload_preview=payload,
+        )
+
+    client = get_client(ctx)
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/spaces/{encode_path_segment(space_id)}"
+        f"/documents/{encode_path_segment(document_name)}"
+        f"/comments/{encode_path_segment(comment_id)}"
+    )
+    try:
+        await client.patch(path, json=cast(dict[str, object], payload))
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot update document comment -- check your POLARION_TOKEN permissions."
+        ) from exc
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Comment '{comment_id}' on document '{document_name}'"
+            f" (space '{space_id}', project '{project_id}') not found."
+            " Use `list_document_comments` to discover valid comment IDs."
+        ) from exc
+    except PolarionError as exc:
+        raise RuntimeError(f"Failed to update document comment: {exc.message}") from exc
+
+    return DocumentCommentUpdateResult(
+        updated=True,
+        dry_run=False,
+        comment_id=comment_id,
+        resolved=resolved,
         payload_preview=None,
     )

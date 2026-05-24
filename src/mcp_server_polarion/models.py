@@ -780,6 +780,35 @@ class DocumentCommentsCreateResult(BaseModel):
     )
 
 
+class DocumentCommentUpdateResult(BaseModel):
+    """Result of an ``update_document_comment`` operation."""
+
+    updated: bool = Field(
+        description=(
+            "True if the comment was actually patched. False when dry_run is True."
+        ),
+    )
+    dry_run: bool = Field(
+        description="Whether this was a dry-run (preview only, no mutation).",
+    )
+    comment_id: str | None = Field(
+        description=(
+            "Short comment ID that was patched (e.g. 'c42'). None when dry_run is True."
+        ),
+    )
+    resolved: bool = Field(
+        description=(
+            "The ``resolved`` value that was sent (or would be sent) to Polarion."
+        ),
+    )
+    payload_preview: dict[str, JsonValue] | None = Field(
+        description=(
+            "JSON:API request payload that was (or would be) sent. "
+            "Populated for dry-run previews; None after a successful real operation."
+        ),
+    )
+
+
 class WorkItemLinkSpec(BaseModel):
     """One link to create under a source work item."""
 
@@ -1035,6 +1064,7 @@ class DocumentUpdateResult(BaseModel):
 
 __all__: list[str] = [
     "CommentResult",
+    "DocumentCommentUpdateResult",
     "DocumentCreateResult",
     "DocumentDetail",
     "DocumentPart",

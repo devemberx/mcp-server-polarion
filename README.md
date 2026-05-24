@@ -164,6 +164,7 @@ All list tools support pagination via `page_size` (1–100) and `page_number` pa
 | `move_work_item_to_document` | Attach a work item to a document at a chosen position |
 | `move_work_item_from_document` | Detach a work item from its document |
 | `create_document_comments` | Add one or more comments or replies to a document |
+| `update_document_comment` | Resolve or re-open a document comment |
 
 ## Example Prompts
 

@@ -22,6 +22,7 @@ from mcp_server_polarion.core.exceptions import (
 )
 from mcp_server_polarion.models import (
     DocumentCommentSpec,
+    DocumentCommentUpdateResult,
     DocumentCreateResult,
     DocumentUpdateResult,
     Hyperlink,
@@ -54,6 +55,10 @@ _build_create_document_payload = _write_mod._build_create_document_payload
 _build_create_links_payload = _write_mod._build_create_links_payload
 _build_delete_links_payload = _write_mod._build_delete_links_payload
 _build_document_comments_payload = _write_mod._build_document_comments_payload
+_build_document_comment_update_payload = (
+    _write_mod._build_document_comment_update_payload
+)
+update_document_comment = _write_mod.update_document_comment
 _build_move_to_document_payload = _write_mod._build_move_to_document_payload
 _build_update_document_payload = _write_mod._build_update_document_payload
 _build_update_link_payload = _write_mod._build_update_link_payload
@@ -4770,3 +4775,295 @@ class TestCreateDocumentCommentsFieldValidation:
         result = self._adapter_for("comments").validate_python(specs)
         assert isinstance(result, list)
         assert len(result) == 1
+
+
+# ---------------------------------------------------------------------------
+# update_document_comment
+# ---------------------------------------------------------------------------
+
+
+class TestBuildDocumentCommentUpdatePayload:
+    """Unit tests for _build_document_comment_update_payload (no I/O)."""
+
+    def _build(
+        self,
+        *,
+        project_id: str = "Proj",
+        space_id: str = "Space",
+        document_name: str = "Doc",
+        comment_id: str = "c42",
+        resolved: bool = True,
+    ) -> dict:  # type: ignore[type-arg]
+        return _build_document_comment_update_payload(
+            project_id=project_id,
+            space_id=space_id,
+            document_name=document_name,
+            comment_id=comment_id,
+            resolved=resolved,
+        )
+
+    def test_payload_is_dict_not_list(self) -> None:
+        payload = self._build()
+        assert isinstance(payload["data"], dict)
+        assert not isinstance(payload["data"], list)
+
+    def test_type_is_document_comments(self) -> None:
+        payload = self._build()
+        assert payload["data"]["type"] == "document_comments"  # type: ignore[index]
+
+    def test_resolved_true_included(self) -> None:
+        payload = self._build(resolved=True)
+        assert payload["data"]["attributes"]["resolved"] is True  # type: ignore[index]
+
+    def test_resolved_false_included(self) -> None:
+        payload = self._build(resolved=False)
+        assert payload["data"]["attributes"]["resolved"] is False  # type: ignore[index]
+
+    def test_full_id_composed_from_four_segments(self) -> None:
+        payload = self._build(
+            project_id="P",
+            space_id="S",
+            document_name="D",
+            comment_id="c42",
+        )
+        assert payload["data"]["id"] == "P/S/D/c42"  # type: ignore[index]
+
+    def test_space_default_value_in_id(self) -> None:
+        payload = self._build(space_id="_default")
+        assert "_default" in str(payload["data"]["id"])  # type: ignore[index]
+
+
+class TestUpdateDocumentCommentDryRun:
+    """Dry-run path must not call client.patch."""
+
+    async def test_dry_run_skips_patch(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        await update_document_comment(
+            mock_ctx,
+            project_id="Proj",
+            space_id="Space",
+            document_name="Doc",
+            comment_id="c42",
+            resolved=True,
+            dry_run=True,
+        )
+        mock_client.patch.assert_not_called()
+
+    async def test_dry_run_result_flags(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        result = await update_document_comment(
+            mock_ctx,
+            project_id="Proj",
+            space_id="Space",
+            document_name="Doc",
+            comment_id="c42",
+            resolved=True,
+            dry_run=True,
+        )
+        assert isinstance(result, DocumentCommentUpdateResult)
+        assert result.dry_run is True
+        assert result.updated is False
+
+    async def test_dry_run_comment_id_is_none(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        result = await update_document_comment(
+            mock_ctx,
+            project_id="Proj",
+            space_id="Space",
+            document_name="Doc",
+            comment_id="c42",
+            resolved=True,
+            dry_run=True,
+        )
+        assert result.comment_id is None
+
+    async def test_dry_run_payload_preview_populated(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        result = await update_document_comment(
+            mock_ctx,
+            project_id="Proj",
+            space_id="Space",
+            document_name="Doc",
+            comment_id="c42",
+            resolved=True,
+            dry_run=True,
+        )
+        assert result.payload_preview is not None
+        data = result.payload_preview["data"]
+        assert data["type"] == "document_comments"  # type: ignore[index]
+        assert data["attributes"]["resolved"] is True  # type: ignore[index]
+        assert data["id"] == "Proj/Space/Doc/c42"  # type: ignore[index]
+
+    async def test_dry_run_resolved_echoed_true(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        result = await update_document_comment(
+            mock_ctx,
+            project_id="Proj",
+            space_id="Space",
+            document_name="Doc",
+            comment_id="c42",
+            resolved=True,
+            dry_run=True,
+        )
+        assert result.resolved is True
+
+    async def test_dry_run_resolved_echoed_false(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        result = await update_document_comment(
+            mock_ctx,
+            project_id="Proj",
+            space_id="Space",
+            document_name="Doc",
+            comment_id="c42",
+            resolved=False,
+            dry_run=True,
+        )
+        assert result.resolved is False
+
+
+class TestUpdateDocumentCommentHappyPath:
+    """Successful PATCH path (204 No Content)."""
+
+    async def test_patch_called_with_correct_path(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.return_value = {}
+        await update_document_comment(
+            mock_ctx,
+            project_id="Proj",
+            space_id="Space",
+            document_name="Doc",
+            comment_id="c42",
+            resolved=True,
+            dry_run=False,
+        )
+        path = mock_client.patch.call_args[0][0]
+        assert path == "/projects/Proj/spaces/Space/documents/Doc/comments/c42"
+
+    async def test_patch_body_resolved_true(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.return_value = {}
+        await update_document_comment(
+            mock_ctx,
+            project_id="Proj",
+            space_id="Space",
+            document_name="Doc",
+            comment_id="c42",
+            resolved=True,
+            dry_run=False,
+        )
+        body = mock_client.patch.call_args[1]["json"]
+        assert body["data"]["attributes"]["resolved"] is True
+
+    async def test_patch_body_resolved_false(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.return_value = {}
+        await update_document_comment(
+            mock_ctx,
+            project_id="Proj",
+            space_id="Space",
+            document_name="Doc",
+            comment_id="c42",
+            resolved=False,
+            dry_run=False,
+        )
+        body = mock_client.patch.call_args[1]["json"]
+        assert body["data"]["attributes"]["resolved"] is False
+
+    async def test_returns_updated_true(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.return_value = {}
+        result = await update_document_comment(
+            mock_ctx,
+            project_id="Proj",
+            space_id="Space",
+            document_name="Doc",
+            comment_id="c42",
+            resolved=True,
+            dry_run=False,
+        )
+        assert isinstance(result, DocumentCommentUpdateResult)
+        assert result.updated is True
+        assert result.dry_run is False
+        assert result.comment_id == "c42"
+        assert result.resolved is True
+        assert result.payload_preview is None
+
+    async def test_path_url_encodes_segments(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.return_value = {}
+        await update_document_comment(
+            mock_ctx,
+            project_id="My Proj",
+            space_id="My Space",
+            document_name="My Doc",
+            comment_id="c 1",
+            resolved=True,
+            dry_run=False,
+        )
+        path = mock_client.patch.call_args[0][0]
+        assert "My%20Proj" in path
+        assert "My%20Space" in path
+        assert "My%20Doc" in path
+        assert "c%201" in path
+
+
+class TestUpdateDocumentCommentErrors:
+    """Exception mapping for PATCH failures."""
+
+    async def test_auth_error_raises_permission_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.side_effect = PolarionAuthError("auth", status_code=401)
+        with pytest.raises(PermissionError, match="POLARION_TOKEN"):
+            await update_document_comment(
+                mock_ctx,
+                project_id="Proj",
+                space_id="Space",
+                document_name="Doc",
+                comment_id="c42",
+                resolved=True,
+                dry_run=False,
+            )
+
+    async def test_not_found_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.side_effect = PolarionNotFoundError(
+            "not found", status_code=404
+        )
+        with pytest.raises(ValueError, match="list_document_comments"):
+            await update_document_comment(
+                mock_ctx,
+                project_id="Proj",
+                space_id="Space",
+                document_name="Doc",
+                comment_id="c42",
+                resolved=True,
+                dry_run=False,
+            )
+
+    async def test_other_error_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.side_effect = PolarionError("boom", status_code=500)
+        with pytest.raises(RuntimeError, match="boom"):
+            await update_document_comment(
+                mock_ctx,
+                project_id="Proj",
+                space_id="Space",
+                document_name="Doc",
+                comment_id="c42",
+                resolved=True,
+                dry_run=False,
+            )
