@@ -641,6 +641,37 @@ class DocumentComment(BaseModel):
     )
 
 
+class DocumentCommentSpec(BaseModel):
+    """One comment to create via ``create_document_comments``."""
+
+    text: str = Field(
+        min_length=1,
+        description="Comment body text.",
+    )
+    text_format: Literal["text/html", "text/plain"] = Field(
+        default="text/plain",
+        description="MIME type of ``text`` ('text/plain' or 'text/html').",
+    )
+    resolved: bool | None = Field(
+        default=None,
+        description="Initial resolved state; omit to let Polarion default to False.",
+    )
+    author_id: str | None = Field(
+        default=None,
+        description=(
+            "User ID of the comment author; omit to default to the authenticated user."
+        ),
+    )
+    parent_comment_id: str | None = Field(
+        default=None,
+        description=(
+            "Short comment ID for replies (e.g. 'c42' from "
+            "``list_document_comments``). Omit for a top-level comment. "
+            "The tool composes the full path internally."
+        ),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Write-result models
 # ---------------------------------------------------------------------------
@@ -720,6 +751,31 @@ class CommentResult(BaseModel):
             "JSON:API request payload that was (or would be) sent. "
             "Usually populated for dry-run previews and may be None "
             "after a successful real operation."
+        ),
+    )
+
+
+class DocumentCommentsCreateResult(BaseModel):
+    """Result of a ``create_document_comments`` operation."""
+
+    created: bool = Field(
+        description=(
+            "True if comments were actually created. False when dry_run is True."
+        ),
+    )
+    dry_run: bool = Field(
+        description="Whether this was a dry-run (preview only, no mutation).",
+    )
+    comment_ids: list[str] = Field(
+        description=(
+            "Short IDs of the created comments in the order returned by Polarion. "
+            "Empty when dry_run is True."
+        ),
+    )
+    payload_preview: dict[str, JsonValue] | None = Field(
+        description=(
+            "JSON:API request payload that was (or would be) sent. "
+            "Populated for dry-run previews; None after a successful real operation."
         ),
     )
 
