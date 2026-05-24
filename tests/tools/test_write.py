@@ -2813,6 +2813,15 @@ class TestWriteToolAnnotations:
                     "openWorldHint": True,
                 },
             ),
+            (
+                "update_document_comment",
+                {
+                    "readOnlyHint": False,
+                    "destructiveHint": False,
+                    "idempotentHint": True,
+                    "openWorldHint": True,
+                },
+            ),
         ],
     )
     async def test_write_tool_annotation(

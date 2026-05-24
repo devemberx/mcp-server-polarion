@@ -3,8 +3,9 @@
 Currently provides ``create_work_item``, ``update_work_item``,
 ``move_work_item_to_document``, ``update_document``,
 ``create_document``, ``create_work_item_links``,
-``delete_work_item_links``, ``update_work_item_links``, and
-``create_document_comments``. All write tools follow the strict
+``delete_work_item_links``, ``update_work_item_links``,
+``create_document_comments``, and ``update_document_comment``. All
+write tools follow the strict
 patterns documented in ``CLAUDE.md``: they convert Markdown input to
 sanitized HTML, build minimal request payloads (skipping unset fields
 rather than sending empty values), and map domain exceptions to
@@ -2125,7 +2126,7 @@ async def update_work_item_links(
 )
 async def create_document_comments(  # noqa: PLR0913
     ctx: Context,
-    project_id: str = Field(description="Polarion project ID."),
+    project_id: str = Field(min_length=1, description="Polarion project ID."),
     space_id: str = Field(
         min_length=1,
         description="Space ID (use '_default' for the default space).",

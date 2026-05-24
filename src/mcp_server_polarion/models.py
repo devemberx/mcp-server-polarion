@@ -1064,7 +1064,9 @@ class DocumentUpdateResult(BaseModel):
 
 __all__: list[str] = [
     "CommentResult",
+    "DocumentCommentSpec",
     "DocumentCommentUpdateResult",
+    "DocumentCommentsCreateResult",
     "DocumentCreateResult",
     "DocumentDetail",
     "DocumentPart",
