@@ -621,12 +621,8 @@ def build_document_comment(item: dict[str, object]) -> DocumentComment:
     parent_full = extract_relationship_id(relationships, "parentComment")
     child_full = extract_relationship_ids(relationships, "childComments")
 
-    comment_id = safe_str(attributes.get("id", ""))
-    if not comment_id:
-        comment_id = extract_short_id(safe_str(item.get("id", "")))
-
     return DocumentComment(
-        id=comment_id,
+        id=extract_short_id(safe_str(item.get("id", ""))),
         created=safe_str(attributes.get("created", "")),
         resolved=bool(attributes.get("resolved", False)),
         text=text_value,

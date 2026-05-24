@@ -1961,6 +1961,9 @@ async def list_document_comments(  # noqa: PLR0913
             path,
             params={
                 "fields[document_comments]": DOCUMENT_COMMENT_LIST_FIELDS,
+                # ``childComments`` is to-many; Polarion only inlines ``data``
+                # for to-many relationships when ``include=`` requests them.
+                "include": "childComments",
                 "page[size]": page_size,
                 "page[number]": page_number,
             },

@@ -4087,6 +4087,7 @@ class TestListDocumentComments:
         assert params["fields[document_comments]"] == (
             "created,resolved,text,author,parentComment,childComments"
         )
+        assert params["include"] == "childComments"
         assert params["page[size]"] == 25
         assert params["page[number]"] == 3
 
