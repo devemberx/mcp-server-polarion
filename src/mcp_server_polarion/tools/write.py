@@ -2215,6 +2215,12 @@ async def create_document_comments(  # noqa: PLR0913
                 if full_id:
                     comment_ids.append(extract_short_id(full_id))
 
+    if not comment_ids:
+        raise RuntimeError(
+            "Polarion returned no comment IDs after creation."
+            " The POST may have succeeded — verify with `list_document_comments`."
+        )
+
     return DocumentCommentsCreateResult(
         created=True,
         dry_run=False,

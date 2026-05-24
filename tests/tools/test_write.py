@@ -4634,8 +4634,8 @@ class TestCreateDocumentCommentsHappyPath:
             ],
             dry_run=False,
         )
-        body = mock_client.post.call_args[1]["json"]
-        assert len(body["data"]) == 2
+        body = mock_client.post.call_args[1]["json"]  # type: ignore[index]
+        assert len(body["data"]) == 2  # type: ignore[index]
 
     async def test_resolved_true_sent_in_payload(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -4702,6 +4702,21 @@ class TestCreateDocumentCommentsErrors:
                 dry_run=False,
             )
 
+    async def test_empty_response_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """201 with no IDs must raise rather than silently return created=True."""
+        mock_client.post.return_value = {}
+        with pytest.raises(RuntimeError, match="no comment IDs"):
+            await create_document_comments(
+                mock_ctx,
+                project_id="P",
+                space_id="S",
+                document_name="D",
+                comments=[DocumentCommentSpec(text="hi")],
+                dry_run=False,
+            )
+
 
 class TestCreateDocumentCommentsFieldValidation:
     """Verify Field constraints on create_document_comments and DocumentCommentSpec.
@@ -4745,3 +4760,13 @@ class TestCreateDocumentCommentsFieldValidation:
     def test_spec_default_text_format_is_plain(self) -> None:
         spec = DocumentCommentSpec(text="hello")
         assert spec.text_format == "text/plain"
+
+    def test_comments_rejects_empty_list(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("comments").validate_python([])
+
+    def test_comments_accepts_non_empty_list(self) -> None:
+        specs = [{"text": "hello"}]
+        result = self._adapter_for("comments").validate_python(specs)
+        assert isinstance(result, list)
+        assert len(result) == 1
