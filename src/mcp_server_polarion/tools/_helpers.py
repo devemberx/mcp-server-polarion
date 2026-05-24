@@ -12,13 +12,14 @@ inside ``read_document_parts``) and lives in ``tools.read``.
 
 from __future__ import annotations
 
-from typing import Final, TypedDict, cast
+from typing import Final, Literal, TypedDict, cast
 from urllib.parse import quote
 
 from fastmcp import Context
 
 from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.models import (
+    DocumentComment,
     Hyperlink,
     JsonValue,
     WorkItemDetail,
@@ -56,6 +57,13 @@ WORK_ITEM_LIST_FIELDS: Final[str] = "title,type,status,priority,updated,module,a
 WORK_ITEM_DETAIL_FIELDS: Final[str] = "@all"
 WORK_ITEM_PART_FIELDS: Final[str] = "title,type,status,description,outlineNumber"
 DOCUMENT_DETAIL_FIELDS: Final[str] = "@all"
+# Sparse fieldset filters relationships as well as attributes, so author /
+# parentComment / childComments must be named explicitly to remain in the
+# response. Document comments expose no project-defined custom fields, so
+# `@all` is not needed here.
+DOCUMENT_COMMENT_LIST_FIELDS: Final[str] = (
+    "created,resolved,text,author,parentComment,childComments"
+)
 
 # Canonical standard attribute names per the Polarion REST OpenAPI schema.
 # Used by ``extract_custom_fields`` as an allowlist: anything appearing in
@@ -582,14 +590,63 @@ def parse_work_item_summaries(
     return items
 
 
+def build_document_comment(item: dict[str, object]) -> DocumentComment:
+    """Build a ``DocumentComment`` from a single JSON:API resource.
+
+    Args:
+        item: A single ``document_comments`` resource (``data`` element).
+
+    Returns:
+        Parsed ``DocumentComment`` with relationship IDs reduced to their
+        short form (project prefix stripped).
+    """
+    attributes_raw = item.get("attributes")
+    attributes: dict[str, object] = (
+        attributes_raw if isinstance(attributes_raw, dict) else {}
+    )
+    relationships_raw = item.get("relationships")
+    relationships: dict[str, object] = (
+        relationships_raw if isinstance(relationships_raw, dict) else {}
+    )
+
+    text_value = ""
+    text_format: Literal["text/html", "text/plain"] = "text/html"
+    text_attr = attributes.get("text")
+    if isinstance(text_attr, dict):
+        text_value = safe_str(text_attr.get("value", ""))
+        raw_format = safe_str(text_attr.get("type", "text/html"))
+        text_format = "text/plain" if raw_format == "text/plain" else "text/html"
+
+    author_full = extract_relationship_id(relationships, "author")
+    parent_full = extract_relationship_id(relationships, "parentComment")
+    child_full = extract_relationship_ids(relationships, "childComments")
+
+    comment_id = safe_str(attributes.get("id", ""))
+    if not comment_id:
+        comment_id = extract_short_id(safe_str(item.get("id", "")))
+
+    return DocumentComment(
+        id=comment_id,
+        created=safe_str(attributes.get("created", "")),
+        resolved=bool(attributes.get("resolved", False)),
+        text=text_value,
+        text_format=text_format,
+        author_id=extract_short_id(author_full) or None,
+        parent_comment_id=extract_short_id(parent_full) or None,
+        child_comment_ids=[extract_short_id(c) for c in child_full],
+    )
+
+
 __all__: list[str] = [
     "DEFAULT_PAGE_SIZE",
+    "DOCUMENT_COMMENT_LIST_FIELDS",
     "DOCUMENT_DETAIL_FIELDS",
     "STANDARD_DOCUMENT_ATTRIBUTES",
     "STANDARD_WORK_ITEM_ATTRIBUTES",
     "WORK_ITEM_DETAIL_FIELDS",
     "WORK_ITEM_LIST_FIELDS",
     "WORK_ITEM_PART_FIELDS",
+    "build_document_comment",
     "build_included_work_item_map",
     "build_work_item_summary_kwargs",
     "compute_has_more",
