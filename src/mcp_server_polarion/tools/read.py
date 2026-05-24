@@ -32,6 +32,7 @@ from mcp_server_polarion.core.exceptions import (
     PolarionNotFoundError,
 )
 from mcp_server_polarion.models import (
+    DocumentComment,
     DocumentDetail,
     DocumentPart,
     DocumentReadResult,
@@ -47,11 +48,13 @@ from mcp_server_polarion.models import (
 from mcp_server_polarion.server import mcp
 from mcp_server_polarion.tools._helpers import (
     DEFAULT_PAGE_SIZE,
+    DOCUMENT_COMMENT_LIST_FIELDS,
     DOCUMENT_DETAIL_FIELDS,
     STANDARD_DOCUMENT_ATTRIBUTES,
     WORK_ITEM_DETAIL_FIELDS,
     WORK_ITEM_LIST_FIELDS,
     WORK_ITEM_PART_FIELDS,
+    build_document_comment,
     build_included_work_item_map,
     compute_has_more,
     encode_path_segment,
@@ -1886,5 +1889,117 @@ async def _get_back_link_page(
         page_size=page_size,
         has_more=compute_has_more(
             response, raw_total, page_number, page_size, len(items)
+        ),
+    )
+
+
+@mcp.tool(
+    tags={"read"},
+    timeout=60.0,
+    annotations={"readOnlyHint": True},
+)
+async def list_document_comments(  # noqa: PLR0913
+    ctx: Context,
+    project_id: str = Field(description="Polarion project ID."),
+    space_id: str = Field(
+        description=(
+            "Space ID that contains the document"
+            " (use '_default' for the default space)."
+        ),
+    ),
+    document_name: str = Field(description="Document name within the space."),
+    page_size: int = Field(
+        default=DEFAULT_PAGE_SIZE,
+        ge=1,
+        le=100,
+        description="Number of comments per page (1-100, default 100).",
+    ),
+    page_number: int = Field(
+        default=1,
+        ge=1,
+        description="Page number to retrieve (1-based, default 1).",
+    ),
+) -> PaginatedResult[DocumentComment]:
+    """List comments attached to a Polarion document.
+
+    Comments come back as a flat page; reconstruct threads on the client
+    side via ``parent_comment_id`` (set on replies) and ``child_comment_ids``
+    (direct replies). Top-level comments have ``parent_comment_id`` of
+    ``None``.
+
+    ``text`` is returned verbatim, with ``text_format`` indicating
+    ``'text/html'`` or ``'text/plain'``. HTML is NOT sanitized so the body
+    round-trips losslessly; treat it as untrusted input if rendering.
+
+    Args:
+        ctx: MCP tool context (injected automatically).
+        project_id: Polarion project ID.
+        space_id: Space ID (use '_default' for the default space).
+        document_name: Document name within the space.
+        page_size: Items per page (1-100, default 100).
+        page_number: 1-based page number (default 1).
+
+    Returns:
+        PaginatedResult of ``DocumentComment`` items with ``id``,
+        ``created``, ``resolved``, ``text``, ``text_format``, ``author_id``,
+        ``parent_comment_id``, and ``child_comment_ids``.
+
+    Raises:
+        ValueError: Project, space, or document not found.
+        PermissionError: Token lacks permission.
+        RuntimeError: Other Polarion API errors.
+    """
+    client = get_client(ctx)
+    path = (
+        f"/projects/{project_id}"
+        f"/spaces/{encode_path_segment(space_id)}"
+        f"/documents/{encode_path_segment(document_name)}"
+        "/comments"
+    )
+    try:
+        response = await client.get(
+            path,
+            params={
+                "fields[document_comments]": DOCUMENT_COMMENT_LIST_FIELDS,
+                # ``childComments`` is to-many; Polarion only inlines ``data``
+                # for to-many relationships when ``include=`` requests them.
+                "include": "childComments",
+                "page[size]": page_size,
+                "page[number]": page_number,
+            },
+        )
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Document '{space_id}/{document_name}' not found in project "
+            f"'{project_id}'. Use `list_documents` to discover valid IDs."
+        ) from exc
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot access document comments -- check your POLARION_TOKEN permissions."
+        ) from exc
+    except PolarionError as exc:
+        raise RuntimeError(
+            f"Failed to list comments for '{space_id}/{document_name}': {exc.message}"
+        ) from exc
+
+    raw_data = response.get("data", []) if isinstance(response, dict) else []
+    comment_items: list[DocumentComment] = []
+    if isinstance(raw_data, list):
+        for entry in raw_data:
+            if isinstance(entry, dict):
+                comment_items.append(build_document_comment(entry))
+
+    raw_total = extract_total_count(response)
+    total = raw_total
+    if total <= 0 and comment_items:
+        total = (page_number - 1) * page_size + len(comment_items)
+
+    return PaginatedResult[DocumentComment](
+        items=comment_items,
+        total_count=total,
+        page=page_number,
+        page_size=page_size,
+        has_more=compute_has_more(
+            response, raw_total, page_number, page_size, len(comment_items)
         ),
     )

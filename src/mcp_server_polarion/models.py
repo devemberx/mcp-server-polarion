@@ -602,6 +602,45 @@ class WorkItemLink(BaseModel):
     )
 
 
+class DocumentComment(BaseModel):
+    """A single document comment returned by ``list_document_comments``.
+
+    Comments form a tree: top-level comments have ``parent_comment_id=None``
+    and replies link back via ``parent_comment_id`` while exposing their own
+    replies through ``child_comment_ids``. The list endpoint returns a flat
+    page; rebuild the thread on the client side. ``text`` is returned
+    verbatim with ``text_format`` indicating whether it is HTML or plain
+    text -- HTML is NOT sanitized, so it round-trips losslessly.
+    """
+
+    id: str = Field(description="Comment ID (e.g. 'MyCommentId').")
+    created: str = Field(description="ISO-8601 creation timestamp.")
+    resolved: bool = Field(
+        default=False,
+        description="True when the comment has been marked resolved.",
+    )
+    text: str = Field(
+        default="",
+        description="Comment body verbatim; format signalled by ``text_format``.",
+    )
+    text_format: Literal["text/html", "text/plain"] = Field(
+        default="text/html",
+        description="MIME type of ``text`` as reported by Polarion.",
+    )
+    author_id: str | None = Field(
+        default=None,
+        description="User ID of the comment author; ``None`` when unknown.",
+    )
+    parent_comment_id: str | None = Field(
+        default=None,
+        description="Parent comment ID for replies; ``None`` for top-level comments.",
+    )
+    child_comment_ids: list[str] = Field(
+        default_factory=list,
+        description="Direct reply comment IDs in declaration order.",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Write-result models
 # ---------------------------------------------------------------------------

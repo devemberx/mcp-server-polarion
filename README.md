@@ -144,6 +144,7 @@ claude mcp add mcp-server-polarion \
 | `get_work_item` | Get work item details with the body as raw HTML |
 | `read_work_item` | Get work item details with the body as Markdown |
 | `list_work_item_links` | List a work item's outgoing or incoming links |
+| `list_document_comments` | List a document's comments with thread relationships |
 | `list_document_enum_options` | Resolve valid enum ids for a document field |
 | `list_work_item_enum_options` | Resolve valid enum ids for a work item field |
 
