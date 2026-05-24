@@ -21,6 +21,7 @@ from mcp_server_polarion.core.exceptions import (
     PolarionNotFoundError,
 )
 from mcp_server_polarion.models import (
+    DocumentCommentSpec,
     DocumentCreateResult,
     DocumentUpdateResult,
     Hyperlink,
@@ -40,6 +41,7 @@ from mcp_server_polarion.tools import write as _write_mod
 # In FastMCP 3.0, @mcp.tool returns the original function unchanged
 # (not a FunctionTool wrapper), so we reference them directly.
 create_document = _write_mod.create_document
+create_document_comments = _write_mod.create_document_comments
 create_work_item = _write_mod.create_work_item
 create_work_item_links = _write_mod.create_work_item_links
 delete_work_item_links = _write_mod.delete_work_item_links
@@ -51,6 +53,7 @@ update_work_item_links = _write_mod.update_work_item_links
 _build_create_document_payload = _write_mod._build_create_document_payload
 _build_create_links_payload = _write_mod._build_create_links_payload
 _build_delete_links_payload = _write_mod._build_delete_links_payload
+_build_document_comments_payload = _write_mod._build_document_comments_payload
 _build_move_to_document_payload = _write_mod._build_move_to_document_payload
 _build_update_document_payload = _write_mod._build_update_document_payload
 _build_update_link_payload = _write_mod._build_update_link_payload
@@ -2796,6 +2799,15 @@ class TestWriteToolAnnotations:
                     "openWorldHint": True,
                 },
             ),
+            (
+                "create_document_comments",
+                {
+                    "readOnlyHint": False,
+                    "destructiveHint": False,
+                    "idempotentHint": False,
+                    "openWorldHint": True,
+                },
+            ),
         ],
     )
     async def test_write_tool_annotation(
@@ -4345,3 +4357,416 @@ class TestUpdateWorkItemLinksFieldValidation:
         )
         assert spec.revision == "HEAD"
         assert spec.suspect is None
+
+
+# ---------------------------------------------------------------------------
+# create_document_comments tests
+# ---------------------------------------------------------------------------
+
+
+class TestBuildDocumentCommentsPayload:
+    """Unit tests for the private ``_build_document_comments_payload`` helper."""
+
+    def test_single_plain_text_spec(self) -> None:
+        payload = _build_document_comments_payload(
+            specs=[DocumentCommentSpec(text="hello")],
+            project_id="Proj",
+            space_id="Space",
+            document_name="Doc",
+        )
+        data = payload["data"]
+        assert isinstance(data, list)
+        assert len(data) == 1
+        item = data[0]
+        assert isinstance(item, dict)
+        assert item["type"] == "document_comments"
+        attrs = item["attributes"]
+        assert isinstance(attrs, dict)
+        assert attrs["text"] == {"type": "text/plain", "value": "hello"}
+        assert "resolved" not in attrs
+        assert "relationships" not in item
+
+    def test_multiple_specs_produce_multiple_items(self) -> None:
+        payload = _build_document_comments_payload(
+            specs=[
+                DocumentCommentSpec(text="first"),
+                DocumentCommentSpec(text="second"),
+            ],
+            project_id="P",
+            space_id="S",
+            document_name="D",
+        )
+        assert len(payload["data"]) == 2  # type: ignore[arg-type]
+
+    def test_resolved_true_in_attributes(self) -> None:
+        payload = _build_document_comments_payload(
+            specs=[DocumentCommentSpec(text="t", resolved=True)],
+            project_id="P",
+            space_id="S",
+            document_name="D",
+        )
+        attrs = payload["data"][0]["attributes"]  # type: ignore[index]
+        assert attrs["resolved"] is True  # type: ignore[index]
+
+    def test_resolved_false_in_attributes(self) -> None:
+        """Explicit False must be sent, not silently omitted like None."""
+        payload = _build_document_comments_payload(
+            specs=[DocumentCommentSpec(text="t", resolved=False)],
+            project_id="P",
+            space_id="S",
+            document_name="D",
+        )
+        attrs = payload["data"][0]["attributes"]  # type: ignore[index]
+        assert attrs["resolved"] is False  # type: ignore[index]
+
+    def test_resolved_none_omits_key(self) -> None:
+        payload = _build_document_comments_payload(
+            specs=[DocumentCommentSpec(text="t", resolved=None)],
+            project_id="P",
+            space_id="S",
+            document_name="D",
+        )
+        attrs = payload["data"][0]["attributes"]  # type: ignore[index]
+        assert "resolved" not in attrs  # type: ignore[operator]
+
+    def test_author_relationship(self) -> None:
+        payload = _build_document_comments_payload(
+            specs=[DocumentCommentSpec(text="t", author_id="alice")],
+            project_id="P",
+            space_id="S",
+            document_name="D",
+        )
+        item = payload["data"][0]  # type: ignore[index]
+        assert isinstance(item, dict)
+        assert item["relationships"]["author"] == {  # type: ignore[index]
+            "data": {"id": "alice", "type": "users"}
+        }
+
+    def test_parent_comment_full_path_composed(self) -> None:
+        """Short parent_comment_id is expanded to the full 4-segment path."""
+        payload = _build_document_comments_payload(
+            specs=[DocumentCommentSpec(text="t", parent_comment_id="c1")],
+            project_id="Proj",
+            space_id="Space",
+            document_name="Doc",
+        )
+        item = payload["data"][0]  # type: ignore[index]
+        assert isinstance(item, dict)
+        rel = item["relationships"]["parentComment"]  # type: ignore[index]
+        assert rel == {"data": {"id": "Proj/Space/Doc/c1", "type": "document_comments"}}
+
+    def test_both_relationships_present(self) -> None:
+        payload = _build_document_comments_payload(
+            specs=[
+                DocumentCommentSpec(text="t", author_id="bob", parent_comment_id="c5")
+            ],
+            project_id="P",
+            space_id="S",
+            document_name="D",
+        )
+        item = payload["data"][0]  # type: ignore[index]
+        assert isinstance(item, dict)
+        rels = item["relationships"]
+        assert "author" in rels  # type: ignore[operator]
+        assert "parentComment" in rels  # type: ignore[operator]
+
+    def test_html_format_preserved(self) -> None:
+        payload = _build_document_comments_payload(
+            specs=[DocumentCommentSpec(text="<b>bold</b>", text_format="text/html")],
+            project_id="P",
+            space_id="S",
+            document_name="D",
+        )
+        text_field = payload["data"][0]["attributes"]["text"]  # type: ignore[index]
+        assert text_field["type"] == "text/html"  # type: ignore[index]
+
+    def test_payload_wrapped_in_array(self) -> None:
+        payload = _build_document_comments_payload(
+            specs=[DocumentCommentSpec(text="t")],
+            project_id="P",
+            space_id="S",
+            document_name="D",
+        )
+        assert isinstance(payload["data"], list)
+        assert len(payload["data"]) == 1  # type: ignore[arg-type]
+
+
+class TestCreateDocumentCommentsDryRun:
+    """Verify dry_run returns preview without calling Polarion."""
+
+    async def test_dry_run_no_post_call(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        result = await create_document_comments(
+            mock_ctx,
+            project_id="P",
+            space_id="S",
+            document_name="D",
+            comments=[DocumentCommentSpec(text="hello")],
+            dry_run=True,
+        )
+        mock_client.post.assert_not_called()
+        assert result.dry_run is True
+        assert result.created is False
+        assert result.comment_ids == []
+
+    async def test_dry_run_payload_preview_populated(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        result = await create_document_comments(
+            mock_ctx,
+            project_id="P",
+            space_id="S",
+            document_name="D",
+            comments=[
+                DocumentCommentSpec(text="first"),
+                DocumentCommentSpec(text="second"),
+            ],
+            dry_run=True,
+        )
+        assert result.payload_preview is not None
+        assert isinstance(result.payload_preview["data"], list)
+        assert len(result.payload_preview["data"]) == 2  # type: ignore[arg-type]
+
+    async def test_dry_run_with_relationships(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        result = await create_document_comments(
+            mock_ctx,
+            project_id="P",
+            space_id="S",
+            document_name="D",
+            comments=[
+                DocumentCommentSpec(
+                    text="reply", author_id="bob", parent_comment_id="c5"
+                )
+            ],
+            dry_run=True,
+        )
+        assert result.payload_preview is not None
+        item = result.payload_preview["data"][0]  # type: ignore[index]
+        assert isinstance(item, dict)
+        assert "author" in item["relationships"]  # type: ignore[index]
+        assert "parentComment" in item["relationships"]  # type: ignore[index]
+
+
+class TestCreateDocumentCommentsHappyPath:
+    """Verify successful creation extracts and returns short comment IDs."""
+
+    async def test_returns_short_comment_ids(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {
+            "data": [
+                {"type": "document_comments", "id": "p/s/d/c42"},
+                {"type": "document_comments", "id": "p/s/d/c43"},
+            ]
+        }
+        result = await create_document_comments(
+            mock_ctx,
+            project_id="p",
+            space_id="s",
+            document_name="d",
+            comments=[
+                DocumentCommentSpec(text="first"),
+                DocumentCommentSpec(text="second"),
+            ],
+            dry_run=False,
+        )
+        assert result.created is True
+        assert result.dry_run is False
+        assert result.comment_ids == ["c42", "c43"]
+        assert result.payload_preview is None
+
+    async def test_post_called_with_correct_path(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {
+            "data": [{"type": "document_comments", "id": "Proj/_default/Doc/c1"}]
+        }
+        await create_document_comments(
+            mock_ctx,
+            project_id="Proj",
+            space_id="_default",
+            document_name="Doc",
+            comments=[DocumentCommentSpec(text="hello")],
+            dry_run=False,
+        )
+        call_args = mock_client.post.call_args
+        expected_path = "/projects/Proj/spaces/_default/documents/Doc/comments"
+        assert call_args[0][0] == expected_path
+
+    async def test_path_url_encodes_spaces(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {
+            "data": [{"type": "document_comments", "id": "P/My%20Space/My%20Doc/c1"}]
+        }
+        await create_document_comments(
+            mock_ctx,
+            project_id="P",
+            space_id="My Space",
+            document_name="My Doc",
+            comments=[DocumentCommentSpec(text="hi")],
+            dry_run=False,
+        )
+        call_args = mock_client.post.call_args
+        assert "My%20Space" in call_args[0][0]
+        assert "My%20Doc" in call_args[0][0]
+
+    async def test_post_body_multiple_items(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {
+            "data": [
+                {"type": "document_comments", "id": "P/S/D/c1"},
+                {"type": "document_comments", "id": "P/S/D/c2"},
+            ]
+        }
+        await create_document_comments(
+            mock_ctx,
+            project_id="P",
+            space_id="S",
+            document_name="D",
+            comments=[
+                DocumentCommentSpec(text="one"),
+                DocumentCommentSpec(text="two"),
+            ],
+            dry_run=False,
+        )
+        body = mock_client.post.call_args[1]["json"]  # type: ignore[index]
+        assert len(body["data"]) == 2  # type: ignore[index]
+
+    async def test_resolved_true_sent_in_payload(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {
+            "data": [{"type": "document_comments", "id": "P/S/D/c1"}]
+        }
+        await create_document_comments(
+            mock_ctx,
+            project_id="P",
+            space_id="S",
+            document_name="D",
+            comments=[DocumentCommentSpec(text="done", resolved=True)],
+            dry_run=False,
+        )
+        body = mock_client.post.call_args[1]["json"]
+        assert body["data"][0]["attributes"]["resolved"] is True
+
+
+class TestCreateDocumentCommentsErrors:
+    """Verify domain exceptions map to the correct public exceptions."""
+
+    async def test_auth_error_raises_permission_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.side_effect = PolarionAuthError("auth", status_code=401)
+        with pytest.raises(PermissionError, match="POLARION_TOKEN"):
+            await create_document_comments(
+                mock_ctx,
+                project_id="P",
+                space_id="S",
+                document_name="D",
+                comments=[DocumentCommentSpec(text="hi")],
+                dry_run=False,
+            )
+
+    async def test_not_found_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.side_effect = PolarionNotFoundError(
+            "not found", status_code=404
+        )
+        with pytest.raises(ValueError, match="list_documents"):
+            await create_document_comments(
+                mock_ctx,
+                project_id="P",
+                space_id="S",
+                document_name="D",
+                comments=[DocumentCommentSpec(text="hi")],
+                dry_run=False,
+            )
+
+    async def test_other_polarion_error_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.side_effect = PolarionError("boom", status_code=500)
+        with pytest.raises(RuntimeError, match="boom"):
+            await create_document_comments(
+                mock_ctx,
+                project_id="P",
+                space_id="S",
+                document_name="D",
+                comments=[DocumentCommentSpec(text="hi")],
+                dry_run=False,
+            )
+
+    async def test_empty_response_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """201 with no IDs must raise rather than silently return created=True."""
+        mock_client.post.return_value = {}
+        with pytest.raises(RuntimeError, match="no comment IDs"):
+            await create_document_comments(
+                mock_ctx,
+                project_id="P",
+                space_id="S",
+                document_name="D",
+                comments=[DocumentCommentSpec(text="hi")],
+                dry_run=False,
+            )
+
+
+class TestCreateDocumentCommentsFieldValidation:
+    """Verify Field constraints on create_document_comments and DocumentCommentSpec.
+
+    FastMCP enforces ``min_length`` via JSON Schema at the MCP protocol
+    layer before the tool function is invoked; calling the function
+    directly bypasses that gate.  We rebuild a ``TypeAdapter`` from each
+    parameter's annotation + ``FieldInfo`` to prove the constraint is
+    wired correctly at the schema layer.
+    """
+
+    @staticmethod
+    def _adapter_for(param_name: str) -> TypeAdapter[object]:
+        hints = get_type_hints(create_document_comments)
+        sig = inspect.signature(create_document_comments)
+        field_info = sig.parameters[param_name].default
+        return TypeAdapter(Annotated[hints[param_name], field_info])
+
+    def test_space_id_rejects_empty(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("space_id").validate_python("")
+
+    def test_space_id_accepts_non_empty(self) -> None:
+        assert self._adapter_for("space_id").validate_python("_default") == "_default"
+
+    def test_document_name_rejects_empty(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("document_name").validate_python("")
+
+    def test_document_name_accepts_non_empty(self) -> None:
+        assert self._adapter_for("document_name").validate_python("MySRS") == "MySRS"
+
+    def test_spec_text_rejects_empty(self) -> None:
+        with pytest.raises(ValidationError):
+            DocumentCommentSpec(text="")
+
+    def test_spec_text_accepts_non_empty(self) -> None:
+        spec = DocumentCommentSpec(text="hello")
+        assert spec.text == "hello"
+
+    def test_spec_default_text_format_is_plain(self) -> None:
+        spec = DocumentCommentSpec(text="hello")
+        assert spec.text_format == "text/plain"
+
+    def test_comments_rejects_empty_list(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("comments").validate_python([])
+
+    def test_comments_accepts_non_empty_list(self) -> None:
+        specs = [{"text": "hello"}]
+        result = self._adapter_for("comments").validate_python(specs)
+        assert isinstance(result, list)
+        assert len(result) == 1

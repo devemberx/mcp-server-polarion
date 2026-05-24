@@ -3,11 +3,12 @@
 Currently provides ``create_work_item``, ``update_work_item``,
 ``move_work_item_to_document``, ``update_document``,
 ``create_document``, ``create_work_item_links``,
-``delete_work_item_links``, and ``update_work_item_links``. All write
-tools follow the strict patterns documented in ``CLAUDE.md``: they
-convert Markdown input to sanitized HTML, build minimal request payloads
-(skipping unset fields rather than sending empty values), and map
-domain exceptions to user-facing ones at the tool layer.
+``delete_work_item_links``, ``update_work_item_links``, and
+``create_document_comments``. All write tools follow the strict
+patterns documented in ``CLAUDE.md``: they convert Markdown input to
+sanitized HTML, build minimal request payloads (skipping unset fields
+rather than sending empty values), and map domain exceptions to
+user-facing ones at the tool layer.
 """
 
 from __future__ import annotations
@@ -24,6 +25,8 @@ from mcp_server_polarion.core.exceptions import (
     PolarionNotFoundError,
 )
 from mcp_server_polarion.models import (
+    DocumentCommentsCreateResult,
+    DocumentCommentSpec,
     DocumentCreateResult,
     DocumentUpdateResult,
     Hyperlink,
@@ -508,6 +511,52 @@ def _build_create_document_payload(  # noqa: PLR0913
         "attributes": attributes,
     }
     return {"data": [item]}
+
+
+def _build_document_comments_payload(
+    *,
+    specs: list[DocumentCommentSpec],
+    project_id: str,
+    space_id: str,
+    document_name: str,
+) -> dict[str, JsonValue]:
+    """Build the JSON:API request body for POST .../documents/{d}/comments.
+
+    Builds one resource object per spec. Only attaches ``resolved`` when
+    explicitly set (None = omit). ``author`` and ``parentComment``
+    relationships are omitted when None. ``parent_comment_id`` is
+    composed into the full path form ``proj/space/doc/commentId``
+    required by the Polarion API, so callers pass the short ID from
+    ``list_document_comments``.
+    """
+    items: list[JsonValue] = []
+    for spec in specs:
+        attributes: dict[str, JsonValue] = {
+            "text": {"type": spec.text_format, "value": spec.text},
+        }
+        if spec.resolved is not None:
+            attributes["resolved"] = spec.resolved
+
+        relationships: dict[str, JsonValue] = {}
+        if spec.author_id is not None:
+            relationships["author"] = {"data": {"id": spec.author_id, "type": "users"}}
+        if spec.parent_comment_id is not None:
+            full_parent = (
+                f"{project_id}/{space_id}/{document_name}/{spec.parent_comment_id}"
+            )
+            relationships["parentComment"] = {
+                "data": {"id": full_parent, "type": "document_comments"}
+            }
+
+        item: dict[str, JsonValue] = {
+            "type": "document_comments",
+            "attributes": attributes,
+        }
+        if relationships:
+            item["relationships"] = relationships
+        items.append(item)
+
+    return {"data": items}
 
 
 # ---------------------------------------------------------------------------
@@ -2029,5 +2078,152 @@ async def update_work_item_links(
         link_ids=succeeded,
         failed_link_id=None,
         failed_reason=None,
+        payload_preview=None,
+    )
+
+
+@mcp.tool(
+    tags={"write"},
+    timeout=60.0,
+    annotations={
+        # Pure additive operation — creates new comments without mutating
+        # existing data, so destructiveHint is False. Not idempotent
+        # because retrying with the same input creates duplicate comments.
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    },
+)
+async def create_document_comments(  # noqa: PLR0913
+    ctx: Context,
+    project_id: str = Field(description="Polarion project ID."),
+    space_id: str = Field(
+        min_length=1,
+        description="Space ID (use '_default' for the default space).",
+    ),
+    document_name: str = Field(
+        min_length=1,
+        description="Document name within ``space_id``.",
+    ),
+    comments: list[DocumentCommentSpec] = Field(  # noqa: B008
+        min_length=1,
+        description="One or more comments to create in a single request.",
+    ),
+    dry_run: bool = Field(
+        default=False,
+        description="When True, return payload preview without calling Polarion.",
+    ),
+) -> DocumentCommentsCreateResult:
+    """Create one or more comments on a Polarion document in a single request.
+
+    All comments in ``comments`` are sent in a single POST to
+    ``/projects/{p}/spaces/{s}/documents/{d}/comments``.  Polarion
+    returns a 201 with the IDs of all created comments.
+
+    **Thread model**: a comment with ``parent_comment_id=None`` is a
+    top-level review comment.  To reply to an existing comment, set
+    ``parent_comment_id`` to the short ID returned in
+    ``list_document_comments`` (e.g. ``'c42'``); the tool composes the
+    full four-segment path ``proj/space/doc/c42`` that the Polarion API
+    requires.
+
+    **Text format**: ``'text/plain'`` (default) stores the body
+    verbatim.  Use ``'text/html'`` for HTML-formatted bodies — the HTML
+    is sent as-is, no sanitization.
+
+    **resolved**: omitting the field (``None``) lets Polarion default to
+    ``False``; pass ``True`` to create a pre-resolved comment.
+
+    **author_id**: omit to have Polarion use the authenticated token's
+    user.
+
+    This operation is NOT idempotent — retrying with the same input
+    creates duplicate comments.
+
+    Args:
+        ctx: MCP tool context (injected automatically).
+        project_id: Polarion project ID.
+        space_id: Space ID (use '_default' for the default space).
+        document_name: Document name within ``space_id``.
+        comments: One or more ``DocumentCommentSpec`` objects, each with
+            ``text``, ``text_format``, ``resolved``, ``author_id``, and
+            ``parent_comment_id``.
+        dry_run: When True, build and return the payload preview without
+            calling Polarion.
+
+    Returns:
+        ``DocumentCommentsCreateResult`` with:
+
+        - ``created`` — True on success; False on dry-run.
+        - ``dry_run`` — mirrors the input flag.
+        - ``comment_ids`` — short IDs (last path segment) of the created
+          comments in Polarion's return order; empty on dry-run.
+        - ``payload_preview`` — JSON:API body sent (or that would be
+          sent); populated on dry-run, None after a real operation.
+
+    Raises:
+        ValueError: Project, space, or document not found.
+        PermissionError: Token lacks permission to create comments.
+        RuntimeError: Other Polarion API errors.
+    """
+    payload = _build_document_comments_payload(
+        specs=comments,
+        project_id=project_id,
+        space_id=space_id,
+        document_name=document_name,
+    )
+
+    if dry_run:
+        return DocumentCommentsCreateResult(
+            created=False,
+            dry_run=True,
+            comment_ids=[],
+            payload_preview=payload,
+        )
+
+    client = get_client(ctx)
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/spaces/{encode_path_segment(space_id)}"
+        f"/documents/{encode_path_segment(document_name)}"
+        "/comments"
+    )
+    try:
+        response = await client.post(path, json=cast(dict[str, object], payload))
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot create document comments -- check your POLARION_TOKEN permissions."
+        ) from exc
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Document '{document_name}' (space '{space_id}',"
+            f" project '{project_id}') not found."
+            " Use `list_documents` to discover valid IDs."
+        ) from exc
+    except PolarionError as exc:
+        raise RuntimeError(
+            f"Failed to create document comments: {exc.message}"
+        ) from exc
+
+    raw_data = response.get("data", []) if isinstance(response, dict) else []
+    comment_ids: list[str] = []
+    if isinstance(raw_data, list):
+        for entry in raw_data:
+            if isinstance(entry, dict):
+                full_id = safe_str(entry.get("id", ""))
+                if full_id:
+                    comment_ids.append(extract_short_id(full_id))
+
+    if not comment_ids:
+        raise RuntimeError(
+            "Polarion returned no comment IDs after creation."
+            " The POST may have succeeded — verify with `list_document_comments`."
+        )
+
+    return DocumentCommentsCreateResult(
+        created=True,
+        dry_run=False,
+        comment_ids=comment_ids,
         payload_preview=None,
     )
