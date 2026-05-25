@@ -1457,11 +1457,12 @@ async def update_document(  # noqa: PLR0913
         PermissionError: Token lacks permission.
         RuntimeError: Other Polarion API errors.
     """
-    if home_page_content_html == "":
+    if home_page_content_html is not None and not home_page_content_html.strip():
         raise ValueError(
-            "home_page_content_html='' would wipe the document body and "
-            "orphan all heading work items. Pass at minimum '<p></p>' "
-            "or omit the parameter to leave the body unchanged."
+            "home_page_content_html is empty or whitespace-only; sending "
+            "this would wipe the document body and orphan every heading "
+            "work item. Pass at minimum '<p></p>' or omit the parameter "
+            "to leave the body unchanged."
         )
 
     has_attrs = (

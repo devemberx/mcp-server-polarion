@@ -2536,6 +2536,30 @@ class TestUpdateDocumentHappyPath:
             )
         mock_client.patch.assert_not_called()
 
+    @pytest.mark.parametrize("whitespace", ["   ", "\n", "\t", "\n\n  \t"])
+    async def test_home_page_content_html_whitespace_raises(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        whitespace: str,
+    ) -> None:
+        """Whitespace-only strings strip to '' on the server, so reject too."""
+        with pytest.raises(ValueError, match="would wipe"):
+            await update_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="S",
+                document_name="D",
+                title=None,
+                status=None,
+                type=None,
+                home_page_content_html=whitespace,
+                custom_fields=None,
+                workflow_action=None,
+                dry_run=False,
+            )
+        mock_client.patch.assert_not_called()
+
     async def test_home_page_content_html_alone_passes_has_attrs_guard(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
