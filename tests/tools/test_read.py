@@ -36,8 +36,8 @@ from mcp_server_polarion.server import mcp
 from mcp_server_polarion.tools import _helpers as _helpers_mod
 from mcp_server_polarion.tools import read as _read_mod
 
-# In FastMCP 3.0, @mcp.tool returns the original function unchanged
-# (not a FunctionTool wrapper), so we reference them directly.
+# ``@mcp.tool`` returns the original function unchanged (not a FunctionTool
+# wrapper), so the tool callables are referenced directly.
 get_document = _read_mod.get_document
 list_document_comments = _read_mod.list_document_comments
 list_document_enum_options = _read_mod.list_document_enum_options

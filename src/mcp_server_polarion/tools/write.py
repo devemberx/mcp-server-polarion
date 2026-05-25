@@ -1,15 +1,10 @@
 """Write MCP tools for Polarion ALM.
 
-Currently provides ``create_work_item``, ``update_work_item``,
-``move_work_item_to_document``, ``update_document``,
-``create_document``, ``create_work_item_links``,
-``delete_work_item_links``, ``update_work_item_links``,
-``create_document_comments``, and ``update_document_comment``. All
-write tools follow the strict
-patterns documented in ``CLAUDE.md``: they convert Markdown input to
-sanitized HTML, build minimal request payloads (skipping unset fields
-rather than sending empty values), and map domain exceptions to
-user-facing ones at the tool layer.
+All write tools follow the same patterns: greenfield Markdown bodies are
+converted to sanitized HTML before send, round-trip HTML bodies pass
+through verbatim, request payloads skip unset fields rather than sending
+empty values, and domain exceptions are mapped to user-facing ones at
+the tool layer.
 """
 
 from __future__ import annotations
@@ -64,10 +59,6 @@ from mcp_server_polarion.utils import markdown_to_html, sanitize_html, stamp_blo
 # multi-megabyte blob to Polarion. Observed real document bodies stay
 # under ~30 KB, so 2 MiB leaves ~70x headroom.
 MAX_BODY_HTML_LEN: Final[int] = 2_000_000
-
-# ---------------------------------------------------------------------------
-# Private helpers
-# ---------------------------------------------------------------------------
 
 
 def _build_work_item_payload(  # noqa: PLR0913
@@ -590,11 +581,6 @@ def _build_document_comment_update_payload(
     }
 
 
-# ---------------------------------------------------------------------------
-# Write tools
-# ---------------------------------------------------------------------------
-
-
 @mcp.tool(
     tags={"write"},
     timeout=60.0,
@@ -881,8 +867,8 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
 
     PATCHes the supplied fields and follows up with a GET so the caller
     can confirm the change in ``current``. ``None`` / empty string /
-    empty list all mean ``leave unchanged`` — there is no way to clear
-    a field via this tool in v1.
+    empty list all mean ``leave unchanged`` — this tool exposes no path
+    to clear a field.
 
     ``description_html`` is RAW Polarion HTML, sent verbatim with no
     sanitization, so XSS/script filtering is delegated to Polarion's
@@ -1088,10 +1074,9 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     tags={"write"},
     timeout=60.0,
     annotations={
-        # idempotentHint=False: the moveToDocument action endpoint is not
-        # verified to be safe on repeat — a second call against an already-
-        # moved work item may 400 instead of no-opping (per Polarion's heading-move
-        # behaviour, see CLAUDE.md). Conservative until confirmed.
+        # idempotentHint=False: repeating moveToDocument against an
+        # already-moved work item may 400 instead of no-opping, so the
+        # action is treated as non-idempotent.
         "readOnlyHint": False,
         "destructiveHint": True,
         "idempotentHint": False,
@@ -1155,17 +1140,14 @@ async def move_work_item_to_document(  # noqa: PLR0913
     with ``read_document_parts``.
 
     Side effect: this server auto-creates an outgoing link from the
-    moved work item to its enclosing section heading (role depends on
-    project config -- observed ``relates_to`` on
-    ``MCP_Test_Project / E2E_WriteFlow_20260525``, ``parent`` on the
-    older ``MCP_Test_Project / Software Requirement Specification``).
-    The auto-link appears in ``list_work_item_links(direction="forward")``
-    after the move and is silently removed by
-    ``move_work_item_from_document``. The role collides with any
-    same-role link you then try to create from the same source -- see
-    the "phantom success" note on ``create_work_item_links``. Querying
-    forward links on a known-attached work item is the only reliable
-    way to discover which role this project uses.
+    moved work item to its enclosing section heading. The role is
+    project-configurable (commonly ``parent`` or ``relates_to``), so
+    discover it by inspecting forward links on a known-attached work
+    item in the same project. The auto-link appears in
+    ``list_work_item_links(direction="forward")`` after the move and is
+    silently removed by ``move_work_item_from_document``. The role
+    collides with any same-role link created from the same source --
+    see the "phantom success" note on ``create_work_item_links``.
 
     Args:
         ctx: MCP tool context (injected automatically).

@@ -26,10 +26,6 @@ type JsonValue = (
     str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
 )
 
-# ---------------------------------------------------------------------------
-# Generic pagination wrapper
-# ---------------------------------------------------------------------------
-
 
 class PaginatedResult[T](BaseModel):
     """Paginated response wrapper used by all list tools.
@@ -45,11 +41,6 @@ class PaginatedResult[T](BaseModel):
     has_more: bool = Field(default=False, description="True if more pages follow.")
 
 
-# ---------------------------------------------------------------------------
-# Read models — summaries and details
-# ---------------------------------------------------------------------------
-
-
 class ProjectSummary(BaseModel):
     """Summary of a Polarion project returned by ``list_projects``."""
 
@@ -57,27 +48,21 @@ class ProjectSummary(BaseModel):
     name: str
     active: bool = Field(
         default=True,
-        description="False means archived; skip these when picking a target.",
+        description="False means archived.",
     )
 
 
 class EnumOption(BaseModel):
     """Single enum option returned by ``list_document_enum_options``.
 
-    Captures only the attributes useful when an LLM picks a value before a
-    write call. The Polarion schema carries several more fields (color,
-    iconURL, columnWidth, createDefect, limited, minValue, oppositeName,
-    parent, requiresSignatureForTestCaseExecution, templateWorkItem) that
-    are intentionally not surfaced; add them on demand if a future caller
-    needs them.
+    Surfaces only the attributes an LLM needs to pick a value before a
+    write call. Other Polarion option fields (color, iconURL, columnWidth,
+    createDefect, limited, minValue, oppositeName, parent,
+    requiresSignatureForTestCaseExecution, templateWorkItem) are not
+    exposed.
     """
 
-    id: str = Field(
-        description=(
-            "Option id -- pass this verbatim to write tools (e.g. 'open',"
-            " 'systemReqSpecification')."
-        ),
-    )
+    id: str = Field(description="Option id; pass verbatim to write tools.")
     name: str = Field(description="Human-readable display name.")
     description: str = Field(
         default="",
@@ -85,18 +70,15 @@ class EnumOption(BaseModel):
     )
     default: bool = Field(
         default=False,
-        description="True if Polarion uses this option when none is specified.",
+        description="True when this option is the project default.",
     )
     hidden: bool = Field(
         default=False,
-        description=(
-            "True if the option is hidden in the UI;"
-            " avoid selecting unless explicitly needed."
-        ),
+        description="True when the option is hidden in the UI; avoid selecting.",
     )
     terminal: bool = Field(
         default=False,
-        description="For status fields: True if this is a workflow end-state.",
+        description="For status fields, True for workflow end-states.",
     )
 
 
@@ -104,88 +86,71 @@ class DocumentSummary(BaseModel):
     """Summary of a Polarion document returned by ``list_documents``."""
 
     space_id: str = Field(
-        description=(
-            "Space identifier that contains the document (e.g. '_default', 'Design')."
-        ),
+        description="Space containing the document (e.g. '_default').",
     )
     document_name: str = Field(
-        description=(
-            "Document name within the space"
-            " (e.g. 'Software Requirement Specification')."
-        ),
+        description="Document name within the space.",
     )
 
 
 class DocumentDetail(BaseModel):
-    """Full details of a Polarion document returned by ``get_document``."""
+    """Full details of a Polarion document returned by ``get_document``.
 
-    title: str = Field(
-        description="Document title.",
-    )
+    ``content_html`` is the round-trip pair for
+    ``update_document(home_page_content_html=...)`` — populated only when
+    ``include_homepage_content_html=True``. It is the inline prose only;
+    heading text and embedded work-item bodies live in separate work items,
+    so ``read_document`` is the assembled-body view.
+
+    ``custom_fields`` mirrors the keys configured on the document type:
+    rich-text values stay as ``{'type': 'text/html', 'value': '<...>'}``
+    dicts so the shape round-trips back unchanged.
+    """
+
+    title: str = Field(description="Document title.")
     type: str = Field(
         default="",
-        description=(
-            "Document type (e.g. 'req_specification', 'test_specification'). "
-            "Empty string when the server does not report a type."
-        ),
+        description="Document type (e.g. 'req_specification').",
     )
     status: str = Field(
         default="",
-        description=(
-            "Document workflow status (e.g. 'draft', 'approved'). "
-            "Empty string when the server does not report a status."
-        ),
+        description="Document workflow status (e.g. 'draft', 'approved').",
     )
     content_html: str = Field(
         default="",
-        description=(
-            "Document body (homePageContent) as raw Polarion HTML. Only "
-            "populated when ``get_document`` is called with "
-            "``include_homepage_content_html=True``; otherwise an empty "
-            "string. The same shape round-trips back through "
-            "``update_document(home_page_content_html=...)`` without "
-            "lossy Markdown conversion. NOTE: incomplete for end-to-end "
-            "reading — heading text and embedded work-item bodies live in "
-            "separate work items, not in homePageContent; use "
-            "``read_document`` for the assembled body."
-        ),
+        description="Raw Polarion HTML body; empty unless the read flag was True.",
     )
     custom_fields: dict[str, object] = Field(
         default_factory=dict,
-        description=(
-            "User-defined custom fields configured per project and "
-            "document type. Keys are project-specific custom field IDs; "
-            "values are heterogeneous (string, int, float, bool, list, "
-            "or ``{'type': 'text/html', 'value': '<...>'}`` for rich-text "
-            "custom fields — kept raw, NOT converted to Markdown, so the "
-            "shape round-trips back to Polarion unchanged). Empty dict "
-            "when no custom fields are populated on the document."
-        ),
+        description="Project-defined custom fields keyed by field ID.",
     )
 
 
 class DocumentPart(BaseModel):
-    """A single part (heading or work item) within a Polarion document."""
+    """A single part (heading or work item) within a Polarion document.
+
+    Field population varies by ``type``:
+
+    * ``heading`` — text in ``title``, depth in ``level``, ``work_item_*``
+      fields point at the heading work item.
+    * ``workitem`` — body in ``description`` (Markdown), metadata on
+      ``work_item_*``, ``content`` empty.
+    * ``normal`` / ``wikiblock`` — body in ``content`` (Markdown).
+    * ``toc`` / ``tof`` / ``page_break`` — widget placeholders, all body
+      fields empty. ``tof`` and ``page_break`` are inferred from the part
+      ID prefix because Polarion reports both as plain ``normal``.
+
+    Use ``id`` as ``previous_part_id`` / ``next_part_id`` when calling
+    ``move_work_item_to_document``. ``work_item_id`` plugs straight into
+    ``get_work_item`` / ``list_work_item_links``.
+    """
 
     id: str = Field(
-        description=(
-            "Short part identifier within the document "
-            "(e.g. 'heading_MCPT-001', 'workitem_MCPT-042', 'polarion_1'). "
-            "Use this as ``next_part_id`` (insert before) or "
-            "``previous_part_id`` (insert after) when calling "
-            "``move_work_item_to_document``."
-        ),
+        description="Short part identifier (e.g. 'workitem_MCPT-042').",
     )
-    title: str = Field(
-        description="Part title or heading text.",
-    )
+    title: str = Field(description="Part title or heading text.")
     content: str = Field(
-        description=(
-            "Part body in Markdown. Populated for 'normal' and 'wikiblock' "
-            "parts; empty for 'heading' (text in ``title``, depth in "
-            "``level``), 'workitem' (body in ``description``), and the "
-            "'toc' / 'tof' / 'page_break' widget placeholders."
-        ),
+        description="Part body in Markdown; empty unless body lives here.",
     )
     type: Literal[
         "heading",
@@ -195,77 +160,37 @@ class DocumentPart(BaseModel):
         "wikiblock",
         "tof",
         "page_break",
-    ] = Field(
-        description=(
-            "Part type: 'heading', 'workitem', 'normal' (rich text), "
-            "'toc' (table of contents widget), 'wikiblock' (wiki macro "
-            "block), 'tof' (table of figures widget), or 'page_break'. "
-            "'tof' and 'page_break' are inferred from the part ID prefix "
-            "because Polarion reports both as plain 'normal'."
-        ),
-    )
+    ] = Field(description="Part type; see class docstring for body-field mapping.")
     level: int = Field(
-        description=(
-            "Heading level (1-4) for heading parts. "
-            "0 for work-item parts that have no heading level."
-        ),
+        description="Heading level (1-4) for heading parts; 0 otherwise.",
     )
     description: str = Field(
         default="",
-        description=(
-            "Work item description converted to Markdown. "
-            "Only populated for 'workitem'-type parts. "
-            "Empty for headings and other part types."
-        ),
+        description="Linked work item body as Markdown; only set on 'workitem' parts.",
     )
     work_item_id: str = Field(
         default="",
-        description=(
-            "Short Work Item ID of the linked work item "
-            "(e.g. 'MCPT-001'). Populated for 'workitem' and 'heading' "
-            "parts; empty for other part types. Use this directly with "
-            "``get_work_item`` or ``list_work_item_links``."
-        ),
+        description="Linked Work Item ID; empty unless 'workitem' / 'heading'.",
     )
     work_item_type: str = Field(
         default="",
-        description=(
-            "Type of the linked work item (e.g. 'requirement', "
-            "'testCase', 'risk'). Populated for 'workitem' and 'heading' "
-            "parts; empty otherwise."
-        ),
+        description="Linked work item type; empty unless 'workitem' / 'heading'.",
     )
     work_item_status: str = Field(
         default="",
-        description=(
-            "Workflow status of the linked work item "
-            "(e.g. 'draft', 'approved'). Populated for 'workitem' and "
-            "'heading' parts; empty otherwise."
-        ),
+        description="Linked work item status; empty unless 'workitem' / 'heading'.",
     )
     external: bool = Field(
         default=False,
-        description=(
-            "True when this part references a work item from another "
-            "project (re-used content). Such parts are typically "
-            "read-only — editing must be done in the source project."
-        ),
+        description="True when the part is re-used from another project (read-only).",
     )
     outline_number: str = Field(
         default="",
-        description=(
-            "Hierarchical position inside the document (e.g. '1.2.3'). "
-            "Populated for 'heading' and 'workitem' parts when Polarion "
-            "has assigned one; empty for prose and widget parts."
-        ),
+        description="Hierarchical position (e.g. '1.2.3'); empty for prose / widgets.",
     )
     next_part_id: str = Field(
         default="",
-        description=(
-            "Short ID of the next part in document order "
-            "(e.g. 'workitem_MCPT-002'). "
-            "Empty string when this is the last part."
-        ),
+        description="Short ID of the next part; empty on the last part.",
     )
 
 
@@ -281,192 +206,115 @@ class DocumentReadResult(BaseModel):
     write tool because no update path accepts this shape. For round-trip
     editing of the document body, fetch the raw source via
     ``get_document(include_homepage_content_html=True)`` instead.
+
+    ``part_count`` reflects parts consumed from ``read_document_parts``
+    on this page — including widget placeholders that produce no output
+    — so use it for pagination accounting, not chunk count.
     """
 
-    content: str = Field(
-        description=(
-            "Rendered Markdown for the parts on this page. "
-            "Empty placeholder paragraphs from Polarion are skipped, "
-            "and runs of blank lines are collapsed."
-        ),
-    )
-    part_count: int = Field(
-        description=(
-            "Number of document parts on this page (i.e. parts consumed "
-            "from ``read_document_parts``). Parts that produce no output "
-            "(empty placeholder paragraphs, ``toc``) still count toward "
-            "this — use it for pagination accounting, not chunk count."
-        ),
-    )
-    page: int = Field(
-        description="Current page number (1-based).",
-    )
-    page_size: int = Field(
-        description="Maximum number of parts per page.",
-    )
-    total_parts: int = Field(
-        description="Total number of parts across the entire document.",
-    )
+    content: str = Field(description="Rendered Markdown for this page.")
+    part_count: int = Field(description="Number of parts consumed on this page.")
+    page: int = Field(description="Current page number (1-based).")
+    page_size: int = Field(description="Maximum number of parts per page.")
+    total_parts: int = Field(description="Total parts across the entire document.")
     has_more: bool = Field(
         default=False,
-        description=(
-            "True when there are more pages of parts after this one. "
-            "Use to decide whether to call ``read_document`` again with "
-            "``page_number + 1``."
-        ),
+        description="True when more pages of parts follow.",
     )
 
 
 class WorkItemSummary(BaseModel):
-    """Compact work-item representation for list and search results."""
+    """Compact work-item representation for list and search results.
 
-    id: str = Field(
-        description="Work Item ID (e.g. 'MCPT-001').",
-    )
-    title: str = Field(
-        description="Work Item title.",
-    )
-    type: str = Field(
-        description=(
-            "Work Item type (e.g. 'requirement', 'task', 'testCase', 'defect')."
-        ),
-    )
-    status: str = Field(
-        description="Work Item workflow status (e.g. 'draft', 'approved').",
-    )
+    ``space_id`` + ``document_name`` together address the containing
+    document (both empty when the work item is free-floating); pass them
+    to ``get_document`` / ``read_document_parts``.
+    """
+
+    id: str = Field(description="Work Item ID (e.g. 'MCPT-001').")
+    title: str = Field(description="Work Item title.")
+    type: str = Field(description="Work Item type (e.g. 'requirement', 'testCase').")
+    status: str = Field(description="Workflow status (e.g. 'draft', 'approved').")
     priority: str = Field(
         default="",
-        description=(
-            "Polarion priority value as a string (e.g. '90.0'). "
-            "Empty when the server does not report a priority."
-        ),
+        description="Priority value as a string (e.g. '90.0'); empty when unset.",
     )
     updated: str = Field(
         default="",
-        description=(
-            "ISO-8601 timestamp of the last modification "
-            "(e.g. '2026-04-29T10:23:00Z'). Empty when not reported."
-        ),
+        description="ISO-8601 last-modified timestamp; empty when unreported.",
     )
     space_id: str = Field(
         default="",
-        description=(
-            "Space that contains the document this work item belongs to. "
-            "Empty when the work item is not part of any document."
-        ),
+        description="Containing document's space; empty when free-floating.",
     )
     document_name: str = Field(
         default="",
-        description=(
-            "Name of the document this work item belongs to. "
-            "Empty when the work item is not part of any document. "
-            "Use with ``space_id`` to call ``get_document`` / "
-            "``read_document_parts``."
-        ),
+        description="Containing document name; empty when free-floating.",
     )
     assignee_ids: list[str] = Field(
         default_factory=list,
-        description=(
-            "Short user IDs of the assignees (e.g. ['alice', 'bob']). "
-            "Empty list when the work item has no assignee."
-        ),
+        description="Short user IDs of assignees; empty list when unassigned.",
     )
 
 
 class Hyperlink(BaseModel):
     """A single external hyperlink attached to a work item."""
 
-    role: str = Field(
-        description=("Hyperlink role identifier (e.g. 'ref_ext', 'implementation')."),
-    )
+    role: str = Field(description="Hyperlink role id (e.g. 'ref_ext').")
     title: str = Field(
         default="",
-        description="Human-readable link title. Empty when not provided.",
+        description="Human-readable link title; empty when unset.",
     )
-    uri: str = Field(
-        description="Target URI of the hyperlink.",
-    )
+    uri: str = Field(description="Target URI of the hyperlink.")
 
 
 class WorkItemDetail(WorkItemSummary):
     """Full work-item details returned by ``get_work_item``.
 
     Extends ``WorkItemSummary`` with the description, project context,
-    and detail-only metadata (authorship, resolution, severity,
-    outline position, external hyperlinks).
+    and detail-only metadata (authorship, resolution, severity, outline
+    position, external hyperlinks).
+
+    ``description_html`` is the round-trip pair for
+    ``update_work_item(description_html=...)`` and must never pass through
+    a Markdown converter or sanitizer — doing so strips Polarion-specific
+    spans and breaks the round-trip. ``custom_fields`` keeps rich-text
+    values as ``{'type': 'text/html', 'value': '<...>'}`` dicts so the
+    shape round-trips back unchanged.
     """
 
     description_html: str = Field(
         default="",
-        description=(
-            "Raw Polarion HTML body for the round-trip pair "
-            "``get_work_item(include_description_html=True)`` → "
-            "``update_work_item(description_html=...)``. Empty when the "
-            "work item has no description or when the read flag was "
-            "False. Never feed through a Markdown converter or sanitizer "
-            "(would strip Polarion-specific spans and break the round-trip)."
-        ),
+        description="Raw Polarion HTML body; empty unless the read flag was True.",
     )
-    project_id: str = Field(
-        description="Project that contains this work item.",
-    )
+    project_id: str = Field(description="Project that contains this work item.")
     author_id: str = Field(
         default="",
-        description=(
-            "Short user ID of the author (e.g. 'alice'). "
-            "Empty when the server does not report an author."
-        ),
+        description="Short user ID of the author; empty when unreported.",
     )
     created: str = Field(
         default="",
-        description=(
-            "ISO-8601 timestamp of the work item creation "
-            "(e.g. '2026-04-29T10:23:00Z'). Empty when not reported."
-        ),
+        description="ISO-8601 creation timestamp; empty when unreported.",
     )
     resolution: str = Field(
         default="",
-        description=(
-            "Resolution outcome for closed/done work items "
-            "(e.g. 'fixed', 'wontfix', 'duplicate'). "
-            "Empty for unresolved or non-closeable items."
-        ),
+        description="Resolution outcome (e.g. 'fixed'); empty when unresolved.",
     )
     severity: str = Field(
         default="",
-        description=(
-            "Severity classification, primarily used for defects "
-            "(e.g. 'blocker', 'critical', 'major'). "
-            "Empty for non-defect types."
-        ),
+        description="Severity classification (e.g. 'critical'); empty for non-defects.",
     )
     outline_number: str = Field(
         default="",
-        description=(
-            "Hierarchical position inside the containing document "
-            "(e.g. '1.2.3'). Empty when the work item is not part of "
-            "a document or has no assigned outline number."
-        ),
+        description="Hierarchical position (e.g. '1.2.3'); empty outside a document.",
     )
     hyperlinks: list[Hyperlink] = Field(
         default_factory=list,
-        description=(
-            "External hyperlinks attached to this work item. "
-            "Empty list when none are set."
-        ),
+        description="External hyperlinks attached to this work item.",
     )
     custom_fields: dict[str, object] = Field(
         default_factory=dict,
-        description=(
-            "User-defined custom fields configured per project and "
-            "work-item type. Keys are project-specific custom field IDs "
-            "(e.g. 'riskLevel', 'effortHours'); values are heterogeneous "
-            "(string, int, float, bool, list, or "
-            "``{'type': 'text/html', 'value': '<...>'}`` for rich-text "
-            "custom fields — kept raw, NOT converted to Markdown, so the "
-            "shape round-trips back to Polarion unchanged). Empty dict "
-            "when no custom fields are populated on the work item."
-        ),
+        description="Project-defined custom fields keyed by field ID.",
     )
 
 
@@ -480,46 +328,36 @@ class WorkItemRead(WorkItemSummary):
     markup). For round-trip editing, use
     ``get_work_item(include_description_html=True)`` paired with
     ``update_work_item(description_html=...)``.
+
+    ``custom_fields`` keeps rich-text values as
+    ``{'type': 'text/html', 'value': '<...>'}`` dicts so this dict alone
+    can be copied back into ``update_work_item(custom_fields=...)``.
     """
 
     description: str = Field(
         default="",
-        description=(
-            "Work-item body rendered as Markdown. Empty when the item has "
-            "no description. Read-only; do NOT feed to ``update_work_item``."
-        ),
+        description="Body as Markdown; read-only — do NOT feed to update_work_item.",
     )
-    project_id: str = Field(
-        description="Project that contains this work item.",
-    )
+    project_id: str = Field(description="Project that contains this work item.")
     author_id: str = Field(
         default="",
-        description="Short user ID of the author; empty when not reported.",
+        description="Short user ID of the author; empty when unreported.",
     )
     created: str = Field(
         default="",
-        description="ISO-8601 creation timestamp; empty when not reported.",
+        description="ISO-8601 creation timestamp; empty when unreported.",
     )
     resolution: str = Field(
         default="",
-        description=(
-            "Resolution outcome for closed items (e.g. 'fixed', 'wontfix'); "
-            "empty otherwise."
-        ),
+        description="Resolution outcome (e.g. 'fixed'); empty when unresolved.",
     )
     severity: str = Field(
         default="",
-        description=(
-            "Severity classification, used for defects (e.g. 'blocker', "
-            "'critical'); empty otherwise."
-        ),
+        description="Severity classification (e.g. 'critical'); empty for non-defects.",
     )
     outline_number: str = Field(
         default="",
-        description=(
-            "Hierarchical position inside the containing document "
-            "(e.g. '1.2.3'); empty when not part of a document."
-        ),
+        description="Hierarchical position (e.g. '1.2.3'); empty outside a document.",
     )
     hyperlinks: list[Hyperlink] = Field(
         default_factory=list,
@@ -527,12 +365,7 @@ class WorkItemRead(WorkItemSummary):
     )
     custom_fields: dict[str, object] = Field(
         default_factory=dict,
-        description=(
-            "User-defined custom fields as ``{fieldId: value}``. Rich-text "
-            "values stay raw as ``{'type': 'text/html', 'value': '<...>'}`` "
-            "dicts so this dict alone may be copied back into "
-            "``update_work_item(custom_fields=...)``."
-        ),
+        description="Project-defined custom fields keyed by field ID.",
     )
 
 
@@ -541,64 +374,37 @@ class WorkItemLink(BaseModel):
 
     ``direction='forward'`` is an outgoing link (this work item links to
     the target); ``'back'`` is an incoming link (the target links to this
-    work item).
+    work item). The back-direction Lucene fallback does not expose the
+    originating role, so ``role`` is ``None`` for every back-direction
+    item. ``suspect`` marks links whose target changed since the link
+    was last reviewed; it is only meaningful in the forward direction.
     """
 
-    id: str = Field(
-        description="Linked Work Item ID (e.g. 'MCPT-002').",
-    )
-    title: str = Field(
-        description="Linked Work Item title.",
-    )
+    id: str = Field(description="Linked Work Item ID (e.g. 'MCPT-002').")
+    title: str = Field(description="Linked Work Item title.")
     role: str | None = Field(
         default=None,
-        description=(
-            "Link role (e.g. 'parent', 'relates_to', 'verifies'); "
-            "``None`` for back-direction links."
-        ),
+        description="Link role (e.g. 'parent'); None on back-direction links.",
     )
     direction: Literal["forward", "back"] = Field(
-        description=(
-            "'forward' for outgoing links (this work item links to the target). "
-            "'back' for incoming links (the target links to this work item)."
-        )
+        description="'forward' for outgoing links, 'back' for incoming.",
     )
-    suspect: bool = Field(
-        description=(
-            "Whether the link is marked as suspect. "
-            "Suspect links indicate that the linked item has changed "
-            "since the link was last reviewed."
-        ),
-    )
+    suspect: bool = Field(description="True when the link is marked as suspect.")
     type: str = Field(
         default="",
-        description=(
-            "Type of the linked work item (e.g. 'requirement', "
-            "'testCase'). Empty when the server does not report a type."
-        ),
+        description="Linked work item type; empty when unreported.",
     )
     status: str = Field(
         default="",
-        description=(
-            "Workflow status of the linked work item "
-            "(e.g. 'draft', 'approved'). Empty when the server does not "
-            "report a status."
-        ),
+        description="Linked work item workflow status; empty when unreported.",
     )
     space_id: str = Field(
         default="",
-        description=(
-            "Space that contains the document the linked work item "
-            "belongs to. Empty when not module-bound."
-        ),
+        description="Linked item's document space; empty when not module-bound.",
     )
     document_name: str = Field(
         default="",
-        description=(
-            "Name of the document the linked work item belongs to. "
-            "Empty when not module-bound. Use with ``space_id`` to call "
-            "``get_document`` / ``read_document_parts``."
-        ),
+        description="Linked item's document name; empty when not module-bound.",
     )
 
 
@@ -617,23 +423,20 @@ class DocumentComment(BaseModel):
     created: str = Field(description="ISO-8601 creation timestamp.")
     resolved: bool = Field(
         default=False,
-        description="True when the comment has been marked resolved.",
+        description="True when the comment is marked resolved.",
     )
-    text: str = Field(
-        default="",
-        description="Comment body verbatim; format signalled by ``text_format``.",
-    )
+    text: str = Field(default="", description="Comment body verbatim.")
     text_format: Literal["text/html", "text/plain"] = Field(
         default="text/html",
         description="MIME type of ``text`` as reported by Polarion.",
     )
     author_id: str | None = Field(
         default=None,
-        description="User ID of the comment author; ``None`` when unknown.",
+        description="User ID of the author; None when unknown.",
     )
     parent_comment_id: str | None = Field(
         default=None,
-        description="Parent comment ID for replies; ``None`` for top-level comments.",
+        description="Parent comment ID for replies; None on top-level.",
     )
     child_comment_ids: list[str] = Field(
         default_factory=list,
@@ -642,186 +445,106 @@ class DocumentComment(BaseModel):
 
 
 class DocumentCommentSpec(BaseModel):
-    """One comment to create via ``create_document_comments``."""
+    """One comment to create via ``create_document_comments``.
 
-    text: str = Field(
-        min_length=1,
-        description="Comment body text.",
-    )
+    ``parent_comment_id`` is the short ID from ``list_document_comments``
+    (omit for top-level); the tool composes the full path internally.
+    Omit ``author_id`` to default to the authenticated token's user;
+    omit ``resolved`` to let Polarion default to False.
+    """
+
+    text: str = Field(min_length=1, description="Comment body text.")
     text_format: Literal["text/html", "text/plain"] = Field(
         default="text/plain",
-        description="MIME type of ``text`` ('text/plain' or 'text/html').",
+        description="MIME type of ``text``.",
     )
-    resolved: bool | None = Field(
-        default=None,
-        description="Initial resolved state; omit to let Polarion default to False.",
-    )
-    author_id: str | None = Field(
-        default=None,
-        description=(
-            "User ID of the comment author; omit to default to the authenticated user."
-        ),
-    )
+    resolved: bool | None = Field(default=None, description="Initial resolved state.")
+    author_id: str | None = Field(default=None, description="Author user ID.")
     parent_comment_id: str | None = Field(
         default=None,
-        description=(
-            "Short comment ID for replies (e.g. 'c42' from "
-            "``list_document_comments``). Omit for a top-level comment. "
-            "The tool composes the full path internally."
-        ),
+        description="Short comment ID for replies; omit for top-level.",
     )
-
-
-# ---------------------------------------------------------------------------
-# Write-result models
-# ---------------------------------------------------------------------------
 
 
 class WorkItemCreateResult(BaseModel):
     """Result of a ``create_work_item`` operation."""
 
-    created: bool = Field(
-        description=(
-            "True if the work item was actually created. False when dry_run is True."
-        ),
-    )
-    dry_run: bool = Field(
-        description="Whether this was a dry-run (preview only, no mutation).",
-    )
+    created: bool = Field(description="True on a real create; False on dry-run.")
+    dry_run: bool = Field(description="Whether this was a dry-run.")
     work_item_id: str | None = Field(
-        description=(
-            "ID of the created work item (e.g. 'MCPT-042'). None when dry_run is True."
-        ),
+        description="ID of the new work item (e.g. 'MCPT-042'); None on dry-run.",
     )
     payload_preview: dict[str, JsonValue] | None = Field(
-        description=(
-            "JSON:API request payload that was (or would be) sent. "
-            "Usually populated for dry-run previews and may be None "
-            "after a successful real operation."
-        ),
+        description="JSON:API payload sent or previewed; None after real ops.",
     )
 
 
 class WorkItemUpdateResult(BaseModel):
     """Result of an ``update_work_item`` operation."""
 
-    updated: bool = Field(
-        description=(
-            "True if the work item was actually updated. False when dry_run is True."
-        ),
-    )
-    dry_run: bool = Field(
-        description="Whether this was a dry-run (preview only, no mutation).",
-    )
+    updated: bool = Field(description="True on a real update; False on dry-run.")
+    dry_run: bool = Field(description="Whether this was a dry-run.")
     current: WorkItemDetail | None = Field(
-        description=(
-            "Post-update state of the work item, fetched after the PATCH "
-            "succeeds. Included so the LLM can verify the change applied. "
-            "None on dry-run."
-        ),
+        description="Post-PATCH state for verification; None on dry-run.",
     )
     changes: dict[str, JsonValue] = Field(
-        description="Map of field names to their new values in the PATCH payload.",
+        description="Map of field names to their new values in the PATCH.",
     )
     payload_preview: dict[str, JsonValue] | None = Field(
-        description=(
-            "JSON:API request payload that was (or would be) sent. "
-            "Usually populated for dry-run previews and may be None "
-            "after a successful real operation."
-        ),
+        description="JSON:API payload sent or previewed; None after real ops.",
     )
 
 
 class DocumentCommentsCreateResult(BaseModel):
     """Result of a ``create_document_comments`` operation."""
 
-    created: bool = Field(
-        description=(
-            "True if comments were actually created. False when dry_run is True."
-        ),
-    )
-    dry_run: bool = Field(
-        description="Whether this was a dry-run (preview only, no mutation).",
-    )
+    created: bool = Field(description="True on a real create; False on dry-run.")
+    dry_run: bool = Field(description="Whether this was a dry-run.")
     comment_ids: list[str] = Field(
-        description=(
-            "Short IDs of the created comments in the order returned by Polarion. "
-            "Empty when dry_run is True."
-        ),
+        description="Short IDs in Polarion's return order; empty on dry-run.",
     )
     payload_preview: dict[str, JsonValue] | None = Field(
-        description=(
-            "JSON:API request payload that was (or would be) sent. "
-            "Populated for dry-run previews; None after a successful real operation."
-        ),
+        description="JSON:API payload sent or previewed; None after real ops.",
     )
 
 
 class DocumentCommentUpdateResult(BaseModel):
     """Result of an ``update_document_comment`` operation."""
 
-    updated: bool = Field(
-        description=(
-            "True if the comment was actually patched. False when dry_run is True."
-        ),
-    )
-    dry_run: bool = Field(
-        description="Whether this was a dry-run (preview only, no mutation).",
-    )
+    updated: bool = Field(description="True on a real PATCH; False on dry-run.")
+    dry_run: bool = Field(description="Whether this was a dry-run.")
     comment_id: str | None = Field(
-        description=(
-            "Short comment ID that was patched (e.g. 'c42'). None when dry_run is True."
-        ),
+        description="Short comment ID patched (e.g. 'c42'); None on dry-run.",
     )
     resolved: bool = Field(
-        description=(
-            "The ``resolved`` value that was sent (or would be sent) to Polarion."
-        ),
+        description="The resolved value sent (or that would be sent).",
     )
     payload_preview: dict[str, JsonValue] | None = Field(
-        description=(
-            "JSON:API request payload that was (or would be) sent. "
-            "Populated for dry-run previews; None after a successful real operation."
-        ),
+        description="JSON:API payload sent or previewed; None after real ops.",
     )
 
 
 class WorkItemLinkSpec(BaseModel):
     """One link to create under a source work item."""
 
-    role: str = Field(
-        min_length=1,
-        description="Link role id (e.g. 'parent', 'relates_to', 'verifies').",
-    )
-    target_work_item_id: str = Field(
-        min_length=1,
-        description="Target work item ID (the link's incoming endpoint).",
-    )
+    role: str = Field(min_length=1, description="Link role id (e.g. 'parent').")
+    target_work_item_id: str = Field(min_length=1, description="Target work item ID.")
     target_project_id: str | None = Field(
         default=None,
         description="Target's project; defaults to the source's project.",
     )
-    suspect: bool = Field(
-        default=False,
-        description="Mark the link as suspect (target changed since last review).",
-    )
+    suspect: bool = Field(default=False, description="Mark the link as suspect.")
     revision: str | None = Field(
         default=None,
-        description="Optional revision pin (current HEAD when omitted).",
+        description="Optional revision pin; defaults to current HEAD.",
     )
 
 
 class WorkItemLinkRef(BaseModel):
     """One existing link identified for deletion."""
 
-    role: str = Field(
-        min_length=1,
-        description="Link role id of the existing link; must match exactly.",
-    )
-    target_work_item_id: str = Field(
-        min_length=1,
-        description="Target work item ID (the link's incoming endpoint).",
-    )
+    role: str = Field(min_length=1, description="Link role id; must match exactly.")
+    target_work_item_id: str = Field(min_length=1, description="Target work item ID.")
     target_project_id: str | None = Field(
         default=None,
         description="Target's project; defaults to the source's project.",
@@ -831,55 +554,36 @@ class WorkItemLinkRef(BaseModel):
 class WorkItemLinksCreateResult(BaseModel):
     """Result of a ``create_work_item_links`` operation."""
 
-    created: bool = Field(
-        description="True if Polarion accepted the bulk create. False on dry_run.",
-    )
-    dry_run: bool = Field(
-        description="Whether this was a dry-run (preview only, no mutation).",
-    )
+    created: bool = Field(description="True on a real create; False on dry-run.")
+    dry_run: bool = Field(description="Whether this was a dry-run.")
     link_ids: list[str] = Field(
         default_factory=list,
-        description=(
-            "Composite 5-segment link ids"
-            " (``<srcProj>/<srcWI>/<role>/<tgtProj>/<tgtWI>``)"
-            " returned by Polarion, in input order; empty on dry-run."
-        ),
+        description="Composite 5-segment link ids in input order; empty on dry-run.",
     )
     payload_preview: dict[str, JsonValue] | None = Field(
         default=None,
-        description=(
-            "JSON:API payload that was (or would be) sent;"
-            " populated for dry-run, None after a real create."
-        ),
+        description="JSON:API payload sent or previewed; None after real ops.",
     )
 
 
 class WorkItemLinksDeleteResult(BaseModel):
-    """Result of a ``delete_work_item_links`` operation."""
+    """Result of a ``delete_work_item_links`` operation.
 
-    deleted: bool = Field(
-        description="True if Polarion accepted the bulk delete. False on dry_run.",
-    )
-    dry_run: bool = Field(
-        description="Whether this was a dry-run (preview only, no mutation).",
-    )
+    ``link_ids`` echoes the REQUEST — Polarion silently ignores body-level
+    refs that do not match an existing link, so the echo is not a list of
+    what was actually deleted. Cross-check with ``list_work_item_links``
+    if exact accounting is required.
+    """
+
+    deleted: bool = Field(description="True on a real delete; False on dry-run.")
+    dry_run: bool = Field(description="Whether this was a dry-run.")
     link_ids: list[str] = Field(
         default_factory=list,
-        description=(
-            "Composite 5-segment link ids REQUESTED for deletion, in input"
-            " order, reconstructed from the input refs. Polarion silently"
-            " ignores body-level refs that do not match an existing link,"
-            " so this echoes the request -- not necessarily what was"
-            " actually deleted. Cross-check with ``list_work_item_links``"
-            " if exact accounting is required."
-        ),
+        description="Composite 5-segment ids reconstructed from the request refs.",
     )
     payload_preview: dict[str, JsonValue] | None = Field(
         default=None,
-        description=(
-            "JSON:API payload that was (or would be) sent;"
-            " populated for dry-run, None after a real delete."
-        ),
+        description="JSON:API payload sent or previewed; None after real ops.",
     )
 
 
@@ -893,25 +597,19 @@ class WorkItemLinkUpdateSpec(BaseModel):
     that Polarion rejects with HTTP 400.
     """
 
-    role: str = Field(
-        min_length=1,
-        description="Link role id of the existing link; must match exactly.",
-    )
-    target_work_item_id: str = Field(
-        min_length=1,
-        description="Target work item ID (the link's incoming endpoint).",
-    )
+    role: str = Field(min_length=1, description="Link role id; must match exactly.")
+    target_work_item_id: str = Field(min_length=1, description="Target work item ID.")
     target_project_id: str | None = Field(
         default=None,
         description="Target's project; defaults to the source's project.",
     )
     suspect: bool | None = Field(
         default=None,
-        description="New suspect flag value; None leaves it unchanged.",
+        description="New suspect flag; None leaves it unchanged.",
     )
     revision: str | None = Field(
         default=None,
-        description="New revision pin; None leaves the existing pin unchanged.",
+        description="New revision pin; None leaves it unchanged.",
     )
 
     @model_validator(mode="after")
@@ -928,87 +626,46 @@ class WorkItemLinkUpdateSpec(BaseModel):
 class WorkItemLinkUpdateResult(BaseModel):
     """Result of an ``update_work_item_links`` operation."""
 
-    updated: bool = Field(
-        description="True if the link was patched. False on dry-run.",
-    )
-    dry_run: bool = Field(
-        description="Whether this was a dry-run (preview only, no mutation).",
-    )
+    updated: bool = Field(description="True on a real PATCH; False on dry-run.")
+    dry_run: bool = Field(description="Whether this was a dry-run.")
     link_id: str = Field(
-        description="Composite 5-segment id of the link (computed from inputs).",
+        description="Composite 5-segment id computed from inputs.",
     )
     payload_preview: dict[str, JsonValue] | None = Field(
-        description=(
-            "JSON:API PATCH body; populated on dry-run, None after a real call."
-        ),
+        description="JSON:API PATCH body; None after real ops.",
     )
 
 
 class WorkItemMoveResult(BaseModel):
     """Result of a ``move_work_item_to_document`` or sibling move-document call."""
 
-    moved: bool = Field(
-        description=(
-            "True if the work item was actually moved (into the target "
-            "document for moveToDocument, or detached to free-floating for "
-            "moveFromDocument). False when dry_run is True."
-        ),
-    )
-    dry_run: bool = Field(
-        description="Whether this was a dry-run (preview only, no mutation).",
-    )
+    moved: bool = Field(description="True on a real move; False on dry-run.")
+    dry_run: bool = Field(description="Whether this was a dry-run.")
     payload_preview: dict[str, JsonValue] | None = Field(
-        description=(
-            "Request payload that was (or would be) sent. "
-            "Usually populated for dry-run previews and may be None "
-            "after a successful real operation."
-        ),
+        description="Request payload sent or previewed; None after real ops.",
     )
 
 
 class DocumentCreateResult(BaseModel):
     """Result of a ``create_document`` operation."""
 
-    created: bool = Field(
-        description=(
-            "True if the document was actually created. False when dry_run is True."
-        ),
-    )
-    dry_run: bool = Field(
-        description="Whether this was a dry-run (preview only, no mutation).",
-    )
+    created: bool = Field(description="True on a real create; False on dry-run.")
+    dry_run: bool = Field(description="Whether this was a dry-run.")
     document_name: str | None = Field(
-        description=(
-            "Module name of the created document (e.g. 'MySpecV1'). "
-            "None when dry_run is True."
-        ),
+        description="Module name of the new document; None on dry-run.",
     )
     payload_preview: dict[str, JsonValue] | None = Field(
-        description=(
-            "JSON:API request payload that was (or would be) sent. "
-            "Usually populated for dry-run previews and may be None "
-            "after a successful real operation."
-        ),
+        description="JSON:API payload sent or previewed; None after real ops.",
     )
 
 
 class DocumentUpdateResult(BaseModel):
     """Result of an ``update_document`` operation."""
 
-    updated: bool = Field(
-        description=(
-            "True if the document metadata was actually patched. "
-            "False when dry_run is True."
-        ),
-    )
-    dry_run: bool = Field(
-        description="Whether this was a dry-run (preview only, no mutation).",
-    )
+    updated: bool = Field(description="True on a real PATCH; False on dry-run.")
+    dry_run: bool = Field(description="Whether this was a dry-run.")
     payload_preview: dict[str, JsonValue] | None = Field(
-        description=(
-            "JSON:API request payload that was (or would be) sent. "
-            "Populated for dry-run; None after a successful real update."
-        ),
+        description="JSON:API payload sent or previewed; None after real ops.",
     )
 
 

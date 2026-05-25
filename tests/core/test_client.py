@@ -28,21 +28,11 @@ from mcp_server_polarion.core.exceptions import (
 BASE = "https://polarion.example.com/polarion/rest/v1"
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _config() -> PolarionConfig:
     return PolarionConfig(
         polarion_url="https://polarion.example.com",
         polarion_token="test-token",
     )
-
-
-# ---------------------------------------------------------------------------
-# 1. Authentication — Bearer token in default headers
-# ---------------------------------------------------------------------------
 
 
 class TestAuthentication:
@@ -74,11 +64,6 @@ class TestAuthentication:
 
             request = route.calls.last.request
             assert request.headers["content-type"] == "application/json"
-
-
-# ---------------------------------------------------------------------------
-# 2. Successful responses
-# ---------------------------------------------------------------------------
 
 
 class TestSuccessfulResponses:
@@ -217,11 +202,6 @@ class TestSuccessfulResponses:
                 result = await client.get("/some/list")
 
             assert result == {"data": [1, 2, 3]}
-
-
-# ---------------------------------------------------------------------------
-# 3. Error mapping
-# ---------------------------------------------------------------------------
 
 
 class TestErrorMapping:
@@ -383,11 +363,6 @@ class TestErrorMapping:
         assert len(detail_part) <= _MAX_ERROR_DETAIL_LEN
 
 
-# ---------------------------------------------------------------------------
-# 4. Transport / network errors
-# ---------------------------------------------------------------------------
-
-
 class TestTransportErrors:
     """Verify that httpx transport errors are wrapped in PolarionError."""
 
@@ -410,11 +385,6 @@ class TestTransportErrors:
             async with PolarionClient(_config(), write_delay=0) as client:
                 with pytest.raises(PolarionError, match="transport error"):
                     await client.get("/projects")
-
-
-# ---------------------------------------------------------------------------
-# 5. Exponential-backoff retry
-# ---------------------------------------------------------------------------
 
 
 class TestRetry:
@@ -590,11 +560,6 @@ class TestSerialization:
         )
 
 
-# ---------------------------------------------------------------------------
-# 6. Context-manager & close
-# ---------------------------------------------------------------------------
-
-
 class TestContextManager:
     """Verify async context-manager protocol."""
 
@@ -611,11 +576,6 @@ class TestContextManager:
         client = PolarionClient(_config(), write_delay=0)
         await client.close()
         assert client.is_closed
-
-
-# ---------------------------------------------------------------------------
-# 8. Config → base_url wiring
-# ---------------------------------------------------------------------------
 
 
 class TestConfigWiring:

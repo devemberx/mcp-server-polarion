@@ -145,8 +145,6 @@ class PolarionClient:
             self._request_lock = asyncio.Lock()
         return self._request_lock
 
-    # -- Context-manager interface -------------------------------------------
-
     async def __aenter__(self) -> PolarionClient:
         return self
 
@@ -354,8 +352,6 @@ class PolarionClient:
             "Unexpected retry loop exit",
             status_code=0,
         )
-
-    # -- Error mapping -------------------------------------------------------
 
     @staticmethod
     def _map_status_to_error(response: httpx.Response) -> PolarionError:

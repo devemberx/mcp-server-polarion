@@ -45,10 +45,6 @@ class WorkItemSummaryKwargs(TypedDict):
     assignee_ids: list[str]
 
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
 # Polarion enforces a hard cap of 100 server-side.
 DEFAULT_PAGE_SIZE: Final[int] = 100
 
@@ -123,10 +119,6 @@ STANDARD_DOCUMENT_ATTRIBUTES: Final[frozenset[str]] = frozenset(
         "updated",
     }
 )
-
-# ---------------------------------------------------------------------------
-# Functions
-# ---------------------------------------------------------------------------
 
 
 def get_client(ctx: Context) -> PolarionClient:
@@ -454,8 +446,8 @@ def merge_custom_fields(
       the rest of the codebase's "skip None/empty" convention. Falsy
       non-``None`` values (``""``, ``0``, ``False``, ``[]``) are sent
       through verbatim because they may be meaningful custom-field
-      values. Polarion may interpret some of those as "clear"; clearing
-      semantics are intentionally out of scope for this phase.
+      values. Polarion may interpret some of those as "clear"; the tool
+      layer does not expose an explicit clearing path.
 
     Aliasing: values are stored under ``attributes`` by reference — no
     defensive copy. Callers must NOT mutate the ``customs`` dict (or any
