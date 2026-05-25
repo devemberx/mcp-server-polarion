@@ -6,7 +6,6 @@ import pytest
 from pydantic import ValidationError
 
 from mcp_server_polarion.models import (
-    CommentResult,
     DocumentDetail,
     DocumentPart,
     DocumentSummary,
@@ -603,35 +602,6 @@ class TestWorkItemUpdateResult:
         assert result.payload_preview is not None
 
 
-class TestCommentResult:
-    def test_successful_create(self):
-        result = CommentResult(
-            created=True,
-            dry_run=False,
-            comment_id="comment-123",
-            payload_preview=None,
-        )
-        assert result.created is True
-        assert result.comment_id == "comment-123"
-
-    def test_dry_run(self):
-        result = CommentResult(
-            created=False,
-            dry_run=True,
-            comment_id=None,
-            payload_preview={
-                "data": {
-                    "type": "document_comments",
-                    "attributes": {
-                        "text": {"type": "text/html", "value": "<p>Note</p>"},
-                    },
-                }
-            },
-        )
-        assert result.dry_run is True
-        assert result.comment_id is None
-
-
 class TestWorkItemLinkSpec:
     def test_minimal_spec(self):
         spec = WorkItemLinkSpec(role="parent", target_work_item_id="MCPT-2")
@@ -845,7 +815,6 @@ class TestCrossModelIntegration:
             WorkItemLink,
             WorkItemCreateResult,
             WorkItemUpdateResult,
-            CommentResult,
             WorkItemLinkSpec,
             WorkItemLinkRef,
             WorkItemLinksCreateResult,
