@@ -130,9 +130,14 @@ class PolarionClient:
             verify=config.polarion_verify_ssl,
         )
         # Polarion forbids concurrent requests; ``asyncio.Lock`` ensures that
-        # every HTTP call (retry sleeps included) serialises through this
-        # client.  Lazy construction so the lock binds to the running event
-        # loop on first use rather than at PolarionClient init time.
+        # every HTTP call (retry sleeps and post-mutation ``_write_delay``
+        # included) serialises through this client. The lock is acquired by
+        # the public methods so the write-delay sleep stays inside the
+        # critical section. Lazy construction so the lock binds to the
+        # running event loop on first use rather than at init time. The
+        # lock is NOT reentrant — never call a public method from inside
+        # ``_request`` (or any code already holding the lock) or the client
+        # will deadlock.
         self._request_lock: asyncio.Lock | None = None
 
     def _get_request_lock(self) -> asyncio.Lock:
@@ -182,7 +187,8 @@ class PolarionClient:
             PolarionNotFoundError: On HTTP 404.
             PolarionError: On other non-2xx responses.
         """
-        return await self._request("GET", path, params=params)
+        async with self._get_request_lock():
+            return await self._request("GET", path, params=params)
 
     async def post(
         self,
@@ -193,7 +199,9 @@ class PolarionClient:
         """Send a ``POST`` request (write operation).
 
         A short delay is applied **after** the request succeeds to account
-        for Polarion cluster propagation.
+        for Polarion cluster propagation. The delay runs inside the request
+        lock so the next caller cannot start its own request during the
+        propagation window.
 
         Args:
             path: URL path relative to the base API URL.
@@ -202,9 +210,10 @@ class PolarionClient:
         Returns:
             Decoded JSON response body.
         """
-        result = await self._request("POST", path, json=json)
-        await asyncio.sleep(self._write_delay)
-        return result
+        async with self._get_request_lock():
+            result = await self._request("POST", path, json=json)
+            await asyncio.sleep(self._write_delay)
+            return result
 
     async def patch(
         self,
@@ -214,7 +223,8 @@ class PolarionClient:
     ) -> dict[str, object]:
         """Send a ``PATCH`` request (write operation).
 
-        A short delay is applied **after** the request succeeds.
+        A short delay is applied **after** the request succeeds, inside the
+        request lock — same contract as ``post``.
 
         Args:
             path: URL path relative to the base API URL.
@@ -223,9 +233,10 @@ class PolarionClient:
         Returns:
             Decoded JSON response body.
         """
-        result = await self._request("PATCH", path, json=json)
-        await asyncio.sleep(self._write_delay)
-        return result
+        async with self._get_request_lock():
+            result = await self._request("PATCH", path, json=json)
+            await asyncio.sleep(self._write_delay)
+            return result
 
     async def delete(
         self,
@@ -238,7 +249,8 @@ class PolarionClient:
         Polarion's bulk-delete endpoints require a JSON:API body listing
         the resource ids to remove; ``httpx`` permits a body on DELETE
         and Polarion's REST gateway accepts it. A short delay is applied
-        **after** the request succeeds, same as ``post`` / ``patch``.
+        **after** the request succeeds, inside the request lock — same
+        contract as ``post`` / ``patch``.
 
         Args:
             path: URL path relative to the base API URL.
@@ -247,9 +259,10 @@ class PolarionClient:
         Returns:
             Decoded JSON response body (``{}`` for 204 No Content).
         """
-        result = await self._request("DELETE", path, json=json)
-        await asyncio.sleep(self._write_delay)
-        return result
+        async with self._get_request_lock():
+            result = await self._request("DELETE", path, json=json)
+            await asyncio.sleep(self._write_delay)
+            return result
 
     async def _request(
         self,
@@ -280,68 +293,67 @@ class PolarionClient:
             PolarionError: On other non-2xx responses after all retries
                 are exhausted.
         """
-        # Hold the lock across the whole retry loop: Polarion forbids
-        # concurrent requests, and dropping the lock between retries would
-        # let another caller slip in and get 429'd by the same backoff.
-        async with self._get_request_lock():
-            last_exception: PolarionError | None = None
-            backoff = _INITIAL_BACKOFF_SECONDS
+        # Caller (``get`` / ``post`` / ``patch`` / ``delete``) is responsible
+        # for holding ``_request_lock`` so the retry-backoff sleep stays
+        # inside the critical section — dropping the lock between retries
+        # would let another caller slip in and get 429'd by the same backoff.
+        last_exception: PolarionError | None = None
+        backoff = _INITIAL_BACKOFF_SECONDS
 
-            for attempt in range(_MAX_RETRIES + 1):
-                try:
-                    response = await self._client.request(
-                        method,
-                        path,
-                        params=params,
-                        json=json,
-                    )
-                except httpx.HTTPError as exc:
-                    raise PolarionError(
-                        f"HTTP transport error: {exc}",
-                        status_code=0,
-                    ) from exc
+        for attempt in range(_MAX_RETRIES + 1):
+            try:
+                response = await self._client.request(
+                    method,
+                    path,
+                    params=params,
+                    json=json,
+                )
+            except httpx.HTTPError as exc:
+                raise PolarionError(
+                    f"HTTP transport error: {exc}",
+                    status_code=0,
+                ) from exc
 
-                if response.is_success:
-                    # Some responses (e.g. 204 No Content) have empty bodies.
-                    if response.status_code == _HTTP_NO_CONTENT or not response.content:
-                        return {}
-                    body: object = response.json()
-                    if not isinstance(body, dict):
-                        return {"data": body}
-                    return body
+            if response.is_success:
+                # Some responses (e.g. 204 No Content) have empty bodies.
+                if response.status_code == _HTTP_NO_CONTENT or not response.content:
+                    return {}
+                body: object = response.json()
+                if not isinstance(body, dict):
+                    return {"data": body}
+                return body
 
-                # Map status codes to domain exceptions.
-                error = self._map_status_to_error(response)
+            # Map status codes to domain exceptions.
+            error = self._map_status_to_error(response)
 
-                # Retry only on transient errors.
-                is_retryable = response.status_code in _RETRYABLE_STATUS_CODES
-                if is_retryable and attempt < _MAX_RETRIES:
-                    logger.warning(
-                        "Retryable error %d on %s %s (attempt %d/%d)."
-                        " Backing off %.1f s.",
-                        response.status_code,
-                        method,
-                        path,
-                        attempt + 1,
-                        _MAX_RETRIES + 1,
-                        backoff,
-                    )
-                    last_exception = error
-                    await asyncio.sleep(backoff)
-                    backoff *= _BACKOFF_MULTIPLIER
-                    continue
+            # Retry only on transient errors.
+            is_retryable = response.status_code in _RETRYABLE_STATUS_CODES
+            if is_retryable and attempt < _MAX_RETRIES:
+                logger.warning(
+                    "Retryable error %d on %s %s (attempt %d/%d). Backing off %.1f s.",
+                    response.status_code,
+                    method,
+                    path,
+                    attempt + 1,
+                    _MAX_RETRIES + 1,
+                    backoff,
+                )
+                last_exception = error
+                await asyncio.sleep(backoff)
+                backoff *= _BACKOFF_MULTIPLIER
+                continue
 
-                raise error
+            raise error
 
-            # All retries exhausted — raise the most recent error.
-            if last_exception is not None:
-                raise last_exception
+        # All retries exhausted — raise the most recent error.
+        if last_exception is not None:
+            raise last_exception
 
-            # Defensive: should never be reached.
-            raise PolarionError(  # pragma: no cover
-                "Unexpected retry loop exit",
-                status_code=0,
-            )
+        # Defensive: should never be reached.
+        raise PolarionError(  # pragma: no cover
+            "Unexpected retry loop exit",
+            status_code=0,
+        )
 
     # -- Error mapping -------------------------------------------------------
 

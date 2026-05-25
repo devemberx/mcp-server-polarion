@@ -550,6 +550,45 @@ class TestSerialization:
             assert route.call_count == 2
             assert max_in_flight == 1
 
+    async def test_write_delay_keeps_lock_held(self) -> None:
+        """A GET dispatched during a POST's write_delay must wait, not overlap.
+
+        The write_delay sleep runs inside the request lock — otherwise a
+        second caller could slip in during Polarion's propagation window
+        and defeat the "no concurrent requests" guarantee. Verified by
+        timing: the GET must start at least ``write_delay`` after the POST.
+        """
+        post_start: list[float] = []
+        get_start: list[float] = []
+
+        async def _on_post(request: httpx.Request) -> httpx.Response:
+            post_start.append(asyncio.get_running_loop().time())
+            return httpx.Response(201, json={"data": {"id": "MCPT-1"}})
+
+        async def _on_get(request: httpx.Request) -> httpx.Response:
+            get_start.append(asyncio.get_running_loop().time())
+            return httpx.Response(200, json={"data": []})
+
+        write_delay = 0.2
+
+        with respx.mock(base_url=BASE) as mock:
+            mock.post("/projects/p/workitems").mock(side_effect=_on_post)
+            mock.get("/projects").mock(side_effect=_on_get)
+
+            async with PolarionClient(_config(), write_delay=write_delay) as client:
+                await asyncio.gather(
+                    client.post("/projects/p/workitems", json={}),
+                    client.get("/projects"),
+                )
+
+        assert post_start and get_start
+        # Allow a small scheduling slack so the assertion isn't flaky on
+        # slow CI workers; the real margin is full ``write_delay``.
+        assert get_start[0] - post_start[0] >= write_delay * 0.9, (
+            f"GET started {get_start[0] - post_start[0]:.3f}s after POST; "
+            f"expected ≥ {write_delay * 0.9:.3f}s (write_delay held by lock)."
+        )
+
 
 # ---------------------------------------------------------------------------
 # 6. Context-manager & close
