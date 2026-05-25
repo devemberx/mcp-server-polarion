@@ -51,6 +51,7 @@ from mcp_server_polarion.tools._helpers import (
     encode_path_segment,
     extract_short_id,
     get_client,
+    invalidate_documents_cache,
     merge_custom_fields,
     parse_work_item_detail,
     safe_str,
@@ -1702,6 +1703,10 @@ async def create_document(  # noqa: PLR0913
             "Polarion accepted the create request but returned no document name. "
             "The document may or may not exist; verify with list_documents."
         )
+
+    # Drop any stale list_documents entry so the new document appears on the
+    # very next call instead of waiting for the 60s TTL to expire.
+    invalidate_documents_cache(project_id)
 
     return DocumentCreateResult(
         created=True,

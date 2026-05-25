@@ -37,6 +37,7 @@ from mcp_server_polarion.models import (
     WorkItemUpdateResult,
 )
 from mcp_server_polarion.server import mcp
+from mcp_server_polarion.tools import _helpers as _helpers_mod
 from mcp_server_polarion.tools import write as _write_mod
 
 # In FastMCP 3.0, @mcp.tool returns the original function unchanged
@@ -3201,6 +3202,55 @@ class TestCreateDocumentHappyPath:
         )
 
         assert result.document_name == "Folder/Sub/Doc"
+
+    async def test_invalidates_documents_cache_on_success(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """``create_document`` drops the project's docs cache entry on 201."""
+        _helpers_mod.store_cached_documents("MyProj", [("_default", "OldDoc")])
+        mock_client.post.return_value = {
+            "data": [{"type": "documents", "id": "MyProj/_default/MySpec"}]
+        }
+
+        await create_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="_default",
+            module_name="MySpec",
+            title="t",
+            type="generic",
+            status=None,
+            home_page_content=None,
+            custom_fields=None,
+            dry_run=False,
+        )
+
+        assert _helpers_mod.get_cached_documents("MyProj") is None
+
+    async def test_does_not_invalidate_cache_on_failure(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Cache is preserved when the POST raises — no half-state change."""
+        _helpers_mod.store_cached_documents("MyProj", [("_default", "OldDoc")])
+        mock_client.post.side_effect = PolarionError("boom", status_code=500)
+
+        with pytest.raises(RuntimeError):
+            await create_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="_default",
+                module_name="MySpec",
+                title="t",
+                type="generic",
+                status=None,
+                home_page_content=None,
+                custom_fields=None,
+                dry_run=False,
+            )
+
+        cached = _helpers_mod.get_cached_documents("MyProj")
+        assert cached == [("_default", "OldDoc")]
+        _helpers_mod.invalidate_documents_cache("MyProj")
 
 
 class TestCreateDocumentErrorMapping:
