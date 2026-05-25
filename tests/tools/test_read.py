@@ -33,6 +33,7 @@ from mcp_server_polarion.models import (
     WorkItemRead,
 )
 from mcp_server_polarion.server import mcp
+from mcp_server_polarion.tools import _helpers as _helpers_mod
 from mcp_server_polarion.tools import read as _read_mod
 
 # In FastMCP 3.0, @mcp.tool returns the original function unchanged
@@ -340,9 +341,9 @@ class TestListDocuments:
         Several tests reuse ``project_id='proj1'``, so without this the
         first test would poison subsequent tests via cache hits.
         """
-        _read_mod._documents_cache.clear()
+        _helpers_mod._documents_cache.clear()
         yield
-        _read_mod._documents_cache.clear()
+        _helpers_mod._documents_cache.clear()
 
     async def test_extracts_documents_from_modules(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -686,13 +687,13 @@ class TestListDocuments:
         def _fake_monotonic() -> float:
             return fake_now[0]
 
-        monkeypatch.setattr(_read_mod.time, "monotonic", _fake_monotonic)
+        monkeypatch.setattr(_helpers_mod.time, "monotonic", _fake_monotonic)
 
         await list_documents(mock_ctx, project_id="proj1", page_size=100, page_number=1)
         first_calls = mock_client.get.call_count
 
         # Advance time past the TTL.
-        fake_now[0] += _read_mod._CACHE_TTL_SECONDS + 1.0
+        fake_now[0] += _helpers_mod._CACHE_TTL_SECONDS + 1.0
 
         await list_documents(mock_ctx, project_id="proj1", page_size=100, page_number=1)
         assert mock_client.get.call_count > first_calls
