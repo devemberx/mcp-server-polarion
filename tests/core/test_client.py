@@ -6,6 +6,7 @@ is needed.  The client uses ``write_delay=0`` to avoid sleeping.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from unittest.mock import patch
 
@@ -516,6 +517,38 @@ class TestRetry:
 
             assert result == {"data": "ok"}
             assert route.call_count == 3
+
+
+class TestSerialization:
+    """Concurrent callers must serialise through PolarionClient's lock."""
+
+    async def test_concurrent_requests_run_sequentially(self) -> None:
+        """Two ``client.get`` calls dispatched together must not overlap."""
+        in_flight = 0
+        max_in_flight = 0
+
+        async def _record(request: httpx.Request) -> httpx.Response:
+            nonlocal in_flight, max_in_flight
+            in_flight += 1
+            max_in_flight = max(max_in_flight, in_flight)
+            # Yield so the event loop can wake the other coroutine; without the
+            # lock both calls would reach this point and ``max_in_flight`` would
+            # rise to 2.
+            await asyncio.sleep(0)
+            in_flight -= 1
+            return httpx.Response(200, json={"data": []})
+
+        with respx.mock(base_url=BASE) as mock:
+            route = mock.get("/projects").mock(side_effect=_record)
+
+            async with PolarionClient(_config(), write_delay=0) as client:
+                await asyncio.gather(
+                    client.get("/projects"),
+                    client.get("/projects"),
+                )
+
+            assert route.call_count == 2
+            assert max_in_flight == 1
 
 
 # ---------------------------------------------------------------------------
