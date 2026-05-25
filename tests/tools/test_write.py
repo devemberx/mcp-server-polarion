@@ -1837,6 +1837,31 @@ class TestUpdateWorkItemHappyPath:
         assert result.changes["title"] == "t"
         assert result.changes["custom_fields"] == {"riskLevel": "high"}
 
+    async def test_changes_custom_fields_is_independent_of_input(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Mutating the caller's dict (or its nested rich-text dict) after the
+        # call must not bleed into the returned ``changes`` snapshot.
+        mock_client.patch.return_value = {}
+        mock_client.get.return_value = _make_get_response()
+
+        rich = {"type": "text/html", "value": "<p>original</p>"}
+        customs: dict[str, object] = {"reviewerNote": rich, "riskLevel": "high"}
+
+        result = await _call_update(
+            mock_ctx,
+            title="t",
+            custom_fields=customs,
+        )
+
+        customs["riskLevel"] = "low"
+        rich["value"] = "<p>mutated</p>"
+
+        recorded = cast(dict[str, object], result.changes["custom_fields"])
+        assert recorded["riskLevel"] == "high"
+        recorded_note = cast(dict[str, object], recorded["reviewerNote"])
+        assert recorded_note["value"] == "<p>original</p>"
+
     async def test_dry_run_preview_includes_custom_fields(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:

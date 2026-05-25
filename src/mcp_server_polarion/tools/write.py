@@ -14,6 +14,7 @@ user-facing ones at the tool layer.
 
 from __future__ import annotations
 
+import copy
 from typing import Final, cast
 from urllib.parse import urlencode
 
@@ -969,7 +970,9 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     if assignee_ids:
         changes["assignee_ids"] = list(assignee_ids)
     if custom_fields:
-        changes["custom_fields"] = cast(JsonValue, dict(custom_fields))
+        # deepcopy so the result's ``changes`` map is independent of the caller's
+        # dict; a shallow copy would alias nested rich-text values.
+        changes["custom_fields"] = cast(JsonValue, copy.deepcopy(custom_fields))
     if workflow_action:
         changes["workflow_action"] = workflow_action
     if change_type_to:
