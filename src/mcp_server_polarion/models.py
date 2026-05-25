@@ -74,7 +74,7 @@ class EnumOption(BaseModel):
     )
     hidden: bool = Field(
         default=False,
-        description="True when the option is hidden in the UI.",
+        description="True when the option is hidden in the UI; avoid selecting.",
     )
     terminal: bool = Field(
         default=False,
