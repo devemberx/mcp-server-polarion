@@ -129,6 +129,21 @@ class PolarionClient:
             timeout=httpx.Timeout(_DEFAULT_TIMEOUT_SECONDS),
             verify=config.polarion_verify_ssl,
         )
+        # Polarion forbids concurrent requests; ``asyncio.Lock`` ensures that
+        # every HTTP call (retry sleeps and post-mutation ``_write_delay``
+        # included) serialises through this client. The lock is acquired by
+        # the public methods so the write-delay sleep stays inside the
+        # critical section. Lazy construction so the lock binds to the
+        # running event loop on first use rather than at init time. The
+        # lock is NOT reentrant — never call a public method from inside
+        # ``_request`` (or any code already holding the lock) or the client
+        # will deadlock.
+        self._request_lock: asyncio.Lock | None = None
+
+    def _get_request_lock(self) -> asyncio.Lock:
+        if self._request_lock is None:
+            self._request_lock = asyncio.Lock()
+        return self._request_lock
 
     # -- Context-manager interface -------------------------------------------
 
@@ -172,7 +187,8 @@ class PolarionClient:
             PolarionNotFoundError: On HTTP 404.
             PolarionError: On other non-2xx responses.
         """
-        return await self._request("GET", path, params=params)
+        async with self._get_request_lock():
+            return await self._request("GET", path, params=params)
 
     async def post(
         self,
@@ -183,7 +199,9 @@ class PolarionClient:
         """Send a ``POST`` request (write operation).
 
         A short delay is applied **after** the request succeeds to account
-        for Polarion cluster propagation.
+        for Polarion cluster propagation. The delay runs inside the request
+        lock so the next caller cannot start its own request during the
+        propagation window.
 
         Args:
             path: URL path relative to the base API URL.
@@ -192,9 +210,10 @@ class PolarionClient:
         Returns:
             Decoded JSON response body.
         """
-        result = await self._request("POST", path, json=json)
-        await asyncio.sleep(self._write_delay)
-        return result
+        async with self._get_request_lock():
+            result = await self._request("POST", path, json=json)
+            await asyncio.sleep(self._write_delay)
+            return result
 
     async def patch(
         self,
@@ -204,7 +223,8 @@ class PolarionClient:
     ) -> dict[str, object]:
         """Send a ``PATCH`` request (write operation).
 
-        A short delay is applied **after** the request succeeds.
+        A short delay is applied **after** the request succeeds, inside the
+        request lock — same contract as ``post``.
 
         Args:
             path: URL path relative to the base API URL.
@@ -213,9 +233,10 @@ class PolarionClient:
         Returns:
             Decoded JSON response body.
         """
-        result = await self._request("PATCH", path, json=json)
-        await asyncio.sleep(self._write_delay)
-        return result
+        async with self._get_request_lock():
+            result = await self._request("PATCH", path, json=json)
+            await asyncio.sleep(self._write_delay)
+            return result
 
     async def delete(
         self,
@@ -228,7 +249,8 @@ class PolarionClient:
         Polarion's bulk-delete endpoints require a JSON:API body listing
         the resource ids to remove; ``httpx`` permits a body on DELETE
         and Polarion's REST gateway accepts it. A short delay is applied
-        **after** the request succeeds, same as ``post`` / ``patch``.
+        **after** the request succeeds, inside the request lock — same
+        contract as ``post`` / ``patch``.
 
         Args:
             path: URL path relative to the base API URL.
@@ -237,9 +259,10 @@ class PolarionClient:
         Returns:
             Decoded JSON response body (``{}`` for 204 No Content).
         """
-        result = await self._request("DELETE", path, json=json)
-        await asyncio.sleep(self._write_delay)
-        return result
+        async with self._get_request_lock():
+            result = await self._request("DELETE", path, json=json)
+            await asyncio.sleep(self._write_delay)
+            return result
 
     async def _request(
         self,
@@ -270,6 +293,10 @@ class PolarionClient:
             PolarionError: On other non-2xx responses after all retries
                 are exhausted.
         """
+        # Caller (``get`` / ``post`` / ``patch`` / ``delete``) is responsible
+        # for holding ``_request_lock`` so the retry-backoff sleep stays
+        # inside the critical section — dropping the lock between retries
+        # would let another caller slip in and get 429'd by the same backoff.
         last_exception: PolarionError | None = None
         backoff = _INITIAL_BACKOFF_SECONDS
 

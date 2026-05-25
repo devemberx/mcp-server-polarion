@@ -12,6 +12,9 @@ inside ``read_document_parts``) and lives in ``tools.read``.
 
 from __future__ import annotations
 
+import re
+import time
+from dataclasses import dataclass
 from typing import Final, Literal, TypedDict, cast
 from urllib.parse import quote
 
@@ -231,6 +234,33 @@ def encode_path_segment(segment: str) -> str:
         URL-encoded segment safe for use in URL paths.
     """
     return quote(segment, safe="")
+
+
+# Polarion work item IDs are project-prefix + hyphen + digits (e.g. ``MCPT-001``);
+# the broader pattern below also accepts underscores so this stays a thin guard,
+# not a format validator. Anything outside the set is rejected when the id is
+# substituted into a Lucene query string (``linkedWorkItems:<id>``).
+_WORK_ITEM_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def validate_work_item_id_for_lucene(work_item_id: str) -> None:
+    """Reject work item IDs that would break a Lucene ``field:<id>`` clause.
+
+    Polarion's Lucene parser treats ``+ - && || ! ( ) { } [ ] ^ " ~ * ? : \\ /``
+    and whitespace as operators. Embedding an unescaped ``work_item_id`` into
+    ``linkedWorkItems:<id>`` would let an adversarial value reshape the query.
+    Polarion IDs never contain those characters, so a hard reject is safer
+    than escape arithmetic.
+
+    Raises:
+        ValueError: ``work_item_id`` contains characters outside ``[A-Za-z0-9_-]``.
+    """
+    if not _WORK_ITEM_ID_PATTERN.match(work_item_id):
+        msg = (
+            f"work_item_id '{work_item_id}' contains characters outside "
+            "[A-Za-z0-9_-]; cannot embed safely in a Lucene query."
+        )
+        raise ValueError(msg)
 
 
 def build_included_work_item_map(
@@ -633,6 +663,49 @@ def build_document_comment(item: dict[str, object]) -> DocumentComment:
     )
 
 
+# Document-discovery TTL cache (in-process, keyed by project_id).
+# A short TTL keeps paginated `list_documents` calls cheap while ensuring
+# newly-created documents appear within ~1 minute. ``create_document`` calls
+# ``invalidate_documents_cache`` to clear the entry immediately on write.
+_CACHE_TTL_SECONDS: Final[float] = 60.0
+
+
+@dataclass(frozen=True, slots=True)
+class _DocCacheEntry:
+    expires_at: float
+    documents: tuple[tuple[str, str], ...]
+
+
+_documents_cache: dict[str, _DocCacheEntry] = {}
+
+
+def get_cached_documents(project_id: str) -> list[tuple[str, str]] | None:
+    """Return the cached document list for *project_id* or ``None``."""
+    entry = _documents_cache.get(project_id)
+    if entry is None:
+        return None
+    if time.monotonic() >= entry.expires_at:
+        _documents_cache.pop(project_id, None)
+        return None
+    return list(entry.documents)
+
+
+def store_cached_documents(
+    project_id: str,
+    documents: list[tuple[str, str]],
+) -> None:
+    """Cache *documents* for *project_id* for ``_CACHE_TTL_SECONDS``."""
+    _documents_cache[project_id] = _DocCacheEntry(
+        expires_at=time.monotonic() + _CACHE_TTL_SECONDS,
+        documents=tuple(documents),
+    )
+
+
+def invalidate_documents_cache(project_id: str) -> None:
+    """Drop the cached document list for *project_id*, if any."""
+    _documents_cache.pop(project_id, None)
+
+
 __all__: list[str] = [
     "DEFAULT_PAGE_SIZE",
     "DOCUMENT_COMMENT_LIST_FIELDS",
@@ -652,13 +725,17 @@ __all__: list[str] = [
     "extract_relationship_ids",
     "extract_short_id",
     "extract_total_count",
+    "get_cached_documents",
     "get_client",
     "has_links_next",
+    "invalidate_documents_cache",
     "merge_custom_fields",
     "parse_hyperlinks",
     "parse_work_item_detail",
     "parse_work_item_summaries",
     "safe_str",
     "split_module_id",
+    "store_cached_documents",
     "summary_to_back_link",
+    "validate_work_item_id_for_lucene",
 ]

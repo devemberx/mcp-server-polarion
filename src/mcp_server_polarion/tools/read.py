@@ -18,7 +18,6 @@ Body fields use two different formats depending on the tool's purpose:
 from __future__ import annotations
 
 import re
-import time
 from dataclasses import dataclass
 from typing import Final, Literal, cast
 
@@ -62,12 +61,15 @@ from mcp_server_polarion.tools._helpers import (
     extract_relationship_id,
     extract_short_id,
     extract_total_count,
+    get_cached_documents,
     get_client,
     parse_work_item_detail,
     parse_work_item_summaries,
     safe_str,
     split_module_id,
+    store_cached_documents,
     summary_to_back_link,
+    validate_work_item_id_for_lucene,
 )
 from mcp_server_polarion.utils import html_to_markdown
 
@@ -466,42 +468,6 @@ def _get_module_id(item: object) -> str:
     return extract_relationship_id(relationships, "module")
 
 
-# Document-discovery TTL cache (in-process, keyed by project_id).
-# A short TTL keeps paginated `list_documents` calls cheap while ensuring
-# newly-created documents appear within ~1 minute. Future write tools can
-# invalidate by popping the project_id key.
-_CACHE_TTL_SECONDS: Final[float] = 60.0
-
-
-@dataclass(frozen=True, slots=True)
-class _DocCacheEntry:
-    expires_at: float
-    documents: tuple[tuple[str, str], ...]
-
-
-_documents_cache: dict[str, _DocCacheEntry] = {}
-
-
-def _get_cached_documents(project_id: str) -> list[tuple[str, str]] | None:
-    entry = _documents_cache.get(project_id)
-    if entry is None:
-        return None
-    if time.monotonic() >= entry.expires_at:
-        _documents_cache.pop(project_id, None)
-        return None
-    return list(entry.documents)
-
-
-def _store_cached_documents(
-    project_id: str,
-    documents: list[tuple[str, str]],
-) -> None:
-    _documents_cache[project_id] = _DocCacheEntry(
-        expires_at=time.monotonic() + _CACHE_TTL_SECONDS,
-        documents=tuple(documents),
-    )
-
-
 async def _discover_documents(
     client: PolarionClient,
     project_id: str,
@@ -509,8 +475,8 @@ async def _discover_documents(
     """Discover all unique (space_id, document_name) pairs via linear scan.
 
     Iterates every heading-workitem page (page_size=100) and accumulates
-    unique ``module`` relationship IDs. Results are cached for
-    ``_CACHE_TTL_SECONDS`` so paginated callers reuse the discovery.
+    unique ``module`` relationship IDs. Results are TTL-cached in
+    ``tools._helpers`` so paginated callers reuse the discovery.
 
     Args:
         client: Active ``PolarionClient`` instance.
@@ -519,7 +485,7 @@ async def _discover_documents(
     Returns:
         Sorted list of (space_id, document_name) tuples.
     """
-    cached = _get_cached_documents(project_id)
+    cached = get_cached_documents(project_id)
     if cached is not None:
         return cached
 
@@ -534,7 +500,7 @@ async def _discover_documents(
 
     while True:
         response = await client.get(
-            f"/projects/{project_id}/workitems",
+            f"/projects/{encode_path_segment(project_id)}/workitems",
             params={**base_params, "page[number]": page_number},
         )
         data = response.get("data", [])
@@ -552,7 +518,7 @@ async def _discover_documents(
         page_number += 1
 
     sorted_docs = sorted(documents)
-    _store_cached_documents(project_id, sorted_docs)
+    store_cached_documents(project_id, sorted_docs)
     return sorted_docs
 
 
@@ -795,11 +761,10 @@ async def get_document(
         RuntimeError: Other Polarion API errors.
     """
     client = get_client(ctx)
-    encoded_name = encode_path_segment(document_name)
     path = (
-        f"/projects/{project_id}"
+        f"/projects/{encode_path_segment(project_id)}"
         f"/spaces/{encode_path_segment(space_id)}"
-        f"/documents/{encoded_name}"
+        f"/documents/{encode_path_segment(document_name)}"
     )
 
     # ``@all`` is the only sparse-fieldset token this Polarion server
@@ -1190,11 +1155,10 @@ async def read_document_parts(  # noqa: PLR0913
         RuntimeError: Other Polarion API errors.
     """
     client = get_client(ctx)
-    encoded_name = encode_path_segment(document_name)
     path = (
-        f"/projects/{project_id}"
+        f"/projects/{encode_path_segment(project_id)}"
         f"/spaces/{encode_path_segment(space_id)}"
-        f"/documents/{encoded_name}/parts"
+        f"/documents/{encode_path_segment(document_name)}/parts"
     )
 
     try:
@@ -1499,7 +1463,7 @@ async def list_work_items(
         params["query"] = query
     try:
         response = await client.get(
-            f"/projects/{project_id}/workitems",
+            f"/projects/{encode_path_segment(project_id)}/workitems",
             params=params,
         )
     except PolarionNotFoundError as exc:
@@ -1606,7 +1570,10 @@ async def get_work_item(
         RuntimeError: On unexpected Polarion API errors.
     """
     client = get_client(ctx)
-    path = f"/projects/{project_id}/workitems/{work_item_id}"
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/workitems/{encode_path_segment(work_item_id)}"
+    )
     try:
         response = await client.get(
             path,
@@ -1795,7 +1762,10 @@ async def _get_forward_link_page(
     page_number: int,
 ) -> PaginatedResult[WorkItemLink]:
     """Fetch a single page of forward (outgoing) links."""
-    path = f"/projects/{project_id}/workitems/{work_item_id}/linkedworkitems"
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/workitems/{encode_path_segment(work_item_id)}/linkedworkitems"
+    )
     try:
         response = await client.get(
             path,
@@ -1849,9 +1819,10 @@ async def _get_back_link_page(
     page_number: int,
 ) -> PaginatedResult[WorkItemLink]:
     """Fetch a single page of back (incoming) links via Lucene query."""
+    validate_work_item_id_for_lucene(work_item_id)
     try:
         response = await client.get(
-            f"/projects/{project_id}/workitems",
+            f"/projects/{encode_path_segment(project_id)}/workitems",
             params={
                 "query": f"linkedWorkItems:{work_item_id}",
                 "fields[workitems]": WORK_ITEM_LIST_FIELDS,
@@ -1951,7 +1922,7 @@ async def list_document_comments(  # noqa: PLR0913
     """
     client = get_client(ctx)
     path = (
-        f"/projects/{project_id}"
+        f"/projects/{encode_path_segment(project_id)}"
         f"/spaces/{encode_path_segment(space_id)}"
         f"/documents/{encode_path_segment(document_name)}"
         "/comments"

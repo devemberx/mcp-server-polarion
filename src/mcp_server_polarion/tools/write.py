@@ -14,6 +14,7 @@ user-facing ones at the tool layer.
 
 from __future__ import annotations
 
+import copy
 from typing import Final, cast
 from urllib.parse import urlencode
 
@@ -51,6 +52,7 @@ from mcp_server_polarion.tools._helpers import (
     encode_path_segment,
     extract_short_id,
     get_client,
+    invalidate_documents_cache,
     merge_custom_fields,
     parse_work_item_detail,
     safe_str,
@@ -968,7 +970,9 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     if assignee_ids:
         changes["assignee_ids"] = list(assignee_ids)
     if custom_fields:
-        changes["custom_fields"] = cast(JsonValue, dict(custom_fields))
+        # deepcopy so the result's ``changes`` map is independent of the caller's
+        # dict; a shallow copy would alias nested rich-text values.
+        changes["custom_fields"] = cast(JsonValue, copy.deepcopy(custom_fields))
     if workflow_action:
         changes["workflow_action"] = workflow_action
     if change_type_to:
@@ -1149,6 +1153,19 @@ async def move_work_item_to_document(  # noqa: PLR0913
     ``next_part_id`` (insert BEFORE); if both are omitted the work item
     is appended at the end of the target document. Discover part IDs
     with ``read_document_parts``.
+
+    Side effect: this server auto-creates an outgoing link from the
+    moved work item to its enclosing section heading (role depends on
+    project config -- observed ``relates_to`` on
+    ``MCP_Test_Project / E2E_WriteFlow_20260525``, ``parent`` on the
+    older ``MCP_Test_Project / Software Requirement Specification``).
+    The auto-link appears in ``list_work_item_links(direction="forward")``
+    after the move and is silently removed by
+    ``move_work_item_from_document``. The role collides with any
+    same-role link you then try to create from the same source -- see
+    the "phantom success" note on ``create_work_item_links``. Querying
+    forward links on a known-attached work item is the only reliable
+    way to discover which role this project uses.
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -1456,11 +1473,12 @@ async def update_document(  # noqa: PLR0913
         PermissionError: Token lacks permission.
         RuntimeError: Other Polarion API errors.
     """
-    if home_page_content_html == "":
+    if home_page_content_html is not None and not home_page_content_html.strip():
         raise ValueError(
-            "home_page_content_html='' would wipe the document body and "
-            "orphan all heading work items. Pass at minimum '<p></p>' "
-            "or omit the parameter to leave the body unchanged."
+            "home_page_content_html is empty or whitespace-only; sending "
+            "this would wipe the document body and orphan every heading "
+            "work item. Pass at minimum '<p></p>' or omit the parameter "
+            "to leave the body unchanged."
         )
 
     has_attrs = (
@@ -1703,6 +1721,10 @@ async def create_document(  # noqa: PLR0913
             "The document may or may not exist; verify with list_documents."
         )
 
+    # Drop any stale list_documents entry so the new document appears on the
+    # very next call instead of waiting for the 60s TTL to expire.
+    invalidate_documents_cache(project_id)
+
     return DocumentCreateResult(
         created=True,
         dry_run=False,
@@ -1770,6 +1792,20 @@ async def create_work_item_links(
     committed and re-query with
     ``list_work_item_links(direction="forward")`` before retrying. If you
     need per-link diagnostics, send one spec per call.
+
+    Phantom-success on same-role conflict: when the source work item is
+    attached to a document, ``move_work_item_to_document`` auto-creates
+    one outgoing link (role depends on project config -- see that
+    tool's docstring). Posting a NEW link with the SAME role from the
+    same source returns 201 and echoes the requested
+    ``link_id`` -- but the new link is NOT persisted. The pre-existing
+    auto-link remains the only forward link, with its original target.
+    There is no error to detect this client-side. After every create
+    on an in-document source, verify the actual stored state with
+    ``list_work_item_links(direction="forward")`` on the source AND
+    ``list_work_item_links(direction="back")`` on the intended target;
+    if your link is missing, detach via ``move_work_item_from_document``,
+    create the link, then re-attach with ``move_work_item_to_document``.
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -2282,6 +2318,15 @@ async def update_document_comment(  # noqa: PLR0913
     with ``{"resolved": <bool>}`` — the only patchable attribute on a
     document comment. Use ``list_document_comments`` to discover the
     short comment ID (last segment of the full 4-part path).
+
+    Root comments only: Polarion accepts this PATCH only on top-level
+    comments (``parent_comment_id`` is ``None`` in
+    ``list_document_comments``). Calling it on a reply -- any comment
+    with a non-null ``parent_comment_id`` -- returns HTTP 400 "Resolved
+    field can be set only for root comments" and surfaces as
+    ``RuntimeError``. Filter for ``parent_comment_id is None`` before
+    calling. There is no server-side workflow to resolve an individual
+    reply; resolving the root marks the entire thread resolved.
 
     This operation is idempotent: marking a comment resolved twice leaves
     the same server state as marking it resolved once.

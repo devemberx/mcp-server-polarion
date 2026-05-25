@@ -732,29 +732,6 @@ class WorkItemUpdateResult(BaseModel):
     )
 
 
-class CommentResult(BaseModel):
-    """Result of an ``add_document_comment`` operation."""
-
-    created: bool = Field(
-        description=(
-            "True if the comment was actually created. False when dry_run is True."
-        ),
-    )
-    dry_run: bool = Field(
-        description="Whether this was a dry-run (preview only, no mutation).",
-    )
-    comment_id: str | None = Field(
-        description=("ID of the created comment. None when dry_run is True."),
-    )
-    payload_preview: dict[str, JsonValue] | None = Field(
-        description=(
-            "JSON:API request payload that was (or would be) sent. "
-            "Usually populated for dry-run previews and may be None "
-            "after a successful real operation."
-        ),
-    )
-
-
 class DocumentCommentsCreateResult(BaseModel):
     """Result of a ``create_document_comments`` operation."""
 
@@ -1036,7 +1013,7 @@ class DocumentUpdateResult(BaseModel):
 
 
 __all__: list[str] = [
-    "CommentResult",
+    "DocumentComment",
     "DocumentCommentSpec",
     "DocumentCommentUpdateResult",
     "DocumentCommentsCreateResult",
@@ -1046,6 +1023,7 @@ __all__: list[str] = [
     "DocumentReadResult",
     "DocumentSummary",
     "DocumentUpdateResult",
+    "EnumOption",
     "Hyperlink",
     "JsonValue",
     "PaginatedResult",
@@ -1055,6 +1033,8 @@ __all__: list[str] = [
     "WorkItemLink",
     "WorkItemLinkRef",
     "WorkItemLinkSpec",
+    "WorkItemLinkUpdateResult",
+    "WorkItemLinkUpdateSpec",
     "WorkItemLinksCreateResult",
     "WorkItemLinksDeleteResult",
     "WorkItemMoveResult",

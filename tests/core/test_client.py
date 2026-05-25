@@ -6,6 +6,7 @@ is needed.  The client uses ``write_delay=0`` to avoid sleeping.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from unittest.mock import patch
 
@@ -516,6 +517,77 @@ class TestRetry:
 
             assert result == {"data": "ok"}
             assert route.call_count == 3
+
+
+class TestSerialization:
+    """Concurrent callers must serialise through PolarionClient's lock."""
+
+    async def test_concurrent_requests_run_sequentially(self) -> None:
+        """Two ``client.get`` calls dispatched together must not overlap."""
+        in_flight = 0
+        max_in_flight = 0
+
+        async def _record(request: httpx.Request) -> httpx.Response:
+            nonlocal in_flight, max_in_flight
+            in_flight += 1
+            max_in_flight = max(max_in_flight, in_flight)
+            # Yield so the event loop can wake the other coroutine; without the
+            # lock both calls would reach this point and ``max_in_flight`` would
+            # rise to 2.
+            await asyncio.sleep(0)
+            in_flight -= 1
+            return httpx.Response(200, json={"data": []})
+
+        with respx.mock(base_url=BASE) as mock:
+            route = mock.get("/projects").mock(side_effect=_record)
+
+            async with PolarionClient(_config(), write_delay=0) as client:
+                await asyncio.gather(
+                    client.get("/projects"),
+                    client.get("/projects"),
+                )
+
+            assert route.call_count == 2
+            assert max_in_flight == 1
+
+    async def test_write_delay_keeps_lock_held(self) -> None:
+        """A GET dispatched during a POST's write_delay must wait, not overlap.
+
+        The write_delay sleep runs inside the request lock — otherwise a
+        second caller could slip in during Polarion's propagation window
+        and defeat the "no concurrent requests" guarantee. Verified by
+        timing: the GET must start at least ``write_delay`` after the POST.
+        """
+        post_start: list[float] = []
+        get_start: list[float] = []
+
+        async def _on_post(request: httpx.Request) -> httpx.Response:
+            post_start.append(asyncio.get_running_loop().time())
+            return httpx.Response(201, json={"data": {"id": "MCPT-1"}})
+
+        async def _on_get(request: httpx.Request) -> httpx.Response:
+            get_start.append(asyncio.get_running_loop().time())
+            return httpx.Response(200, json={"data": []})
+
+        write_delay = 0.2
+
+        with respx.mock(base_url=BASE) as mock:
+            mock.post("/projects/p/workitems").mock(side_effect=_on_post)
+            mock.get("/projects").mock(side_effect=_on_get)
+
+            async with PolarionClient(_config(), write_delay=write_delay) as client:
+                await asyncio.gather(
+                    client.post("/projects/p/workitems", json={}),
+                    client.get("/projects"),
+                )
+
+        assert post_start and get_start
+        # Allow a small scheduling slack so the assertion isn't flaky on
+        # slow CI workers; the real margin is full ``write_delay``.
+        assert get_start[0] - post_start[0] >= write_delay * 0.9, (
+            f"GET started {get_start[0] - post_start[0]:.3f}s after POST; "
+            f"expected ≥ {write_delay * 0.9:.3f}s (write_delay held by lock)."
+        )
 
 
 # ---------------------------------------------------------------------------

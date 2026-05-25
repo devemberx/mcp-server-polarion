@@ -37,6 +37,7 @@ from mcp_server_polarion.models import (
     WorkItemUpdateResult,
 )
 from mcp_server_polarion.server import mcp
+from mcp_server_polarion.tools import _helpers as _helpers_mod
 from mcp_server_polarion.tools import write as _write_mod
 
 # In FastMCP 3.0, @mcp.tool returns the original function unchanged
@@ -1836,6 +1837,31 @@ class TestUpdateWorkItemHappyPath:
         assert result.changes["title"] == "t"
         assert result.changes["custom_fields"] == {"riskLevel": "high"}
 
+    async def test_changes_custom_fields_is_independent_of_input(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Mutating the caller's dict (or its nested rich-text dict) after the
+        # call must not bleed into the returned ``changes`` snapshot.
+        mock_client.patch.return_value = {}
+        mock_client.get.return_value = _make_get_response()
+
+        rich = {"type": "text/html", "value": "<p>original</p>"}
+        customs: dict[str, object] = {"reviewerNote": rich, "riskLevel": "high"}
+
+        result = await _call_update(
+            mock_ctx,
+            title="t",
+            custom_fields=customs,
+        )
+
+        customs["riskLevel"] = "low"
+        rich["value"] = "<p>mutated</p>"
+
+        recorded = cast(dict[str, object], result.changes["custom_fields"])
+        assert recorded["riskLevel"] == "high"
+        recorded_note = cast(dict[str, object], recorded["reviewerNote"])
+        assert recorded_note["value"] == "<p>original</p>"
+
     async def test_dry_run_preview_includes_custom_fields(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
@@ -2535,6 +2561,30 @@ class TestUpdateDocumentHappyPath:
             )
         mock_client.patch.assert_not_called()
 
+    @pytest.mark.parametrize("whitespace", ["   ", "\n", "\t", "\n\n  \t"])
+    async def test_home_page_content_html_whitespace_raises(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        whitespace: str,
+    ) -> None:
+        """Whitespace-only strings strip to '' on the server, so reject too."""
+        with pytest.raises(ValueError, match="would wipe"):
+            await update_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="S",
+                document_name="D",
+                title=None,
+                status=None,
+                type=None,
+                home_page_content_html=whitespace,
+                custom_fields=None,
+                workflow_action=None,
+                dry_run=False,
+            )
+        mock_client.patch.assert_not_called()
+
     async def test_home_page_content_html_alone_passes_has_attrs_guard(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
@@ -3201,6 +3251,55 @@ class TestCreateDocumentHappyPath:
         )
 
         assert result.document_name == "Folder/Sub/Doc"
+
+    async def test_invalidates_documents_cache_on_success(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """``create_document`` drops the project's docs cache entry on 201."""
+        _helpers_mod.store_cached_documents("MyProj", [("_default", "OldDoc")])
+        mock_client.post.return_value = {
+            "data": [{"type": "documents", "id": "MyProj/_default/MySpec"}]
+        }
+
+        await create_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="_default",
+            module_name="MySpec",
+            title="t",
+            type="generic",
+            status=None,
+            home_page_content=None,
+            custom_fields=None,
+            dry_run=False,
+        )
+
+        assert _helpers_mod.get_cached_documents("MyProj") is None
+
+    async def test_does_not_invalidate_cache_on_failure(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Cache is preserved when the POST raises — no half-state change."""
+        _helpers_mod.store_cached_documents("MyProj", [("_default", "OldDoc")])
+        mock_client.post.side_effect = PolarionError("boom", status_code=500)
+
+        with pytest.raises(RuntimeError):
+            await create_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="_default",
+                module_name="MySpec",
+                title="t",
+                type="generic",
+                status=None,
+                home_page_content=None,
+                custom_fields=None,
+                dry_run=False,
+            )
+
+        cached = _helpers_mod.get_cached_documents("MyProj")
+        assert cached == [("_default", "OldDoc")]
+        _helpers_mod.invalidate_documents_cache("MyProj")
 
 
 class TestCreateDocumentErrorMapping:
