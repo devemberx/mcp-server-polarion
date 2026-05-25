@@ -40,8 +40,8 @@ from mcp_server_polarion.server import mcp
 from mcp_server_polarion.tools import _helpers as _helpers_mod
 from mcp_server_polarion.tools import write as _write_mod
 
-# In FastMCP 3.0, @mcp.tool returns the original function unchanged
-# (not a FunctionTool wrapper), so we reference them directly.
+# ``@mcp.tool`` returns the original function unchanged (not a FunctionTool
+# wrapper), so the tool callables are referenced directly.
 create_document = _write_mod.create_document
 create_document_comments = _write_mod.create_document_comments
 create_work_item = _write_mod.create_work_item
@@ -706,11 +706,6 @@ class TestCreateWorkItemFieldValidation:
             adapter.validate_python("x" * (2_000_000 + 1))
 
 
-# ===========================================================================
-# move_work_item_to_document
-# ===========================================================================
-
-
 class TestBuildMoveToDocumentPayload:
     """Tests for the private ``_build_move_to_document_payload`` helper."""
 
@@ -1035,11 +1030,6 @@ class TestMoveWorkItemToDocumentFieldValidation:
         assert self._adapter_for("work_item_id").validate_python("MCPT-1") == "MCPT-1"
 
 
-# ===========================================================================
-# move_work_item_from_document
-# ===========================================================================
-
-
 class TestMoveWorkItemFromDocumentDryRun:
     """Tests for ``move_work_item_from_document`` with ``dry_run=True``."""
 
@@ -1196,11 +1186,6 @@ class TestMoveWorkItemFromDocumentFieldValidation:
 
     def test_work_item_id_accepts_non_empty(self) -> None:
         assert self._adapter_for("work_item_id").validate_python("MCPT-1") == "MCPT-1"
-
-
-# ===========================================================================
-# update_work_item
-# ===========================================================================
 
 
 class TestBuildUpdateWorkItemPayload:
@@ -2053,11 +2038,6 @@ class TestUpdateWorkItemFieldValidation:
         # 2 MiB + 1 char is rejected.
         with pytest.raises(ValidationError):
             adapter.validate_python("x" * (2_000_000 + 1))
-
-
-# ===========================================================================
-# update_document
-# ===========================================================================
 
 
 class TestBuildUpdateDocumentPayload:
@@ -2919,11 +2899,6 @@ class TestUpdateDocumentPitfallDocumentation:
             "update_document docstring must surface that the work item's module "
             "relationship stays unset after a macro <div> injection"
         )
-
-
-# ===========================================================================
-# create_document
-# ===========================================================================
 
 
 class TestBuildCreateDocumentPayload:
@@ -4444,11 +4419,6 @@ class TestUpdateWorkItemLinksFieldValidation:
         assert result.updated is True
 
 
-# ---------------------------------------------------------------------------
-# create_document_comments tests
-# ---------------------------------------------------------------------------
-
-
 class TestBuildDocumentCommentsPayload:
     """Unit tests for the private ``_build_document_comments_payload`` helper."""
 
@@ -4855,11 +4825,6 @@ class TestCreateDocumentCommentsFieldValidation:
         result = self._adapter_for("comments").validate_python(specs)
         assert isinstance(result, list)
         assert len(result) == 1
-
-
-# ---------------------------------------------------------------------------
-# update_document_comment
-# ---------------------------------------------------------------------------
 
 
 class TestBuildDocumentCommentUpdatePayload:

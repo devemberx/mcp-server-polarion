@@ -13,10 +13,6 @@ from mcp_server_polarion.utils.html import (
     stamp_block_ids,
 )
 
-# ---------------------------------------------------------------------------
-# html_to_markdown
-# ---------------------------------------------------------------------------
-
 
 class TestHtmlToMarkdown:
     """Verify HTML → Markdown conversion."""
@@ -441,11 +437,6 @@ class TestHtmlToMarkdownPolarionRteLinks:
         assert "polarion:Design/Bracket%20%5BDoc%5D" in result
 
 
-# ---------------------------------------------------------------------------
-# markdown_to_html
-# ---------------------------------------------------------------------------
-
-
 class TestMarkdownToHtml:
     """Verify Markdown → HTML conversion."""
 
@@ -545,11 +536,6 @@ class TestMarkdownToHtml:
         # html_inline rule is disabled → inline HTML is HTML-escaped, not live
         assert "<a onclick=" not in result  # no executable attribute
         assert "&lt;a" in result  # tag is safely encoded as text
-
-
-# ---------------------------------------------------------------------------
-# sanitize_html
-# ---------------------------------------------------------------------------
 
 
 class TestSanitizeHtml:
@@ -699,11 +685,6 @@ class TestSanitizeHtml:
         assert "<font>" not in result
         assert "<marquee>" not in result
         assert "Text" in result
-
-
-# ---------------------------------------------------------------------------
-# Round-trip consistency
-# ---------------------------------------------------------------------------
 
 
 class TestRoundTrip:

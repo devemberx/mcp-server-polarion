@@ -69,11 +69,6 @@ class TestExceptionRaiseAndCatch:
             raise PolarionNotFoundError("gone", status_code=404)
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 @contextmanager
 def _raises_polarion_error(
     expected_type: type[PolarionError],

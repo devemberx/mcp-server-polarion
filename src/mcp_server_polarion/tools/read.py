@@ -1,18 +1,13 @@
 """Read-only MCP tools for querying Polarion ALM.
 
-Eleven tools that retrieve projects, documents, work items, and their
-relationships.  Every tool returns Pydantic models -- never raw ``dict``.
+Body fields use one of two formats depending on the tool's purpose:
 
-Body fields use two different formats depending on the tool's purpose:
-
-* **Round-trip paths** -- ``get_work_item`` and ``get_document`` return
-  raw Polarion HTML (``description_html``, ``content_html``). Same shape
-  round-trips back through the matching ``update_*`` tool without lossy
-  Markdown conversion.
-* **Synthesis paths** -- ``read_document`` and ``read_document_parts``
-  convert HTML to Markdown via ``html_to_markdown()`` for LLM
-  consumption. Output from these tools is read-only and cannot be fed
-  back to write tools.
+* **Round-trip paths** (``get_work_item``, ``get_document``) return raw
+  Polarion HTML so the value round-trips through the matching ``update_*``
+  tool without lossy Markdown conversion.
+* **Synthesis paths** (``read_document``, ``read_document_parts``,
+  ``read_work_item``) convert HTML to Markdown for LLM consumption; the
+  output is read-only and cannot be fed back to write tools.
 """
 
 from __future__ import annotations
@@ -520,11 +515,6 @@ async def _discover_documents(
     sorted_docs = sorted(documents)
     store_cached_documents(project_id, sorted_docs)
     return sorted_docs
-
-
-# ---------------------------------------------------------------------------
-# Read tools
-# ---------------------------------------------------------------------------
 
 
 @mcp.tool(
@@ -1280,8 +1270,8 @@ async def read_document(  # noqa: PLR0913
         PermissionError: Token lacks permission.
         RuntimeError: Other Polarion API errors.
     """
-    # FastMCP 3.0's ``@mcp.tool()`` returns the original function unchanged,
-    # so direct invocation forwards both the fetch and the error mapping.
+    # ``@mcp.tool()`` returns the original function unchanged, so direct
+    # invocation forwards both the fetch and the error mapping.
     page = await read_document_parts(
         ctx,
         project_id=project_id,
@@ -1656,10 +1646,10 @@ async def read_work_item(
         PermissionError: If the token lacks permissions.
         RuntimeError: On unexpected Polarion API errors.
     """
-    # Delegate fetch + error mapping to ``get_work_item``; FastMCP 3.0's
-    # ``@mcp.tool`` returns the original function unchanged, so the call
-    # forwards directly. Pulling the raw HTML lets the converter run
-    # without an extra round trip.
+    # Delegate fetch + error mapping to ``get_work_item``; ``@mcp.tool``
+    # returns the original function unchanged, so the call forwards
+    # directly. Pulling the raw HTML lets the converter run without an
+    # extra round trip.
     detail = await get_work_item(
         ctx,
         project_id=project_id,
