@@ -12,6 +12,7 @@ inside ``read_document_parts``) and lives in ``tools.read``.
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
 from typing import Final, Literal, TypedDict, cast
@@ -233,6 +234,33 @@ def encode_path_segment(segment: str) -> str:
         URL-encoded segment safe for use in URL paths.
     """
     return quote(segment, safe="")
+
+
+# Polarion work item IDs are project-prefix + hyphen + digits (e.g. ``MCPT-001``);
+# the broader pattern below also accepts underscores so this stays a thin guard,
+# not a format validator. Anything outside the set is rejected when the id is
+# substituted into a Lucene query string (``linkedWorkItems:<id>``).
+_WORK_ITEM_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def validate_work_item_id_for_lucene(work_item_id: str) -> None:
+    """Reject work item IDs that would break a Lucene ``field:<id>`` clause.
+
+    Polarion's Lucene parser treats ``+ - && || ! ( ) { } [ ] ^ " ~ * ? : \\ /``
+    and whitespace as operators. Embedding an unescaped ``work_item_id`` into
+    ``linkedWorkItems:<id>`` would let an adversarial value reshape the query.
+    Polarion IDs never contain those characters, so a hard reject is safer
+    than escape arithmetic.
+
+    Raises:
+        ValueError: ``work_item_id`` contains characters outside ``[A-Za-z0-9_-]``.
+    """
+    if not _WORK_ITEM_ID_PATTERN.match(work_item_id):
+        msg = (
+            f"work_item_id '{work_item_id}' contains characters outside "
+            "[A-Za-z0-9_-]; cannot embed safely in a Lucene query."
+        )
+        raise ValueError(msg)
 
 
 def build_included_work_item_map(
@@ -709,4 +737,5 @@ __all__: list[str] = [
     "split_module_id",
     "store_cached_documents",
     "summary_to_back_link",
+    "validate_work_item_id_for_lucene",
 ]

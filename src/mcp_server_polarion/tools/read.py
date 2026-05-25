@@ -69,6 +69,7 @@ from mcp_server_polarion.tools._helpers import (
     split_module_id,
     store_cached_documents,
     summary_to_back_link,
+    validate_work_item_id_for_lucene,
 )
 from mcp_server_polarion.utils import html_to_markdown
 
@@ -1818,6 +1819,7 @@ async def _get_back_link_page(
     page_number: int,
 ) -> PaginatedResult[WorkItemLink]:
     """Fetch a single page of back (incoming) links via Lucene query."""
+    validate_work_item_id_for_lucene(work_item_id)
     try:
         response = await client.get(
             f"/projects/{encode_path_segment(project_id)}/workitems",

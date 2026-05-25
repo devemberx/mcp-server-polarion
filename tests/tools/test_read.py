@@ -3852,6 +3852,36 @@ class TestListWorkItemLinks:
         assert direction_schema["default"] == "forward"
         assert direction_schema["enum"] == ["forward", "back"]
 
+    @pytest.mark.parametrize(
+        "bad_id",
+        [
+            "MCPT-1 OR title:*",
+            "MCPT-1:foo",
+            "*MCPT*",
+            "MCPT-1\\",
+            "MCPT-1/MCPT-2",
+            "MCPT 1",
+            "",
+        ],
+    )
+    async def test_back_direction_rejects_lucene_metacharacters(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        bad_id: str,
+    ) -> None:
+        """Back-link Lucene query is built from the raw id; bad chars must abort."""
+        with pytest.raises(ValueError, match="Lucene"):
+            await list_work_item_links(
+                mock_ctx,
+                project_id="proj1",
+                work_item_id=bad_id,
+                direction="back",
+                page_size=10,
+                page_number=1,
+            )
+        mock_client.get.assert_not_called()
+
 
 class TestListDocumentComments:
     """Tests for the ``list_document_comments`` tool."""
