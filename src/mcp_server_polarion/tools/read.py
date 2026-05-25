@@ -534,7 +534,7 @@ async def _discover_documents(
 
     while True:
         response = await client.get(
-            f"/projects/{project_id}/workitems",
+            f"/projects/{encode_path_segment(project_id)}/workitems",
             params={**base_params, "page[number]": page_number},
         )
         data = response.get("data", [])
@@ -795,11 +795,10 @@ async def get_document(
         RuntimeError: Other Polarion API errors.
     """
     client = get_client(ctx)
-    encoded_name = encode_path_segment(document_name)
     path = (
-        f"/projects/{project_id}"
+        f"/projects/{encode_path_segment(project_id)}"
         f"/spaces/{encode_path_segment(space_id)}"
-        f"/documents/{encoded_name}"
+        f"/documents/{encode_path_segment(document_name)}"
     )
 
     # ``@all`` is the only sparse-fieldset token this Polarion server
@@ -1190,11 +1189,10 @@ async def read_document_parts(  # noqa: PLR0913
         RuntimeError: Other Polarion API errors.
     """
     client = get_client(ctx)
-    encoded_name = encode_path_segment(document_name)
     path = (
-        f"/projects/{project_id}"
+        f"/projects/{encode_path_segment(project_id)}"
         f"/spaces/{encode_path_segment(space_id)}"
-        f"/documents/{encoded_name}/parts"
+        f"/documents/{encode_path_segment(document_name)}/parts"
     )
 
     try:
@@ -1499,7 +1497,7 @@ async def list_work_items(
         params["query"] = query
     try:
         response = await client.get(
-            f"/projects/{project_id}/workitems",
+            f"/projects/{encode_path_segment(project_id)}/workitems",
             params=params,
         )
     except PolarionNotFoundError as exc:
@@ -1606,7 +1604,10 @@ async def get_work_item(
         RuntimeError: On unexpected Polarion API errors.
     """
     client = get_client(ctx)
-    path = f"/projects/{project_id}/workitems/{work_item_id}"
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/workitems/{encode_path_segment(work_item_id)}"
+    )
     try:
         response = await client.get(
             path,
@@ -1795,7 +1796,10 @@ async def _get_forward_link_page(
     page_number: int,
 ) -> PaginatedResult[WorkItemLink]:
     """Fetch a single page of forward (outgoing) links."""
-    path = f"/projects/{project_id}/workitems/{work_item_id}/linkedworkitems"
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/workitems/{encode_path_segment(work_item_id)}/linkedworkitems"
+    )
     try:
         response = await client.get(
             path,
@@ -1851,7 +1855,7 @@ async def _get_back_link_page(
     """Fetch a single page of back (incoming) links via Lucene query."""
     try:
         response = await client.get(
-            f"/projects/{project_id}/workitems",
+            f"/projects/{encode_path_segment(project_id)}/workitems",
             params={
                 "query": f"linkedWorkItems:{work_item_id}",
                 "fields[workitems]": WORK_ITEM_LIST_FIELDS,
@@ -1951,7 +1955,7 @@ async def list_document_comments(  # noqa: PLR0913
     """
     client = get_client(ctx)
     path = (
-        f"/projects/{project_id}"
+        f"/projects/{encode_path_segment(project_id)}"
         f"/spaces/{encode_path_segment(space_id)}"
         f"/documents/{encode_path_segment(document_name)}"
         "/comments"
