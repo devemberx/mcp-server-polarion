@@ -23,7 +23,8 @@ from fastmcp.exceptions import ToolError
 import mcp_server_polarion.core.client as _client_mod
 from mcp_server_polarion.server import mcp
 
-_BASE = "https://polarion.example.com/polarion/rest/v1"
+_POLARION_HOST = "https://polarion.example.com"
+_BASE = f"{_POLARION_HOST}/polarion/rest/v1"
 _MCPClient = Client[FastMCPTransport]
 
 _READ_TOOL_NAMES: frozenset[str] = frozenset(
@@ -63,8 +64,11 @@ EXPECTED_TOOL_NAMES: frozenset[str] = _READ_TOOL_NAMES | _WRITE_TOOL_NAMES
 @pytest.fixture
 def _polarion_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Set env vars the lifespan reads and zero out write-delay sleeps."""
-    monkeypatch.setenv("POLARION_URL", "https://polarion.example.com")
+    monkeypatch.setenv("POLARION_URL", _POLARION_HOST)
     monkeypatch.setenv("POLARION_TOKEN", "test-token-secret")
+    # ``PolarionClient`` is constructed inside ``_lifespan`` so its
+    # ``write_delay`` constructor arg is unreachable from the test; patch
+    # the module-level default instead to keep the write-tool case fast.
     monkeypatch.setattr(_client_mod, "_WRITE_DELAY_SECONDS", 0.0)
 
 
@@ -104,6 +108,14 @@ class TestToolMetadata:
 
 class TestSchemaValidation:
     """Pydantic Field constraints must be enforced at the JSON Schema layer."""
+
+    async def test_page_size_schema_caps_at_100(self, mcp_client: _MCPClient) -> None:
+        tool = next(
+            t for t in await mcp_client.list_tools() if t.name == "list_projects"
+        )
+        page_size_schema = tool.inputSchema["properties"]["page_size"]
+        assert page_size_schema["maximum"] == 100
+        assert page_size_schema["minimum"] == 1
 
     async def test_page_size_above_max_rejected(self, mcp_client: _MCPClient) -> None:
         with pytest.raises(ToolError):
@@ -156,6 +168,19 @@ class TestEndToEndInvocation:
         assert body["has_more"] is False
         assert body["items"][0]["id"] == "P1"
         assert body["items"][0]["name"] == "Proj One"
+
+    async def test_polarion_not_found_surfaces_as_tool_error(
+        self, mcp_client: _MCPClient
+    ) -> None:
+        with respx.mock(base_url=_BASE, assert_all_called=False) as mock:
+            mock.get("/projects/P1/workitems/P1-1").mock(
+                return_value=httpx.Response(404, json={"errors": []})
+            )
+            with pytest.raises(ToolError):
+                await mcp_client.call_tool(
+                    "get_work_item",
+                    {"project_id": "P1", "work_item_id": "P1-1"},
+                )
 
     async def test_create_work_item_dry_run(self, mcp_client: _MCPClient) -> None:
         result = await mcp_client.call_tool(
