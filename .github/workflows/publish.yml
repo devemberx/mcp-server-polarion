@@ -19,7 +19,7 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Set up Python
-        run: uv python install 3.12
+        run: uv python install 3.13
 
       - name: Build package
         run: uv build
@@ -43,7 +43,7 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Set up Python
-        run: uv python install 3.12
+        run: uv python install 3.13
 
       - name: Build package
         run: uv build
