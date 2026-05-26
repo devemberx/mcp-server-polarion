@@ -6,10 +6,10 @@ readme = "README.md"
 authors = [{ name = "devemberx", email = "devemberx@gmail.com" }]
 license = { file = "LICENSE" }
 classifiers = [
-    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "License :: OSI Approved :: MIT License",
 ]
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 dependencies = [
     "fastmcp>=3.0,<4",
     "httpx>=0.27",
@@ -40,7 +40,7 @@ build-backend = "hatchling.build"
 packages = ["src/mcp_server_polarion"]
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py313"
 line-length = 88
 
 [tool.ruff.lint]
@@ -50,7 +50,7 @@ select = ["E", "W", "F", "I", "UP", "B", "SIM", "ANN", "PL", "C4", "PTH", "RUF"]
 "tests/**" = ["ANN", "PLR"]
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.13"
 strict = true
 warn_unreachable = true
 files = ["src/mcp_server_polarion"]
