@@ -122,6 +122,8 @@ PATCH bodies need at least one `attributes` / `relationships` entry — Polarion
 
 `pytest-asyncio` in `mode=auto`. **Tool tests** (`tests/tools/`) call tool functions directly with an injected `mock_client` (FastMCP 3.0's `@mcp.tool` returns the original function unchanged). **Client tests** (`tests/core/test_client.py`) use `respx` to mock `httpx`. Shared fixtures live in `tests/conftest.py`; pass `write_delay=0` for real `PolarionClient` instances. Pydantic `Field` constraints (`min_length` / `ge` / `le`) bypass FastMCP's JSON Schema on direct calls — verify them by reconstructing a `TypeAdapter` from `Annotated[type, FieldInfo]` (see `TestCreateWorkItemFieldValidation`).
 
+**Transport tests** (`tests/test_mcp_transport.py`) drive the server through `fastmcp.Client(mcp)` in-memory transport so the full path — registration → JSON Schema → lifespan → `get_client(ctx)` → real `PolarionClient` → mocked HTTP — runs end to end. They cover four gaps the direct-call tool tests cannot see: missing imports in `tools/__init__.py` (silent tool drop), JSON Schema projection of Pydantic `Field` bounds, lifespan client injection, and tool description fidelity. Adding a new `@mcp.tool` requires updating `EXPECTED_TOOL_NAMES` — this is the forcing function. The fixture monkeypatches `_WRITE_DELAY_SECONDS` rather than passing `write_delay=0` because the lifespan constructs `PolarionClient` itself, leaving the constructor seam unreachable.
+
 ## Repo Conventions
 
 Branch strategy, full commit rules, and PR workflow are in [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md). Quick reference for commit/PR generation:
