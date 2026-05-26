@@ -1,0 +1,42 @@
+name: Security Scan
+
+on:
+  schedule:
+    - cron: '0 18 * * *'   # daily 03:00 KST (18:00 UTC)
+  workflow_dispatch:
+
+jobs:
+  mcp-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install project
+        run: uv sync --dev
+
+      - name: Install mcp-scanner
+        run: uv tool install --python 3.13 cisco-ai-mcp-scanner
+
+      - name: YARA scan (stdio)
+        env:
+          POLARION_URL: https://example.invalid
+          POLARION_TOKEN: dummy
+        run: |
+          mcp-scanner --analyzers yara --format raw --log-level error \
+            stdio --stdio-command uv \
+                  --stdio-arg run --stdio-arg mcp-server-polarion \
+            | tee scan-result.json
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-scan-report
+          path: scan-result.json
+          retention-days: 30
