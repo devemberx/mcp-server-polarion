@@ -282,8 +282,11 @@ class FakePolarion:
                 200, json={"data": data, "meta": {"totalCount": len(data)}}
             )
 
-        # Single document: /projects/{p}/spaces/{s}/documents/{d}
-        if "/documents/" in path or path.endswith("/documents/" + DOC):
+        # Single document: /projects/{p}/spaces/{s}/documents/{d}.
+        # Match exactly on FakeDoc — a broad "/documents/" in path would
+        # claim every name as existing, hiding bugs in cases that probe
+        # alternate names against list_documents.
+        if path.endswith(f"/spaces/{SPACE}/documents/{DOC}"):
             return httpx.Response(200, json={"data": self._document_resource()})
 
         return httpx.Response(404, json={"errors": [{"status": "404", "path": path}]})
@@ -297,8 +300,9 @@ class FakePolarion:
                 body = None
         self.mutations.append({"method": request.method, "path": path, "json": body})
 
-        # POSTs that create a resource must echo an id (tool layer requires it).
-        if request.method == "POST" and not path.endswith("/actions/moveFromDocument"):
+        # Resource-creating POSTs must echo an id (tool layer requires it).
+        # Action POSTs (/actions/...) and PATCH / DELETE fall through to 204.
+        if request.method == "POST":
             if path.endswith("/workitems"):
                 return httpx.Response(
                     201,
@@ -332,7 +336,6 @@ class FakePolarion:
                         ]
                     },
                 )
-        # Actions and PATCH / DELETE: accept with no content.
         return httpx.Response(204)
 
     def install(self, router: respx.MockRouter) -> None:
