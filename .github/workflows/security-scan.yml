@@ -60,3 +60,25 @@ jobs:
           path: scan-result.json
           retention-days: 30
           if-no-files-found: warn
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scan dependencies for known CVEs (osv-scanner)
+        run: |
+          set -o pipefail
+          curl -sSL -o osv-scanner \
+            https://github.com/google/osv-scanner/releases/download/v2.3.8/osv-scanner_linux_amd64
+          chmod +x osv-scanner
+          ./osv-scanner scan source --lockfile uv.lock | tee osv-result.txt
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: osv-scan-report
+          path: osv-result.txt
+          retention-days: 30
+          if-no-files-found: warn

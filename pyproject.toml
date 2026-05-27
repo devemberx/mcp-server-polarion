@@ -44,10 +44,10 @@ target-version = "py313"
 line-length = 88
 
 [tool.ruff.lint]
-select = ["E", "W", "F", "I", "UP", "B", "SIM", "ANN", "PL", "C4", "PTH", "RUF"]
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "ANN", "PL", "C4", "PTH", "RUF", "S"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["ANN", "PLR"]
+"tests/**" = ["ANN", "PLR", "S101", "S105", "S106"]
 
 [tool.mypy]
 python_version = "3.13"
