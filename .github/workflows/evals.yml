@@ -1,0 +1,44 @@
+name: Tier-1 Evals
+
+# Manual pre-deploy gate run. Same checks as the publish gate, but triggered
+# on demand so results can be reviewed before tagging a release.
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "LiteLLM model id (EVAL_MODEL)"
+        default: "openai/gpt-4o-mini"
+        type: string
+      runs:
+        description: "Runs per case (EVAL_RUNS)"
+        default: "10"
+        type: string
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install eval dependencies
+        run: uv sync --group evals
+
+      - name: Run Tier-1 gate
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          EVAL_MODEL: ${{ inputs.model }}
+          EVAL_RUNS: ${{ inputs.runs }}
+        run: uv run python -m evals.run
+
+      - name: Upload Tier-1 report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tier1-report
+          path: evals/reports/
