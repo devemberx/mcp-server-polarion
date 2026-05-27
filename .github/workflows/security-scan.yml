@@ -24,16 +24,13 @@ jobs:
       - name: Install project
         run: uv sync --dev
 
-      - name: Install mcp-scanner
-        run: uv tool install --python 3.13 cisco-ai-mcp-scanner
-
       - name: YARA scan (stdio)
         env:
           POLARION_URL: https://example.invalid
           POLARION_TOKEN: dummy
         run: |
           set -o pipefail
-          uv tool run --python 3.13 mcp-scanner \
+          uv tool run --python 3.13 --from cisco-ai-mcp-scanner mcp-scanner \
             --analyzers yara --format raw --log-level error \
             stdio --stdio-command uv \
                   --stdio-arg run --stdio-arg mcp-server-polarion \
