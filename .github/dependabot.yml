@@ -4,13 +4,17 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-    # open-pull-requests-limit: 0 disables routine version-update PRs;
-    # security updates are unaffected and stay enabled.
-    open-pull-requests-limit: 0
+    open-pull-requests-limit: 10
     commit-message:
       prefix: "chore(deps)"
     groups:
-      security:
-        applies-to: security-updates
-        patterns:
-          - "*"
+      production:
+        dependency-type: "production"
+        update-types:
+          - "minor"
+          - "patch"
+      development:
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
