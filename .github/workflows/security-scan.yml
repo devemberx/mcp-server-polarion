@@ -62,6 +62,9 @@ jobs:
           if-no-files-found: warn
 
   audit:
+    # Dependabot already re-checks deps against advisories on its own cadence;
+    # only run the lockfile audit on PR/push (via workflow_call) and manual dispatch.
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
