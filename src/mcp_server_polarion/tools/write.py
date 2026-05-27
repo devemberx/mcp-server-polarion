@@ -676,7 +676,7 @@ async def create_work_item(  # noqa: PLR0913
     ghost values that look real on later reads but never match Lucene
     queries. ``priority`` is the only partial exception: a non-numeric
     string coerces to the project default, but a numeric string outside
-    the enum set (e.g. ``"999.0"``) also stores verbatim. Resolve valid
+    the enum set (e.g. ``"999.0"``) also persists verbatim. Resolve valid
     ids first via ``list_work_item_enum_options(project_id, field_id,
     work_item_type)``. ``custom_fields`` is the same story: unknown
     field IDs — including brand-new IDs that no work item of this type
@@ -879,7 +879,7 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
 
     ``hyperlinks`` and ``assignee_ids`` REPLACE the existing lists (pass
     the full list, not a delta). ``custom_fields`` is partial — omitted
-    keys are preserved. Unknown custom-field IDs are silently stored as
+    keys are preserved. Unknown custom-field IDs silently persist as
     ghost attributes; pass keys from a prior read to avoid creating them.
 
     The ``module`` relationship is NOT exposed here: Polarion rejects
@@ -894,7 +894,7 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     ``status`` / ``severity`` / ``resolution`` writes are NOT validated
     server-side: unknown ids are stored verbatim as ghost values.
     ``priority`` only coerces non-numeric inputs to the project default;
-    numeric strings outside the enum set also store verbatim. Resolve
+    numeric strings outside the enum set also persist verbatim. Resolve
     valid ids first via ``list_work_item_enum_options(project_id,
     field_id, work_item_type)``.
 
