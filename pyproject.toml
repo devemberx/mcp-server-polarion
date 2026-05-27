@@ -31,6 +31,10 @@ dev = [
     "ruff>=0.15",
     "mypy>=2.0",
 ]
+evals = [
+    "strands-agents[litellm]",
+    "strands-agents-evals",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -48,6 +52,9 @@ select = ["E", "W", "F", "I", "UP", "B", "SIM", "ANN", "PL", "C4", "PTH", "RUF",
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["ANN", "PLR", "S101", "S105", "S106"]
+# The eval harness drives third-party agent/LLM types (lots of `Any`) and is
+# not shipped in the wheel; relax the same rules tests get.
+"evals/**" = ["ANN", "PLR", "S101", "S105", "S106", "S603", "S607", "E402"]
 
 [tool.mypy]
 python_version = "3.13"
