@@ -110,30 +110,126 @@ def check_no_resolve_reply(
     return True, "no reply comment patched"
 
 
+_ENUM_FIELDS: frozenset[str] = frozenset({"type", "severity", "status", "priority"})
+
+
+def _enum_option_ids(result: object) -> set[str]:
+    """Extract enum option ids from a list_*_enum_options structured result."""
+    if not isinstance(result, dict):
+        return set()
+    items = result.get("items")
+    if not isinstance(items, list):
+        return set()
+    ids: set[str] = set()
+    for item in items:
+        if isinstance(item, dict):
+            opt_id = item.get("id")
+            if isinstance(opt_id, str):
+                ids.add(opt_id)
+    return ids
+
+
+def _document_summaries(result: object) -> set[tuple[str, str]]:
+    """Extract (space_id, document_name) pairs from a list_documents result."""
+    if not isinstance(result, dict):
+        return set()
+    items = result.get("items")
+    if not isinstance(items, list):
+        return set()
+    pairs: set[tuple[str, str]] = set()
+    for item in items:
+        if isinstance(item, dict):
+            space = item.get("space_id")
+            doc = item.get("document_name")
+            if isinstance(space, str) and isinstance(doc, str):
+                pairs.add((space, doc))
+    return pairs
+
+
 def check_enum_before_create(
     trajectory: Trajectory, _params: dict[str, Any]
 ) -> CheckResult:
-    """create_work_item must be preceded by a list_work_item_enum_options call."""
+    """create_work_item must be preceded by a listing of every enum it sets.
+
+    For each enum-shaped argument the agent supplies on the first
+    ``create_work_item`` (type / severity / status / priority), a prior
+    ``list_work_item_enum_options(field_id=<that field>)`` must have been
+    called AND its result must contain the value the agent went on to use.
+    "Called before" alone is too weak — an agent could list ``type`` once
+    and then ghost an arbitrary severity. Reading the response from the
+    trajectory's recorded result closes the loop.
+    """
     names = _names(trajectory)
     if "create_work_item" not in names:
         return True, "no work item created"
     first_create = names.index("create_work_item")
-    if "list_work_item_enum_options" in names[:first_create]:
-        return True, "enum options resolved before create"
-    return False, "created a work item without first listing enum options"
+    create_args = trajectory[first_create].get("args", {}) or {}
+
+    prior = trajectory[:first_create]
+    listed: dict[str, set[str]] = {}
+    for call in prior:
+        if call.get("name") != "list_work_item_enum_options":
+            continue
+        field_id = (call.get("args", {}) or {}).get("field_id")
+        if isinstance(field_id, str):
+            listed.setdefault(field_id, set()).update(
+                _enum_option_ids(call.get("result"))
+            )
+
+    for field_id in _ENUM_FIELDS:
+        value = create_args.get(field_id)
+        if value is None or value == "":
+            continue
+        if field_id not in listed:
+            return False, (
+                f"created a work item with {field_id}='{value}' but never "
+                f"called list_work_item_enum_options(field_id='{field_id}')"
+            )
+        if isinstance(value, str) and value not in listed[field_id]:
+            return False, (
+                f"created a work item with {field_id}='{value}' which was "
+                f"not in the listed options {sorted(listed[field_id])}"
+            )
+    return True, "every enum used was listed and contained the chosen value"
 
 
 def check_list_before_create_document(
     trajectory: Trajectory, _params: dict[str, Any]
 ) -> CheckResult:
-    """create_document must be preceded by a list_documents uniqueness check."""
+    """create_document must be preceded by a list_documents discovery.
+
+    The discovery's response is also inspected: if the (space_id,
+    document_name) the agent is about to create already appears in the
+    listed pairs, the agent ignored the duplicate warning and the check
+    fails. "Called list_documents" alone passes the buggy "list then
+    create anyway" path; this guards against it.
+    """
     names = _names(trajectory)
     if "create_document" not in names:
         return True, "no document created"
     first_create = names.index("create_document")
-    if "list_documents" in names[:first_create]:
-        return True, "documents listed before create"
-    return False, "created a document without first listing existing documents"
+    create_args = trajectory[first_create].get("args", {}) or {}
+
+    prior = trajectory[:first_create]
+    existing: set[tuple[str, str]] = set()
+    list_calls = 0
+    for call in prior:
+        if call.get("name") != "list_documents":
+            continue
+        list_calls += 1
+        existing |= _document_summaries(call.get("result"))
+
+    if list_calls == 0:
+        return False, "created a document without first listing existing documents"
+
+    space = create_args.get("space_id")
+    doc = create_args.get("document_name")
+    if isinstance(space, str) and isinstance(doc, str) and (space, doc) in existing:
+        return False, (
+            f"created document '{doc}' in space '{space}' even though it "
+            f"already appeared in the prior list_documents response"
+        )
+    return True, "documents listed before create and target name is unique"
 
 
 def check_update_document_ids(
