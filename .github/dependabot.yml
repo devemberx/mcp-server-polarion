@@ -4,16 +4,11 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 10
-    commit-message:
-      prefix: "chore(deps)"
+    # open-pull-requests-limit: 0 disables routine version-update PRs;
+    # security updates are unaffected and stay enabled.
+    open-pull-requests-limit: 0
     groups:
-      dev-dependencies:
-        dependency-type: "development"
-
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-    commit-message:
-      prefix: "ci(deps)"
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
