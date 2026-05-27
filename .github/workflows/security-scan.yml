@@ -68,13 +68,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Export production-only requirements
+        # Scan only the deps that ship in the wheel. Dev/eval-only groups
+        # (ruff, mypy, strands-agents, ...) never reach end users via PyPI
+        # so their CVEs should not gate publish; Dependabot still tracks
+        # them on its own cadence. --no-hashes is required because the OSV
+        # scanner's pip parser does not read the multiline hash form.
+        run: |
+          uv export --no-dev --no-emit-project --no-hashes \
+            --format requirements-txt > runtime-requirements.txt
+
       - name: Scan dependencies for known CVEs (osv-scanner)
         run: |
           set -o pipefail
           curl -sSL -o osv-scanner \
             https://github.com/google/osv-scanner/releases/download/v2.3.8/osv-scanner_linux_amd64
           chmod +x osv-scanner
-          ./osv-scanner scan source --lockfile uv.lock | tee osv-result.txt
+          ./osv-scanner scan source \
+            --lockfile=requirements.txt:runtime-requirements.txt \
+            | tee osv-result.txt
 
       - name: Upload report
         if: always()
