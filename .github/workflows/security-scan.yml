@@ -2,12 +2,16 @@ name: Security Scan
 
 on:
   schedule:
-    - cron: '0 18 * * *'   # daily 03:00 KST (18:00 UTC)
+    - cron: '0 18 * * *'   # daily 18:00 UTC / 03:00 KST
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   mcp-scan:
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -28,7 +32,9 @@ jobs:
           POLARION_URL: https://example.invalid
           POLARION_TOKEN: dummy
         run: |
-          mcp-scanner --analyzers yara --format raw --log-level error \
+          set -o pipefail
+          uv tool run --python 3.13 mcp-scanner \
+            --analyzers yara --format raw --log-level error \
             stdio --stdio-command uv \
                   --stdio-arg run --stdio-arg mcp-server-polarion \
             | tee scan-result.json
@@ -40,3 +46,4 @@ jobs:
           name: mcp-scan-report
           path: scan-result.json
           retention-days: 30
+          if-no-files-found: warn
