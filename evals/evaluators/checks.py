@@ -13,6 +13,12 @@ from typing import Any
 
 from bs4 import BeautifulSoup
 
+# Source of truth for which block tags Polarion rejects without a unique id.
+# Imported (not redeclared) so the gate can never drift from the renderer:
+# `stamp_block_ids` skips `<hN>` because Polarion rewrites heading ids on save,
+# so headings must NOT be treated as anchorless here.
+from mcp_server_polarion.utils.html import _BLOCK_TAGS_NEEDING_IDS as _BLOCK_TAGS
+
 Trajectory = list[dict[str, Any]]
 CheckResult = tuple[bool, str]
 
@@ -29,27 +35,6 @@ WRITE_TOOLS: frozenset[str] = frozenset(
         "update_document",
         "create_document_comments",
         "update_document_comment",
-    }
-)
-
-# Block-level tags that Polarion rejects (next GET .../parts → 500) unless each
-# carries a unique non-empty id. `<hN>` is included per this project's server
-# config: headings added via update_document must also be anchored.
-_BLOCK_TAGS: frozenset[str] = frozenset(
-    {
-        "h1",
-        "h2",
-        "h3",
-        "h4",
-        "h5",
-        "h6",
-        "p",
-        "ul",
-        "ol",
-        "table",
-        "div",
-        "blockquote",
-        "pre",
     }
 )
 

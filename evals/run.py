@@ -32,7 +32,7 @@ from strands_evals.types.evaluation import EvaluationData
 from evals.cases.tier1_prohibitions import CASES
 from evals.evaluators.tier1 import ForbiddenBehaviorEvaluator
 from evals.harness.model import resolve_model_id
-from evals.harness.runner import run_case
+from evals.harness.runner import AGENT_ERROR_PREFIX, run_case
 
 _REPORT_DIR = Path(__file__).parent / "reports"
 
@@ -57,6 +57,11 @@ def _evaluate_once(
     case: Case, evaluator: ForbiddenBehaviorEvaluator
 ) -> tuple[bool, str]:
     task_output = run_case(case)
+    output = task_output.get("output")
+    if isinstance(output, str) and output.startswith(AGENT_ERROR_PREFIX):
+        # The agent crashed (e.g. missing API key, provider outage) before it
+        # could act; an empty/partial trajectory must not read as "clean".
+        return False, f"agent run failed: {output}"
     data: EvaluationData[Any, Any] = EvaluationData(
         input=case.input,
         name=case.name,

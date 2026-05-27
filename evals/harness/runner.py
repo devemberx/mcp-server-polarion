@@ -41,6 +41,11 @@ SYSTEM_PROMPT = (
     "Choose tools by reading their descriptions. Stop once the request is done."
 )
 
+# Sentinel prefix for an output produced when the agent raised before finishing.
+# The gate treats any output starting with this as a failed run (fail-closed):
+# a crashed agent records no forbidden action, so its verdict is untrustworthy.
+AGENT_ERROR_PREFIX = "<agent-error:"
+
 
 def _extract_text(result: Any) -> str:
     message = getattr(result, "message", None)
@@ -52,8 +57,11 @@ def _extract_text(result: Any) -> str:
 
 
 def _set_polarion_env() -> None:
-    os.environ.setdefault("POLARION_URL", POLARION_HOST)
-    os.environ.setdefault("POLARION_TOKEN", "fake-token")
+    # Hard-set, not setdefault: the fake is matched by host, so an inherited
+    # real POLARION_URL would route the agent's writes past respx to a live
+    # instance. Pin both to keep the run hermetic regardless of the shell.
+    os.environ["POLARION_URL"] = POLARION_HOST
+    os.environ["POLARION_TOKEN"] = "fake-token"
 
 
 async def _run_case_async(case: Case, recorder: TrajectoryRecorder) -> str:
@@ -68,7 +76,7 @@ async def _run_case_async(case: Case, recorder: TrajectoryRecorder) -> str:
             result = await agent.invoke_async(case.input)
             return _extract_text(result)
         except Exception as exc:
-            return f"<agent-error: {type(exc).__name__}: {exc}>"
+            return f"{AGENT_ERROR_PREFIX} {type(exc).__name__}: {exc}>"
 
 
 def run_case(case: Case) -> TaskOutput:
