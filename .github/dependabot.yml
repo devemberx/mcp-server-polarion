@@ -7,6 +7,8 @@ updates:
     # open-pull-requests-limit: 0 disables routine version-update PRs;
     # security updates are unaffected and stay enabled.
     open-pull-requests-limit: 0
+    commit-message:
+      prefix: "chore(deps)"
     groups:
       security:
         applies-to: security-updates
