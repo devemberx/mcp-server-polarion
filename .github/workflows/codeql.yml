@@ -16,7 +16,7 @@ jobs:
     name: CodeQL
     runs-on: ubuntu-latest
     permissions:
-      security-events: write   # upload findings to the code-scanning dashboard
+      security-events: write
       contents: read
     steps:
       - uses: actions/checkout@v4

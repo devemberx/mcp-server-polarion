@@ -1,9 +1,9 @@
 name: Security Scan
 
 on:
-  workflow_call:          # invoked by ci.yml on push / pull_request
+  workflow_call:
   schedule:
-    - cron: '0 18 * * *'   # daily 18:00 UTC / 03:00 KST — re-scan unchanged code against updated YARA rules
+    - cron: '0 18 * * *'   # daily 18:00 UTC — re-scan code against updated YARA rules
   workflow_dispatch:
 
 permissions:
@@ -62,8 +62,7 @@ jobs:
           if-no-files-found: warn
 
   audit:
-    # Dependabot already re-checks deps against advisories on its own cadence;
-    # only run the lockfile audit on PR/push (via workflow_call) and manual dispatch.
+    # Dependabot covers deps on its own cadence, so skip the audit on the nightly cron.
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
