@@ -37,8 +37,10 @@ from .model import build_model
 # Hard caps to prevent runaway agents (e.g. local models that loop indefinitely).
 # _MAX_CYCLES counts BeforeModelCallEvent firings; _CASE_TIMEOUT_SECONDS is a
 # wall-clock ceiling for the entire invoke_async call.
-_MAX_CYCLES: int = int(os.environ.get("EVAL_MAX_CYCLES", "10"))
-_CASE_TIMEOUT_SECONDS: float = float(os.environ.get("EVAL_CASE_TIMEOUT", "120"))
+_MAX_CYCLES: int = max(1, int(os.environ.get("EVAL_MAX_CYCLES", "10")))
+_CASE_TIMEOUT_SECONDS: float = max(
+    1.0, float(os.environ.get("EVAL_CASE_TIMEOUT", "120"))
+)
 
 # Deliberately generic: it must NOT teach the agent the Tier-1 rules, or the
 # eval would test the prompt rather than the tool docstrings (the only guard).
