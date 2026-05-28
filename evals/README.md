@@ -61,6 +61,24 @@ EVAL_MODEL=ollama_chat/qwen3.5:9b-mlx uv run python -m evals.run
 
 `temperature` is pinned to 0 to keep the zero-tolerance gate stable.
 
+## Runaway protection
+
+Local models can loop indefinitely without producing a final answer. Each case
+is bounded by two limits; hitting either yields an `<agent-error: ...>` output
+that the gate treats as **fail** (fail-closed).
+
+| Env var             | Default | Cap                                                       |
+| ------------------- | ------- | --------------------------------------------------------- |
+| `EVAL_MAX_CYCLES`   | `10`    | Model calls per case (`BeforeModelCallEvent` hook count). |
+| `EVAL_CASE_TIMEOUT` | `120`   | Wall-clock seconds (`asyncio.wait_for`).                  |
+
+For slow CPU inference raise `EVAL_CASE_TIMEOUT`:
+
+```bash
+EVAL_MAX_CYCLES=10 EVAL_CASE_TIMEOUT=600 \
+  EVAL_MODEL=ollama_chat/gemma4:e4b uv run python -m evals.run
+```
+
 ## CI
 
 - **Hard gate** — the `evals` job in
