@@ -83,7 +83,7 @@ EVAL_MAX_CYCLES=10 EVAL_CASE_TIMEOUT=600 \
   EVAL_MODEL=ollama_chat/gemma4:e4b uv run python -m evals.run
 ```
 
-## CI
+## Release pipeline
 
 - **Hard gate** — the `evals` job in
   [`publish.yml`](../.github/workflows/publish.yml) runs on tag push, and
