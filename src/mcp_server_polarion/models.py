@@ -16,12 +16,17 @@ Models are organised into three categories:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-# Recursive JSON-safe type alias.  Constrains payload previews and change
-# maps to values that are guaranteed to round-trip through JSON-RPC.
+# Recursive JSON-safe alias for internal payload builders. Result-model
+# fields below intentionally surface payload previews as
+# `Mapping[str, object]` instead of `dict[str, JsonValue]`: the recursive
+# alias emits a `$defs/JsonValue` self-reference that the FastMCP client's
+# `json_schema_to_type` cannot rebuild, producing an unresolved
+# `ForwardRef('Root')` TypeAdapter and noisy errors on every write call.
 type JsonValue = (
     str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
 )
@@ -474,7 +479,7 @@ class WorkItemCreateResult(BaseModel):
     work_item_id: str | None = Field(
         description="ID of the new work item (e.g. 'MCPT-042'); None on dry-run.",
     )
-    payload_preview: dict[str, JsonValue] | None = Field(
+    payload_preview: Mapping[str, object] | None = Field(
         description="JSON:API payload sent or previewed; None after real ops.",
     )
 
@@ -487,10 +492,10 @@ class WorkItemUpdateResult(BaseModel):
     current: WorkItemDetail | None = Field(
         description="Post-PATCH state for verification; None on dry-run.",
     )
-    changes: dict[str, JsonValue] = Field(
+    changes: Mapping[str, object] = Field(
         description="Map of field names to their new values in the PATCH.",
     )
-    payload_preview: dict[str, JsonValue] | None = Field(
+    payload_preview: Mapping[str, object] | None = Field(
         description="JSON:API payload sent or previewed; None after real ops.",
     )
 
@@ -503,7 +508,7 @@ class DocumentCommentsCreateResult(BaseModel):
     comment_ids: list[str] = Field(
         description="Short IDs in Polarion's return order; empty on dry-run.",
     )
-    payload_preview: dict[str, JsonValue] | None = Field(
+    payload_preview: Mapping[str, object] | None = Field(
         description="JSON:API payload sent or previewed; None after real ops.",
     )
 
@@ -519,7 +524,7 @@ class DocumentCommentUpdateResult(BaseModel):
     resolved: bool = Field(
         description="The resolved value sent (or that would be sent).",
     )
-    payload_preview: dict[str, JsonValue] | None = Field(
+    payload_preview: Mapping[str, object] | None = Field(
         description="JSON:API payload sent or previewed; None after real ops.",
     )
 
@@ -560,7 +565,7 @@ class WorkItemLinksCreateResult(BaseModel):
         default_factory=list,
         description="Composite 5-segment link ids in input order; empty on dry-run.",
     )
-    payload_preview: dict[str, JsonValue] | None = Field(
+    payload_preview: Mapping[str, object] | None = Field(
         default=None,
         description="JSON:API payload sent or previewed; None after real ops.",
     )
@@ -581,7 +586,7 @@ class WorkItemLinksDeleteResult(BaseModel):
         default_factory=list,
         description="Composite 5-segment ids reconstructed from the request refs.",
     )
-    payload_preview: dict[str, JsonValue] | None = Field(
+    payload_preview: Mapping[str, object] | None = Field(
         default=None,
         description="JSON:API payload sent or previewed; None after real ops.",
     )
@@ -631,7 +636,7 @@ class WorkItemLinkUpdateResult(BaseModel):
     link_id: str = Field(
         description="Composite 5-segment id computed from inputs.",
     )
-    payload_preview: dict[str, JsonValue] | None = Field(
+    payload_preview: Mapping[str, object] | None = Field(
         description="JSON:API PATCH body; None after real ops.",
     )
 
@@ -641,7 +646,7 @@ class WorkItemMoveResult(BaseModel):
 
     moved: bool = Field(description="True on a real move; False on dry-run.")
     dry_run: bool = Field(description="Whether this was a dry-run.")
-    payload_preview: dict[str, JsonValue] | None = Field(
+    payload_preview: Mapping[str, object] | None = Field(
         description="Request payload sent or previewed; None after real ops.",
     )
 
@@ -654,7 +659,7 @@ class DocumentCreateResult(BaseModel):
     document_name: str | None = Field(
         description="Module name of the new document; None on dry-run.",
     )
-    payload_preview: dict[str, JsonValue] | None = Field(
+    payload_preview: Mapping[str, object] | None = Field(
         description="JSON:API payload sent or previewed; None after real ops.",
     )
 
@@ -664,7 +669,7 @@ class DocumentUpdateResult(BaseModel):
 
     updated: bool = Field(description="True on a real PATCH; False on dry-run.")
     dry_run: bool = Field(description="Whether this was a dry-run.")
-    payload_preview: dict[str, JsonValue] | None = Field(
+    payload_preview: Mapping[str, object] | None = Field(
         description="JSON:API payload sent or previewed; None after real ops.",
     )
 
