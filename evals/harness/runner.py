@@ -17,11 +17,13 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import Callable
 from typing import Any
 
 import respx
 from fastmcp import Client
 from strands import Agent
+from strands.hooks import BeforeModelCallEvent
 from strands_evals import Case
 from strands_evals.types import TaskOutput
 
@@ -31,6 +33,12 @@ from mcp_server_polarion.server import mcp
 from .fake_polarion import POLARION_HOST, PROJECT, FakePolarion
 from .mcp_bridge import TrajectoryRecorder, build_agent_tools
 from .model import build_model
+
+# Hard caps to prevent runaway agents (e.g. local models that loop indefinitely).
+# _MAX_CYCLES counts BeforeModelCallEvent firings; _CASE_TIMEOUT_SECONDS is a
+# wall-clock ceiling for the entire invoke_async call.
+_MAX_CYCLES: int = int(os.environ.get("EVAL_MAX_CYCLES", "10"))
+_CASE_TIMEOUT_SECONDS: float = float(os.environ.get("EVAL_CASE_TIMEOUT", "120"))
 
 # Deliberately generic: it must NOT teach the agent the Tier-1 rules, or the
 # eval would test the prompt rather than the tool docstrings (the only guard).
@@ -64,19 +72,60 @@ def _set_polarion_env() -> None:
     os.environ["POLARION_TOKEN"] = "fake-token"
 
 
+def _make_cycle_guard(
+    max_cycles: int,
+) -> tuple[Callable[[BeforeModelCallEvent], None], Callable[[], int]]:
+    """Build a model-call counter hook + an inspector for the final count.
+
+    The hook flips ``stop_event_loop`` once the count exceeds *max_cycles*.
+    The caller reads the inspector after invoke to fail-closed on a forced
+    stop: a clean ``stop_event_loop`` would otherwise return whatever partial
+    text the agent emitted, which could be empty and silently pass.
+    """
+    count = 0
+
+    def hook(event: BeforeModelCallEvent) -> None:
+        nonlocal count
+        count += 1
+        if count > max_cycles:
+            rs: dict[str, object] = event.invocation_state.setdefault(
+                "request_state", {}
+            )
+            rs["stop_event_loop"] = True
+
+    def get_count() -> int:
+        return count
+
+    return hook, get_count
+
+
 async def _run_case_async(case: Case, recorder: TrajectoryRecorder) -> str:
     async with Client(mcp) as mcp_client:
         tools = await build_agent_tools(mcp_client, recorder)
+        cycle_hook, cycle_count = _make_cycle_guard(_MAX_CYCLES)
         agent = Agent(
             model=build_model(),
             tools=tools,
             system_prompt=SYSTEM_PROMPT,
+            hooks=[cycle_hook],
         )
         try:
-            result = await agent.invoke_async(case.input)
-            return _extract_text(result)
+            result = await asyncio.wait_for(
+                agent.invoke_async(case.input),
+                timeout=_CASE_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            return (
+                f"{AGENT_ERROR_PREFIX} TimeoutError: "
+                f"case exceeded {_CASE_TIMEOUT_SECONDS:.0f}s>"
+            )
         except Exception as exc:
             return f"{AGENT_ERROR_PREFIX} {type(exc).__name__}: {exc}>"
+        if cycle_count() > _MAX_CYCLES:
+            return (
+                f"{AGENT_ERROR_PREFIX} CycleGuard: exceeded {_MAX_CYCLES} model cycles>"
+            )
+        return _extract_text(result)
 
 
 def run_case(case: Case) -> TaskOutput:
