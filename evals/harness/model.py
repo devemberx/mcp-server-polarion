@@ -7,7 +7,9 @@ the ``EVAL_MODEL`` env var, no code change:
     EVAL_MODEL=ollama/qwen2.5-coder:7b       # local (set EVAL_MODEL_BASE_URL)
 
 ``temperature`` is pinned to 0.0 to minimise run-to-run flakiness so the
-zero-tolerance gate stays stable.
+zero-tolerance gate stays stable. ``EVAL_NUM_RETRIES`` / ``EVAL_LLM_TIMEOUT``
+forward to LiteLLM so transient 429/RateLimitError from cloud providers gets
+absorbed by exponential backoff rather than failing the case.
 """
 
 from __future__ import annotations
@@ -41,5 +43,9 @@ def build_model() -> LiteLLMModel:
     return LiteLLMModel(
         client_args=client_args or None,
         model_id=model_id,
-        params={"temperature": 0.0},
+        params={
+            "temperature": 0.0,
+            "num_retries": max(0, int(os.environ.get("EVAL_NUM_RETRIES", "10"))),
+            "timeout": max(1.0, float(os.environ.get("EVAL_LLM_TIMEOUT", "60"))),
+        },
     )

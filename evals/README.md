@@ -63,14 +63,24 @@ EVAL_MODEL=ollama_chat/qwen3.5:9b-mlx uv run python -m evals.run
 
 ## Runaway protection
 
-Local models can loop indefinitely without producing a final answer. Each case
-is bounded by two limits; hitting either yields an `<agent-error: ...>` output
-that the gate treats as **fail** (fail-closed).
+Local models can loop indefinitely without producing a final answer, and
+cloud providers can return 429 when TPM/RPM is exhausted. Each case is
+bounded by case-level limits (fail-closed via `<agent-error: ...>`), and a
+single model call retries transient 429 / network errors with exponential
+backoff (handled by the OpenAI SDK underneath LiteLLM) before giving up.
 
-| Env var             | Default | Cap                                                       |
-| ------------------- | ------- | --------------------------------------------------------- |
-| `EVAL_MAX_CYCLES`   | `10`    | Model calls per case (`BeforeModelCallEvent` hook count). |
-| `EVAL_CASE_TIMEOUT` | `120`   | Wall-clock seconds (`asyncio.wait_for`).                  |
+| Env var             | Default | Cap                                                                              |
+| ------------------- | ------- | -------------------------------------------------------------------------------- |
+| `EVAL_MAX_CYCLES`   | `10`    | Model calls per case (`BeforeModelCallEvent` hook count).                        |
+| `EVAL_CASE_TIMEOUT` | `120`   | Wall-clock seconds (`asyncio.wait_for`).                                         |
+| `EVAL_NUM_RETRIES`  | `10`    | LiteLLM `num_retries`; OpenAI SDK sleeps `min(0.5·2ⁿ, 8)s` with ±25 % jitter, or honours `Retry-After` if present. |
+| `EVAL_LLM_TIMEOUT`  | `60`    | Wall-clock seconds for one model call (LiteLLM `timeout`).                       |
+
+`EVAL_LLM_TIMEOUT` is per attempt — worst-case wall-clock for one model
+call is `EVAL_NUM_RETRIES × EVAL_LLM_TIMEOUT` when every attempt times out
+without a fast 429 response. Raise `EVAL_CASE_TIMEOUT` in lockstep when
+bumping either, or the case fail-closes via `asyncio.wait_for` before the
+retry budget is exhausted.
 
 For slow CPU inference raise `EVAL_CASE_TIMEOUT`:
 
@@ -79,7 +89,7 @@ EVAL_MAX_CYCLES=10 EVAL_CASE_TIMEOUT=600 \
   EVAL_MODEL=ollama_chat/gemma4:e4b uv run python -m evals.run
 ```
 
-## CI
+## Release pipeline
 
 - **Hard gate** — the `evals` job in
   [`publish.yml`](../.github/workflows/publish.yml) runs on tag push, and
