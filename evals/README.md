@@ -63,14 +63,18 @@ EVAL_MODEL=ollama_chat/qwen3.5:9b-mlx uv run python -m evals.run
 
 ## Runaway protection
 
-Local models can loop indefinitely without producing a final answer. Each case
-is bounded by two limits; hitting either yields an `<agent-error: ...>` output
-that the gate treats as **fail** (fail-closed).
+Local models can loop indefinitely without producing a final answer, and
+cloud providers can return 429 when TPM/RPM is exhausted. Each case is
+bounded by case-level limits (fail-closed via `<agent-error: ...>`) and the
+LiteLLM call itself does exponential backoff on transient errors before
+giving up.
 
-| Env var             | Default | Cap                                                       |
-| ------------------- | ------- | --------------------------------------------------------- |
-| `EVAL_MAX_CYCLES`   | `10`    | Model calls per case (`BeforeModelCallEvent` hook count). |
-| `EVAL_CASE_TIMEOUT` | `120`   | Wall-clock seconds (`asyncio.wait_for`).                  |
+| Env var             | Default | Cap                                                                              |
+| ------------------- | ------- | -------------------------------------------------------------------------------- |
+| `EVAL_MAX_CYCLES`   | `10`    | Model calls per case (`BeforeModelCallEvent` hook count).                        |
+| `EVAL_CASE_TIMEOUT` | `120`   | Wall-clock seconds (`asyncio.wait_for`).                                         |
+| `EVAL_NUM_RETRIES`  | `10`    | LiteLLM retries on 429 / RateLimitError / Timeout (exponential backoff ≤10s/sleep). |
+| `EVAL_LLM_TIMEOUT`  | `60`    | Wall-clock seconds for one model call (LiteLLM `timeout`).                       |
 
 For slow CPU inference raise `EVAL_CASE_TIMEOUT`:
 
