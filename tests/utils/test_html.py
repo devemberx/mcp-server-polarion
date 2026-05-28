@@ -76,8 +76,7 @@ class TestHtmlToMarkdown:
     def test_link_preserved(self) -> None:
         html = '<p>See <a href="https://example.com">this link</a></p>'
         result = html_to_markdown(html)
-        assert "this link" in result
-        assert "https://example.com" in result
+        assert "[this link](https://example.com)" in result
 
     def test_code_preserved(self) -> None:
         html = "<p>Use <code>print()</code> function</p>"

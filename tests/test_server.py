@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from unittest.mock import patch
+from urllib.parse import urlparse
 
 from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.server import LifespanContext, _lifespan, mcp
@@ -80,6 +81,6 @@ class TestLifespan:
         with patch.dict("os.environ", _FAKE_ENV, clear=False):
             async with _lifespan(mcp) as ctx:
                 client = ctx["polarion_client"]
-                base_url = str(client.base_url)
-                assert "polarion.example.com" in base_url
-                assert "polarion/rest/v1" in base_url
+                parsed = urlparse(str(client.base_url))
+                assert parsed.netloc == "polarion.example.com"
+                assert parsed.path == "/polarion/rest/v1"

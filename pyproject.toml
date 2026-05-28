@@ -34,6 +34,7 @@ dev = [
 evals = [
     "strands-agents[litellm]",
     "strands-agents-evals",
+    "litellm>=1.83.10",
 ]
 
 [build-system]
