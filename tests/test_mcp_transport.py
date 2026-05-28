@@ -201,3 +201,31 @@ class TestEndToEndInvocation:
         assert "payload_preview" in body
         assert body["payload_preview"]["data"][0]["type"] == "workitems"
         assert body["payload_preview"]["data"][0]["attributes"]["title"] == "smoke"
+
+    async def test_create_work_item_dry_run_materialises_result_data(
+        self,
+        mcp_client: _MCPClient,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # Regression guard: result-model fields with recursive type aliases
+        # produce a `$defs` self-reference that fastmcp 3.3.1's
+        # json_schema_to_type cannot rebuild, leaving result.data unmaterialised
+        # and logging "Error parsing structured content" on every write call.
+        with caplog.at_level("WARNING", logger="fastmcp"):
+            result = await mcp_client.call_tool(
+                "create_work_item",
+                {
+                    "project_id": "MCP_Test_Project",
+                    "title": "smoke",
+                    "type": "task",
+                    "dry_run": True,
+                },
+            )
+
+        assert not any(
+            "Error parsing structured content" in rec.message for rec in caplog.records
+        )
+        assert result.data is not None
+        assert result.data.dry_run is True
+        assert result.data.work_item_id is None
+        assert result.data.payload_preview is not None
