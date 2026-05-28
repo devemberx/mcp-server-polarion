@@ -17,13 +17,12 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import Callable
 from typing import Any
 
 import respx
 from fastmcp import Client
 from strands import Agent
-from strands.hooks import BeforeModelCallEvent
+from strands.hooks import BeforeModelCallEvent, HookRegistry
 from strands_evals import Case
 from strands_evals.types import TaskOutput
 
@@ -74,42 +73,43 @@ def _set_polarion_env() -> None:
     os.environ["POLARION_TOKEN"] = "fake-token"
 
 
-def _make_cycle_guard(
-    max_cycles: int,
-) -> tuple[Callable[[BeforeModelCallEvent], None], Callable[[], int]]:
-    """Build a model-call counter hook + an inspector for the final count.
+class _CycleGuard:
+    """Model-call counter hook that fail-closes runaway agents.
 
-    The hook flips ``stop_event_loop`` once the count exceeds *max_cycles*.
-    The caller reads the inspector after invoke to fail-closed on a forced
-    stop: a clean ``stop_event_loop`` would otherwise return whatever partial
-    text the agent emitted, which could be empty and silently pass.
+    Strands' ``hooks=`` expects ``HookProvider`` instances (objects with a
+    ``register_hooks`` method), not bare callbacks — so the counter ships as
+    a class that registers itself against ``BeforeModelCallEvent`` and exposes
+    ``count`` for post-invoke inspection. The caller checks ``count`` after
+    invoke to fail-closed on a forced stop: a clean ``stop_event_loop`` would
+    otherwise return whatever partial text the agent emitted, which could be
+    empty and silently pass.
     """
-    count = 0
 
-    def hook(event: BeforeModelCallEvent) -> None:
-        nonlocal count
-        count += 1
-        if count > max_cycles:
+    def __init__(self, max_cycles: int) -> None:
+        self._max_cycles = max_cycles
+        self.count = 0
+
+    def register_hooks(self, registry: HookRegistry, **_: object) -> None:
+        registry.add_callback(BeforeModelCallEvent, self._on_before_model_call)
+
+    def _on_before_model_call(self, event: BeforeModelCallEvent) -> None:
+        self.count += 1
+        if self.count > self._max_cycles:
             rs: dict[str, object] = event.invocation_state.setdefault(
                 "request_state", {}
             )
             rs["stop_event_loop"] = True
 
-    def get_count() -> int:
-        return count
-
-    return hook, get_count
-
 
 async def _run_case_async(case: Case, recorder: TrajectoryRecorder) -> str:
     async with Client(mcp) as mcp_client:
         tools = await build_agent_tools(mcp_client, recorder)
-        cycle_hook, cycle_count = _make_cycle_guard(_MAX_CYCLES)
+        cycle_guard = _CycleGuard(_MAX_CYCLES)
         agent = Agent(
             model=build_model(),
             tools=tools,
             system_prompt=SYSTEM_PROMPT,
-            hooks=[cycle_hook],
+            hooks=[cycle_guard],
         )
         try:
             result = await asyncio.wait_for(
@@ -123,7 +123,7 @@ async def _run_case_async(case: Case, recorder: TrajectoryRecorder) -> str:
             )
         except Exception as exc:
             return f"{AGENT_ERROR_PREFIX} {type(exc).__name__}: {exc}>"
-        if cycle_count() > _MAX_CYCLES:
+        if cycle_guard.count > _MAX_CYCLES:
             return (
                 f"{AGENT_ERROR_PREFIX} CycleGuard: exceeded {_MAX_CYCLES} model cycles>"
             )
