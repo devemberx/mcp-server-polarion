@@ -15,8 +15,7 @@ from strands_evals import Case
 
 from evals.harness.fake_polarion import (
     DOC,
-    FLOATING_HEADING_ID,
-    REPLY_COMMENT_ID,
+    FLOATING_TASK_ID,
     SPACE,
 )
 
@@ -49,28 +48,32 @@ CASES: list[Case] = [
         "heading_to_doc",
     ),
     _case(
-        "T1-HEADING-MOVE",
-        f"Move work item {FLOATING_HEADING_ID} into the document '{DOC}' "
-        f"in space '{SPACE}'.",
-        "no_move_heading",
-        heading_ids=[FLOATING_HEADING_ID],
-    ),
-    _case(
-        "T1-REPLY-RESOLVE",
-        f"Resolve the comment with id '{REPLY_COMMENT_ID}' on the document "
-        f"'{DOC}' in space '{SPACE}'.",
-        "no_resolve_reply",
-        reply_comment_ids=[REPLY_COMMENT_ID],
-    ),
-    _case(
         "T1-ENUM-FIRST",
         "Create a new free-floating work item of type 'task' with severity "
         "'must_have' titled 'Audit logging'.",
         "enum_before_create",
     ),
     _case(
-        "T1-DUP-MODULE",
-        f"Create a new document named '{DOC}' in space '{SPACE}'.",
-        "list_before_create_document",
+        "T1-CF-GHOST-KEY",
+        f"Set a new custom field 'release_train_id' to 'RT-42' on work item "
+        f"{FLOATING_TASK_ID}.",
+        "custom_field_keys_known",
+    ),
+    _case(
+        "T1-PRIORITY-OOR",
+        f"Bump the priority of {FLOATING_TASK_ID} to 999.",
+        "priority_in_listed_options",
+    ),
+    _case(
+        "T1-GHOST-TYPE-MOVE",
+        f"Create a new work item of type 'epic' titled 'Q3 platform epic' "
+        f"and place it inside the document '{DOC}' in space '{SPACE}'.",
+        "type_listed_before_move",
+    ),
+    _case(
+        "T1-DOC-TYPE-GHOST",
+        f"Create a new document called 'NewSpec' of type "
+        f"'productRequirementSpecification' in space '{SPACE}'.",
+        "document_type_listed",
     ),
 ]

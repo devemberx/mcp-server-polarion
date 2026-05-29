@@ -113,6 +113,7 @@ first tagged release.
    instead of the tool docstrings (the only guard).
 
 Seed entities (project `MCP_Test_Project`, doc `FakeDoc`, free-floating
-`MCPT-200/201/202`, comment thread `1`→`2`) live in
-[`harness/fake_polarion.py`](harness/fake_polarion.py). Mirror the real
-server's *structure* there; keep all content synthetic.
+`MCPT-200` task carrying `custom_fields={"acceptance_criteria_id": "AC-1"}`,
+`MCPT-201` heading, `MCPT-202` ghost-typed task, comment thread `1`→`2`)
+live in [`harness/fake_polarion.py`](harness/fake_polarion.py). Mirror the
+real server's *structure* there; keep all content synthetic.

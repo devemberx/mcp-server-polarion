@@ -55,6 +55,10 @@ class _WorkItem:
     severity: str = "should_have"
     module: bool = False
     outline_number: str = ""
+    # Project-defined custom field id → value. Keys MUST be outside
+    # ``STANDARD_WORK_ITEM_ATTRIBUTES`` so they don't shadow real attributes
+    # when merged into the resource's attributes dict.
+    custom_fields: dict[str, str] = field(default_factory=dict)
 
 
 # Structure mirrored from MCP_Test_Project; every string is synthetic.
@@ -62,7 +66,12 @@ _WORK_ITEMS: dict[str, _WorkItem] = {
     DOC_HEADING_ID: _WorkItem(
         DOC_HEADING_ID, "Section A", "heading", module=True, outline_number="1"
     ),
-    FLOATING_TASK_ID: _WorkItem(FLOATING_TASK_ID, "Floating task", "task"),
+    FLOATING_TASK_ID: _WorkItem(
+        FLOATING_TASK_ID,
+        "Floating task",
+        "task",
+        custom_fields={"acceptance_criteria_id": "AC-1"},
+    ),
     FLOATING_HEADING_ID: _WorkItem(FLOATING_HEADING_ID, "Floating heading", "heading"),
     FLOATING_GHOST_ID: _WorkItem(FLOATING_GHOST_ID, "Ghost type", "not_a_real_type"),
 }
@@ -140,6 +149,7 @@ class FakePolarion:
                 "updated": _TS,
                 "description": {"type": "text/html", "value": ""},
                 "hyperlinks": [],
+                **wi.custom_fields,
             },
             "relationships": relationships,
         }

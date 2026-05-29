@@ -86,30 +86,6 @@ def check_heading_to_doc(
     return True, "no create/move used for heading"
 
 
-def check_no_move_heading(
-    trajectory: Trajectory, params: dict[str, Any]
-) -> CheckResult:
-    """A heading-type work item must never be moved into a document."""
-    heading_ids = set(params.get("heading_ids", []))
-    for call in _calls(trajectory, "move_work_item_to_document"):
-        wi = call.get("args", {}).get("work_item_id")
-        if wi in heading_ids:
-            return False, f"moved heading-type work item '{wi}' into a document"
-    return True, "no heading moved into a document"
-
-
-def check_no_resolve_reply(
-    trajectory: Trajectory, params: dict[str, Any]
-) -> CheckResult:
-    """update_document_comment must not target a reply comment."""
-    reply_ids = set(params.get("reply_comment_ids", []))
-    for call in _calls(trajectory, "update_document_comment"):
-        cid = call.get("args", {}).get("comment_id")
-        if cid in reply_ids:
-            return False, f"patched reply comment '{cid}' (only root comments allowed)"
-    return True, "no reply comment patched"
-
-
 _ENUM_FIELDS: frozenset[str] = frozenset({"type", "severity", "status", "priority"})
 
 
@@ -127,23 +103,6 @@ def _enum_option_ids(result: object) -> set[str]:
             if isinstance(opt_id, str):
                 ids.add(opt_id)
     return ids
-
-
-def _document_summaries(result: object) -> set[tuple[str, str]]:
-    """Extract (space_id, document_name) pairs from a list_documents result."""
-    if not isinstance(result, dict):
-        return set()
-    items = result.get("items")
-    if not isinstance(items, list):
-        return set()
-    pairs: set[tuple[str, str]] = set()
-    for item in items:
-        if isinstance(item, dict):
-            space = item.get("space_id")
-            doc = item.get("document_name")
-            if isinstance(space, str) and isinstance(doc, str):
-                pairs.add((space, doc))
-    return pairs
 
 
 def check_enum_before_create(
@@ -193,43 +152,153 @@ def check_enum_before_create(
     return True, "every enum used was listed and contained the chosen value"
 
 
-def check_list_before_create_document(
+def _enum_listed_before(
+    trajectory: Trajectory,
+    list_tool: str,
+    field_id: str,
+    before_idx: int,
+) -> set[str]:
+    """Union of enum option ids from every prior ``list_tool(field_id=...)`` call."""
+    out: set[str] = set()
+    for call in trajectory[:before_idx]:
+        if call.get("name") != list_tool:
+            continue
+        if (call.get("args") or {}).get("field_id") != field_id:
+            continue
+        out |= _enum_option_ids(call.get("result"))
+    return out
+
+
+def _get_work_item_custom_keys(trajectory: Trajectory, before_idx: int) -> set[str]:
+    """All ``custom_fields`` keys returned by prior ``get_work_item`` calls."""
+    keys: set[str] = set()
+    for call in trajectory[:before_idx]:
+        if call.get("name") != "get_work_item":
+            continue
+        result = call.get("result")
+        if not isinstance(result, dict):
+            continue
+        cf = result.get("custom_fields")
+        if isinstance(cf, dict):
+            keys.update(cf.keys())
+    return keys
+
+
+def check_custom_field_keys_known(
     trajectory: Trajectory, _params: dict[str, Any]
 ) -> CheckResult:
-    """create_document must be preceded by a list_documents discovery.
+    """Custom field keys on create/update must be sourced from a prior get_work_item.
 
-    The discovery's response is also inspected: if the (space_id,
-    document_name) the agent is about to create already appears in the
-    listed pairs, the agent ignored the duplicate warning and the check
-    fails. "Called list_documents" alone passes the buggy "list then
-    create anyway" path; this guards against it.
+    Polarion accepts unknown custom_fields keys silently as ghost attributes:
+    HTTP 200, the value persists on the work item, but the field never
+    appears in the project's schema so reports and queries ignore it. The
+    only safe pattern is to read an existing work item first and reuse a
+    key that was already returned.
     """
-    names = _names(trajectory)
-    if "create_document" not in names:
-        return True, "no document created"
-    first_create = names.index("create_document")
-    create_args = trajectory[first_create].get("args", {}) or {}
+    for tool in ("create_work_item", "update_work_item"):
+        for i, call in enumerate(trajectory):
+            if call.get("name") != tool:
+                continue
+            cf = (call.get("args") or {}).get("custom_fields") or {}
+            if not isinstance(cf, dict) or not cf:
+                continue
+            known = _get_work_item_custom_keys(trajectory, i)
+            if not known:
+                return False, (
+                    f"set custom_fields={sorted(cf)} via {tool} without "
+                    f"reading existing custom field keys from any prior get_work_item"
+                )
+            unknown = [k for k in cf if k not in known]
+            if unknown:
+                return False, (
+                    f"used custom_field key(s) {sorted(unknown)} that were "
+                    f"not in any prior get_work_item.custom_fields"
+                )
+    return True, "every custom_fields key was backed by a prior get_work_item"
 
-    prior = trajectory[:first_create]
-    existing: set[tuple[str, str]] = set()
-    list_calls = 0
-    for call in prior:
-        if call.get("name") != "list_documents":
+
+def check_priority_in_listed_options(
+    trajectory: Trajectory, _params: dict[str, Any]
+) -> CheckResult:
+    """priority must come from a prior list_work_item_enum_options call."""
+    for tool in ("create_work_item", "update_work_item"):
+        for i, call in enumerate(trajectory):
+            if call.get("name") != tool:
+                continue
+            pri = (call.get("args") or {}).get("priority")
+            if not isinstance(pri, str) or not pri:
+                continue
+            listed = _enum_listed_before(
+                trajectory, "list_work_item_enum_options", "priority", i
+            )
+            if not listed:
+                return False, (
+                    f"set priority='{pri}' via {tool} without first listing "
+                    f"priority options"
+                )
+            if pri not in listed:
+                return False, (
+                    f"priority='{pri}' is not in the listed priority options "
+                    f"{sorted(listed)}"
+                )
+    return True, "every priority value was listed and chosen from the response"
+
+
+def check_type_listed_before_move(
+    trajectory: Trajectory, _params: dict[str, Any]
+) -> CheckResult:
+    """A ghost-typed work item must not be moved into a document.
+
+    Polarion does not validate the ``type`` id on create, so an unknown
+    type is silently persisted. Moving it into a document then attaches
+    a structurally-invalid part to the body — reports and type-based
+    filters in the document treat it as missing. The double-violation
+    (ghost create AND move) is what this check targets.
+    """
+    for i, call in enumerate(trajectory):
+        if call.get("name") != "create_work_item":
             continue
-        list_calls += 1
-        existing |= _document_summaries(call.get("result"))
-
-    if list_calls == 0:
-        return False, "created a document without first listing existing documents"
-
-    space = create_args.get("space_id")
-    doc = create_args.get("document_name")
-    if isinstance(space, str) and isinstance(doc, str) and (space, doc) in existing:
-        return False, (
-            f"created document '{doc}' in space '{space}' even though it "
-            f"already appeared in the prior list_documents response"
+        wi_type = (call.get("args") or {}).get("type")
+        if not isinstance(wi_type, str) or not wi_type:
+            continue
+        listed = _enum_listed_before(
+            trajectory, "list_work_item_enum_options", "type", i
         )
-    return True, "documents listed before create and target name is unique"
+        if wi_type in listed:
+            continue
+        for later in trajectory[i + 1 :]:
+            if later.get("name") == "move_work_item_to_document":
+                return False, (
+                    f"created work item with unlisted type='{wi_type}' "
+                    f"then moved it into a document"
+                )
+    return True, "no ghost-typed work item was moved into a document"
+
+
+def check_document_type_listed(
+    trajectory: Trajectory, _params: dict[str, Any]
+) -> CheckResult:
+    """create_document.type must come from a prior list_document_enum_options call."""
+    for i, call in enumerate(trajectory):
+        if call.get("name") != "create_document":
+            continue
+        doc_type = (call.get("args") or {}).get("type")
+        if not isinstance(doc_type, str) or not doc_type:
+            continue
+        listed = _enum_listed_before(
+            trajectory, "list_document_enum_options", "type", i
+        )
+        if not listed:
+            return False, (
+                f"created document with type='{doc_type}' without first "
+                f"listing document type options"
+            )
+        if doc_type not in listed:
+            return False, (
+                f"document type='{doc_type}' is not in the listed options "
+                f"{sorted(listed)}"
+            )
+    return True, "every document type was listed and chosen from the response"
 
 
 def check_update_document_ids(
@@ -247,10 +316,11 @@ REGISTRY: dict[str, Callable[[Trajectory, dict[str, Any]], CheckResult]] = {
     "readonly": check_readonly,
     "no_update_document": check_no_update_document,
     "heading_to_doc": check_heading_to_doc,
-    "no_move_heading": check_no_move_heading,
-    "no_resolve_reply": check_no_resolve_reply,
     "enum_before_create": check_enum_before_create,
-    "list_before_create_document": check_list_before_create_document,
+    "custom_field_keys_known": check_custom_field_keys_known,
+    "priority_in_listed_options": check_priority_in_listed_options,
+    "type_listed_before_move": check_type_listed_before_move,
+    "document_type_listed": check_document_type_listed,
 }
 
 # Applied to every case in addition to its named check.

@@ -76,52 +76,6 @@ class TestCheckHeadingToDoc:
         assert wrong_tool in reason
 
 
-class TestCheckNoMoveHeading:
-    def test_no_move_passes(self) -> None:
-        passed, _ = checks.check_no_move_heading([], {"heading_ids": ["MCPT-201"]})
-        assert passed is True
-
-    def test_move_of_non_heading_passes(self) -> None:
-        trajectory = [
-            _call("move_work_item_to_document", {"work_item_id": "MCPT-200"}),
-        ]
-        passed, _ = checks.check_no_move_heading(
-            trajectory, {"heading_ids": ["MCPT-201"]}
-        )
-        assert passed is True
-
-    def test_move_of_heading_fails(self) -> None:
-        trajectory = [
-            _call("move_work_item_to_document", {"work_item_id": "MCPT-201"}),
-        ]
-        passed, reason = checks.check_no_move_heading(
-            trajectory, {"heading_ids": ["MCPT-201"]}
-        )
-        assert passed is False
-        assert "MCPT-201" in reason
-
-
-class TestCheckNoResolveReply:
-    def test_no_update_passes(self) -> None:
-        passed, _ = checks.check_no_resolve_reply([], {"reply_comment_ids": ["2"]})
-        assert passed is True
-
-    def test_root_comment_update_passes(self) -> None:
-        trajectory = [_call("update_document_comment", {"comment_id": "1"})]
-        passed, _ = checks.check_no_resolve_reply(
-            trajectory, {"reply_comment_ids": ["2"]}
-        )
-        assert passed is True
-
-    def test_reply_comment_update_fails(self) -> None:
-        trajectory = [_call("update_document_comment", {"comment_id": "2"})]
-        passed, reason = checks.check_no_resolve_reply(
-            trajectory, {"reply_comment_ids": ["2"]}
-        )
-        assert passed is False
-        assert "'2'" in reason
-
-
 def _enum_result(option_ids: list[str]) -> dict[str, Any]:
     return {"items": [{"id": opt_id, "name": opt_id} for opt_id in option_ids]}
 
@@ -187,54 +141,201 @@ class TestCheckEnumBeforeCreate:
         assert passed is True
 
 
-def _doc_list_result(pairs: list[tuple[str, str]]) -> dict[str, Any]:
-    return {"items": [{"space_id": s, "document_name": d} for s, d in pairs]}
+def _wi_result(custom_fields: dict[str, str]) -> dict[str, Any]:
+    return {"id": "MCPT-200", "custom_fields": custom_fields}
 
 
-class TestCheckListBeforeCreateDocument:
-    def test_no_create_passes(self) -> None:
-        passed, _ = checks.check_list_before_create_document([], {})
+class TestCheckCustomFieldKeysKnown:
+    def test_no_custom_fields_passes(self) -> None:
+        trajectory = [_call("update_work_item", {"work_item_id": "MCPT-200"})]
+        passed, _ = checks.check_custom_field_keys_known(trajectory, {})
         assert passed is True
 
-    def test_listed_then_unique_name_passes(self) -> None:
+    def test_reused_known_key_passes(self) -> None:
         trajectory = [
             _call(
-                "list_documents",
-                result=_doc_list_result([("_default", "FakeDoc")]),
+                "get_work_item",
+                {"work_item_id": "MCPT-200"},
+                _wi_result({"acceptance_criteria_id": "AC-1"}),
             ),
             _call(
-                "create_document",
-                {"space_id": "_default", "document_name": "NewDoc"},
+                "update_work_item",
+                {
+                    "work_item_id": "MCPT-200",
+                    "custom_fields": {"acceptance_criteria_id": "AC-42"},
+                },
             ),
         ]
-        passed, _ = checks.check_list_before_create_document(trajectory, {})
+        passed, _ = checks.check_custom_field_keys_known(trajectory, {})
+        assert passed is True
+
+    def test_unknown_key_without_prior_get_fails(self) -> None:
+        trajectory = [
+            _call(
+                "update_work_item",
+                {
+                    "work_item_id": "MCPT-200",
+                    "custom_fields": {"release_train_id": "RT-42"},
+                },
+            )
+        ]
+        passed, reason = checks.check_custom_field_keys_known(trajectory, {})
+        assert passed is False
+        assert "release_train_id" in reason or "without reading" in reason
+
+    def test_unknown_key_with_prior_get_fails(self) -> None:
+        trajectory = [
+            _call(
+                "get_work_item",
+                {"work_item_id": "MCPT-200"},
+                _wi_result({"acceptance_criteria_id": "AC-1"}),
+            ),
+            _call(
+                "update_work_item",
+                {
+                    "work_item_id": "MCPT-200",
+                    "custom_fields": {"release_train_id": "RT-42"},
+                },
+            ),
+        ]
+        passed, reason = checks.check_custom_field_keys_known(trajectory, {})
+        assert passed is False
+        assert "release_train_id" in reason
+
+
+class TestCheckPriorityInListedOptions:
+    def test_no_priority_passes(self) -> None:
+        trajectory = [_call("update_work_item", {"work_item_id": "MCPT-200"})]
+        passed, _ = checks.check_priority_in_listed_options(trajectory, {})
+        assert passed is True
+
+    def test_listed_and_used_passes(self) -> None:
+        trajectory = [
+            _call(
+                "list_work_item_enum_options",
+                {"field_id": "priority"},
+                _enum_result(["90.0", "50.0", "10.0"]),
+            ),
+            _call(
+                "update_work_item",
+                {"work_item_id": "MCPT-200", "priority": "90.0"},
+            ),
+        ]
+        passed, _ = checks.check_priority_in_listed_options(trajectory, {})
         assert passed is True
 
     def test_skipped_listing_fails(self) -> None:
         trajectory = [
             _call(
-                "create_document",
-                {"space_id": "_default", "document_name": "NewDoc"},
+                "update_work_item",
+                {"work_item_id": "MCPT-200", "priority": "999.0"},
             )
         ]
-        passed, reason = checks.check_list_before_create_document(trajectory, {})
+        passed, reason = checks.check_priority_in_listed_options(trajectory, {})
         assert passed is False
         assert "without first listing" in reason
 
-    def test_duplicate_name_after_listing_fails(self) -> None:
+    def test_out_of_range_value_fails(self) -> None:
         trajectory = [
             _call(
-                "list_documents",
-                result=_doc_list_result([("_default", "FakeDoc")]),
+                "list_work_item_enum_options",
+                {"field_id": "priority"},
+                _enum_result(["90.0", "50.0", "10.0"]),
             ),
             _call(
-                "create_document",
-                {"space_id": "_default", "document_name": "FakeDoc"},
+                "update_work_item",
+                {"work_item_id": "MCPT-200", "priority": "999.0"},
             ),
         ]
-        passed, reason = checks.check_list_before_create_document(trajectory, {})
+        passed, reason = checks.check_priority_in_listed_options(trajectory, {})
         assert passed is False
-        assert "FakeDoc" in reason
+        assert "999.0" in reason
+
+
+class TestCheckTypeListedBeforeMove:
+    def test_no_create_passes(self) -> None:
+        passed, _ = checks.check_type_listed_before_move([], {})
+        assert passed is True
+
+    def test_create_without_move_passes(self) -> None:
+        trajectory = [_call("create_work_item", {"type": "epic"})]
+        passed, _ = checks.check_type_listed_before_move(trajectory, {})
+        assert passed is True
+
+    def test_listed_type_then_move_passes(self) -> None:
+        trajectory = [
+            _call(
+                "list_work_item_enum_options",
+                {"field_id": "type"},
+                _enum_result(["task", "requirement"]),
+            ),
+            _call("create_work_item", {"type": "task"}),
+            _call("move_work_item_to_document", {"work_item_id": "MCPT-9001"}),
+        ]
+        passed, _ = checks.check_type_listed_before_move(trajectory, {})
+        assert passed is True
+
+    def test_ghost_type_then_move_fails(self) -> None:
+        trajectory = [
+            _call(
+                "list_work_item_enum_options",
+                {"field_id": "type"},
+                _enum_result(["task", "requirement"]),
+            ),
+            _call("create_work_item", {"type": "epic"}),
+            _call("move_work_item_to_document", {"work_item_id": "MCPT-9001"}),
+        ]
+        passed, reason = checks.check_type_listed_before_move(trajectory, {})
+        assert passed is False
+        assert "epic" in reason
+
+    def test_unlisted_type_without_listing_then_move_fails(self) -> None:
+        trajectory = [
+            _call("create_work_item", {"type": "epic"}),
+            _call("move_work_item_to_document", {"work_item_id": "MCPT-9001"}),
+        ]
+        passed, reason = checks.check_type_listed_before_move(trajectory, {})
+        assert passed is False
+        assert "epic" in reason
+
+
+class TestCheckDocumentTypeListed:
+    def test_no_create_passes(self) -> None:
+        passed, _ = checks.check_document_type_listed([], {})
+        assert passed is True
+
+    def test_listed_and_used_passes(self) -> None:
+        trajectory = [
+            _call(
+                "list_document_enum_options",
+                {"field_id": "type"},
+                _enum_result(["systemRequirementSpecification", "generic"]),
+            ),
+            _call("create_document", {"type": "generic"}),
+        ]
+        passed, _ = checks.check_document_type_listed(trajectory, {})
+        assert passed is True
+
+    def test_skipped_listing_fails(self) -> None:
+        trajectory = [
+            _call("create_document", {"type": "productRequirementSpecification"})
+        ]
+        passed, reason = checks.check_document_type_listed(trajectory, {})
+        assert passed is False
+        assert "without first listing" in reason
+
+    def test_ghost_type_after_listing_fails(self) -> None:
+        trajectory = [
+            _call(
+                "list_document_enum_options",
+                {"field_id": "type"},
+                _enum_result(["systemRequirementSpecification"]),
+            ),
+            _call("create_document", {"type": "productRequirementSpecification"}),
+        ]
+        passed, reason = checks.check_document_type_listed(trajectory, {})
+        assert passed is False
+        assert "productRequirementSpecification" in reason
 
 
 class TestCheckUpdateDocumentIds:

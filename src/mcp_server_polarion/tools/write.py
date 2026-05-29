@@ -653,7 +653,17 @@ async def create_work_item(  # noqa: PLR0913
         description="When True, return payload preview without calling Polarion.",
     ),
 ) -> WorkItemCreateResult:
-    """Create a new Polarion work item in a project.
+    """Create a new Polarion work item in a project. For every
+    enum-valued argument you pass (``type``, ``status``, ``severity``,
+    ``resolution``, or ``custom_fields`` enum entries), you MUST first
+    call ``list_work_item_enum_options(project_id, field_id,
+    work_item_type)`` and confirm the value you intend to send appears
+    in the returned options. Unverified ids are accepted by Polarion
+    but persist as ghosts that never match Lucene queries. ``priority``
+    partly coerces (non-numeric → project default) but numeric
+    out-of-range still persists verbatim. ``custom_fields`` keys are
+    likewise unvalidated — pass keys taken from a prior
+    ``get_work_item``.
 
     The work item is created free-floating — to place it inside a
     document at a specific outline position, follow up with
@@ -670,18 +680,6 @@ async def create_work_item(  # noqa: PLR0913
     ``get_work_item(include_description_html=True)`` ↔
     ``update_work_item(description_html=...)`` which speaks raw HTML
     verbatim. The two formats never mix.
-
-    Polarion does NOT validate enum membership server-side. Unknown
-    ``type`` / ``status`` / ``severity`` ids are stored verbatim as
-    ghost values that look real on later reads but never match Lucene
-    queries. ``priority`` is the only partial exception: a non-numeric
-    string coerces to the project default, but a numeric string outside
-    the enum set (e.g. ``"999.0"``) also persists verbatim. Resolve valid
-    ids first via ``list_work_item_enum_options(project_id, field_id,
-    work_item_type)``. ``custom_fields`` is the same story: unknown
-    field IDs — including brand-new IDs that no work item of this type
-    has ever used — silently persist as ghost attributes. Pass keys
-    taken from a prior ``get_work_item``.
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -1593,12 +1591,22 @@ async def create_document(  # noqa: PLR0913
         description="When True, return payload preview without calling Polarion.",
     ),
 ) -> DocumentCreateResult:
-    """Create a new Polarion document in a space.
+    """Create a new Polarion document in a space. Before calling this
+    tool, you MUST call ``list_documents(project_id, space_id)`` and
+    confirm ``module_name`` is not already present in the returned list
+    — duplicates return HTTP 409, surfaced as ``RuntimeError``. For
+    every enum-valued argument you pass (``type``, ``status``, or
+    ``custom_fields`` enum entries), supply only ids returned by
+    ``list_document_enum_options(project_id, field_id, document_type)``;
+    unverified ids persist as ghosts that never match Lucene.
+    ``custom_fields`` keys are likewise unvalidated — pass keys taken
+    from a prior ``get_document``.
 
-    Greenfield document creation. The document starts empty (or with the
-    optional ``home_page_content`` body) and headings / work item parts
-    can be added later via ``update_document`` and
-    ``move_work_item_to_document``.
+    The document starts empty (or with the optional ``home_page_content``
+    body) and headings / work item parts can be added later via
+    ``update_document`` and ``move_work_item_to_document``.
+    ``module_name`` is Polarion's persistent identifier within the space
+    and appears in every subsequent URL.
 
     Format asymmetry: ``home_page_content`` here is Markdown (converted
     to sanitized HTML on write) because greenfield authoring is natural
@@ -1615,20 +1623,6 @@ async def create_document(  # noqa: PLR0913
     ``<h1>..<h4>`` are intentionally skipped — Polarion rewrites their
     ids into a ``polarion_wiki macro name=module-workitem`` macro form on
     save.
-
-    ``module_name`` is Polarion's persistent identifier within the space
-    and is used in every subsequent URL (``get_document``,
-    ``update_document``, etc.). It must be unique within ``space_id``;
-    a duplicate name causes Polarion to return HTTP 409, surfaced here
-    as ``RuntimeError``.
-
-    Polarion does NOT validate enum membership server-side. Unknown
-    ``type`` / ``status`` ids are stored verbatim as ghost values that
-    look real on later reads but never match Lucene queries. Resolve
-    valid ids first via ``list_document_enum_options(project_id,
-    field_id, document_type)``. ``custom_fields`` is the same story:
-    unknown field IDs silently persist as ghost attributes -- pass keys
-    taken from a prior ``get_document``.
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -2303,8 +2297,8 @@ async def update_document_comment(  # noqa: PLR0913
 
     Root comments only: Polarion accepts this PATCH only on top-level
     comments (``parent_comment_id`` is ``None`` in
-    ``list_document_comments``). Calling it on a reply -- any comment
-    with a non-null ``parent_comment_id`` -- returns HTTP 400 "Resolved
+    ``list_document_comments``). Calling it on a reply — any comment
+    with a non-null ``parent_comment_id`` — returns HTTP 400 "Resolved
     field can be set only for root comments" and surfaces as
     ``RuntimeError``. Filter for ``parent_comment_id is None`` before
     calling. There is no server-side workflow to resolve an individual
