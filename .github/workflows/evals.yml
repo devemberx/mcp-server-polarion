@@ -7,7 +7,7 @@ on:
     inputs:
       model:
         description: "LiteLLM model id (EVAL_MODEL)"
-        default: "openai/o3-mini"
+        default: "openai/gpt-4o-mini"
         type: string
       runs:
         description: "Runs per case (EVAL_RUNS)"
