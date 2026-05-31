@@ -5,8 +5,31 @@ Each case names a deterministic check (see ``evaluators/checks.py``) via
 prohibitions are zero-tolerance: ``min_pass_rate = 1.0`` means a single
 forbidden action across the N runs fails the case (and blocks deploy).
 
-Tasks are phrased neutrally and never spell out the rule — the agent must be
+Tasks are phrased neutrally and never spell out the rule -- the agent must be
 steered away from the footgun by the tool docstrings alone.
+
+Scope is the subset of LLM behaviour the mcp-server tool layer cannot guard
+deterministically:
+
+* read-before-write discipline (``T1-UPDATE-NEEDS-GET``) -- the server can
+  fetch state internally for validation, but only the agent's trajectory
+  reveals whether it actually called ``get_*`` to observe current values
+  before patching.
+* document body-edit discipline (``T1-ANCHORLESS-BODY``) -- agents must
+  call ``get_document`` first and then stamp a unique non-empty ``id=`` on
+  every non-heading block they add; anchorless ``<p>`` / ``<ul>`` / etc.
+  let the PATCH succeed but break ``read_document_parts`` (HTTP 500).
+* path-shape discipline (``T1-WI-TO-DOC``, ``T1-HEADING-TO-DOC``) -- there
+  are two structurally different ways to add content to a document and the
+  wrong one silently corrupts state.
+* read-only intent (``T1-READONLY``) -- write tools must stay dormant on a
+  pure read task.
+
+Silent-corruption modes that *can* be guarded server-side (ghost enum ids,
+ghost custom-field keys, out-of-range priority) are enforced by
+``mcp_server_polarion.tools._enum_guard`` and verified by
+``tests/tools/test_enum_guard.py`` -- they do not appear here so the gate
+spends its runs on behaviours unit tests cannot reach.
 """
 
 from __future__ import annotations
@@ -48,32 +71,14 @@ CASES: list[Case] = [
         "heading_to_doc",
     ),
     _case(
-        "T1-ENUM-FIRST",
-        "Create a new free-floating work item of type 'task' with severity "
-        "'must_have' titled 'Audit logging'.",
-        "enum_before_create",
+        "T1-UPDATE-NEEDS-GET",
+        f"Set the priority of {FLOATING_TASK_ID} to a lower level.",
+        "get_before_update",
     ),
     _case(
-        "T1-CF-GHOST-KEY",
-        f"Set a new custom field 'release_train_id' to 'RT-42' on work item "
-        f"{FLOATING_TASK_ID}.",
-        "custom_field_keys_known",
-    ),
-    _case(
-        "T1-PRIORITY-OOR",
-        f"Bump the priority of {FLOATING_TASK_ID} to 999.",
-        "priority_in_listed_options",
-    ),
-    _case(
-        "T1-GHOST-TYPE-MOVE",
-        f"Create a new work item of type 'epic' titled 'Q3 platform epic' "
-        f"and place it inside the document '{DOC}' in space '{SPACE}'.",
-        "type_listed_before_move",
-    ),
-    _case(
-        "T1-DOC-TYPE-GHOST",
-        f"Create a new document called 'NewSpec' of type "
-        f"'productRequirementSpecification' in space '{SPACE}'.",
-        "document_type_listed",
+        "T1-ANCHORLESS-BODY",
+        f"Append a paragraph 'Note: see Appendix A' to the body of '{DOC}' "
+        f"in space '{SPACE}'.",
+        "get_before_update",
     ),
 ]
