@@ -10,6 +10,7 @@ the tool layer.
 from __future__ import annotations
 
 import copy
+import logging
 from typing import Final, cast
 from urllib.parse import urlencode
 
@@ -40,6 +41,12 @@ from mcp_server_polarion.models import (
     WorkItemUpdateResult,
 )
 from mcp_server_polarion.server import mcp
+from mcp_server_polarion.tools._enum_guard import (
+    guard_document_enums,
+    guard_update_custom_field_keys,
+    guard_work_item_enums,
+    record_custom_keys_from_get,
+)
 from mcp_server_polarion.tools._helpers import (
     STANDARD_DOCUMENT_ATTRIBUTES,
     STANDARD_WORK_ITEM_ATTRIBUTES,
@@ -54,6 +61,8 @@ from mcp_server_polarion.tools._helpers import (
     split_module_id,
 )
 from mcp_server_polarion.utils import markdown_to_html, sanitize_html, stamp_block_ids
+
+logger = logging.getLogger("mcp_server_polarion.tools.write")
 
 # Caps tool-layer body payloads so a prompt-injected caller cannot ship a
 # multi-megabyte blob to Polarion. Observed real document bodies stay
@@ -708,6 +717,32 @@ async def create_work_item(  # noqa: PLR0913
         PermissionError: Token lacks permission.
         RuntimeError: Other Polarion API errors, or accepted-but-no-ID.
     """
+    client = get_client(ctx)
+    await guard_work_item_enums(
+        client,
+        project_id,
+        work_item_type=type,
+        type=type,
+        status=status,
+        severity=severity,
+        priority=priority,
+    )
+    if custom_fields:
+        # Polarion exposes no project-config endpoint to enumerate valid
+        # custom-field keys, and on create there is no prior work item to
+        # observe. Surface the gap as a warning so an unknown key on
+        # create still leaves a forensic trail — the matching update path
+        # (``guard_update_custom_field_keys``) does enforce.
+        logger.warning(
+            "create_work_item.custom_fields cannot be schema-validated "
+            "(no project-config endpoint for custom-field keys); "
+            "ensure keys come from a prior get_work_item to avoid ghost "
+            "attributes. project=%s type=%s keys=%s",
+            project_id,
+            type,
+            sorted(custom_fields),
+        )
+
     description_html = (
         sanitize_html(markdown_to_html(description)) if description else ""
     )
@@ -734,7 +769,6 @@ async def create_work_item(  # noqa: PLR0913
             payload_preview=payload,
         )
 
-    client = get_client(ctx)
     path = f"/projects/{encode_path_segment(project_id)}/workitems"
     try:
         response = await client.post(path, json=cast(dict[str, object], payload))
@@ -1001,6 +1035,70 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
             "initial_estimate, resolution, hyperlinks, or assignee_ids."
         )
 
+    client = get_client(ctx)
+    base_path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/workitems/{encode_path_segment(work_item_id)}"
+    )
+
+    # When any enum or custom-field arg is set, fetch the work item once
+    # so we know its type (enum options are type-scoped) and so the
+    # custom-key cache is primed for ``guard_update_custom_field_keys``.
+    # Runs on dry_run too so preview surfaces the same ValueError the
+    # real call would raise.
+    work_item_type = ""
+    if status or severity or priority or change_type_to or custom_fields:
+        try:
+            prefetch = await client.get(
+                base_path,
+                params={"fields[workitems]": "@all"},
+            )
+        except PolarionNotFoundError as exc:
+            raise ValueError(
+                f"Work item '{work_item_id}' in project '{project_id}' not found. "
+                "Use `list_work_items` to discover valid IDs."
+            ) from exc
+        except PolarionAuthError as exc:
+            raise PermissionError(
+                "Cannot read work item -- check your POLARION_TOKEN permissions."
+            ) from exc
+        except PolarionError as exc:
+            raise RuntimeError(
+                f"Failed to read work item for guard: {exc.message}"
+            ) from exc
+        prefetch_data = prefetch.get("data", {})
+        if isinstance(prefetch_data, dict):
+            current_detail = parse_work_item_detail(
+                prefetch_data,
+                project_id=project_id,
+                fallback_id=work_item_id,
+            )
+            work_item_type = current_detail.type
+            if work_item_type:
+                record_custom_keys_from_get(
+                    project_id,
+                    work_item_type,
+                    current_detail.custom_fields.keys(),
+                )
+
+        await guard_work_item_enums(
+            client,
+            project_id,
+            work_item_type=work_item_type or "~",
+            type=change_type_to,
+            status=status,
+            severity=severity,
+            priority=priority,
+        )
+        if custom_fields and work_item_type:
+            await guard_update_custom_field_keys(
+                client,
+                project_id,
+                work_item_id,
+                work_item_type,
+                custom_fields,
+            )
+
     if dry_run:
         return WorkItemUpdateResult(
             updated=False,
@@ -1010,11 +1108,6 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
             payload_preview=payload,
         )
 
-    client = get_client(ctx)
-    base_path = (
-        f"/projects/{encode_path_segment(project_id)}"
-        f"/workitems/{encode_path_segment(work_item_id)}"
-    )
     query_params: dict[str, str] = {}
     if workflow_action:
         query_params["workflowAction"] = workflow_action
@@ -1482,6 +1575,31 @@ async def update_document(  # noqa: PLR0913
             "or custom_fields."
         )
 
+    client = get_client(ctx)
+    # Guard type / status with type-agnostic options. For status this is
+    # less precise than scoping by the document's current type, but
+    # matches the cost trade-off used by ``create_document`` (no extra
+    # GET); the goal is to catch the obvious ghost-id cases (e.g.
+    # ``productRequirementSpecification``).
+    await guard_document_enums(
+        client,
+        project_id,
+        document_type="~",
+        type=type,
+        status=status,
+    )
+    if custom_fields:
+        logger.warning(
+            "update_document.custom_fields cannot be schema-validated "
+            "(no project-config endpoint for custom-field keys); "
+            "ensure keys come from a prior get_document to avoid ghost "
+            "attributes. project=%s document=%s/%s keys=%s",
+            project_id,
+            space_id,
+            document_name,
+            sorted(custom_fields),
+        )
+
     payload = _build_update_document_payload(
         project_id=project_id,
         space_id=space_id,
@@ -1500,7 +1618,6 @@ async def update_document(  # noqa: PLR0913
             payload_preview=payload,
         )
 
-    client = get_client(ctx)
     base_path = (
         f"/projects/{encode_path_segment(project_id)}"
         f"/spaces/{encode_path_segment(space_id)}"
@@ -1648,6 +1765,15 @@ async def create_document(  # noqa: PLR0913
         RuntimeError: Other Polarion API errors (including duplicate
             ``module_name``), or accepted-but-no-ID response.
     """
+    client = get_client(ctx)
+    await guard_document_enums(
+        client,
+        project_id,
+        document_type=type,
+        type=type,
+        status=status,
+    )
+
     home_page_content_html = (
         stamp_block_ids(sanitize_html(markdown_to_html(home_page_content)))
         if home_page_content
@@ -1671,7 +1797,6 @@ async def create_document(  # noqa: PLR0913
             payload_preview=payload,
         )
 
-    client = get_client(ctx)
     path = (
         f"/projects/{encode_path_segment(project_id)}"
         f"/spaces/{encode_path_segment(space_id)}/documents"
