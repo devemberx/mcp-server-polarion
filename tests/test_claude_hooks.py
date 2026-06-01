@@ -223,3 +223,38 @@ class TestMissingTemplateBoxes:
     ) -> None:
         monkeypatch.chdir(tmp_path)  # no .github/ here
         assert body.missing_template_boxes("anything") == []
+
+
+class TestChangesFormatErrors:
+    def test_valid_two_bullets(self) -> None:
+        text = "## Summary\nx\n\n## Changes\n\n- motivation\n- change\n\n## Testing\n"
+        assert body.changes_format_errors(text) == []
+
+    def test_section_ends_at_next_header(self) -> None:
+        # bullets under a later section must not be counted toward Changes
+        text = "## Changes\n\n- one\n- two\n\n## Testing\n\n- not counted\n"
+        assert body.changes_format_errors(text) == []
+
+    def test_wrong_count(self) -> None:
+        text = "## Changes\n\n- only one\n\n## Testing\n"
+        errs = body.changes_format_errors(text)
+        assert any("exactly 2" in e for e in errs)
+
+    def test_empty_template_stub_fails(self) -> None:
+        # the unfilled "- \n- " stub has no text, so it counts as zero bullets
+        text = "## Changes\n\n- \n- \n\n## Testing\n"
+        errs = body.changes_format_errors(text)
+        assert any("found 0" in e for e in errs)
+
+    def test_over_limit_bullet(self) -> None:
+        text = f"## Changes\n\n- {'x' * 130}\n- ok\n\n## Testing\n"
+        errs = body.changes_format_errors(text)
+        assert any("limit: 120" in e for e in errs)
+
+    def test_absent_section_is_tolerant(self) -> None:
+        assert body.changes_format_errors("## Summary\nno changes section\n") == []
+
+    def test_section_at_end_of_body(self) -> None:
+        # no trailing section header after Changes
+        text = "## Summary\nx\n\n## Changes\n\n- one\n- two\n"
+        assert body.changes_format_errors(text) == []

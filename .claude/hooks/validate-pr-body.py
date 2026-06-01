@@ -8,7 +8,8 @@ Triggered before every Bash tool call. Skips silently unless the command is one 
   - gh api ... /pulls/... (body= or body=@)
   - gh api ... /issues/... (body= or body=@)
 
-When triggered, extracts the body content from the command, then enforces two rules:
+When triggered, extracts the body content from the command, then enforces these
+rules:
 
   1. **English-only.** No Hangul characters (U+AC00-D7A3, U+3131-318E) anywhere in
      the body. Per ``feedback_repo_artifacts_english`` memory and CLAUDE.md.
@@ -18,6 +19,12 @@ When triggered, extracts the body content from the command, then enforces two ru
      must appear in the body (state ``[ ]`` vs ``[x]`` is irrelevant). Per
      CLAUDE.md: "flip ``[ ]`` -> ``[x]`` for matching items; do not delete
      unchecked options."
+
+  3. **Changes section in commit-body format.** For PR create/edit only, the
+     ``## Changes`` section must hold exactly two non-empty ``- `` bullets, each
+     <= 120 chars -- the same rule the squash commit body follows (the template
+     marks Changes as "these become the squash commit body"). Empty template
+     stubs (``- `` with no text) do not count, so an unfilled section fails.
 
 Exit codes:
   0 = allow tool call (no violation, or command is unrelated)
@@ -34,7 +41,11 @@ from pathlib import Path
 
 HANGUL_RE = re.compile(r"[가-힣ㄱ-ㆎ]")
 CHECKBOX_RE = re.compile(r"^- \[[ x]\] (.+)$", re.MULTILINE)
+CHANGES_HEADER_RE = re.compile(r"^##\s+Changes\s*$", re.IGNORECASE | re.MULTILINE)
+NEXT_SECTION_RE = re.compile(r"^##\s", re.MULTILINE)
 TEMPLATE_PATH = Path(".github/PULL_REQUEST_TEMPLATE.md")
+BULLET_LIMIT = 120
+REQUIRED_BULLETS = 2
 
 PR_CREATE_EDIT_RE = re.compile(r"\bgh\s+pr\s+(create|edit)\b")
 PR_COMMENT_RE = re.compile(r"\bgh\s+pr\s+comment\b")
@@ -80,6 +91,7 @@ def main() -> int:
                 "options.' Include these lines (toggle state as needed):\n"
                 + "\n".join(f"    - [ ] {m}" for m in missing)
             )
+        errors.extend(changes_format_errors(body))
 
     if errors:
         sys.stderr.write("BLOCKED by .claude/hooks/validate-pr-body.py:\n\n")
@@ -165,6 +177,36 @@ def missing_template_boxes(body: str) -> list[str]:
     template_labels = set(CHECKBOX_RE.findall(template_text))
     body_labels = set(CHECKBOX_RE.findall(body))
     return sorted(template_labels - body_labels)
+
+
+def changes_format_errors(body: str) -> list[str]:
+    """Validate the ``## Changes`` section against the commit-body rules: exactly
+    two non-empty ``- `` bullets, each <= 120 chars. Empty stub bullets (``- ``
+    with no text) are not counted, so the unfilled template fails. Returns an empty
+    list when the section is absent (tolerant: a non-template body is not enforced).
+    """
+    header = CHANGES_HEADER_RE.search(body)
+    if header is None:
+        return []
+    nxt = NEXT_SECTION_RE.search(body, header.end())
+    section = body[header.end() : nxt.start()] if nxt else body[header.end() :]
+    lines = (ln.rstrip() for ln in section.splitlines())
+    bullets = [ln for ln in lines if ln.startswith("- ")]
+
+    errors: list[str] = []
+    if len(bullets) != REQUIRED_BULLETS:
+        errors.append(
+            f"The ## Changes section must contain exactly {REQUIRED_BULLETS} "
+            f"non-empty bullets (- ...), found {len(bullets)}. These become the "
+            "squash commit body (motivation, then change); fill the template stub."
+        )
+    for ln in bullets:
+        if len(ln) > BULLET_LIMIT:
+            errors.append(
+                f"A ## Changes bullet is {len(ln)} chars (limit: {BULLET_LIMIT}):"
+                f"\n    {ln}"
+            )
+    return errors
 
 
 if __name__ == "__main__":
