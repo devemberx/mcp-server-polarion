@@ -482,3 +482,23 @@ def stamp_block_ids(html: str, prefix: str = "polarion_mcp") -> str:
         used_ids.add(new_id)
         counter += 1
     return str(soup)
+
+
+def first_anchorless_block(html: str) -> str | None:
+    """Return the name of the first block element lacking a non-empty ``id=``.
+
+    The inverse predicate of :func:`stamp_block_ids`: the write side calls
+    this on raw ``update_document`` body HTML to reject anchorless blocks
+    before they reach Polarion, since each one makes the next
+    ``GET .../parts`` return HTTP 500. Heading tags are exempt (Polarion
+    rewrites their ids on save). Returns ``None`` when every block in
+    ``_BLOCK_TAGS_NEEDING_IDS`` carries an id, or the input is empty.
+    """
+    if not html or not html.strip():
+        return None
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup.find_all(list(_BLOCK_TAGS_NEEDING_IDS)):
+        existing = tag.get("id")
+        if not (isinstance(existing, str) and existing.strip()):
+            return str(tag.name)
+    return None

@@ -63,7 +63,12 @@ from mcp_server_polarion.tools._helpers import (
     safe_str,
     split_module_id,
 )
-from mcp_server_polarion.utils import markdown_to_html, sanitize_html, stamp_block_ids
+from mcp_server_polarion.utils import (
+    first_anchorless_block,
+    markdown_to_html,
+    sanitize_html,
+    stamp_block_ids,
+)
 
 logger = logging.getLogger("mcp_server_polarion.tools.write")
 
@@ -1522,7 +1527,8 @@ async def update_document(  # noqa: PLR0913
     an unknown id raises ``ValueError`` listing the valid options. Unknown
     ``custom_fields`` keys are likewise rejected unless seen on a prior
     ``get_document`` for this document (the tool does one priming read on
-    a miss).
+    a miss). An anchorless non-heading block in ``home_page_content_html``
+    raises ``ValueError`` before the write — stamp ids first.
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -1556,6 +1562,18 @@ async def update_document(  # noqa: PLR0913
             "work item. Pass at minimum '<p></p>' or omit the parameter "
             "to leave the body unchanged."
         )
+    if home_page_content_html is not None:
+        anchorless = first_anchorless_block(home_page_content_html)
+        if anchorless is not None:
+            raise ValueError(
+                f"home_page_content_html contains an anchorless <{anchorless}> "
+                "block. Every non-heading block (<p>/<ul>/<ol>/<table>/<div>/"
+                "<blockquote>/<pre>) must carry a unique non-empty id= or the "
+                "next read_document_parts returns HTTP 500. Stamp ids "
+                '(e.g. id="polarion_mcp_1") on each such block before updating; '
+                "<h1>..<h6> headings are exempt."
+            )
+
     has_attrs = (
         title is not None
         or status is not None

@@ -5397,3 +5397,43 @@ class TestEnumGuardUpdateDocument:
             mock_ctx, custom_fields={"doc_risk": 9}, dry_run=True
         )
         assert result.dry_run is True  # type: ignore[attr-defined]
+
+
+class TestUpdateDocumentAnchorlessGuard:
+    """Integration: ``update_document`` rejects anchorless body blocks."""
+
+    async def test_anchorless_paragraph_raises(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        with pytest.raises(ValueError, match="anchorless <p>"):
+            await _call_update_doc(
+                mock_ctx, home_page_content_html="<p>Note</p>", dry_run=True
+            )
+        mock_client.patch.assert_not_called()
+
+    async def test_stamped_paragraph_passes(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        result = await _call_update_doc(
+            mock_ctx,
+            home_page_content_html='<p id="polarion_mcp_1">Note</p>',
+            dry_run=True,
+        )
+        assert result.dry_run is True  # type: ignore[attr-defined]
+
+    async def test_heading_only_passes(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        result = await _call_update_doc(
+            mock_ctx, home_page_content_html="<h1>Title</h1>", dry_run=True
+        )
+        assert result.dry_run is True  # type: ignore[attr-defined]
