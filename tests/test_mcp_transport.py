@@ -182,16 +182,35 @@ class TestEndToEndInvocation:
                     {"project_id": "P1", "work_item_id": "P1-1"},
                 )
 
-    async def test_create_work_item_dry_run(self, mcp_client: _MCPClient) -> None:
-        result = await mcp_client.call_tool(
-            "create_work_item",
-            {
-                "project_id": "MCP_Test_Project",
-                "title": "smoke",
-                "type": "task",
-                "dry_run": True,
-            },
+    @staticmethod
+    def _stub_type_options(mock: respx.MockRouter) -> None:
+        """Stub the enum guard's ``getAvailableOptions`` GET for ``type``.
+
+        The guard runs even on ``dry_run`` and is fail-closed, so the dry_run
+        path now needs the validation endpoint to be reachable.
+        """
+        mock.get(
+            "/projects/MCP_Test_Project/workitems/fields/type/actions/"
+            "getAvailableOptions"
+        ).mock(
+            return_value=httpx.Response(
+                200,
+                json={"data": [{"id": "task", "name": "Task"}], "meta": {}},
+            )
         )
+
+    async def test_create_work_item_dry_run(self, mcp_client: _MCPClient) -> None:
+        with respx.mock(base_url=_BASE, assert_all_called=False) as mock:
+            self._stub_type_options(mock)
+            result = await mcp_client.call_tool(
+                "create_work_item",
+                {
+                    "project_id": "MCP_Test_Project",
+                    "title": "smoke",
+                    "type": "task",
+                    "dry_run": True,
+                },
+            )
 
         body = result.structured_content
         assert body is not None
@@ -211,7 +230,11 @@ class TestEndToEndInvocation:
         # produce a `$defs` self-reference that fastmcp 3.3.1's
         # json_schema_to_type cannot rebuild, leaving result.data unmaterialised
         # and logging "Error parsing structured content" on every write call.
-        with caplog.at_level("WARNING", logger="fastmcp"):
+        with (
+            caplog.at_level("WARNING", logger="fastmcp"),
+            respx.mock(base_url=_BASE, assert_all_called=False) as mock,
+        ):
+            self._stub_type_options(mock)
             result = await mcp_client.call_tool(
                 "create_work_item",
                 {

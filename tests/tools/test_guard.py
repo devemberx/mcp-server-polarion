@@ -1,9 +1,9 @@
-"""Tests for ``tools/_enum_guard.py``.
+"""Tests for ``tools/_guard.py``.
 
-Covers the two TTL caches (enum-option ids, observed custom-field keys),
-the ``fetch_enum_option_ids`` GET + parse path, soft-fail on Polarion error,
-and the two write-time guards (``guard_work_item_enums``,
-``guard_update_custom_field_keys``).
+Covers the ``fetch_enum_option_ids`` GET + parse path, the fail-closed
+behaviour on Polarion error (the write is blocked, not skipped), and the
+four write-time guards. The TTL caches the guards read from live in
+``tools/_cache.py`` and are exercised in ``test_cache.py``.
 """
 
 from __future__ import annotations
@@ -14,20 +14,26 @@ import pytest
 
 from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.core.exceptions import PolarionError
-from mcp_server_polarion.tools import _enum_guard as guard_mod
-from mcp_server_polarion.tools._enum_guard import (
+from mcp_server_polarion.tools import _cache as cache_mod
+from mcp_server_polarion.tools._cache import (
+    record_document_custom_field_keys,
+    record_work_item_custom_field_keys,
+)
+from mcp_server_polarion.tools._guard import (
     fetch_enum_option_ids,
+    guard_document_custom_field_keys,
     guard_document_enums,
-    guard_update_custom_field_keys,
+    guard_work_item_custom_field_keys,
     guard_work_item_enums,
-    record_custom_keys_from_get,
 )
 
 
 @pytest.fixture(autouse=True)
 def _reset_caches() -> None:
     """Drop any cache state leaked from prior tests in the session."""
-    guard_mod._reset_caches_for_tests()
+    cache_mod._enum_option_cache.clear()
+    cache_mod._work_item_custom_key_cache.clear()
+    cache_mod._document_custom_key_cache.clear()
 
 
 @pytest.fixture
@@ -80,7 +86,7 @@ class TestFetchEnumOptionIds:
     ) -> None:
         mock_client.get.return_value = _enum_response(["a"])
         clock = [1000.0]
-        monkeypatch.setattr(guard_mod, "_now", lambda: clock[0])
+        monkeypatch.setattr(cache_mod, "_now", lambda: clock[0])
 
         await fetch_enum_option_ids(mock_client, "P", "workitems", "severity", "task")
         clock[0] += 61.0  # past the 60s TTL
@@ -88,30 +94,29 @@ class TestFetchEnumOptionIds:
 
         assert mock_client.get.await_count == 2
 
-    async def test_polarion_error_returns_none_and_logs(
+    async def test_polarion_error_blocks_write_and_logs(
         self,
         mock_client: AsyncMock,
         caplog: pytest.LogCaptureFixture,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        # ``setup_logging`` (in the production package) sets
-        # ``propagate=False`` on ``mcp_server_polarion`` so MCP JSON-RPC
-        # over stdout never gets contaminated. caplog hooks the root
-        # logger, so once another test has run setup_logging, child
-        # warnings never reach caplog. Re-enable propagation locally so
-        # this test is order-independent.
+        # ``setup_logging`` sets ``propagate=False`` on the package logger so
+        # MCP JSON-RPC over stdout never gets contaminated. caplog hooks the
+        # root logger, so once another test ran setup_logging, child warnings
+        # never reach caplog. Re-enable propagation locally for order
+        # independence.
         import logging  # noqa: PLC0415 -- fixture-local import is intentional
 
         monkeypatch.setattr(logging.getLogger("mcp_server_polarion"), "propagate", True)
-        caplog.set_level("WARNING", logger="mcp_server_polarion._enum_guard")
+        caplog.set_level("WARNING", logger="mcp_server_polarion._guard")
         mock_client.get.side_effect = PolarionError("backend down")
 
-        result = await fetch_enum_option_ids(
-            mock_client, "P", "workitems", "severity", "task"
-        )
+        with pytest.raises(RuntimeError, match="Refusing the write"):
+            await fetch_enum_option_ids(
+                mock_client, "P", "workitems", "severity", "task"
+            )
 
-        assert result is None
-        assert any("enum guard skipped" in r.message for r in caplog.records)
+        assert any("blocking write" in r.message for r in caplog.records)
 
     async def test_unknown_resource_field_returns_empty_set(
         self, mock_client: AsyncMock
@@ -171,14 +176,11 @@ class TestGuardWorkItemEnums:
 
         mock_client.get.assert_not_awaited()
 
-    async def test_soft_fail_on_polarion_error_lets_write_proceed(
-        self, mock_client: AsyncMock
-    ) -> None:
+    async def test_polarion_error_blocks_write(self, mock_client: AsyncMock) -> None:
         mock_client.get.side_effect = PolarionError("backend down")
 
-        await guard_work_item_enums(
-            mock_client, "P", "task", priority="999"
-        )  # must not raise
+        with pytest.raises(RuntimeError, match="Refusing the write"):
+            await guard_work_item_enums(mock_client, "P", "task", priority="999")
 
     async def test_type_uses_tilde_axis(self, mock_client: AsyncMock) -> None:
         mock_client.get.return_value = _enum_response(["task", "requirement"])
@@ -230,45 +232,49 @@ class TestGuardDocumentEnums:
         assert "productRequirementSpecification" in str(exc.value)
 
 
-class TestObservedCustomKeysCache:
-    """``record_custom_keys_from_get`` plus the read path used by the guard."""
+class TestRecordWorkItemCustomKeys:
+    """``record_work_item_custom_field_keys`` plus the cache read it feeds."""
 
     def test_record_merges_across_calls(self) -> None:
-        record_custom_keys_from_get("P", "task", ["k1"])
-        record_custom_keys_from_get("P", "task", ["k2", "k1"])
+        record_work_item_custom_field_keys("P", "task", ["k1"])
+        record_work_item_custom_field_keys("P", "task", ["k2", "k1"])
 
-        assert guard_mod._get_cached_custom_keys("P", "task") == frozenset({"k1", "k2"})
+        assert cache_mod._work_item_custom_key_cache.get(("P", "task")) == frozenset(
+            {"k1", "k2"}
+        )
 
     def test_record_filters_non_string_and_empty(self) -> None:
-        record_custom_keys_from_get("P", "task", ["k1", "", "k2"])
+        record_work_item_custom_field_keys("P", "task", ["k1", "", "k2"])
 
-        assert guard_mod._get_cached_custom_keys("P", "task") == frozenset({"k1", "k2"})
+        assert cache_mod._work_item_custom_key_cache.get(("P", "task")) == frozenset(
+            {"k1", "k2"}
+        )
 
     def test_cache_expiry(self, monkeypatch: pytest.MonkeyPatch) -> None:
         clock = [1000.0]
-        monkeypatch.setattr(guard_mod, "_now", lambda: clock[0])
-        record_custom_keys_from_get("P", "task", ["k1"])
+        monkeypatch.setattr(cache_mod, "_now", lambda: clock[0])
+        record_work_item_custom_field_keys("P", "task", ["k1"])
 
         clock[0] += 61.0
-        assert guard_mod._get_cached_custom_keys("P", "task") is None
+        assert cache_mod._work_item_custom_key_cache.get(("P", "task")) is None
 
 
-class TestGuardUpdateCustomFieldKeys:
+class TestGuardWorkItemCustomFieldKeys:
     """Validation of ``update_work_item.custom_fields`` keys."""
 
     async def test_no_custom_fields_short_circuits(
         self, mock_client: AsyncMock
     ) -> None:
-        await guard_update_custom_field_keys(mock_client, "P", "MCPT-1", "task", {})
+        await guard_work_item_custom_field_keys(mock_client, "P", "MCPT-1", "task", {})
 
         mock_client.get.assert_not_awaited()
 
     async def test_known_key_passes_without_inline_get(
         self, mock_client: AsyncMock
     ) -> None:
-        record_custom_keys_from_get("P", "task", ["risk_score"])
+        record_work_item_custom_field_keys("P", "task", ["risk_score"])
 
-        await guard_update_custom_field_keys(
+        await guard_work_item_custom_field_keys(
             mock_client, "P", "MCPT-1", "task", {"risk_score": 5}
         )
 
@@ -277,10 +283,10 @@ class TestGuardUpdateCustomFieldKeys:
     async def test_unknown_key_raises_with_known_set(
         self, mock_client: AsyncMock
     ) -> None:
-        record_custom_keys_from_get("P", "task", ["risk_score"])
+        record_work_item_custom_field_keys("P", "task", ["risk_score"])
 
         with pytest.raises(ValueError) as exc:
-            await guard_update_custom_field_keys(
+            await guard_work_item_custom_field_keys(
                 mock_client, "P", "MCPT-1", "task", {"release_train_id": "RT-42"}
             )
 
@@ -302,13 +308,12 @@ class TestGuardUpdateCustomFieldKeys:
             }
         }
 
-        await guard_update_custom_field_keys(
+        await guard_work_item_custom_field_keys(
             mock_client, "P", "MCPT-1", "task", {"risk_score": 5}
         )
 
         mock_client.get.assert_awaited_once()
-        # Cache primed for follow-up.
-        assert guard_mod._get_cached_custom_keys("P", "task") == frozenset(
+        assert cache_mod._work_item_custom_key_cache.get(("P", "task")) == frozenset(
             {"risk_score"}
         )
 
@@ -320,18 +325,80 @@ class TestGuardUpdateCustomFieldKeys:
         }
 
         with pytest.raises(ValueError) as exc:
-            await guard_update_custom_field_keys(
+            await guard_work_item_custom_field_keys(
                 mock_client, "P", "MCPT-1", "task", {"release_train_id": "RT-42"}
             )
 
         assert "release_train_id" in str(exc.value)
 
-    async def test_soft_fail_on_priming_get_polarion_error(
-        self, mock_client: AsyncMock
-    ) -> None:
+    async def test_priming_get_error_blocks_write(self, mock_client: AsyncMock) -> None:
         mock_client.get.side_effect = PolarionError("backend down")
 
-        # No raise: guard skipped, write proceeds.
-        await guard_update_custom_field_keys(
-            mock_client, "P", "MCPT-1", "task", {"release_train_id": "RT-42"}
+        with pytest.raises(RuntimeError, match="Refusing the write"):
+            await guard_work_item_custom_field_keys(
+                mock_client, "P", "MCPT-1", "task", {"release_train_id": "RT-42"}
+            )
+
+
+class TestGuardDocumentCustomFieldKeys:
+    """Validation of ``update_document.custom_fields`` keys."""
+
+    async def test_no_custom_fields_short_circuits(
+        self, mock_client: AsyncMock
+    ) -> None:
+        await guard_document_custom_field_keys(mock_client, "P", "_default", "Doc", {})
+
+        mock_client.get.assert_not_awaited()
+
+    async def test_known_recorded_key_passes_without_inline_get(
+        self, mock_client: AsyncMock
+    ) -> None:
+        record_document_custom_field_keys("P", "_default", "Doc", ["doc_risk"])
+
+        await guard_document_custom_field_keys(
+            mock_client, "P", "_default", "Doc", {"doc_risk": 3}
         )
+
+        mock_client.get.assert_not_awaited()
+
+    async def test_cache_miss_fetches_inline_and_primes_cache(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": {"attributes": {"title": "x", "type": "generic", "doc_risk": 3}}
+        }
+
+        await guard_document_custom_field_keys(
+            mock_client, "P", "_default", "Doc", {"doc_risk": 3}
+        )
+
+        mock_client.get.assert_awaited_once()
+        path = mock_client.get.call_args.args[0]
+        assert path == "/projects/P/spaces/_default/documents/Doc"
+        assert cache_mod._document_custom_key_cache.get(
+            ("P", "_default", "Doc")
+        ) == frozenset({"doc_risk"})
+
+    async def test_unknown_key_raises_with_known_set(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": {"attributes": {"title": "x", "doc_risk": 3}}
+        }
+
+        with pytest.raises(ValueError) as exc:
+            await guard_document_custom_field_keys(
+                mock_client, "P", "_default", "Doc", {"ghost_key": 1}
+            )
+
+        msg = str(exc.value)
+        assert "ghost_key" in msg
+        assert "doc_risk" in msg
+
+    async def test_priming_get_error_blocks_write(self, mock_client: AsyncMock) -> None:
+        mock_client.get.side_effect = PolarionError("backend down")
+
+        with pytest.raises(RuntimeError, match="Refusing the write"):
+            await guard_document_custom_field_keys(
+                mock_client, "P", "_default", "Doc", {"ghost_key": 1}
+            )

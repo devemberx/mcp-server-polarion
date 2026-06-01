@@ -42,9 +42,10 @@ from mcp_server_polarion.models import (
 from mcp_server_polarion.server import mcp
 from mcp_server_polarion.tools._cache import (
     get_cached_documents,
+    record_document_custom_field_keys,
+    record_work_item_custom_field_keys,
     store_cached_documents,
 )
-from mcp_server_polarion.tools._enum_guard import record_custom_keys_from_get
 from mcp_server_polarion.tools._helpers import (
     DEFAULT_PAGE_SIZE,
     DOCUMENT_COMMENT_LIST_FIELDS,
@@ -805,13 +806,20 @@ async def get_document(
         if isinstance(content_obj, dict):
             content_html = safe_str(content_obj.get("value", ""))
 
-    return DocumentDetail(
+    detail = DocumentDetail(
         title=safe_str(attributes.get("title", "")),
         type=safe_str(attributes.get("type", "")),
         status=safe_str(attributes.get("status", "")),
         content_html=content_html,
         custom_fields=extract_custom_fields(attributes, STANDARD_DOCUMENT_ATTRIBUTES),
     )
+    # Record observed custom-field keys so a later
+    # ``update_document.custom_fields`` can be validated against ids the
+    # caller has actually seen (guarded in ``tools/_guard.py``).
+    record_document_custom_field_keys(
+        project_id, space_id, document_name, detail.custom_fields.keys()
+    )
+    return detail
 
 
 def _build_enum_option(entry: dict[str, object]) -> EnumOption:
@@ -1599,11 +1607,11 @@ async def get_work_item(
         project_id=project_id,
         fallback_id=work_item_id,
     )
-    # Feed observed custom-field keys to the enum guard so a later
+    # Record observed custom-field keys so a later
     # ``update_work_item.custom_fields`` can be validated without an
-    # extra round trip (see ``tools/_enum_guard.py``).
+    # extra round trip (guarded in ``tools/_guard.py``).
     if detail.type:
-        record_custom_keys_from_get(
+        record_work_item_custom_field_keys(
             project_id, detail.type, detail.custom_fields.keys()
         )
     if not include_description_html:

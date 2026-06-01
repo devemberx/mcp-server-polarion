@@ -38,7 +38,6 @@ from mcp_server_polarion.models import (
 )
 from mcp_server_polarion.server import mcp
 from mcp_server_polarion.tools import _cache as _cache_mod
-from mcp_server_polarion.tools import _enum_guard as _enum_guard_mod
 from mcp_server_polarion.tools import write as _write_mod
 
 # ``@mcp.tool`` returns the original function unchanged (not a FunctionTool
@@ -68,6 +67,24 @@ _build_update_work_item_payload = _write_mod._build_update_work_item_payload
 _build_work_item_payload = _write_mod._build_work_item_payload
 _extract_created_id = _write_mod._extract_created_id
 _extract_created_link_ids = _write_mod._extract_created_link_ids
+
+
+def _clear_guard_caches() -> None:
+    """Drop the guard caches owned by ``tools/_cache.py``."""
+    _cache_mod._enum_option_cache.clear()
+    _cache_mod._work_item_custom_key_cache.clear()
+    _cache_mod._document_custom_key_cache.clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_guard_caches() -> None:
+    """Start every write test with cold enum/custom-field guard caches.
+
+    The guards memoise option ids and observed custom-field keys in
+    module-level caches; without a reset, a key primed by one test would
+    leak into the next and mask a missing priming GET.
+    """
+    _clear_guard_caches()
 
 
 @pytest.fixture
@@ -2252,7 +2269,11 @@ class TestUpdateDocumentValidation:
     async def test_custom_fields_alone_satisfies_at_least_one_check(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # custom_fields counts as a body field on update_document too.
+        # custom_fields counts as a body field on update_document too. The
+        # priming GET lets the custom-field guard see ``documentVersion``.
+        mock_client.get.return_value = {
+            "data": {"attributes": {"title": "D", "documentVersion": "0.1"}}
+        }
         result = await update_document(
             mock_ctx,
             project_id="MyProj",
@@ -2273,6 +2294,9 @@ class TestUpdateDocumentValidation:
     ) -> None:
         # workflow_action paired with custom_fields-only should also
         # satisfy the body-field check.
+        mock_client.get.return_value = {
+            "data": {"attributes": {"title": "D", "documentVersion": "0.1"}}
+        }
         result = await update_document(
             mock_ctx,
             project_id="MyProj",
@@ -2306,7 +2330,7 @@ class TestUpdateDocumentValidation:
             title=None,
             status=None,
             type=None,
-            home_page_content_html="<p>new body</p>",
+            home_page_content_html='<p id="b1">new body</p>',
             custom_fields=None,
             workflow_action="approve",
             dry_run=True,
@@ -2318,7 +2342,7 @@ class TestUpdateDocumentValidation:
         attributes = cast(dict[str, object], item["attributes"])
         assert attributes["homePageContent"] == {
             "type": "text/html",
-            "value": "<p>new body</p>",
+            "value": '<p id="b1">new body</p>',
         }
 
     async def test_custom_fields_collision_raises(
@@ -2487,7 +2511,7 @@ class TestUpdateDocumentHappyPath:
         mock_client.patch.return_value = {}
 
         raw = (
-            '<p>Body with <span class="polarion-rte-link" '
+            '<p id="b1">Body with <span class="polarion-rte-link" '
             'data-item-id="MCPT-1">link</span></p>'
         )
         await update_document(
@@ -2590,7 +2614,7 @@ class TestUpdateDocumentHappyPath:
             title=None,
             status=None,
             type=None,
-            home_page_content_html="<p>x</p>",
+            home_page_content_html='<p id="b1">x</p>',
             custom_fields=None,
             workflow_action=None,
             dry_run=True,
@@ -5138,7 +5162,7 @@ def _enum_get_response(ids: list[str]) -> dict[str, object]:
 @pytest.fixture
 def reset_enum_guard_caches() -> None:
     """Drop guard caches between integration tests so each scenario starts cold."""
-    _enum_guard_mod._reset_caches_for_tests()
+    _clear_guard_caches()
 
 
 async def _call_create_wi(mock_ctx: MagicMock, **overrides: object) -> object:
@@ -5255,7 +5279,7 @@ class TestEnumGuardCreateWorkItem:
     ) -> None:
         # No schema for project custom-field keys → guard cannot validate
         # on create; surface the gap as a warning rather than a hard fail.
-        # See test_polarion_error_returns_none_and_logs in test_enum_guard.py
+        # See test_polarion_error_blocks_write_and_logs in test_guard.py
         # for why we re-enable propagation here.
         import logging  # noqa: PLC0415 -- fixture-local import is intentional
 
@@ -5342,3 +5366,34 @@ class TestEnumGuardUpdateDocument:
         with pytest.raises(ValueError, match="status='ghost'"):
             await _call_update_doc(mock_ctx, status="ghost")
         mock_client.patch.assert_not_called()
+
+    async def test_unknown_custom_field_key_raises_via_priming_get(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        # Cache miss → guard does one inline get_document-shaped read; the
+        # unknown key is absent from the document's customs, so it rejects.
+        mock_client.get.return_value = {
+            "data": {"attributes": {"title": "x", "doc_risk": 3}}
+        }
+
+        with pytest.raises(ValueError, match="ghost_key"):
+            await _call_update_doc(mock_ctx, custom_fields={"ghost_key": 1})
+        mock_client.patch.assert_not_called()
+
+    async def test_known_custom_field_key_passes_guard(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": {"attributes": {"title": "x", "doc_risk": 3}}
+        }
+
+        result = await _call_update_doc(
+            mock_ctx, custom_fields={"doc_risk": 9}, dry_run=True
+        )
+        assert result.dry_run is True  # type: ignore[attr-defined]
