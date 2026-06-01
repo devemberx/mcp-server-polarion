@@ -40,6 +40,10 @@ from mcp_server_polarion.models import (
     WorkItemSummary,
 )
 from mcp_server_polarion.server import mcp
+from mcp_server_polarion.tools._cache import (
+    get_cached_documents,
+    store_cached_documents,
+)
 from mcp_server_polarion.tools._enum_guard import record_custom_keys_from_get
 from mcp_server_polarion.tools._helpers import (
     DEFAULT_PAGE_SIZE,
@@ -57,13 +61,11 @@ from mcp_server_polarion.tools._helpers import (
     extract_relationship_id,
     extract_short_id,
     extract_total_count,
-    get_cached_documents,
     get_client,
     parse_work_item_detail,
     parse_work_item_summaries,
     safe_str,
     split_module_id,
-    store_cached_documents,
     summary_to_back_link,
     validate_work_item_id_for_lucene,
 )
