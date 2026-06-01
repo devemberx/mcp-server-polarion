@@ -487,12 +487,17 @@ def stamp_block_ids(html: str, prefix: str = "polarion_mcp") -> str:
 def first_anchorless_block(html: str) -> str | None:
     """Return the name of the first block element lacking a non-empty ``id=``.
 
-    The inverse predicate of :func:`stamp_block_ids`: the write side calls
-    this on raw ``update_document`` body HTML to reject anchorless blocks
-    before they reach Polarion, since each one makes the next
+    The write-side counterpart to :func:`stamp_block_ids`: the write side
+    calls this on raw ``update_document`` body HTML to reject anchorless
+    blocks before they reach Polarion, since each one makes the next
     ``GET .../parts`` return HTTP 500. Heading tags are exempt (Polarion
     rewrites their ids on save). Returns ``None`` when every block in
     ``_BLOCK_TAGS_NEEDING_IDS`` carries an id, or the input is empty.
+
+    Deliberately stricter than the ``stamp_block_ids`` skip test: a
+    whitespace-only ``id`` counts as anchorless here (it does not anchor the
+    block for Polarion either), whereas ``stamp_block_ids`` leaves any truthy
+    id untouched. The guard erring toward rejection is the safe direction.
     """
     if not html or not html.strip():
         return None

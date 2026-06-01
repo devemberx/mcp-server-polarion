@@ -7,6 +7,7 @@ import pytest
 from mcp_server_polarion.utils.html import (
     ALLOWED_ATTRS,
     ALLOWED_TAGS,
+    first_anchorless_block,
     html_to_markdown,
     markdown_to_html,
     sanitize_html,
@@ -766,3 +767,55 @@ class TestStampBlockIds:
     @pytest.mark.parametrize("value", ["", "   ", "\n\t"])
     def test_empty_or_whitespace_input_returns_empty(self, value: str) -> None:
         assert stamp_block_ids(value) == ""
+
+
+class TestFirstAnchorlessBlock:
+    """``first_anchorless_block`` is the write-side reject predicate; every
+    block in ``_BLOCK_TAGS_NEEDING_IDS`` must carry a non-empty id."""
+
+    @pytest.mark.parametrize("value", ["", "   ", "\n\t"])
+    def test_empty_or_whitespace_input_is_none(self, value: str) -> None:
+        assert first_anchorless_block(value) is None
+
+    def test_headings_are_exempt(self) -> None:
+        html = "<h1>a</h1><h2>b</h2><h3>c</h3><h4>d</h4><h5>e</h5><h6>f</h6>"
+        assert first_anchorless_block(html) is None
+
+    @pytest.mark.parametrize(
+        "tag", ["p", "ul", "ol", "table", "div", "blockquote", "pre"]
+    )
+    def test_each_block_tag_without_id_is_flagged(self, tag: str) -> None:
+        assert first_anchorless_block(f"<{tag}>x</{tag}>") == tag
+
+    def test_block_with_id_passes(self) -> None:
+        assert first_anchorless_block('<p id="a">x</p>') is None
+
+    def test_all_blocks_anchored_passes(self) -> None:
+        html = '<p id="a">x</p><ul id="b"><li>y</li></ul><div id="c">z</div>'
+        assert first_anchorless_block(html) is None
+
+    def test_returns_first_offender_in_document_order(self) -> None:
+        # The <p> is anchored; the <ul> is not, so the <ul> is reported.
+        html = '<p id="a">x</p><ul><li>y</li></ul>'
+        assert first_anchorless_block(html) == "ul"
+
+    def test_empty_id_is_anchorless(self) -> None:
+        assert first_anchorless_block('<p id="">x</p>') == "p"
+
+    def test_whitespace_only_id_is_anchorless(self) -> None:
+        # Stricter than stamp_block_ids: a blank id does not anchor the block.
+        assert first_anchorless_block('<p id="   ">x</p>') == "p"
+
+    def test_nested_anchorless_block_is_caught(self) -> None:
+        # An anchored outer block does not excuse an anchorless inner block.
+        html = '<div id="outer"><p>inner</p></div>'
+        assert first_anchorless_block(html) == "p"
+
+    def test_mixed_anchored_and_anchorless_reports_the_gap(self) -> None:
+        html = '<p id="a">ok</p><table><tr><td>x</td></tr></table>'
+        assert first_anchorless_block(html) == "table"
+
+    def test_inline_elements_do_not_count(self) -> None:
+        # <span>/<strong> are not in the block set, so an anchored <p>
+        # wrapping them passes even though the inline tags lack ids.
+        assert first_anchorless_block('<p id="a">x <span>y</span></p>') is None
