@@ -2,8 +2,9 @@
 
 Dispatches on ``Case.metadata["check"]`` (carried through to
 ``EvaluationData.metadata``) to the matching pure check in ``checks.py``,
-then also runs every cross-cutting ``GLOBAL_CHECKS`` entry. A case passes
-only if its named check AND all global checks pass — the first failure wins.
+then also runs every cross-cutting ``GLOBAL_CHECKS`` entry (currently none —
+the list is a reserved extension point). A case passes only if its named
+check AND all global checks pass — the first failure wins.
 """
 
 from __future__ import annotations
