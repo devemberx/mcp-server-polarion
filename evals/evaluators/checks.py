@@ -129,8 +129,3 @@ REGISTRY: dict[str, Callable[[Trajectory, dict[str, Any]], CheckResult]] = {
     "heading_to_doc": check_heading_to_doc,
     "get_before_update": check_get_before_update,
 }
-
-# Reserved extension point: checks run on every case in addition to its named
-# check. Empty since the anchorless-body check moved server-side (the tool layer
-# hard-rejects anchorless blocks via ``first_anchorless_block``).
-GLOBAL_CHECKS: list[Callable[[Trajectory, dict[str, Any]], CheckResult]] = []
