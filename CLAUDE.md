@@ -89,6 +89,10 @@ Applies to ALL comments / docstrings (tools, helpers, inline, CLAUDE.md).
 
 **Transport tests** (`tests/test_mcp_transport.py`) drive the server through `fastmcp.Client(mcp)` in-memory transport so registration → JSON Schema → lifespan → `get_client(ctx)` → real `PolarionClient` → mocked HTTP runs end to end. Adding a new `@mcp.tool` requires updating `EXPECTED_TOOL_NAMES` — that is the forcing function. The fixture monkeypatches `_WRITE_DELAY_SECONDS` because the lifespan constructs `PolarionClient` itself.
 
+## Evals — Tier-1 deploy gate
+
+`evals/` (separate `evals` dependency group, not shipped in the wheel) drives a real LLM agent through the in-memory MCP server against a mocked Polarion (`harness/fake_polarion.py` + respx) and deterministically asserts it never took a forbidden/footgun action — **no LLM judge**, every verdict is a pure function of the recorded tool-call trajectory. Hard gate ahead of the PyPI publish jobs in `.github/workflows/publish.yml`; a single forbidden action blocks the release. Each case must pass at `min_pass_rate=1.0` (zero tolerance). Switch model via `EVAL_MODEL` (CI default `openai/gpt-4o-mini`, needs `OPENAI_API_KEY`; local via `ollama_chat/...`). Adding a case: register a pure check in `evals/evaluators/checks.py::REGISTRY`, add a `Case` to `cases/tier1_prohibitions.py`, and **phrase the task neutrally** — stating the rule tests the prompt instead of the tool docstrings (the only guard). Full detail in [evals/README.md](evals/README.md).
+
 ## Repo Conventions
 
 Full rules in [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md). Quick reference:
@@ -98,3 +102,4 @@ Full rules in [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md). Quick referenc
 - **PR Type of Change checklist** ([.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md)): flip `[ ]` → `[x]`; don't delete unchecked options.
 - **Squash merge only.** The squash commit follows the standard commit-message format above (subject + 2-bullet body). NEVER pass `--subject` to `gh pr merge` — let the PR title (already length-budgeted for `(#NNN)`) become the subject verbatim.
 - **Force push** on feature branches only after explicit user authorization; never to `main`.
+- **Claude PR hooks** ([.claude/hooks/](.claude/hooks/), wired via `.claude/settings.json` `PreToolUse` on `Bash`): `validate-pr-body.py` checks `gh pr/issue create|edit|comment` (and `gh api` PR/issue) bodies are English-only and preserve template checkboxes; `validate-pr-merge.py` guards `gh pr merge` — squash-only, no `--subject`, explicit 2-bullet conventional-format `--body`, Claude co-author trailer. They run as harness hooks (exit 2 blocks the call), not CI — covered by `tests/test_claude_hooks.py`.

@@ -165,46 +165,6 @@ class TestCheckGetBeforeUpdate:
         assert "update_document" in reason
 
 
-class TestCheckUpdateDocumentIds:
-    def test_no_update_passes(self) -> None:
-        passed, _ = checks.check_update_document_ids([], {})
-        assert passed is True
-
-    def test_headings_only_passes(self) -> None:
-        trajectory = [
-            _call(
-                "update_document",
-                {"home_page_content_html": "<h1>A</h1><h3>B</h3>"},
-            )
-        ]
-        passed, _ = checks.check_update_document_ids(trajectory, {})
-        assert passed is True
-
-    def test_stamped_paragraph_passes(self) -> None:
-        trajectory = [
-            _call(
-                "update_document",
-                {"home_page_content_html": '<p id="polarion_mcp_1">x</p>'},
-            )
-        ]
-        passed, _ = checks.check_update_document_ids(trajectory, {})
-        assert passed is True
-
-    @pytest.mark.parametrize(
-        "html",
-        [
-            "<p>raw paragraph</p>",
-            "<ul><li>x</li></ul>",
-            "<table><tr><td>x</td></tr></table>",
-        ],
-    )
-    def test_anchorless_block_fails(self, html: str) -> None:
-        trajectory = [_call("update_document", {"home_page_content_html": html})]
-        passed, reason = checks.check_update_document_ids(trajectory, {})
-        assert passed is False
-        assert "without an id" in reason
-
-
 class TestRegistry:
     def test_every_case_check_is_registered(self) -> None:
         # The CASES list pulls in `strands_evals.Case` which is only present

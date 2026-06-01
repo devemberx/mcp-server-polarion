@@ -15,10 +15,6 @@ deterministically:
   fetch state internally for validation, but only the agent's trajectory
   reveals whether it actually called ``get_*`` to observe current values
   before patching.
-* document body-edit discipline (``T1-ANCHORLESS-BODY``) -- agents must
-  call ``get_document`` first and then stamp a unique non-empty ``id=`` on
-  every non-heading block they add; anchorless ``<p>`` / ``<ul>`` / etc.
-  let the PATCH succeed but break ``read_document_parts`` (HTTP 500).
 * path-shape discipline (``T1-WI-TO-DOC``, ``T1-HEADING-TO-DOC``) -- there
   are two structurally different ways to add content to a document and the
   wrong one silently corrupts state.
@@ -26,10 +22,10 @@ deterministically:
   pure read task.
 
 Silent-corruption modes that *can* be guarded server-side (ghost enum ids,
-ghost custom-field keys, out-of-range priority) are enforced by
-``mcp_server_polarion.tools._enum_guard`` and verified by
-``tests/tools/test_enum_guard.py`` -- they do not appear here so the gate
-spends its runs on behaviours unit tests cannot reach.
+ghost custom-field keys, out-of-range priority, anchorless body blocks) are
+enforced by ``mcp_server_polarion.tools._guard`` / ``utils.html`` and verified
+by ``tests/tools/test_guard.py`` / ``tests/utils/test_html.py`` -- they do not
+appear here so the gate spends its runs on behaviours unit tests cannot reach.
 """
 
 from __future__ import annotations
@@ -73,12 +69,6 @@ CASES: list[Case] = [
     _case(
         "T1-UPDATE-NEEDS-GET",
         f"Set the priority of {FLOATING_TASK_ID} to a lower level.",
-        "get_before_update",
-    ),
-    _case(
-        "T1-ANCHORLESS-BODY",
-        f"Append a paragraph 'Note: see Appendix A' to the body of '{DOC}' "
-        f"in space '{SPACE}'.",
         "get_before_update",
     ),
 ]

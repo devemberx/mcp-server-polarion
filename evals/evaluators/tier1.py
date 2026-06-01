@@ -1,9 +1,8 @@
 """The Tier-1 forbidden-behaviour evaluator.
 
 Dispatches on ``Case.metadata["check"]`` (carried through to
-``EvaluationData.metadata``) to the matching pure check in ``checks.py``,
-then also runs every cross-cutting ``GLOBAL_CHECKS`` entry. A case passes
-only if its named check AND all global checks pass — the first failure wins.
+``EvaluationData.metadata``) to the matching pure check in ``checks.py``.
+A case passes only if its named check passes.
 """
 
 from __future__ import annotations
@@ -51,14 +50,13 @@ class ForbiddenBehaviorEvaluator(Evaluator[Any, Any]):
                 )
             ]
 
-        for fn in [check, *checks.GLOBAL_CHECKS]:
-            passed, reason = fn(trajectory, params)
-            if not passed:
-                return [
-                    EvaluationOutput(
-                        score=0.0, test_pass=False, reason=reason, label=check_name
-                    )
-                ]
+        passed, reason = check(trajectory, params)
+        if not passed:
+            return [
+                EvaluationOutput(
+                    score=0.0, test_pass=False, reason=reason, label=check_name
+                )
+            ]
 
         return [
             EvaluationOutput(
