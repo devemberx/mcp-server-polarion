@@ -56,6 +56,8 @@ select = ["E", "W", "F", "I", "UP", "B", "SIM", "ANN", "PL", "C4", "PTH", "RUF",
 # The eval harness drives third-party agent/LLM types (lots of `Any`) and is
 # not shipped in the wheel; relax the same rules tests get.
 "evals/**" = ["ANN", "PLR", "S101", "S105", "S106", "S603", "S607", "E402"]
+# Claude Code PreToolUse hooks: local tooling scripts, not shipped in the wheel.
+".claude/hooks/**" = ["PLR"]
 
 [tool.mypy]
 python_version = "3.13"
