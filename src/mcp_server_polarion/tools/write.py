@@ -41,6 +41,7 @@ from mcp_server_polarion.models import (
     WorkItemUpdateResult,
 )
 from mcp_server_polarion.server import mcp
+from mcp_server_polarion.tools._cache import invalidate_documents_cache
 from mcp_server_polarion.tools._enum_guard import (
     guard_document_enums,
     guard_update_custom_field_keys,
@@ -54,7 +55,6 @@ from mcp_server_polarion.tools._helpers import (
     encode_path_segment,
     extract_short_id,
     get_client,
-    invalidate_documents_cache,
     merge_custom_fields,
     parse_work_item_detail,
     safe_str,

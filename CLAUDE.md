@@ -22,7 +22,7 @@ CI: `ruff check` → `ruff format --check` → `mypy` → `pytest`.
 ## Architecture
 
 - **`core/`** — `client.py` (async httpx wrapper, 429/5xx backoff, post-mutation delay, maps to `PolarionError` / `PolarionAuthError` / `PolarionNotFoundError`), `config.py` (Pydantic settings: `POLARION_URL`, `POLARION_TOKEN`, `POLARION_VERIFY_SSL`), `logging.py` (stderr-only, called from server lifespan), `exceptions.py`. Every module: `logging.getLogger("mcp_server_polarion.<module>")`.
-- **`tools/`** — `read.py` (12 read tools), `write.py` (11 write tools, each with its `_build_*_payload` helper as the unit-testable seam), `_helpers.py` (sparse-fieldset constants, JSON:API extractors, pagination, custom-field merge).
+- **`tools/`** — `read.py` (12 read tools), `write.py` (11 write tools, each with its `_build_*_payload` helper as the unit-testable seam), `_helpers.py` (sparse-fieldset constants, JSON:API extractors, pagination, custom-field merge), `_cache.py` (generic `TTLCache[K, V]` primitive + all cache state — document-discovery, enum-option, and observed custom-field-key caches — behind get/store/record wrappers).
 - **`utils/html.py`** — Markdown ↔ HTML (markdownify + BeautifulSoup4 sanitization) plus `stamp_block_ids` for write-side anchor injection.
 - **`models.py`** — Pydantic v2. `PaginatedResult[T]` wraps all list responses.
 - **`server.py`** — FastMCP instance with lifespan that opens/closes `PolarionClient`.
