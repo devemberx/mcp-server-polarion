@@ -37,6 +37,7 @@ from mcp_server_polarion.models import (
     WorkItemUpdateResult,
 )
 from mcp_server_polarion.server import mcp
+from mcp_server_polarion.tools import _enum_guard as _enum_guard_mod
 from mcp_server_polarion.tools import _helpers as _helpers_mod
 from mcp_server_polarion.tools import write as _write_mod
 
@@ -1630,6 +1631,7 @@ def _make_get_response(
     status: str = "open",
     description_html: str = "",
     assignee_ids: list[str] | None = None,
+    custom_fields: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Build a minimal JSON:API GET response for the follow-up fetch."""
     relationships: dict[str, object] = {}
@@ -1646,6 +1648,12 @@ def _make_get_response(
     }
     if description_html:
         attributes["description"] = {"type": "text/html", "value": description_html}
+    if custom_fields:
+        # Inline alongside standard attrs (Polarion's JSON:API shape — no
+        # ``customFields`` container). The ``update_work_item`` pre-fetch
+        # guard parses these as custom keys, priming the cache so a
+        # follow-up update with the same keys is accepted.
+        attributes.update(custom_fields)
     return {
         "data": {
             "type": "workitems",
@@ -1789,9 +1797,11 @@ class TestUpdateWorkItemHappyPath:
         # (NOT nested under a ``customFields`` container — Polarion drops
         # that). Pin the wire shape here.
         mock_client.patch.return_value = {}
-        mock_client.get.return_value = _make_get_response()
-
         rich = {"type": "text/html", "value": "<p>note</p>"}
+        mock_client.get.return_value = _make_get_response(
+            custom_fields={"riskLevel": "high", "reviewerNote": rich}
+        )
+
         await _call_update(
             mock_ctx,
             custom_fields={"riskLevel": "low", "reviewerNote": rich},
@@ -1811,7 +1821,9 @@ class TestUpdateWorkItemHappyPath:
         # ``WorkItemUpdateResult.changes`` should reflect what was sent
         # so callers can confirm the intent client-side.
         mock_client.patch.return_value = {}
-        mock_client.get.return_value = _make_get_response()
+        mock_client.get.return_value = _make_get_response(
+            custom_fields={"riskLevel": "low"}
+        )
 
         result = await _call_update(
             mock_ctx,
@@ -1828,7 +1840,9 @@ class TestUpdateWorkItemHappyPath:
         # Mutating the caller's dict (or its nested rich-text dict) after the
         # call must not bleed into the returned ``changes`` snapshot.
         mock_client.patch.return_value = {}
-        mock_client.get.return_value = _make_get_response()
+        mock_client.get.return_value = _make_get_response(
+            custom_fields={"reviewerNote": "x", "riskLevel": "low"}
+        )
 
         rich = {"type": "text/html", "value": "<p>original</p>"}
         customs: dict[str, object] = {"reviewerNote": rich, "riskLevel": "high"}
@@ -1874,14 +1888,13 @@ class TestUpdateWorkItemHappyPath:
         # write — without copying or transformation. This is the
         # critical end-to-end ergonomic that justifies symmetric shapes
         # on both sides.
-        mock_client.patch.return_value = {}
-        mock_client.get.return_value = _make_get_response()
-
         read_customs: dict[str, object] = {
             "riskLevel": "high",
             "effortHours": 8.0,
             "reviewerNote": {"type": "text/html", "value": "<p>x</p>"},
         }
+        mock_client.patch.return_value = {}
+        mock_client.get.return_value = _make_get_response(custom_fields=read_customs)
 
         result = await _call_update(mock_ctx, custom_fields=read_customs)
 
@@ -5112,3 +5125,220 @@ class TestUpdateDocumentCommentErrors:
                 resolved=True,
                 dry_run=False,
             )
+
+
+def _enum_get_response(ids: list[str]) -> dict[str, object]:
+    """Shape a ``getAvailableOptions`` reply for the guard tests."""
+    return {
+        "data": [{"id": i, "name": i} for i in ids],
+        "meta": {"totalCount": len(ids)},
+    }
+
+
+@pytest.fixture
+def reset_enum_guard_caches() -> None:
+    """Drop guard caches between integration tests so each scenario starts cold."""
+    _enum_guard_mod._reset_caches_for_tests()
+
+
+async def _call_create_wi(mock_ctx: MagicMock, **overrides: object) -> object:
+    """Invoke ``create_work_item`` with explicit defaults for every Field."""
+    defaults: dict[str, object] = {
+        "project_id": "MyProj",
+        "title": "t",
+        "type": "task",
+        "description": None,
+        "status": None,
+        "priority": None,
+        "severity": None,
+        "assignee_ids": None,
+        "due_date": None,
+        "initial_estimate": None,
+        "hyperlinks": None,
+        "custom_fields": None,
+        "dry_run": False,
+    }
+    defaults.update(overrides)
+    return await create_work_item(mock_ctx, **defaults)  # type: ignore[arg-type]
+
+
+async def _call_create_doc(mock_ctx: MagicMock, **overrides: object) -> object:
+    """Invoke ``create_document`` with explicit defaults for every Field."""
+    defaults: dict[str, object] = {
+        "project_id": "MyProj",
+        "space_id": "_default",
+        "module_name": "Doc",
+        "title": "x",
+        "type": "systemRequirementSpecification",
+        "status": None,
+        "home_page_content": None,
+        "custom_fields": None,
+        "dry_run": False,
+    }
+    defaults.update(overrides)
+    return await create_document(mock_ctx, **defaults)  # type: ignore[arg-type]
+
+
+async def _call_update_doc(mock_ctx: MagicMock, **overrides: object) -> object:
+    """Invoke ``update_document`` with explicit defaults for every Field."""
+    defaults: dict[str, object] = {
+        "project_id": "MyProj",
+        "space_id": "_default",
+        "document_name": "Doc",
+        "title": None,
+        "status": None,
+        "type": None,
+        "home_page_content_html": None,
+        "custom_fields": None,
+        "workflow_action": None,
+        "dry_run": False,
+    }
+    defaults.update(overrides)
+    return await update_document(mock_ctx, **defaults)  # type: ignore[arg-type]
+
+
+class TestEnumGuardCreateWorkItem:
+    """Integration: ``create_work_item`` rejects ghost enum ids before POST."""
+
+    async def test_unlisted_severity_raises_before_post(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        # ``task`` makes the prior type-axis check pass; severity then trips.
+        mock_client.get.return_value = _enum_get_response(
+            ["task", "must_have", "should_have"]
+        )
+
+        with pytest.raises(ValueError, match="severity='ghost'"):
+            await _call_create_wi(mock_ctx, severity="ghost")
+        mock_client.post.assert_not_called()
+
+    async def test_listed_severity_reaches_post(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        # Single response shape works for any number of guard probes plus
+        # the final create — the guard ignores ``data`` keys it does not
+        # expect (no ``id`` field on the create response is fine).
+        mock_client.get.return_value = _enum_get_response(
+            ["task", "must_have", "open", "50.0"]
+        )
+        mock_client.post.return_value = {"data": [{"id": "MyProj/MCPT-9"}]}
+
+        result = await _call_create_wi(mock_ctx, severity="must_have")
+        assert result.work_item_id == "MCPT-9"  # type: ignore[attr-defined]
+        mock_client.post.assert_awaited_once()
+
+    async def test_guard_runs_on_dry_run_too(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        mock_client.get.return_value = _enum_get_response(["task"])
+
+        with pytest.raises(ValueError, match="type='unknown'"):
+            await _call_create_wi(mock_ctx, type="unknown", dry_run=True)
+        mock_client.post.assert_not_called()
+
+    async def test_custom_fields_on_create_logs_warning_but_proceeds(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+        caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # No schema for project custom-field keys → guard cannot validate
+        # on create; surface the gap as a warning rather than a hard fail.
+        # See test_polarion_error_returns_none_and_logs in test_enum_guard.py
+        # for why we re-enable propagation here.
+        import logging  # noqa: PLC0415 -- fixture-local import is intentional
+
+        monkeypatch.setattr(logging.getLogger("mcp_server_polarion"), "propagate", True)
+        mock_client.get.return_value = _enum_get_response(["task"])
+        mock_client.post.return_value = {"data": [{"id": "MyProj/MCPT-1"}]}
+        caplog.set_level("WARNING", logger="mcp_server_polarion.tools.write")
+
+        await _call_create_wi(mock_ctx, custom_fields={"risk_score": 5})
+        assert any("cannot be schema-validated" in r.message for r in caplog.records)
+
+
+class TestEnumGuardUpdateWorkItem:
+    """Integration: ``update_work_item`` pre-fetches type then guards."""
+
+    async def test_unlisted_priority_raises_after_prefetch(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        # First GET call (pre-fetch): the work item itself.
+        # Second GET call (guard): the priority options.
+        mock_client.get.side_effect = [
+            _make_get_response(),
+            _enum_get_response(["90.0", "50.0", "10.0"]),
+        ]
+        with pytest.raises(ValueError, match="priority='999'"):
+            await _call_update(mock_ctx, priority="999")
+        mock_client.patch.assert_not_called()
+
+    async def test_unknown_custom_field_key_raises_after_prefetch(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        # Pre-fetch surfaces the existing customs; the unknown key does not
+        # appear there so the guard rejects.
+        mock_client.get.return_value = _make_get_response(
+            custom_fields={"risk_score": 5}
+        )
+        with pytest.raises(ValueError, match="release_train_id"):
+            await _call_update(
+                mock_ctx,
+                custom_fields={"release_train_id": "RT-42"},
+            )
+        mock_client.patch.assert_not_called()
+
+
+class TestEnumGuardCreateDocument:
+    """Integration: ``create_document`` rejects ghost document types."""
+
+    async def test_unlisted_type_raises_before_post(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        mock_client.get.return_value = _enum_get_response(
+            ["systemRequirementSpecification", "softwareRequirementSpecification"]
+        )
+
+        with pytest.raises(ValueError, match="type='productRequirementSpecification'"):
+            await _call_create_doc(
+                mock_ctx,
+                module_name="NewSpec",
+                type="productRequirementSpecification",
+            )
+        mock_client.post.assert_not_called()
+
+
+class TestEnumGuardUpdateDocument:
+    """Integration: ``update_document`` rejects ghost type / status."""
+
+    async def test_unlisted_status_raises_before_patch(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        mock_client.get.return_value = _enum_get_response(["draft", "approved"])
+
+        with pytest.raises(ValueError, match="status='ghost'"):
+            await _call_update_doc(mock_ctx, status="ghost")
+        mock_client.patch.assert_not_called()

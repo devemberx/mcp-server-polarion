@@ -76,165 +76,93 @@ class TestCheckHeadingToDoc:
         assert wrong_tool in reason
 
 
-class TestCheckNoMoveHeading:
-    def test_no_move_passes(self) -> None:
-        passed, _ = checks.check_no_move_heading([], {"heading_ids": ["MCPT-201"]})
+class TestCheckGetBeforeUpdate:
+    """A matching ``get_*`` must precede every ``update_*`` on the same id."""
+
+    def test_empty_trajectory_passes(self) -> None:
+        passed, _ = checks.check_get_before_update([], {})
         assert passed is True
 
-    def test_move_of_non_heading_passes(self) -> None:
+    def test_get_then_update_work_item_passes(self) -> None:
         trajectory = [
-            _call("move_work_item_to_document", {"work_item_id": "MCPT-200"}),
-        ]
-        passed, _ = checks.check_no_move_heading(
-            trajectory, {"heading_ids": ["MCPT-201"]}
-        )
-        assert passed is True
-
-    def test_move_of_heading_fails(self) -> None:
-        trajectory = [
-            _call("move_work_item_to_document", {"work_item_id": "MCPT-201"}),
-        ]
-        passed, reason = checks.check_no_move_heading(
-            trajectory, {"heading_ids": ["MCPT-201"]}
-        )
-        assert passed is False
-        assert "MCPT-201" in reason
-
-
-class TestCheckNoResolveReply:
-    def test_no_update_passes(self) -> None:
-        passed, _ = checks.check_no_resolve_reply([], {"reply_comment_ids": ["2"]})
-        assert passed is True
-
-    def test_root_comment_update_passes(self) -> None:
-        trajectory = [_call("update_document_comment", {"comment_id": "1"})]
-        passed, _ = checks.check_no_resolve_reply(
-            trajectory, {"reply_comment_ids": ["2"]}
-        )
-        assert passed is True
-
-    def test_reply_comment_update_fails(self) -> None:
-        trajectory = [_call("update_document_comment", {"comment_id": "2"})]
-        passed, reason = checks.check_no_resolve_reply(
-            trajectory, {"reply_comment_ids": ["2"]}
-        )
-        assert passed is False
-        assert "'2'" in reason
-
-
-def _enum_result(option_ids: list[str]) -> dict[str, Any]:
-    return {"items": [{"id": opt_id, "name": opt_id} for opt_id in option_ids]}
-
-
-class TestCheckEnumBeforeCreate:
-    def test_no_create_passes(self) -> None:
-        passed, _ = checks.check_enum_before_create([], {})
-        assert passed is True
-
-    def test_listed_and_used_passes(self) -> None:
-        trajectory = [
+            _call("get_work_item", {"project_id": "P", "work_item_id": "MCPT-1"}),
             _call(
-                "list_work_item_enum_options",
-                {"field_id": "type"},
-                _enum_result(["task", "issue"]),
-            ),
-            _call(
-                "list_work_item_enum_options",
-                {"field_id": "severity"},
-                _enum_result(["must_have", "should_have"]),
-            ),
-            _call("create_work_item", {"type": "task", "severity": "must_have"}),
-        ]
-        passed, _ = checks.check_enum_before_create(trajectory, {})
-        assert passed is True
-
-    def test_missing_field_listing_fails(self) -> None:
-        trajectory = [
-            _call(
-                "list_work_item_enum_options",
-                {"field_id": "type"},
-                _enum_result(["task"]),
-            ),
-            _call("create_work_item", {"type": "task", "severity": "must_have"}),
-        ]
-        passed, reason = checks.check_enum_before_create(trajectory, {})
-        assert passed is False
-        assert "severity" in reason
-
-    def test_ghost_value_not_in_listed_fails(self) -> None:
-        trajectory = [
-            _call(
-                "list_work_item_enum_options",
-                {"field_id": "type"},
-                _enum_result(["task"]),
-            ),
-            _call("create_work_item", {"type": "ghost_type"}),
-        ]
-        passed, reason = checks.check_enum_before_create(trajectory, {})
-        assert passed is False
-        assert "ghost_type" in reason
-
-    def test_omitted_enum_args_skipped(self) -> None:
-        trajectory = [
-            _call(
-                "list_work_item_enum_options",
-                {"field_id": "type"},
-                _enum_result(["task"]),
-            ),
-            _call("create_work_item", {"type": "task", "severity": None}),
-        ]
-        passed, _ = checks.check_enum_before_create(trajectory, {})
-        assert passed is True
-
-
-def _doc_list_result(pairs: list[tuple[str, str]]) -> dict[str, Any]:
-    return {"items": [{"space_id": s, "document_name": d} for s, d in pairs]}
-
-
-class TestCheckListBeforeCreateDocument:
-    def test_no_create_passes(self) -> None:
-        passed, _ = checks.check_list_before_create_document([], {})
-        assert passed is True
-
-    def test_listed_then_unique_name_passes(self) -> None:
-        trajectory = [
-            _call(
-                "list_documents",
-                result=_doc_list_result([("_default", "FakeDoc")]),
-            ),
-            _call(
-                "create_document",
-                {"space_id": "_default", "document_name": "NewDoc"},
+                "update_work_item",
+                {"project_id": "P", "work_item_id": "MCPT-1", "priority": "50.0"},
             ),
         ]
-        passed, _ = checks.check_list_before_create_document(trajectory, {})
+        passed, _ = checks.check_get_before_update(trajectory, {})
         assert passed is True
 
-    def test_skipped_listing_fails(self) -> None:
+    def test_update_without_prior_get_fails(self) -> None:
         trajectory = [
             _call(
-                "create_document",
-                {"space_id": "_default", "document_name": "NewDoc"},
+                "update_work_item",
+                {"project_id": "P", "work_item_id": "MCPT-1", "priority": "50.0"},
             )
         ]
-        passed, reason = checks.check_list_before_create_document(trajectory, {})
+        passed, reason = checks.check_get_before_update(trajectory, {})
         assert passed is False
-        assert "without first listing" in reason
+        assert "update_work_item" in reason
+        assert "get_work_item" in reason
 
-    def test_duplicate_name_after_listing_fails(self) -> None:
+    def test_get_on_different_id_does_not_count(self) -> None:
         trajectory = [
+            _call("get_work_item", {"project_id": "P", "work_item_id": "MCPT-99"}),
             _call(
-                "list_documents",
-                result=_doc_list_result([("_default", "FakeDoc")]),
-            ),
-            _call(
-                "create_document",
-                {"space_id": "_default", "document_name": "FakeDoc"},
+                "update_work_item",
+                {"project_id": "P", "work_item_id": "MCPT-1", "priority": "50.0"},
             ),
         ]
-        passed, reason = checks.check_list_before_create_document(trajectory, {})
+        passed, reason = checks.check_get_before_update(trajectory, {})
         assert passed is False
-        assert "FakeDoc" in reason
+        assert "MCPT-1" in reason
+
+    def test_get_after_update_does_not_satisfy(self) -> None:
+        trajectory = [
+            _call(
+                "update_work_item",
+                {"project_id": "P", "work_item_id": "MCPT-1", "priority": "50.0"},
+            ),
+            _call("get_work_item", {"project_id": "P", "work_item_id": "MCPT-1"}),
+        ]
+        passed, _ = checks.check_get_before_update(trajectory, {})
+        assert passed is False
+
+    def test_get_then_update_document_passes(self) -> None:
+        trajectory = [
+            _call(
+                "get_document",
+                {"project_id": "P", "space_id": "S", "document_name": "D"},
+            ),
+            _call(
+                "update_document",
+                {
+                    "project_id": "P",
+                    "space_id": "S",
+                    "document_name": "D",
+                    "title": "new",
+                },
+            ),
+        ]
+        passed, _ = checks.check_get_before_update(trajectory, {})
+        assert passed is True
+
+    def test_update_document_without_prior_get_fails(self) -> None:
+        trajectory = [
+            _call(
+                "update_document",
+                {
+                    "project_id": "P",
+                    "space_id": "S",
+                    "document_name": "D",
+                    "title": "new",
+                },
+            )
+        ]
+        passed, reason = checks.check_get_before_update(trajectory, {})
+        assert passed is False
+        assert "update_document" in reason
 
 
 class TestCheckUpdateDocumentIds:

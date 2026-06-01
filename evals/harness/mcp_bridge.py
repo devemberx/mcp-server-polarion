@@ -11,8 +11,7 @@ Every forwarded call is recorded by ``TrajectoryRecorder`` together with
 its parsed result, giving the deterministic Tier-1 evaluators not just the
 (name, args) sequence but also what each call returned — required for
 checks that verify the agent honoured a discovery response (e.g.,
-``check_enum_before_create`` rejecting values absent from the listed
-options, ``check_list_before_create_document`` rejecting duplicate names).
+``check_get_before_update`` rejecting updates with no matching prior get).
 """
 
 from __future__ import annotations

@@ -40,6 +40,7 @@ from mcp_server_polarion.models import (
     WorkItemSummary,
 )
 from mcp_server_polarion.server import mcp
+from mcp_server_polarion.tools._enum_guard import record_custom_keys_from_get
 from mcp_server_polarion.tools._helpers import (
     DEFAULT_PAGE_SIZE,
     DOCUMENT_COMMENT_LIST_FIELDS,
@@ -1596,6 +1597,13 @@ async def get_work_item(
         project_id=project_id,
         fallback_id=work_item_id,
     )
+    # Feed observed custom-field keys to the enum guard so a later
+    # ``update_work_item.custom_fields`` can be validated without an
+    # extra round trip (see ``tools/_enum_guard.py``).
+    if detail.type:
+        record_custom_keys_from_get(
+            project_id, detail.type, detail.custom_fields.keys()
+        )
     if not include_description_html:
         # Polarion has no sparse-fieldset that surfaces customs while
         # excluding ``description``, so the body still travels over the
