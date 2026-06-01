@@ -96,7 +96,12 @@ def classify(cmd: str) -> str | None:
     """
     if PR_CREATE_EDIT_RE.search(cmd):
         return "pr"
-    if GH_API_RE.search(cmd) and "/pulls/" in cmd and "/comments" not in cmd and "/reviews" not in cmd:
+    if (
+        GH_API_RE.search(cmd)
+        and "/pulls/" in cmd
+        and "/comments" not in cmd
+        and "/reviews" not in cmd
+    ):
         return "pr"
     if PR_COMMENT_RE.search(cmd) or ISSUE_CMD_RE.search(cmd):
         return "other"
@@ -127,7 +132,11 @@ def extract_body(cmd: str) -> str | None:
             return _read_file(nxt)
         if a.startswith("--body-file="):
             return _read_file(a[len("--body-file=") :])
-        if a in {"-F", "-f", "--field", "--raw-field"} and nxt is not None and nxt.startswith("body="):
+        if (
+            a in {"-F", "-f", "--field", "--raw-field"}
+            and nxt is not None
+            and nxt.startswith("body=")
+        ):
             val = nxt[len("body=") :]
             if val.startswith("@"):
                 return _read_file(val[1:])

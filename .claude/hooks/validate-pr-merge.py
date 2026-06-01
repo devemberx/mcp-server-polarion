@@ -103,13 +103,17 @@ def main() -> int:
 
 
 def is_pr_merge(argv: list[str]) -> bool:
-    """True when argv invokes `gh pr merge` (allowing flags between the words)."""
+    """True when argv invokes `gh pr merge` (allowing flags between the words).
+
+    Scans for any `gh` positional followed by `pr merge`, so a chained command
+    (`gh pr view 72 && gh pr merge 72 ...`) is still caught even when an earlier
+    `gh` subcommand precedes the merge.
+    """
     positionals = [a for a in argv if not a.startswith("-")]
-    try:
-        i = positionals.index("gh")
-    except ValueError:
-        return False
-    return tuple(positionals[i + 1 : i + 3]) == PR_MERGE
+    return any(
+        positionals[i] == "gh" and tuple(positionals[i + 1 : i + 3]) == PR_MERGE
+        for i in range(len(positionals))
+    )
 
 
 def has_squash(argv: list[str]) -> bool:
@@ -164,11 +168,7 @@ def body_format_errors(body: str) -> list[str]:
     """Validate the body against .githooks/commit-msg's body rules: exactly two
     ``- `` bullets, each <= 120 chars after trailing-whitespace strip. ``#`` lines
     are ignored, matching the commit-msg hook."""
-    lines = [
-        ln.rstrip()
-        for ln in body.splitlines()
-        if not ln.lstrip().startswith("#")
-    ]
+    lines = [ln.rstrip() for ln in body.splitlines() if not ln.lstrip().startswith("#")]
     bullets = [ln for ln in lines if ln.startswith("- ")]
 
     errors: list[str] = []
@@ -180,7 +180,9 @@ def body_format_errors(body: str) -> list[str]:
         )
     over = [ln for ln in bullets if len(ln) > BULLET_LIMIT]
     for ln in over:
-        errors.append(f"Squash body bullet is {len(ln)} chars (limit: {BULLET_LIMIT}):\n    {ln}")
+        errors.append(
+            f"Squash body bullet is {len(ln)} chars (limit: {BULLET_LIMIT}):\n    {ln}"
+        )
 
     if not CO_AUTHOR_RE.search(body):
         errors.append(
