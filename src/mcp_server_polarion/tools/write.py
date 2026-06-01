@@ -667,12 +667,17 @@ async def create_work_item(  # noqa: PLR0913
     ),
     dry_run: bool = Field(
         default=False,
-        description="When True, return payload preview without calling Polarion.",
+        description=(
+            "When True, validate inputs and return the payload preview "
+            "without writing. The enum guard still queries Polarion "
+            "(getAvailableOptions), so the validation endpoint must be "
+            "reachable even on a dry run."
+        ),
     ),
 ) -> WorkItemCreateResult:
     """Create a new Polarion work item in a project. For every
     enum-valued argument you pass (``type``, ``status``, ``severity``,
-    ``resolution``, or ``custom_fields`` enum entries), you MUST first
+    or ``custom_fields`` enum entries), you MUST first
     call ``list_work_item_enum_options(project_id, field_id,
     work_item_type)`` and confirm the value you intend to send appears
     in the returned options. Unverified ids are accepted by Polarion
@@ -900,7 +905,13 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     ),
     dry_run: bool = Field(
         default=False,
-        description="When True, return payload preview without calling Polarion.",
+        description=(
+            "When True, validate inputs and return the payload preview "
+            "without writing. The enum/custom-field guards still query "
+            "Polarion (a priming read plus getAvailableOptions), so the "
+            "work item must be readable and the validation endpoint reachable "
+            "even on a dry run."
+        ),
     ),
 ) -> WorkItemUpdateResult:
     """Update an existing Polarion work item.
@@ -930,13 +941,15 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     Prefer ``workflow_action`` over a raw ``status`` edit so the project's
     transition rules run. ``workflow_action`` and ``change_type_to`` MUST
     be paired with at least one body field — Polarion rejects empty PATCH
-    bodies (HTTP 400 "At least one of the members is required"). Direct
-    ``status`` / ``severity`` / ``resolution`` writes are NOT validated
-    server-side: unknown ids are stored verbatim as ghost values.
-    ``priority`` only coerces non-numeric inputs to the project default;
-    numeric strings outside the enum set also persist verbatim. Resolve
-    valid ids first via ``list_work_item_enum_options(project_id,
-    field_id, work_item_type)``.
+    bodies (HTTP 400 "At least one of the members is required"). Polarion
+    itself does not validate ``status`` / ``severity`` / ``resolution`` /
+    ``priority`` / ``change_type_to`` ids, so this tool does: an unknown id
+    raises ``ValueError`` listing the valid options before the PATCH (on
+    ``dry_run`` too). When ``change_type_to`` is set, ``status`` /
+    ``severity`` / ``resolution`` are validated against the target type's
+    options. Unknown ``custom_fields`` keys are likewise rejected unless
+    seen on a prior ``get_work_item`` for this type (the tool does one
+    priming read on a miss).
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -1055,7 +1068,7 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     # Runs on dry_run too so preview surfaces the same ValueError the
     # real call would raise.
     work_item_type = ""
-    if status or severity or priority or change_type_to or custom_fields:
+    if status or severity or priority or resolution or change_type_to or custom_fields:
         try:
             prefetch = await client.get(
                 base_path,
@@ -1089,16 +1102,27 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
                     current_detail.custom_fields.keys(),
                 )
 
+        # status / severity / resolution / priority are scoped by the
+        # work item's type. When ``change_type_to`` is set, validate them
+        # against the target type's options, since the patch lands the
+        # item in the new type. ``type`` is checked first inside the guard
+        # (against the ``~`` axis), so an invalid ``change_type_to`` raises
+        # before it is ever used as the scoping axis.
+        effective_type = change_type_to or work_item_type or "~"
         await guard_work_item_enums(
             client,
             project_id,
-            work_item_type=work_item_type or "~",
+            work_item_type=effective_type,
             type=change_type_to,
             status=status,
             severity=severity,
             priority=priority,
+            resolution=resolution,
         )
-        if custom_fields and work_item_type:
+        # Fail-closed even when the prefetch could not resolve a type: pass
+        # whatever type we have (possibly "") so the guard's own priming GET
+        # validates the keys rather than silently skipping the check.
+        if custom_fields:
             await guard_work_item_custom_field_keys(
                 client,
                 project_id,
@@ -1476,7 +1500,13 @@ async def update_document(  # noqa: PLR0913
     ),
     dry_run: bool = Field(
         default=False,
-        description="When True, return payload preview without calling Polarion.",
+        description=(
+            "When True, validate inputs and return the payload preview "
+            "without writing. The enum/custom-field guards still query "
+            "Polarion (a priming read plus getAvailableOptions), so the "
+            "document must be readable and the validation endpoint reachable "
+            "even on a dry run."
+        ),
     ),
 ) -> DocumentUpdateResult:
     """Update a Polarion document's metadata or body.
@@ -1570,7 +1600,7 @@ async def update_document(  # noqa: PLR0913
                 "block. Every non-heading block (<p>/<ul>/<ol>/<table>/<div>/"
                 "<blockquote>/<pre>) must carry a unique non-empty id= or the "
                 "next read_document_parts returns HTTP 500. Stamp ids "
-                '(e.g. id="polarion_mcp_1") on each such block before updating; '
+                '(e.g. id="polarion_mcp_0") on each such block before updating; '
                 "<h1>..<h6> headings are exempt."
             )
 
@@ -1727,7 +1757,12 @@ async def create_document(  # noqa: PLR0913
     ),
     dry_run: bool = Field(
         default=False,
-        description="When True, return payload preview without calling Polarion.",
+        description=(
+            "When True, validate inputs and return the payload preview "
+            "without writing. The enum guard still queries Polarion "
+            "(getAvailableOptions), so the validation endpoint must be "
+            "reachable even on a dry run."
+        ),
     ),
 ) -> DocumentCreateResult:
     """Create a new Polarion document in a space. Before calling this

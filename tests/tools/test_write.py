@@ -1519,7 +1519,11 @@ class TestUpdateWorkItemValidation:
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         # custom_fields counts as a body field — neither title nor any
-        # other standard param is required when customs are present.
+        # other standard param is required when customs are present. The
+        # prefetch primes the custom-key cache so the guard accepts the key.
+        mock_client.get.return_value = _make_get_response(
+            custom_fields={"riskLevel": "high"}
+        )
         result = await _call_update(
             mock_ctx,
             custom_fields={"riskLevel": "high"},
@@ -1882,7 +1886,11 @@ class TestUpdateWorkItemHappyPath:
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         # Dry-run should echo the merged attributes (standard + custom)
-        # so the LLM can verify the wire shape before committing.
+        # so the LLM can verify the wire shape before committing. The
+        # prefetch primes the custom-key cache so the guard accepts the key.
+        mock_client.get.return_value = _make_get_response(
+            custom_fields={"riskLevel": "high"}
+        )
         result = await _call_update(
             mock_ctx,
             title="t",
@@ -5328,6 +5336,50 @@ class TestEnumGuardUpdateWorkItem:
                 custom_fields={"release_train_id": "RT-42"},
             )
         mock_client.patch.assert_not_called()
+
+    async def test_unlisted_resolution_raises_after_prefetch(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        # ``resolution`` is a ghost-prone enum like type/status/severity;
+        # an unlisted id must be rejected, not written verbatim.
+        mock_client.get.side_effect = [
+            _make_get_response(),
+            _enum_get_response(["done", "wontfix", "duplicate"]),
+        ]
+        with pytest.raises(ValueError, match="resolution='ghost_resolution'"):
+            await _call_update(mock_ctx, resolution="ghost_resolution")
+        mock_client.patch.assert_not_called()
+
+    async def test_status_scoped_by_target_type_on_change_type_to(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        # Pre-fetch returns a ``task``; ``change_type_to='requirement'``
+        # means status must be validated against the target type's options,
+        # so the guard's status lookup must use ``type='requirement'``.
+        # GETs in order: work-item pre-fetch, type options (``~`` axis),
+        # status options (target-type axis).
+        mock_client.get.side_effect = [
+            _make_get_response(),
+            _enum_get_response(["requirement"]),
+            _enum_get_response(["draft", "approved"]),
+        ]
+        result = await _call_update(
+            mock_ctx, change_type_to="requirement", status="draft", dry_run=True
+        )
+        assert result.dry_run is True  # type: ignore[attr-defined]
+        status_calls = [
+            c
+            for c in mock_client.get.call_args_list
+            if "fields/status/actions/getAvailableOptions" in c.args[0]
+        ]
+        assert status_calls, "guard must probe status options"
+        assert status_calls[0].kwargs["params"]["type"] == "requirement"
 
 
 class TestEnumGuardCreateDocument:

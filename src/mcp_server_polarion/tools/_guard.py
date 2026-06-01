@@ -1,7 +1,8 @@
 """Server-side write guards that prevent silent corruption on Polarion writes.
 
 Polarion accepts unknown enum ids (``type`` / ``status`` / ``severity`` /
-``priority`` on work items; ``type`` / ``status`` on documents) and unknown
+``priority`` / ``resolution`` on work items; ``type`` / ``status`` on
+documents) and unknown
 custom-field keys verbatim -- HTTP 200, the value persists, but the field
 never appears in Polarion's UI, in Lucene, or in reports, and is never
 reported as an error. Docstring-level rules ("call ``list_*_enum_options``
@@ -17,9 +18,13 @@ check logic.
 Fail-closed. If a validation request errors after the client's 429/5xx
 backoff, the guard raises ``RuntimeError`` rather than letting the write
 through: a ghost write is invisible in Polarion and unrecoverable, so an
-unverifiable write is refused rather than risked. The one lenient case is a
-*successful* empty option set (a field with no configured options), where the
-guard defers to Polarion rather than risk a false positive.
+unverifiable write is refused rather than risked. Two lenient cases defer to
+Polarion instead of blocking: a *successful* empty option set (a field with no
+configured options), and a 404 from ``getAvailableOptions`` (the endpoint or
+field is unsupported on this instance, so there is nothing to validate
+against). A 404 cannot mask a ghost -- a genuinely wrong project/field path
+makes the subsequent write fail loudly. This keeps a single unsupported
+endpoint from blocking every enum-bearing write on an instance that lacks it.
 """
 
 from __future__ import annotations
@@ -27,7 +32,7 @@ from __future__ import annotations
 import logging
 
 from mcp_server_polarion.core.client import PolarionClient
-from mcp_server_polarion.core.exceptions import PolarionError
+from mcp_server_polarion.core.exceptions import PolarionError, PolarionNotFoundError
 from mcp_server_polarion.tools._cache import (
     Resource,
     get_cached_enum_options,
@@ -78,9 +83,14 @@ async def fetch_enum_option_ids(
 ) -> frozenset[str]:
     """Return the valid option ids for ``(project, resource, field, type)``.
 
-    Cached for the guard TTL. Fail-closed: on Polarion error (after the
-    client's own 429/5xx backoff) this raises ``RuntimeError`` rather than
-    returning a sentinel, so the caller's write is blocked.
+    Cached for the guard TTL. Fail-closed on a *reachable-but-erroring*
+    backend: after the client's own 429/5xx backoff, a 5xx or auth error
+    raises ``RuntimeError`` so the caller's write is blocked rather than
+    risking a ghost. A 404 is the exception -- it means ``getAvailableOptions``
+    is unsupported on this instance (or the field/project path does not
+    exist), so there is nothing to validate against; the guard defers (empty
+    set) rather than block every enum-bearing write. A genuinely wrong target
+    makes the subsequent write fail loudly, so deferring cannot mask a ghost.
     """
     cached = get_cached_enum_options(project_id, resource, field_id, type_id)
     if cached is not None:
@@ -98,6 +108,21 @@ async def fetch_enum_option_ids(
     }
     try:
         response = await client.get(path, params=params)
+    except PolarionNotFoundError:
+        # Endpoint/field unsupported on this instance: cache an empty set so
+        # _check_enum defers and we do not re-probe a missing endpoint on
+        # every write within the TTL.
+        logger.warning(
+            "getAvailableOptions returned 404 for field=%s (resource=%s, "
+            "project=%s); skipping enum validation for this field -- the "
+            "endpoint or field is unsupported here, so there is nothing to "
+            "validate against.",
+            field_id,
+            resource,
+            project_id,
+        )
+        store_cached_enum_options(project_id, resource, field_id, type_id, frozenset())
+        return frozenset()
     except PolarionError as exc:
         raise _unreachable_write_block(f"{field_id} options", project_id, exc) from exc
 
@@ -151,13 +176,16 @@ async def guard_work_item_enums(  # noqa: PLR0913
     status: str | None = None,
     severity: str | None = None,
     priority: str | None = None,
+    resolution: str | None = None,
 ) -> None:
     """Validate every supplied work-item enum arg against ``getAvailableOptions``.
 
-    ``work_item_type`` is the type axis Polarion scopes status/severity by.
-    Pass ``'~'`` for type-agnostic lookups (used when validating ``type``
-    itself or when the caller does not have a type in hand). On cache hit the
-    guard adds zero round trips; on miss, one GET per (field, type) pair.
+    ``work_item_type`` is the type axis Polarion scopes
+    status/severity/resolution/priority by. Pass ``'~'`` for type-agnostic
+    lookups (used when validating ``type`` itself or when the caller does not
+    have a type in hand). ``type`` is always checked first so an invalid
+    ``type`` raises before it could be used as the scoping axis. On cache hit
+    the guard adds zero round trips; on miss, one GET per (field, type) pair.
 
     Raises ``ValueError`` listing the valid options on an unknown id, or
     ``RuntimeError`` if Polarion is unreachable (fail-closed).
@@ -175,6 +203,10 @@ async def guard_work_item_enums(  # noqa: PLR0913
     if priority is not None and priority != "":
         await _check_enum(
             client, project_id, "workitems", "priority", work_item_type, priority
+        )
+    if resolution is not None and resolution != "":
+        await _check_enum(
+            client, project_id, "workitems", "resolution", work_item_type, resolution
         )
 
 
