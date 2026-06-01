@@ -149,7 +149,7 @@ The hook rejects any commit whose subject exceeds 50 chars or whose body does no
 - **Title** follows the commit-subject format: `type(scope): summary`, ≤70 characters. Keep details for the body. Since the merge strategy is squash, the PR title becomes the squashed commit subject — if your title exceeds the 50-char commit-subject limit, shorten it (or edit the subject at squash time) before merging.
 - **Base branch**: `main`.
 - Use the [pull request template](PULL_REQUEST_TEMPLATE.md). It is auto-loaded by GitHub.
-- Fill every section: **Summary**, **Type of Change**, **Changes**, **Testing**, **Golden Rule Compliance**.
+- Fill every section: **Summary**, **Type of Change**, **Changes**, **Testing**.
 - In **Type of Change**, keep the full checkbox list as written — only flip `[ ]` → `[x]` for matching items. Do **not** delete unchecked options.
 - Link related issues with `Closes #<n>` or `Refs #<n>` in the Summary. Remove the placeholder line if there is no linked issue.
 
