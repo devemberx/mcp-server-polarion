@@ -44,6 +44,8 @@ Thumbs.db
 # Claude configuration
 .claude/*
 !.claude/skills/
+!.claude/hooks/
+!.claude/settings.json
 
 # Eval gate reports (generated per run)
 evals/reports/
