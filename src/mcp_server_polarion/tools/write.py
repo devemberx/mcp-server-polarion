@@ -41,12 +41,15 @@ from mcp_server_polarion.models import (
     WorkItemUpdateResult,
 )
 from mcp_server_polarion.server import mcp
-from mcp_server_polarion.tools._cache import invalidate_documents_cache
-from mcp_server_polarion.tools._enum_guard import (
+from mcp_server_polarion.tools._cache import (
+    invalidate_documents_cache,
+    record_work_item_custom_field_keys,
+)
+from mcp_server_polarion.tools._guard import (
+    guard_document_custom_field_keys,
     guard_document_enums,
-    guard_update_custom_field_keys,
+    guard_work_item_custom_field_keys,
     guard_work_item_enums,
-    record_custom_keys_from_get,
 )
 from mcp_server_polarion.tools._helpers import (
     STANDARD_DOCUMENT_ATTRIBUTES,
@@ -732,7 +735,7 @@ async def create_work_item(  # noqa: PLR0913
         # custom-field keys, and on create there is no prior work item to
         # observe. Surface the gap as a warning so an unknown key on
         # create still leaves a forensic trail — the matching update path
-        # (``guard_update_custom_field_keys``) does enforce.
+        # (``guard_work_item_custom_field_keys``) does enforce.
         logger.warning(
             "create_work_item.custom_fields cannot be schema-validated "
             "(no project-config endpoint for custom-field keys); "
@@ -1043,7 +1046,7 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
 
     # When any enum or custom-field arg is set, fetch the work item once
     # so we know its type (enum options are type-scoped) and so the
-    # custom-key cache is primed for ``guard_update_custom_field_keys``.
+    # custom-key cache is primed for ``guard_work_item_custom_field_keys``.
     # Runs on dry_run too so preview surfaces the same ValueError the
     # real call would raise.
     work_item_type = ""
@@ -1075,7 +1078,7 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
             )
             work_item_type = current_detail.type
             if work_item_type:
-                record_custom_keys_from_get(
+                record_work_item_custom_field_keys(
                     project_id,
                     work_item_type,
                     current_detail.custom_fields.keys(),
@@ -1091,7 +1094,7 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
             priority=priority,
         )
         if custom_fields and work_item_type:
-            await guard_update_custom_field_keys(
+            await guard_work_item_custom_field_keys(
                 client,
                 project_id,
                 work_item_id,
@@ -1514,12 +1517,12 @@ async def update_document(  # noqa: PLR0913
 
     Workflow: prefer ``workflow_action`` over a raw ``status`` edit so
     project rules run. ``workflow_action`` MUST be paired with at least
-    one attribute field — Polarion rejects empty PATCH bodies. Direct
-    ``status`` / ``type`` writes are NOT validated server-side: unknown
-    ids are stored verbatim as ghost values. Resolve valid ids first via
-    ``list_document_enum_options(project_id, field_id, document_type)``.
-    Unknown ``custom_fields`` IDs also become ghost attributes; pass
-    keys from a prior ``get_document``.
+    one attribute field — Polarion rejects empty PATCH bodies. Polarion
+    itself does not validate ``status`` / ``type`` ids, so this tool does:
+    an unknown id raises ``ValueError`` listing the valid options. Unknown
+    ``custom_fields`` keys are likewise rejected unless seen on a prior
+    ``get_document`` for this document (the tool does one priming read on
+    a miss).
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -1553,7 +1556,6 @@ async def update_document(  # noqa: PLR0913
             "work item. Pass at minimum '<p></p>' or omit the parameter "
             "to leave the body unchanged."
         )
-
     has_attrs = (
         title is not None
         or status is not None
@@ -1588,18 +1590,10 @@ async def update_document(  # noqa: PLR0913
         type=type,
         status=status,
     )
-    if custom_fields:
-        logger.warning(
-            "update_document.custom_fields cannot be schema-validated "
-            "(no project-config endpoint for custom-field keys); "
-            "ensure keys come from a prior get_document to avoid ghost "
-            "attributes. project=%s document=%s/%s keys=%s",
-            project_id,
-            space_id,
-            document_name,
-            sorted(custom_fields),
-        )
 
+    # Build first: ``merge_custom_fields`` rejects keys that shadow a standard
+    # attribute (e.g. ``title`` / ``homePageContent``) -- a more fundamental
+    # error than an unknown custom key, and cheaper than the guard's GET.
     payload = _build_update_document_payload(
         project_id=project_id,
         space_id=space_id,
@@ -1609,6 +1603,16 @@ async def update_document(  # noqa: PLR0913
         type=type,
         home_page_content_html=home_page_content_html,
         custom_fields=custom_fields,
+    )
+    # Hard guard: reject custom-field keys never seen on a prior get_document
+    # for this document (priming GET on cache miss). Polarion persists unknown
+    # keys as invisible ghosts, so an update with an unvetted key is corruption.
+    await guard_document_custom_field_keys(
+        client,
+        project_id,
+        space_id,
+        document_name,
+        custom_fields or {},
     )
 
     if dry_run:
@@ -1773,6 +1777,20 @@ async def create_document(  # noqa: PLR0913
         type=type,
         status=status,
     )
+    if custom_fields:
+        # No project-config endpoint lists valid custom-field keys, and a
+        # brand-new document has no prior get to learn them from, so create
+        # cannot hard-guard keys the way update_document does. Warn; the LLM
+        # is expected to source keys from a sibling get_document.
+        logger.warning(
+            "create_document.custom_fields cannot be schema-validated "
+            "(no project-config endpoint for custom-field keys); ensure keys "
+            "come from a prior get_document to avoid ghost attributes. "
+            "project=%s module=%s keys=%s",
+            project_id,
+            module_name,
+            sorted(custom_fields),
+        )
 
     home_page_content_html = (
         stamp_block_ids(sanitize_html(markdown_to_html(home_page_content)))
