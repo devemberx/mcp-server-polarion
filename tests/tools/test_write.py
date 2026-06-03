@@ -371,12 +371,12 @@ class TestCreateWorkItemsDryRun:
         assert attributes == {"title": "Dry test", "type": "task"}
 
 
-def _hyperlink_enum_response(ids: list[str]) -> dict[str, object]:
-    """Single-enumeration ``hyperlink-role`` response (dict ``data``)."""
+def _project_enum_get_response(enum_name: str, ids: list[str]) -> dict[str, object]:
+    """Single-enumeration response: ``data`` is a dict, options nested under it."""
     return {
         "data": {
             "type": "enumerations",
-            "id": "hyperlink-role",
+            "id": enum_name,
             "attributes": {"options": [{"id": i, "name": i} for i in ids]},
         }
     }
@@ -388,7 +388,9 @@ class TestCreateWorkItemsHyperlinkRoleGuard:
     async def test_unknown_hyperlink_role_raises_without_post(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = _hyperlink_enum_response(["ref_int", "ref_ext"])
+        mock_client.get.return_value = _project_enum_get_response(
+            "hyperlink-role", ["ref_int", "ref_ext"]
+        )
 
         with pytest.raises(ValueError, match="ghost") as exc:
             await create_work_items(
@@ -410,7 +412,9 @@ class TestCreateWorkItemsHyperlinkRoleGuard:
     async def test_valid_hyperlink_role_proceeds_to_post(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = _hyperlink_enum_response(["ref_int", "ref_ext"])
+        mock_client.get.return_value = _project_enum_get_response(
+            "hyperlink-role", ["ref_int", "ref_ext"]
+        )
         mock_client.post.return_value = {
             "data": [{"type": "workitems", "id": "MyProj/MCPT-1"}]
         }
@@ -1590,7 +1594,9 @@ class TestUpdateWorkItemHyperlinkRoleGuard:
     async def test_unknown_hyperlink_role_raises_without_patch(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = _hyperlink_enum_response(["ref_int", "ref_ext"])
+        mock_client.get.return_value = _project_enum_get_response(
+            "hyperlink-role", ["ref_int", "ref_ext"]
+        )
 
         with pytest.raises(ValueError, match="ghost") as exc:
             await _call_update(
@@ -3732,17 +3738,6 @@ class TestCreateWorkItemLinksTargetGuard:
         mock_client.post.assert_not_called()
 
 
-def _project_enum_get_response(enum_name: str, ids: list[str]) -> dict[str, object]:
-    """Single-enumeration response: ``data`` is a dict, options nested under it."""
-    return {
-        "data": {
-            "type": "enumerations",
-            "id": enum_name,
-            "attributes": {"options": [{"id": i, "name": i} for i in ids]},
-        }
-    }
-
-
 class TestCreateWorkItemLinksRoleGuard:
     """The link-role guard runs after the target guard, before the write."""
 
@@ -3798,6 +3793,33 @@ class TestCreateWorkItemLinksRoleGuard:
 
         assert result.created is True
         mock_client.post.assert_called_once()
+
+    async def test_target_guard_runs_before_role_guard(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Missing target AND unknown role: the target guard runs first, so its
+        # error surfaces and the role enumeration is never fetched.
+        def fake_get(
+            path: str, *, params: dict[str, object] | None = None, **_: object
+        ) -> dict[str, object]:
+            if "/enumerations/" in path:
+                raise AssertionError("role guard ran before the target guard")
+            return {"data": []}
+
+        mock_client.get.side_effect = fake_get
+
+        with pytest.raises(ValueError, match="MyProj/MCPT-2"):
+            await create_work_item_links(
+                mock_ctx,
+                project_id="MyProj",
+                work_item_id="MCPT-1",
+                links=[
+                    WorkItemLinkSpec(role="ghost_role", target_work_item_id="MCPT-2")
+                ],
+                dry_run=True,
+            )
+
+        mock_client.post.assert_not_called()
 
 
 class TestCreateWorkItemLinksHappyPath:
