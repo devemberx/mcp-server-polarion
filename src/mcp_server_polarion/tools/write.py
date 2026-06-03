@@ -50,8 +50,10 @@ from mcp_server_polarion.tools._cache import (
 from mcp_server_polarion.tools._guard import (
     guard_document_custom_field_keys,
     guard_document_enums,
+    guard_hyperlink_roles,
     guard_work_item_custom_field_keys,
     guard_work_item_enums,
+    guard_work_item_link_roles,
     guard_work_item_link_targets,
 )
 from mcp_server_polarion.tools._helpers import (
@@ -667,6 +669,11 @@ async def create_work_items(
     persists verbatim. ``custom_fields`` keys are likewise unvalidated —
     pass keys taken from a prior ``get_work_item``.
 
+    Each item's ``hyperlinks[].role`` is validated against the project's
+    ``hyperlink-role`` enumeration (typically ``ref_int`` / ``ref_ext``); an
+    unknown role raises ``ValueError`` before any write, since Polarion would
+    otherwise store it as a silent ghost.
+
     Bulk semantics: every item's enum guard, Markdown conversion, and
     payload build run BEFORE any write, so a bad enum or colliding
     custom-field key on ANY item rejects the whole batch with nothing sent.
@@ -720,6 +727,11 @@ async def create_work_items(
             severity=spec.severity,
             priority=spec.priority,
         )
+    await guard_hyperlink_roles(
+        client,
+        project_id,
+        [h.role for spec in items for h in (spec.hyperlinks or [])],
+    )
     for index, spec in enumerate(items):
         if spec.custom_fields:
             # Polarion exposes no project-config endpoint to enumerate valid
@@ -904,7 +916,11 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     ``description`` (Markdown) — the two format paths never mix.
 
     ``hyperlinks`` and ``assignee_ids`` REPLACE the existing lists (pass
-    the full list, not a delta). ``custom_fields`` is partial — omitted
+    the full list, not a delta). Each hyperlink's ``role`` is validated
+    against the project's ``hyperlink-role`` enumeration (typically
+    ``ref_int`` / ``ref_ext``) and an unknown role raises ``ValueError``
+    before the PATCH (on ``dry_run`` too), since Polarion would otherwise
+    store it as a silent ghost. ``custom_fields`` is partial — omitted
     keys are preserved. Unknown custom-field IDs silently persist as
     ghost attributes; pass keys from a prior read to avoid creating them.
 
@@ -1105,6 +1121,9 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
                 work_item_type,
                 custom_fields,
             )
+
+    if hyperlinks:
+        await guard_hyperlink_roles(client, project_id, [h.role for h in hyperlinks])
 
     if dry_run:
         return WorkItemUpdateResult(
@@ -1919,11 +1938,11 @@ async def create_work_item_links(
     The orientation matches ``list_work_item_links(direction="forward")``
     on the source.
 
-    Polarion does not validate link roles server-side: an unknown ``role``
-    is stored verbatim and never matches subsequent queries. Resolve valid
-    roles by reading an existing link with
-    ``list_work_item_links(direction="forward")`` on a similar work item
-    in the same project.
+    Polarion does not validate link roles server-side -- an unknown ``role``
+    would be stored verbatim and never match subsequent queries -- so the
+    tool validates each ``role`` against the project's ``workitem-link-role``
+    enumeration first and raises ``ValueError`` listing the valid ids on a
+    miss (on ``dry_run=True`` as well).
 
     A nonexistent target is rejected before the write. Polarion accepts a
     link to a missing target as a silent dangling link (HTTP 201, empty
@@ -1942,14 +1961,14 @@ async def create_work_item_links(
     Bulk semantics: the POST is atomic. A link Polarion rejects -- e.g. a
     duplicate (role, target) pair (HTTP 409) -- rolls back the whole batch,
     including the links listed before and after it; nothing is committed.
-    What Polarion does NOT reject is target existence or role validity: a
-    nonexistent target creates a dangling link and an unknown role is stored
-    verbatim, both with a 201 (see the role note above). So a 4xx means the
-    entire batch was refused; a 201 does not mean every link points
-    somewhere real. As a safeguard, if a 2xx response ever returns an id
-    count different from the number of links submitted the tool raises;
-    re-query with ``list_work_item_links(direction="forward")`` before
-    retrying. For per-link diagnostics, send one spec per call.
+    Target existence and role validity are both checked before the POST (see
+    the role note above), so the batch is refused at the tool layer rather
+    than landing a dangling or ghost link. A 4xx from Polarion still means the
+    entire batch was refused; nothing is committed. As a safeguard, if a 2xx
+    response ever returns an id count different from the number of links
+    submitted the tool raises; re-query with
+    ``list_work_item_links(direction="forward")`` before retrying. For
+    per-link diagnostics, send one spec per call.
 
     Phantom-success on same-role conflict: when the source work item is
     attached to a document, ``move_work_item_to_document`` auto-creates
@@ -1980,12 +1999,14 @@ async def create_work_item_links(
         None on real create).
 
     Raises:
-        ValueError: Source project or work item not found, or a target work
-            item / target project that does not exist.
+        ValueError: Source project or work item not found, a target work
+            item / target project that does not exist, or a ``role`` not in
+            the project's ``workitem-link-role`` enumeration.
         PermissionError: Token lacks permission.
         RuntimeError: Other Polarion API errors (including duplicate link),
-            an unreachable target-validation request, or a returned-id count
-            that does not match the number of links submitted.
+            an unreachable target- or role-validation request, or a
+            returned-id count that does not match the number of links
+            submitted.
     """
     payload = _build_create_links_payload(
         source_project_id=project_id,
@@ -1994,6 +2015,7 @@ async def create_work_item_links(
 
     client = get_client(ctx)
     await guard_work_item_link_targets(client, project_id, links)
+    await guard_work_item_link_roles(client, project_id, [spec.role for spec in links])
 
     if dry_run:
         return WorkItemLinksCreateResult(
