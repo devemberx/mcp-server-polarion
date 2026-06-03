@@ -55,6 +55,7 @@ from mcp_server_polarion.tools._guard import (
     guard_work_item_enums,
     guard_work_item_link_roles,
     guard_work_item_link_targets,
+    partition_delete_links,
 )
 from mcp_server_polarion.tools._helpers import (
     STANDARD_DOCUMENT_ATTRIBUTES,
@@ -2106,14 +2107,18 @@ async def delete_work_item_links(
       ``role`` and ``id`` (the target's short ID) form one ref;
       ``target_project_id`` defaults to ``project_id`` for same-project.
 
-    Idempotent at the body level: Polarion silently ignores refs whose
-    composite id does not match an existing link, deletes any refs that
-    do match, and returns 204 either way. So re-deleting an
-    already-removed link is a no-op, and a mixed batch (some real,
-    some stale) succeeds for the real ones without surfacing the
-    stale ones. ``ValueError`` is reserved for path-level 404 -- the
-    source work item itself does not exist; the body-level "link not
-    found" case never reaches the tool layer.
+    Polarion's delete is idempotent and silent: it removes refs that match
+    an existing outgoing link, ignores refs that don't, and returns 204
+    either way with no body -- so a stale ref looks identical to a real
+    delete. To make that visible, the tool first reads the source work
+    item's existing outgoing links (one extra GET, paginated) and splits
+    the request into ``deleted_link_ids`` (matched, removed) and
+    ``not_found_link_ids`` (no-ops). The delete still succeeds either way
+    -- a no-op is reported, never raised, so re-deleting an already-removed
+    link stays idempotent. Inspect ``not_found_link_ids`` to tell whether a
+    ref actually matched. The pre-read is fail-closed: an unreachable
+    backend raises ``RuntimeError`` before any delete, so the split is
+    always trustworthy when the call returns.
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -2121,23 +2126,23 @@ async def delete_work_item_links(
         work_item_id: Source work item ID.
         links: One or more ``WorkItemLinkRef`` (role + target + optional
             target_project_id).
-        dry_run: When True, return payload preview only.
+        dry_run: When True, return payload preview only. The pre-read still
+            runs, so the preview's matched/no-op split is accurate.
 
     Returns:
         WorkItemLinksDeleteResult with ``deleted``, ``dry_run``,
-        ``link_ids`` (composite ids that were/would be deleted, in input
-        order, always populated since they are reconstructed from the
-        request), and ``payload_preview`` (populated on dry-run; None on
-        real delete).
+        ``link_ids`` (every requested composite id, in input order),
+        ``deleted_link_ids`` (refs that matched an existing link),
+        ``not_found_link_ids`` (refs that matched nothing), and
+        ``payload_preview`` (populated on dry-run; None on real delete).
 
     Raises:
-        ValueError: Source work item itself not found (path-level 404).
-            Body-level "link not found" is silently ignored by Polarion
-            and does not raise.
+        ValueError: Source work item itself not found.
         PermissionError: Token lacks permission.
-        RuntimeError: Other Polarion API errors (e.g. 400 on a malformed
-            composite id -- but this tool constructs valid ids from
-            structured refs, so 400 should be unreachable).
+        RuntimeError: An unreachable pre-read or other Polarion API error
+            (e.g. 400 on a malformed composite id -- but this tool
+            constructs valid ids from structured refs, so 400 should be
+            unreachable).
     """
     link_ids, payload = _build_delete_links_payload(
         source_project_id=project_id,
@@ -2145,15 +2150,21 @@ async def delete_work_item_links(
         links=links,
     )
 
+    client = get_client(ctx)
+    deleted_link_ids, not_found_link_ids = await partition_delete_links(
+        client, project_id, work_item_id, link_ids
+    )
+
     if dry_run:
         return WorkItemLinksDeleteResult(
             deleted=False,
             dry_run=True,
             link_ids=link_ids,
+            deleted_link_ids=deleted_link_ids,
+            not_found_link_ids=not_found_link_ids,
             payload_preview=payload,
         )
 
-    client = get_client(ctx)
     path = (
         f"/projects/{encode_path_segment(project_id)}"
         f"/workitems/{encode_path_segment(work_item_id)}/linkedworkitems"
@@ -2178,6 +2189,8 @@ async def delete_work_item_links(
         deleted=True,
         dry_run=False,
         link_ids=link_ids,
+        deleted_link_ids=deleted_link_ids,
+        not_found_link_ids=not_found_link_ids,
         payload_preview=None,
     )
 

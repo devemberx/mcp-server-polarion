@@ -13,7 +13,11 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mcp_server_polarion.core.client import PolarionClient
-from mcp_server_polarion.core.exceptions import PolarionError, PolarionNotFoundError
+from mcp_server_polarion.core.exceptions import (
+    PolarionAuthError,
+    PolarionError,
+    PolarionNotFoundError,
+)
 from mcp_server_polarion.models import WorkItemLinkSpec
 from mcp_server_polarion.tools import _cache as cache_mod
 from mcp_server_polarion.tools._cache import (
@@ -30,6 +34,7 @@ from mcp_server_polarion.tools._guard import (
     guard_work_item_enums,
     guard_work_item_link_roles,
     guard_work_item_link_targets,
+    partition_delete_links,
 )
 
 
@@ -761,3 +766,113 @@ class TestGuardHyperlinkRoles:
         await guard_hyperlink_roles(mock_client, "P", [])
 
         mock_client.get.assert_not_awaited()
+
+
+def _linkedworkitems_response(composite_ids: list[str]) -> dict[str, object]:
+    """A JSON:API forward-link page; ids are the 5-segment composite form."""
+    return {
+        "data": [{"type": "linkedworkitems", "id": cid} for cid in composite_ids],
+        "meta": {"totalCount": len(composite_ids)},
+    }
+
+
+class TestPartitionDeleteLinks:
+    """Pre-read + matched/no-op split for ``delete_work_item_links``."""
+
+    async def test_splits_matched_and_not_found_preserving_order(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _linkedworkitems_response(
+            ["P/MCPT-1/parent/P/MCPT-2", "P/MCPT-1/relates_to/P/MCPT-9"]
+        )
+
+        matched, not_found = await partition_delete_links(
+            mock_client,
+            "P",
+            "MCPT-1",
+            [
+                "P/MCPT-1/relates_to/P/MCPT-9",
+                "P/MCPT-1/verifies/P/MCPT-3",
+                "P/MCPT-1/parent/P/MCPT-2",
+            ],
+        )
+
+        assert matched == [
+            "P/MCPT-1/relates_to/P/MCPT-9",
+            "P/MCPT-1/parent/P/MCPT-2",
+        ]
+        assert not_found == ["P/MCPT-1/verifies/P/MCPT-3"]
+
+    async def test_reads_only_id_field(self, mock_client: AsyncMock) -> None:
+        mock_client.get.return_value = _linkedworkitems_response([])
+
+        await partition_delete_links(
+            mock_client, "P", "MCPT-1", ["P/MCPT-1/parent/P/MCPT-2"]
+        )
+
+        path, kwargs = (
+            mock_client.get.call_args.args[0],
+            mock_client.get.call_args.kwargs,
+        )
+        assert path == "/projects/P/workitems/MCPT-1/linkedworkitems"
+        assert kwargs["params"]["fields[linkedworkitems]"] == "id"
+
+    async def test_paginates_above_page_size(self, mock_client: AsyncMock) -> None:
+        full = [f"P/MCPT-1/relates_to/P/WI-{n}" for n in range(100)]
+        tail = ["P/MCPT-1/relates_to/P/WI-100"]
+
+        async def fake_get(path: str, **kwargs: object) -> dict[str, object]:
+            page = kwargs["params"]["page[number]"]  # type: ignore[index]
+            return _linkedworkitems_response(full if page == 1 else tail)
+
+        mock_client.get.side_effect = fake_get
+
+        matched, not_found = await partition_delete_links(
+            mock_client,
+            "P",
+            "MCPT-1",
+            ["P/MCPT-1/relates_to/P/WI-100"],
+        )
+
+        assert mock_client.get.await_count == 2
+        assert matched == ["P/MCPT-1/relates_to/P/WI-100"]
+        assert not_found == []
+
+    async def test_source_wi_404_raises_value_error(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionNotFoundError("not found")
+
+        with pytest.raises(ValueError, match="Source work item 'MCPT-1' not found"):
+            await partition_delete_links(
+                mock_client,
+                "P",
+                "MCPT-1",
+                ["P/MCPT-1/parent/P/MCPT-2"],
+            )
+
+    async def test_auth_error_raises_permission_error(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError("auth")
+
+        with pytest.raises(PermissionError):
+            await partition_delete_links(
+                mock_client,
+                "P",
+                "MCPT-1",
+                ["P/MCPT-1/parent/P/MCPT-2"],
+            )
+
+    async def test_unreachable_backend_blocks_with_runtime_error(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionError("backend down")
+
+        with pytest.raises(RuntimeError, match="Refusing the delete"):
+            await partition_delete_links(
+                mock_client,
+                "P",
+                "MCPT-1",
+                ["P/MCPT-1/parent/P/MCPT-2"],
+            )
