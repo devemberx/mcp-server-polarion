@@ -16,9 +16,11 @@ Validated option ids and observed custom-field keys are memoised in
 check logic.
 
 Fail-closed. If a validation request errors after the client's 429/5xx
-backoff, the guard raises ``RuntimeError`` rather than letting the write
-through: a ghost write is invisible in Polarion and unrecoverable, so an
-unverifiable write is refused rather than risked. Two lenient cases defer to
+backoff, the guard raises rather than letting the write through: a ghost
+write is invisible in Polarion and unrecoverable, so an unverifiable write is
+refused rather than risked. An auth failure raises ``PermissionError`` (the
+token's problem, matching the tool layer); any other unreachable-backend
+error raises ``RuntimeError``. Two lenient cases defer to
 Polarion instead of blocking: a *successful* empty option set (a field with no
 configured options), and a 404 from ``getAvailableOptions`` (the endpoint or
 field is unsupported on this instance, so there is nothing to validate
@@ -84,6 +86,25 @@ def _unreachable_write_block(
     )
 
 
+def _unauthorized_write_block(what: str, project_id: str) -> PermissionError:
+    """Build the fail-closed error raised when validation is unauthorized.
+
+    Mirrors the tool layer's ``PolarionAuthError -> PermissionError`` mapping:
+    the write is still refused, but the cause is a token-scope problem the
+    caller can fix rather than an unreachable backend to retry.
+    """
+    logger.warning(
+        "guard blocking write: not authorized to validate %s for project=%s",
+        what,
+        project_id,
+    )
+    return PermissionError(
+        f"Cannot validate {what} against project '{project_id}' before writing: "
+        f"the POLARION_TOKEN lacks permission for the validation request. "
+        f"Refusing the write -- check your token's permissions."
+    )
+
+
 async def fetch_enum_option_ids(
     client: PolarionClient,
     project_id: str,
@@ -133,6 +154,8 @@ async def fetch_enum_option_ids(
         )
         store_cached_enum_options(project_id, resource, field_id, type_id, frozenset())
         return frozenset()
+    except PolarionAuthError as exc:
+        raise _unauthorized_write_block(f"{field_id} options", project_id) from exc
     except PolarionError as exc:
         raise _unreachable_write_block(f"{field_id} options", project_id, exc) from exc
 
@@ -293,6 +316,8 @@ async def guard_work_item_custom_field_keys(
             response = await client.get(
                 path, params={"fields[workitems]": WORK_ITEM_DETAIL_FIELDS}
             )
+        except PolarionAuthError as exc:
+            raise _unauthorized_write_block("custom_fields keys", project_id) from exc
         except PolarionError as exc:
             raise _unreachable_write_block(
                 "custom_fields keys", project_id, exc
@@ -335,6 +360,8 @@ async def guard_document_custom_field_keys(
             response = await client.get(
                 path, params={"fields[documents]": DOCUMENT_DETAIL_FIELDS}
             )
+        except PolarionAuthError as exc:
+            raise _unauthorized_write_block("custom_fields keys", project_id) from exc
         except PolarionError as exc:
             raise _unreachable_write_block(
                 "custom_fields keys", project_id, exc
@@ -413,6 +440,8 @@ async def guard_work_item_link_targets(
         except PolarionNotFoundError:
             missing.extend(f"{project_id}/{wi}" for wi in sorted(requested))
             continue
+        except PolarionAuthError as exc:
+            raise _unauthorized_write_block("link targets", project_id) from exc
         except PolarionError as exc:
             raise _unreachable_write_block("link targets", project_id, exc) from exc
         missing.extend(f"{project_id}/{wi}" for wi in sorted(requested - existing))
@@ -466,6 +495,8 @@ async def fetch_project_enum_option_ids(
         )
         store_cached_project_enum(project_id, enum_name, frozenset())
         return frozenset()
+    except PolarionAuthError as exc:
+        raise _unauthorized_write_block(f"{enum_name} options", project_id) from exc
     except PolarionError as exc:
         raise _unreachable_write_block(f"{enum_name} options", project_id, exc) from exc
 

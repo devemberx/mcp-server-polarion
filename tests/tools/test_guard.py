@@ -129,6 +129,16 @@ class TestFetchEnumOptionIds:
 
         assert any("blocking write" in r.message for r in caplog.records)
 
+    async def test_auth_error_raises_permission_error(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
+
+        with pytest.raises(PermissionError, match="lacks permission"):
+            await fetch_enum_option_ids(
+                mock_client, "P", "workitems", "severity", "task"
+            )
+
     async def test_not_found_defers_instead_of_blocking(
         self,
         mock_client: AsyncMock,
@@ -412,6 +422,16 @@ class TestGuardWorkItemCustomFieldKeys:
                 mock_client, "P", "MCPT-1", "task", {"release_train_id": "RT-42"}
             )
 
+    async def test_priming_get_auth_error_raises_permission_error(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
+
+        with pytest.raises(PermissionError, match="lacks permission"):
+            await guard_work_item_custom_field_keys(
+                mock_client, "P", "MCPT-1", "task", {"release_train_id": "RT-42"}
+            )
+
 
 class TestGuardDocumentCustomFieldKeys:
     """Validation of ``update_document.custom_fields`` keys."""
@@ -472,6 +492,16 @@ class TestGuardDocumentCustomFieldKeys:
         mock_client.get.side_effect = PolarionError("backend down")
 
         with pytest.raises(RuntimeError, match="Refusing the write"):
+            await guard_document_custom_field_keys(
+                mock_client, "P", "_default", "Doc", {"ghost_key": 1}
+            )
+
+    async def test_priming_get_auth_error_raises_permission_error(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
+
+        with pytest.raises(PermissionError, match="lacks permission"):
             await guard_document_custom_field_keys(
                 mock_client, "P", "_default", "Doc", {"ghost_key": 1}
             )
@@ -581,6 +611,14 @@ class TestGuardWorkItemLinkTargets:
         with pytest.raises(RuntimeError, match="Refusing the write"):
             await guard_work_item_link_targets(mock_client, "P", [_link("A")])
 
+    async def test_auth_error_raises_permission_error(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
+
+        with pytest.raises(PermissionError, match="lacks permission"):
+            await guard_work_item_link_targets(mock_client, "P", [_link("A")])
+
     async def test_missing_target_project_raises_value_error(
         self, mock_client: AsyncMock
     ) -> None:
@@ -651,6 +689,14 @@ class TestFetchProjectEnumOptionIds:
         mock_client.get.side_effect = PolarionError("backend down")
 
         with pytest.raises(RuntimeError, match="Refusing the write"):
+            await fetch_project_enum_option_ids(mock_client, "P", "workitem-link-role")
+
+    async def test_auth_error_raises_permission_error(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
+
+        with pytest.raises(PermissionError, match="lacks permission"):
             await fetch_project_enum_option_ids(mock_client, "P", "workitem-link-role")
 
     async def test_not_found_defers_with_empty_set(
@@ -737,6 +783,14 @@ class TestGuardWorkItemLinkRoles:
         mock_client.get.side_effect = PolarionError("backend down")
 
         with pytest.raises(RuntimeError, match="Refusing the write"):
+            await guard_work_item_link_roles(mock_client, "P", ["relates_to"])
+
+    async def test_auth_error_raises_permission_error(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
+
+        with pytest.raises(PermissionError, match="lacks permission"):
             await guard_work_item_link_roles(mock_client, "P", ["relates_to"])
 
 
