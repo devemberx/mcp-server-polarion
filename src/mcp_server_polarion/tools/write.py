@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import copy
 import logging
-from typing import cast
+from typing import Final, cast
 from urllib.parse import urlencode
 
 from fastmcp import Context
@@ -73,6 +73,12 @@ from mcp_server_polarion.utils import (
 )
 
 logger = logging.getLogger("mcp_server_polarion.tools.write")
+
+# Caps how many items a single bulk write may carry. Polarion allows no
+# concurrent requests and throttles at ~3 req/s, so an unbounded batch is a
+# rate-limit and payload-size hazard; 50 bounds one request without forcing
+# callers to paginate typical work. Shared by every bulk write tool.
+MAX_BULK_ITEMS: Final[int] = 50
 
 
 def _build_work_item_resource(
@@ -633,7 +639,7 @@ async def create_work_items(
     project_id: str = Field(min_length=1, description="Polarion project ID."),
     items: list[WorkItemCreateSpec] = Field(  # noqa: B008
         min_length=1,
-        max_length=50,
+        max_length=MAX_BULK_ITEMS,
         description=(
             "One or more work items to create in a single request "
             "(1-50). Pass a single-element list to create just one."
@@ -1895,14 +1901,15 @@ async def create_work_item_links(
     ),
     links: list[WorkItemLinkSpec] = Field(  # noqa: B008
         min_length=1,
-        description="One or more links to create under the source work item.",
+        max_length=MAX_BULK_ITEMS,
+        description="One or more links to create under the source work item (1-50).",
     ),
     dry_run: bool = Field(
         default=False,
         description="When True, return payload preview without calling Polarion.",
     ),
 ) -> WorkItemLinksCreateResult:
-    """Create one or more outgoing links from a single source work item.
+    """Create one or more outgoing links (1-50) from a single source work item.
 
     All links share the same source (``project_id`` / ``work_item_id``)
     and are sent as a single bulk JSON:API request. For each spec
@@ -1926,12 +1933,17 @@ async def create_work_item_links(
     are the path identifiers for future delete/PATCH of the same links
     via ``delete_work_item_links``.
 
-    Bulk semantics -- partial-failure hazard: behavior on mixed-success
-    (e.g. one duplicate among otherwise valid links) is not currently
-    characterised on this server. On any 4xx response, assume nothing was
-    committed and re-query with
-    ``list_work_item_links(direction="forward")`` before retrying. If you
-    need per-link diagnostics, send one spec per call.
+    Bulk semantics: the POST is atomic. A link Polarion rejects -- e.g. a
+    duplicate (role, target) pair (HTTP 409) -- rolls back the whole batch,
+    including the links listed before and after it; nothing is committed.
+    What Polarion does NOT reject is target existence or role validity: a
+    nonexistent target creates a dangling link and an unknown role is stored
+    verbatim, both with a 201 (see the role note above). So a 4xx means the
+    entire batch was refused; a 201 does not mean every link points
+    somewhere real. As a safeguard, if a 2xx response ever returns an id
+    count different from the number of links submitted the tool raises;
+    re-query with ``list_work_item_links(direction="forward")`` before
+    retrying. For per-link diagnostics, send one spec per call.
 
     Phantom-success on same-role conflict: when the source work item is
     attached to a document, ``move_work_item_to_document`` auto-creates
@@ -1965,7 +1977,8 @@ async def create_work_item_links(
         ValueError: Source project or work item not found.
         PermissionError: Token lacks permission.
         RuntimeError: Other Polarion API errors (including duplicate link),
-            or accepted-but-no-ID response.
+            or a returned-id count that does not match the number of links
+            submitted.
     """
     payload = _build_create_links_payload(
         source_project_id=project_id,
@@ -2000,11 +2013,12 @@ async def create_work_item_links(
         raise RuntimeError(f"Failed to create work item links: {exc.message}") from exc
 
     link_ids = _extract_created_link_ids(response)
-    if not link_ids:
+    if len(link_ids) != len(links):
         raise RuntimeError(
-            "Polarion accepted the bulk create-link request but returned no "
-            "link ids. The links may or may not exist; verify with "
-            "list_work_item_links."
+            f"Polarion accepted the bulk create-link request but returned "
+            f"{len(link_ids)} ids for {len(links)} requested links. The batch "
+            "may be partially created; verify with list_work_item_links before "
+            "retrying."
         )
 
     return WorkItemLinksCreateResult(
@@ -2037,14 +2051,15 @@ async def delete_work_item_links(
     ),
     links: list[WorkItemLinkRef] = Field(  # noqa: B008
         min_length=1,
-        description="One or more existing outgoing links to delete.",
+        max_length=MAX_BULK_ITEMS,
+        description="One or more existing outgoing links to delete (1-50).",
     ),
     dry_run: bool = Field(
         default=False,
         description="When True, return payload preview without calling Polarion.",
     ),
 ) -> WorkItemLinksDeleteResult:
-    """Delete one or more outgoing links from a single source work item.
+    """Delete one or more outgoing links (1-50) from a single source work item.
 
     Mirrors ``create_work_item_links``: same source coordinates, structured
     refs for each target. Only **outgoing** ("forward") links are removed
@@ -2148,7 +2163,7 @@ async def delete_work_item_links(
         "openWorldHint": True,
     },
 )
-async def update_work_item_links(  # noqa: PLR0913
+async def update_work_item_link(  # noqa: PLR0913
     ctx: Context,
     project_id: str = Field(min_length=1, description="Source work item's project ID."),
     work_item_id: str = Field(

@@ -55,7 +55,7 @@ move_work_item_to_document = _write_mod.move_work_item_to_document
 update_document = _write_mod.update_document
 update_document_comment = _write_mod.update_document_comment
 update_work_item = _write_mod.update_work_item
-update_work_item_links = _write_mod.update_work_item_links
+update_work_item_link = _write_mod.update_work_item_link
 
 # Private payload builders (alphabetical).
 _build_create_document_payload = _write_mod._build_create_document_payload
@@ -3767,7 +3767,7 @@ class TestCreateWorkItemLinksResponseParsing:
     ) -> None:
         mock_client.post.return_value = {"data": []}
 
-        with pytest.raises(RuntimeError, match="no link ids"):
+        with pytest.raises(RuntimeError, match="0 ids for 1 requested links"):
             await create_work_item_links(
                 mock_ctx,
                 project_id="MyProj",
@@ -3783,13 +3783,38 @@ class TestCreateWorkItemLinksResponseParsing:
     ) -> None:
         mock_client.post.return_value = {"data": [{"type": "linkedworkitems"}]}
 
-        with pytest.raises(RuntimeError, match="no link ids"):
+        with pytest.raises(RuntimeError, match="0 ids for 1 requested links"):
             await create_work_item_links(
                 mock_ctx,
                 project_id="MyProj",
                 work_item_id="MCPT-1",
                 links=[
                     WorkItemLinkSpec(role="parent", target_work_item_id="MCPT-2"),
+                ],
+                dry_run=False,
+            )
+
+    async def test_id_count_mismatch_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Fewer returned ids than submitted links flags a partial create."""
+        mock_client.post.return_value = {
+            "data": [
+                {
+                    "type": "linkedworkitems",
+                    "id": "MyProj/MCPT-1/parent/MyProj/MCPT-2",
+                }
+            ]
+        }
+
+        with pytest.raises(RuntimeError, match="1 ids for 2 requested links"):
+            await create_work_item_links(
+                mock_ctx,
+                project_id="MyProj",
+                work_item_id="MCPT-1",
+                links=[
+                    WorkItemLinkSpec(role="parent", target_work_item_id="MCPT-2"),
+                    WorkItemLinkSpec(role="parent", target_work_item_id="MCPT-3"),
                 ],
                 dry_run=False,
             )
@@ -3816,6 +3841,22 @@ class TestCreateWorkItemLinksFieldValidation:
     def test_links_rejects_empty_list(self) -> None:
         with pytest.raises(ValidationError):
             self._adapter_for("links").validate_python([])
+
+    def test_over_cap_links_rejected(self) -> None:
+        too_many = [
+            {"role": "parent", "target_work_item_id": "MCPT-2"} for _ in range(51)
+        ]
+        with pytest.raises(ValidationError):
+            self._adapter_for("links").validate_python(too_many)
+
+    def test_cap_boundary_accepted(self) -> None:
+        exactly_50 = [
+            {"role": "parent", "target_work_item_id": "MCPT-2"} for _ in range(50)
+        ]
+        result = cast(
+            list[object], self._adapter_for("links").validate_python(exactly_50)
+        )
+        assert len(result) == 50
 
     def test_spec_role_rejects_empty(self) -> None:
         with pytest.raises(ValidationError):
@@ -4064,6 +4105,22 @@ class TestDeleteWorkItemLinksFieldValidation:
         with pytest.raises(ValidationError):
             self._adapter_for("links").validate_python([])
 
+    def test_over_cap_links_rejected(self) -> None:
+        too_many = [
+            {"role": "parent", "target_work_item_id": "MCPT-2"} for _ in range(51)
+        ]
+        with pytest.raises(ValidationError):
+            self._adapter_for("links").validate_python(too_many)
+
+    def test_cap_boundary_accepted(self) -> None:
+        exactly_50 = [
+            {"role": "parent", "target_work_item_id": "MCPT-2"} for _ in range(50)
+        ]
+        result = cast(
+            list[object], self._adapter_for("links").validate_python(exactly_50)
+        )
+        assert len(result) == 50
+
     def test_ref_role_rejects_empty(self) -> None:
         with pytest.raises(ValidationError):
             WorkItemLinkRef(role="", target_work_item_id="MCPT-2")
@@ -4171,13 +4228,13 @@ class TestBuildUpdateLinkPayload:
         assert attributes == {"suspect": False}
 
 
-class TestUpdateWorkItemLinksDryRun:
-    """Tests for ``update_work_item_links`` with ``dry_run=True``."""
+class TestUpdateWorkItemLinkDryRun:
+    """Tests for ``update_work_item_link`` with ``dry_run=True``."""
 
     async def test_dry_run_returns_preview_without_calling_patch(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        result = await update_work_item_links(
+        result = await update_work_item_link(
             mock_ctx,
             project_id="MyProj",
             work_item_id="MCPT-1",
@@ -4199,15 +4256,15 @@ class TestUpdateWorkItemLinksDryRun:
         assert data["id"] == "MyProj/MCPT-1/parent/MyProj/MCPT-2"
 
 
-class TestUpdateWorkItemLinksHappyPath:
-    """Tests for a successful ``update_work_item_links`` call."""
+class TestUpdateWorkItemLinkHappyPath:
+    """Tests for a successful ``update_work_item_link`` call."""
 
     async def test_returns_updated_true_and_link_id(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.patch.return_value = {}
 
-        result = await update_work_item_links(
+        result = await update_work_item_link(
             mock_ctx,
             project_id="MyProj",
             work_item_id="MCPT-1",
@@ -4230,7 +4287,7 @@ class TestUpdateWorkItemLinksHappyPath:
     ) -> None:
         mock_client.patch.return_value = {}
 
-        await update_work_item_links(
+        await update_work_item_link(
             mock_ctx,
             project_id="MyProj",
             work_item_id="MCPT-1",
@@ -4252,7 +4309,7 @@ class TestUpdateWorkItemLinksHappyPath:
         assert data["attributes"] == {"revision": "42"}
 
 
-class TestUpdateWorkItemLinksErrors:
+class TestUpdateWorkItemLinkErrors:
     """Domain exceptions are raised, not returned in the result."""
 
     async def test_not_found_raises_value_error(
@@ -4263,7 +4320,7 @@ class TestUpdateWorkItemLinksErrors:
         )
 
         with pytest.raises(ValueError, match="404"):
-            await update_work_item_links(
+            await update_work_item_link(
                 mock_ctx,
                 project_id="MyProj",
                 work_item_id="MCPT-1",
@@ -4281,7 +4338,7 @@ class TestUpdateWorkItemLinksErrors:
         mock_client.patch.side_effect = PolarionError("bad revision", status_code=400)
 
         with pytest.raises(RuntimeError, match="400"):
-            await update_work_item_links(
+            await update_work_item_link(
                 mock_ctx,
                 project_id="MyProj",
                 work_item_id="MCPT-1",
@@ -4294,7 +4351,7 @@ class TestUpdateWorkItemLinksErrors:
             )
 
 
-class TestUpdateWorkItemLinksAuthError:
+class TestUpdateWorkItemLinkAuthError:
     """Auth errors raise PermissionError."""
 
     async def test_auth_error_raises_permission_error(
@@ -4303,7 +4360,7 @@ class TestUpdateWorkItemLinksAuthError:
         mock_client.patch.side_effect = PolarionAuthError("auth", status_code=401)
 
         with pytest.raises(PermissionError):
-            await update_work_item_links(
+            await update_work_item_link(
                 mock_ctx,
                 project_id="MyProj",
                 work_item_id="MCPT-1",
@@ -4316,13 +4373,13 @@ class TestUpdateWorkItemLinksAuthError:
             )
 
 
-class TestUpdateWorkItemLinksFieldValidation:
+class TestUpdateWorkItemLinkFieldValidation:
     """Verify ``min_length=1`` constraints and at-least-one-attribute check."""
 
     @staticmethod
     def _adapter_for(param_name: str) -> TypeAdapter[object]:
-        hints = get_type_hints(update_work_item_links)
-        sig = inspect.signature(update_work_item_links)
+        hints = get_type_hints(update_work_item_link)
+        sig = inspect.signature(update_work_item_link)
         field_info = sig.parameters[param_name].default
         return TypeAdapter(Annotated[hints[param_name], field_info])
 
@@ -4347,7 +4404,7 @@ class TestUpdateWorkItemLinksFieldValidation:
     ) -> None:
         """suspect=None and revision=None must be rejected before any PATCH."""
         with pytest.raises(ValueError, match="at least one"):
-            await update_work_item_links(
+            await update_work_item_link(
                 mock_ctx,
                 project_id="MyProj",
                 work_item_id="MCPT-1",
@@ -4363,7 +4420,7 @@ class TestUpdateWorkItemLinksFieldValidation:
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.patch.return_value = {}
-        result = await update_work_item_links(
+        result = await update_work_item_link(
             mock_ctx,
             project_id="P",
             work_item_id="P-1",
@@ -4380,7 +4437,7 @@ class TestUpdateWorkItemLinksFieldValidation:
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.patch.return_value = {}
-        result = await update_work_item_links(
+        result = await update_work_item_link(
             mock_ctx,
             project_id="P",
             work_item_id="P-1",
