@@ -34,7 +34,7 @@ class TestCheckReadonly:
 
     @pytest.mark.parametrize(
         "tool",
-        ["create_work_item", "update_document", "delete_work_item_links"],
+        ["create_work_items", "update_document", "delete_work_item_links"],
     )
     def test_any_write_call_fails(self, tool: str) -> None:
         trajectory = [_call("get_document"), _call(tool)]
@@ -46,7 +46,7 @@ class TestCheckReadonly:
 class TestCheckNoUpdateDocument:
     def test_create_plus_move_passes(self) -> None:
         trajectory = [
-            _call("create_work_item"),
+            _call("create_work_items"),
             _call("move_work_item_to_document"),
         ]
         passed, _ = checks.check_no_update_document(trajectory, {})
@@ -67,7 +67,7 @@ class TestCheckHeadingToDoc:
 
     @pytest.mark.parametrize(
         "wrong_tool",
-        ["create_work_item", "move_work_item_to_document"],
+        ["create_work_items", "move_work_item_to_document"],
     )
     def test_create_or_move_fails(self, wrong_tool: str) -> None:
         trajectory = [_call(wrong_tool)]

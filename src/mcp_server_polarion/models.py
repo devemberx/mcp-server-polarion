@@ -17,7 +17,7 @@ Models are organised into three categories:
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Literal
+from typing import Final, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -30,6 +30,14 @@ from pydantic import BaseModel, Field, model_validator
 type JsonValue = (
     str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
 )
+
+# Caps a single body payload so a prompt-injected caller cannot ship a
+# multi-megabyte blob to Polarion. Observed real document bodies stay under
+# ~30 KB, so 2 MiB leaves ~70x headroom. This is a per-item bound; a bulk
+# ``create_work_items`` batch can carry it once per item, so the aggregate
+# request is bounded by item count, not by this constant alone. Single source
+# of truth; ``tools.write`` imports this.
+MAX_BODY_HTML_LEN: Final[int] = 2_000_000
 
 
 class PaginatedResult[T](BaseModel):
@@ -471,15 +479,17 @@ class DocumentCommentSpec(BaseModel):
     )
 
 
-class WorkItemCreateResult(BaseModel):
-    """Result of a ``create_work_item`` operation."""
+class WorkItemsCreateResult(BaseModel):
+    """Result of a ``create_work_items`` operation."""
 
     created: bool = Field(description="True on a real create; False on dry-run.")
     dry_run: bool = Field(description="Whether this was a dry-run.")
-    work_item_id: str | None = Field(
-        description="ID of the new work item (e.g. 'MCPT-042'); None on dry-run.",
+    work_item_ids: list[str] = Field(
+        default_factory=list,
+        description="Short IDs of created work items in input order; empty on dry-run.",
     )
     payload_preview: Mapping[str, object] | None = Field(
+        default=None,
         description="JSON:API payload sent or previewed; None after real ops.",
     )
 
@@ -526,6 +536,58 @@ class DocumentCommentUpdateResult(BaseModel):
     )
     payload_preview: Mapping[str, object] | None = Field(
         description="JSON:API payload sent or previewed; None after real ops.",
+    )
+
+
+class WorkItemCreateSpec(BaseModel):
+    """One work item to create via ``create_work_items``."""
+
+    title: str = Field(
+        min_length=1, description="Work item title (required, non-empty)."
+    )
+    type: str = Field(
+        min_length=1,
+        description="Work item type (e.g. 'requirement', 'task', 'testCase').",
+    )
+    description: str | None = Field(
+        default=None,
+        max_length=MAX_BODY_HTML_LEN,
+        description="Optional Markdown body; converted to sanitized HTML on write.",
+    )
+    status: str | None = Field(
+        default=None,
+        description="Optional initial workflow status (project default if omitted).",
+    )
+    priority: str | None = Field(
+        default=None, description="Optional priority string (e.g. '50.0')."
+    )
+    severity: str | None = Field(
+        default=None,
+        description="Optional severity classification (e.g. 'major', 'critical').",
+    )
+    assignee_ids: list[str] | None = Field(
+        default=None,
+        description="Optional short user IDs to assign (e.g. ['alice', 'bob']).",
+    )
+    due_date: str | None = Field(
+        default=None, description="Optional due date 'YYYY-MM-DD'."
+    )
+    initial_estimate: str | None = Field(
+        default=None,
+        description="Optional Polarion duration (e.g. '5 1/2d', '1w 2d', '4h').",
+    )
+    hyperlinks: list[Hyperlink] | None = Field(
+        default=None,
+        description=(
+            "Optional external hyperlinks; each must have ``role`` and ``uri``."
+        ),
+    )
+    custom_fields: dict[str, object] | None = Field(
+        default=None,
+        description=(
+            "Optional custom fields keyed by Polarion field ID; "
+            "rich-text values must be ``{'type':'text/html','value':...}``."
+        ),
     )
 
 
@@ -675,6 +737,7 @@ class DocumentUpdateResult(BaseModel):
 
 
 __all__: list[str] = [
+    "MAX_BODY_HTML_LEN",
     "DocumentComment",
     "DocumentCommentSpec",
     "DocumentCommentUpdateResult",
@@ -690,7 +753,7 @@ __all__: list[str] = [
     "JsonValue",
     "PaginatedResult",
     "ProjectSummary",
-    "WorkItemCreateResult",
+    "WorkItemCreateSpec",
     "WorkItemDetail",
     "WorkItemLink",
     "WorkItemLinkRef",
@@ -703,4 +766,5 @@ __all__: list[str] = [
     "WorkItemRead",
     "WorkItemSummary",
     "WorkItemUpdateResult",
+    "WorkItemsCreateResult",
 ]

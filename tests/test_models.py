@@ -12,7 +12,7 @@ from mcp_server_polarion.models import (
     Hyperlink,
     PaginatedResult,
     ProjectSummary,
-    WorkItemCreateResult,
+    WorkItemCreateSpec,
     WorkItemDetail,
     WorkItemLink,
     WorkItemLinkRef,
@@ -20,6 +20,7 @@ from mcp_server_polarion.models import (
     WorkItemLinksDeleteResult,
     WorkItemLinkSpec,
     WorkItemRead,
+    WorkItemsCreateResult,
     WorkItemSummary,
     WorkItemUpdateResult,
 )
@@ -531,32 +532,34 @@ class TestWorkItemLink:
         assert link.document_name == "Software Test Case Specification"
 
 
-class TestWorkItemCreateResult:
+class TestWorkItemsCreateResult:
     def test_successful_create(self):
-        result = WorkItemCreateResult(
+        result = WorkItemsCreateResult(
             created=True,
             dry_run=False,
-            work_item_id="MCPT-042",
-            payload_preview={"data": {"type": "workitems"}},
+            work_item_ids=["MCPT-042", "MCPT-043"],
+            payload_preview=None,
         )
         assert result.created is True
-        assert result.work_item_id == "MCPT-042"
+        assert result.work_item_ids == ["MCPT-042", "MCPT-043"]
 
     def test_dry_run(self):
-        result = WorkItemCreateResult(
+        result = WorkItemsCreateResult(
             created=False,
             dry_run=True,
-            work_item_id=None,
+            work_item_ids=[],
             payload_preview={
-                "data": {
-                    "type": "workitems",
-                    "attributes": {"title": "New work item"},
-                }
+                "data": [
+                    {
+                        "type": "workitems",
+                        "attributes": {"title": "New work item"},
+                    }
+                ]
             },
         )
         assert result.created is False
         assert result.dry_run is True
-        assert result.work_item_id is None
+        assert result.work_item_ids == []
         assert result.payload_preview is not None
 
 
@@ -813,7 +816,8 @@ class TestCrossModelIntegration:
             WorkItemDetail,
             WorkItemRead,
             WorkItemLink,
-            WorkItemCreateResult,
+            WorkItemCreateSpec,
+            WorkItemsCreateResult,
             WorkItemUpdateResult,
             WorkItemLinkSpec,
             WorkItemLinkRef,

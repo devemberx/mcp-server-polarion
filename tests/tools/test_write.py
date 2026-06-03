@@ -26,7 +26,7 @@ from mcp_server_polarion.models import (
     DocumentCreateResult,
     DocumentUpdateResult,
     Hyperlink,
-    WorkItemCreateResult,
+    WorkItemCreateSpec,
     WorkItemLinkRef,
     WorkItemLinksCreateResult,
     WorkItemLinksDeleteResult,
@@ -34,6 +34,7 @@ from mcp_server_polarion.models import (
     WorkItemLinkUpdateResult,
     WorkItemLinkUpdateSpec,
     WorkItemMoveResult,
+    WorkItemsCreateResult,
     WorkItemUpdateResult,
 )
 from mcp_server_polarion.server import mcp
@@ -42,31 +43,38 @@ from mcp_server_polarion.tools import write as _write_mod
 
 # ``@mcp.tool`` returns the original function unchanged (not a FunctionTool
 # wrapper), so the tool callables are referenced directly.
+
+# Public tool callables (alphabetical).
 create_document = _write_mod.create_document
 create_document_comments = _write_mod.create_document_comments
-create_work_item = _write_mod.create_work_item
 create_work_item_links = _write_mod.create_work_item_links
+create_work_items = _write_mod.create_work_items
 delete_work_item_links = _write_mod.delete_work_item_links
 move_work_item_from_document = _write_mod.move_work_item_from_document
 move_work_item_to_document = _write_mod.move_work_item_to_document
 update_document = _write_mod.update_document
+update_document_comment = _write_mod.update_document_comment
 update_work_item = _write_mod.update_work_item
 update_work_item_links = _write_mod.update_work_item_links
+
+# Private payload builders (alphabetical).
 _build_create_document_payload = _write_mod._build_create_document_payload
 _build_create_links_payload = _write_mod._build_create_links_payload
+_build_create_work_items_payload = _write_mod._build_create_work_items_payload
 _build_delete_links_payload = _write_mod._build_delete_links_payload
-_build_document_comments_payload = _write_mod._build_document_comments_payload
 _build_document_comment_update_payload = (
     _write_mod._build_document_comment_update_payload
 )
-update_document_comment = _write_mod.update_document_comment
+_build_document_comments_payload = _write_mod._build_document_comments_payload
 _build_move_to_document_payload = _write_mod._build_move_to_document_payload
 _build_update_document_payload = _write_mod._build_update_document_payload
 _build_update_link_payload = _write_mod._build_update_link_payload
 _build_update_work_item_payload = _write_mod._build_update_work_item_payload
-_build_work_item_payload = _write_mod._build_work_item_payload
-_extract_created_id = _write_mod._extract_created_id
+_build_work_item_resource = _write_mod._build_work_item_resource
+
+# Private response extractors (alphabetical).
 _extract_created_link_ids = _write_mod._extract_created_link_ids
+_extract_created_work_item_ids = _write_mod._extract_created_work_item_ids
 
 
 def _clear_guard_caches() -> None:
@@ -108,72 +116,49 @@ def mock_ctx(mock_client: AsyncMock) -> MagicMock:
     return ctx
 
 
-class TestBuildWorkItemPayload:
-    """Tests for the private ``_build_work_item_payload`` helper."""
+class TestBuildWorkItemResource:
+    """Tests for the private ``_build_work_item_resource`` helper (one resource)."""
 
-    def test_minimal_payload_has_only_required_attrs(self) -> None:
-        payload = _build_work_item_payload(
-            title="My work item",
-            type="task",
+    def test_minimal_item_has_only_required_attrs(self) -> None:
+        item = _build_work_item_resource(
+            spec=WorkItemCreateSpec(title="My work item", type="task"),
             description_html="",
-            status=None,
-            priority=None,
-            severity=None,
-            assignee_ids=None,
-            due_date=None,
-            initial_estimate=None,
-            hyperlinks=None,
         )
 
-        assert payload == {
-            "data": [
-                {
-                    "type": "workitems",
-                    "attributes": {"title": "My work item", "type": "task"},
-                }
-            ]
+        assert item == {
+            "type": "workitems",
+            "attributes": {"title": "My work item", "type": "task"},
         }
         # No relationships key, no description, no other attributes.
-        item = cast(list[dict[str, object]], payload["data"])[0]
         assert "relationships" not in item
         attributes = cast(dict[str, object], item["attributes"])
         assert set(attributes.keys()) == {"title", "type"}
 
     def test_skips_none_and_empty_string_fields(self) -> None:
-        payload = _build_work_item_payload(
-            title="x",
-            type="task",
+        item = _build_work_item_resource(
+            spec=WorkItemCreateSpec(
+                title="x",
+                type="task",
+                status="",
+                severity="",
+                assignee_ids=[],
+                due_date="",
+                hyperlinks=[],
+            ),
             description_html="",
-            status="",
-            priority=None,
-            severity="",
-            assignee_ids=[],
-            due_date="",
-            initial_estimate=None,
-            hyperlinks=[],
         )
 
-        item = cast(list[dict[str, object]], payload["data"])[0]
         attributes = cast(dict[str, object], item["attributes"])
         # Only title + type — nothing else slipped through.
         assert set(attributes.keys()) == {"title", "type"}
         assert "relationships" not in item
 
     def test_includes_description_block(self) -> None:
-        payload = _build_work_item_payload(
-            title="x",
-            type="task",
+        item = _build_work_item_resource(
+            spec=WorkItemCreateSpec(title="x", type="task"),
             description_html="<p>hello</p>",
-            status=None,
-            priority=None,
-            severity=None,
-            assignee_ids=None,
-            due_date=None,
-            initial_estimate=None,
-            hyperlinks=None,
         )
 
-        item = cast(list[dict[str, object]], payload["data"])[0]
         attributes = cast(dict[str, object], item["attributes"])
         assert attributes["description"] == {
             "type": "text/html",
@@ -181,20 +166,13 @@ class TestBuildWorkItemPayload:
         }
 
     def test_assignee_ids_become_to_many_users_relationship(self) -> None:
-        payload = _build_work_item_payload(
-            title="x",
-            type="task",
+        item = _build_work_item_resource(
+            spec=WorkItemCreateSpec(
+                title="x", type="task", assignee_ids=["alice", "bob"]
+            ),
             description_html="",
-            status=None,
-            priority=None,
-            severity=None,
-            assignee_ids=["alice", "bob"],
-            due_date=None,
-            initial_estimate=None,
-            hyperlinks=None,
         )
 
-        item = cast(list[dict[str, object]], payload["data"])[0]
         relationships = cast(dict[str, object], item["relationships"])
         assert relationships["assignee"] == {
             "data": [
@@ -204,23 +182,18 @@ class TestBuildWorkItemPayload:
         }
 
     def test_hyperlinks_serialise_role_title_uri(self) -> None:
-        payload = _build_work_item_payload(
-            title="x",
-            type="task",
+        item = _build_work_item_resource(
+            spec=WorkItemCreateSpec(
+                title="x",
+                type="task",
+                hyperlinks=[
+                    Hyperlink(role="ref_ext", title="Spec", uri="https://example.com"),
+                    Hyperlink(role="implementation", uri="https://example.com/code"),
+                ],
+            ),
             description_html="",
-            status=None,
-            priority=None,
-            severity=None,
-            assignee_ids=None,
-            due_date=None,
-            initial_estimate=None,
-            hyperlinks=[
-                Hyperlink(role="ref_ext", title="Spec", uri="https://example.com"),
-                Hyperlink(role="implementation", uri="https://example.com/code"),
-            ],
         )
 
-        item = cast(list[dict[str, object]], payload["data"])[0]
         attributes = cast(dict[str, object], item["attributes"])
         assert attributes["hyperlinks"] == [
             {
@@ -236,20 +209,19 @@ class TestBuildWorkItemPayload:
         ]
 
     def test_all_optional_attrs_included_when_set(self) -> None:
-        payload = _build_work_item_payload(
-            title="x",
-            type="task",
+        item = _build_work_item_resource(
+            spec=WorkItemCreateSpec(
+                title="x",
+                type="task",
+                status="open",
+                priority="50.0",
+                severity="major",
+                due_date="2026-05-31",
+                initial_estimate="5 1/2d",
+            ),
             description_html="",
-            status="open",
-            priority="50.0",
-            severity="major",
-            assignee_ids=None,
-            due_date="2026-05-31",
-            initial_estimate="5 1/2d",
-            hyperlinks=None,
         )
 
-        item = cast(list[dict[str, object]], payload["data"])[0]
         attributes = cast(dict[str, object], item["attributes"])
         assert attributes["status"] == "open"
         assert attributes["priority"] == "50.0"
@@ -258,21 +230,15 @@ class TestBuildWorkItemPayload:
         assert attributes["initialEstimate"] == "5 1/2d"
 
     def test_custom_fields_inlined_alongside_standard_attrs(self) -> None:
-        payload = _build_work_item_payload(
-            title="x",
-            type="softwarerequirement",
+        item = _build_work_item_resource(
+            spec=WorkItemCreateSpec(
+                title="x",
+                type="softwarerequirement",
+                custom_fields={"riskLevel": "high", "effortHours": 12.0},
+            ),
             description_html="",
-            status=None,
-            priority=None,
-            severity=None,
-            assignee_ids=None,
-            due_date=None,
-            initial_estimate=None,
-            hyperlinks=None,
-            custom_fields={"riskLevel": "high", "effortHours": 12.0},
         )
 
-        item = cast(list[dict[str, object]], payload["data"])[0]
         attributes = cast(dict[str, object], item["attributes"])
         assert attributes["riskLevel"] == "high"
         assert attributes["effortHours"] == 12.0
@@ -284,104 +250,118 @@ class TestBuildWorkItemPayload:
         # ``title`` is a Polarion-defined standard attribute; collision
         # would silently shadow the explicit ``title`` param. Reject.
         with pytest.raises(ValueError, match="custom_fields keys collide"):
-            _build_work_item_payload(
-                title="x",
-                type="task",
+            _build_work_item_resource(
+                spec=WorkItemCreateSpec(
+                    title="x", type="task", custom_fields={"title": "y"}
+                ),
                 description_html="",
-                status=None,
-                priority=None,
-                severity=None,
-                assignee_ids=None,
-                due_date=None,
-                initial_estimate=None,
-                hyperlinks=None,
-                custom_fields={"title": "y"},
             )
 
     def test_custom_fields_skips_none_values_inside_dict(self) -> None:
         # The merge helper already has direct coverage for skip-None;
-        # this test pins that the create-payload's wrapper invocation
-        # honours the same semantics — a ``None`` value inside the dict
-        # MUST NOT land under ``attributes``, while falsy non-``None``
-        # values (e.g. 0) pass through.
-        payload = _build_work_item_payload(
-            title="t",
-            type="task",
+        # this test pins that the item builder honours the same semantics —
+        # a ``None`` value inside the dict MUST NOT land under
+        # ``attributes``, while falsy non-``None`` values (e.g. 0) pass.
+        item = _build_work_item_resource(
+            spec=WorkItemCreateSpec(
+                title="t",
+                type="task",
+                custom_fields={"riskLevel": None, "effortHours": 0},
+            ),
             description_html="",
-            status=None,
-            priority=None,
-            severity=None,
-            assignee_ids=None,
-            due_date=None,
-            initial_estimate=None,
-            hyperlinks=None,
-            custom_fields={"riskLevel": None, "effortHours": 0},
         )
-        item = cast(list[dict[str, object]], payload["data"])[0]
         attributes = cast(dict[str, object], item["attributes"])
         assert "riskLevel" not in attributes
         assert attributes["effortHours"] == 0
 
 
-class TestExtractCreatedId:
-    """Tests for the private ``_extract_created_id`` helper."""
+class TestBuildCreateWorkItemsPayload:
+    """Tests for the bulk ``_build_create_work_items_payload`` wrapper."""
 
-    def test_extracts_short_id_from_data_array(self) -> None:
-        response: dict[str, object] = {
+    def test_single_spec_wraps_in_data_list(self) -> None:
+        payload = _build_create_work_items_payload(
+            specs=[WorkItemCreateSpec(title="one", type="task")],
+            descriptions_html=[""],
+        )
+        assert payload == {
             "data": [
-                {
-                    "type": "workitems",
-                    "id": "MyProj/MCPT-042",
-                    "links": {"self": "..."},
-                }
+                {"type": "workitems", "attributes": {"title": "one", "type": "task"}}
             ]
         }
-        assert _extract_created_id(response) == "MCPT-042"
 
-    def test_returns_none_when_data_missing(self) -> None:
-        assert _extract_created_id({}) is None
+    def test_multiple_specs_preserve_order_and_pair_html(self) -> None:
+        payload = _build_create_work_items_payload(
+            specs=[
+                WorkItemCreateSpec(title="a", type="task"),
+                WorkItemCreateSpec(title="b", type="task"),
+            ],
+            descriptions_html=["<p>aaa</p>", ""],
+        )
+        data = cast(list[dict[str, object]], payload["data"])
+        assert len(data) == 2
+        first = cast(dict[str, object], data[0]["attributes"])
+        second = cast(dict[str, object], data[1]["attributes"])
+        assert first["title"] == "a"
+        assert first["description"] == {"type": "text/html", "value": "<p>aaa</p>"}
+        assert second["title"] == "b"
+        assert "description" not in second
 
-    def test_returns_none_when_data_empty_list(self) -> None:
-        assert _extract_created_id({"data": []}) is None
-
-    def test_returns_none_when_data_not_a_list(self) -> None:
-        assert _extract_created_id({"data": {"id": "MyProj/MCPT-1"}}) is None
-
-    def test_returns_none_when_first_entry_missing_id(self) -> None:
-        assert _extract_created_id({"data": [{"type": "workitems"}]}) is None
-
-    def test_returns_none_when_first_entry_not_dict(self) -> None:
-        assert _extract_created_id({"data": ["not a dict"]}) is None
+    def test_mismatched_lengths_raise(self) -> None:
+        # ``zip(strict=True)`` guards the spec/html pairing invariant.
+        with pytest.raises(ValueError):
+            _build_create_work_items_payload(
+                specs=[WorkItemCreateSpec(title="a", type="task")],
+                descriptions_html=[],
+            )
 
 
-class TestCreateWorkItemDryRun:
-    """Tests for ``create_work_item`` with ``dry_run=True``."""
+class TestExtractCreatedWorkItemIds:
+    """Tests for the private ``_extract_created_work_item_ids`` helper."""
+
+    def test_extracts_short_ids_in_order(self) -> None:
+        response: dict[str, object] = {
+            "data": [
+                {"type": "workitems", "id": "MyProj/MCPT-042"},
+                {"type": "workitems", "id": "MyProj/MCPT-043"},
+            ]
+        }
+        assert _extract_created_work_item_ids(response) == ["MCPT-042", "MCPT-043"]
+
+    def test_returns_empty_when_data_missing(self) -> None:
+        assert _extract_created_work_item_ids({}) == []
+
+    def test_returns_empty_when_data_not_a_list(self) -> None:
+        assert _extract_created_work_item_ids({"data": {"id": "MyProj/MCPT-1"}}) == []
+
+    def test_skips_entries_missing_id_or_not_dict(self) -> None:
+        response: dict[str, object] = {
+            "data": [
+                {"type": "workitems", "id": "MyProj/MCPT-1"},
+                {"type": "workitems"},
+                "not a dict",
+            ]
+        }
+        assert _extract_created_work_item_ids(response) == ["MCPT-1"]
+
+
+class TestCreateWorkItemsDryRun:
+    """Tests for ``create_work_items`` with ``dry_run=True``."""
 
     async def test_dry_run_returns_payload_without_calling_post(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        result = await create_work_item(
+        result = await create_work_items(
             mock_ctx,
             project_id="MyProj",
-            title="Dry test",
-            type="task",
-            description=None,
-            status=None,
-            priority=None,
-            severity=None,
-            assignee_ids=None,
-            due_date=None,
-            initial_estimate=None,
-            hyperlinks=None,
-            custom_fields=None,
+            items=[WorkItemCreateSpec(title="Dry test", type="task")],
             dry_run=True,
         )
 
         mock_client.post.assert_not_called()
-        assert isinstance(result, WorkItemCreateResult)
+        assert isinstance(result, WorkItemsCreateResult)
         assert result.dry_run is True
         assert result.created is False
-        assert result.work_item_id is None
+        assert result.work_item_ids == []
         assert result.payload_preview is not None
         # payload_preview is a plain dict (no Pydantic objects leaked).
         assert isinstance(result.payload_preview, dict)
@@ -390,44 +370,54 @@ class TestCreateWorkItemDryRun:
         assert attributes == {"title": "Dry test", "type": "task"}
 
 
-class TestCreateWorkItemHappyPath:
-    """Tests for a successful ``create_work_item`` call."""
+class TestCreateWorkItemsHappyPath:
+    """Tests for a successful ``create_work_items`` call."""
 
-    async def test_returns_short_id_on_201(
+    async def test_single_item_returns_short_id_on_201(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.post.return_value = {
             "data": [
-                {
-                    "type": "workitems",
-                    "id": "MyProj/MCPT-042",
-                    "links": {"self": "..."},
-                }
+                {"type": "workitems", "id": "MyProj/MCPT-042", "links": {"self": "..."}}
             ]
         }
 
-        result = await create_work_item(
+        result = await create_work_items(
             mock_ctx,
             project_id="MyProj",
-            title="Real",
-            type="task",
-            description=None,
-            status=None,
-            priority=None,
-            severity=None,
-            assignee_ids=None,
-            due_date=None,
-            initial_estimate=None,
-            hyperlinks=None,
-            custom_fields=None,
+            items=[WorkItemCreateSpec(title="Real", type="task")],
             dry_run=False,
         )
 
-        assert isinstance(result, WorkItemCreateResult)
+        assert isinstance(result, WorkItemsCreateResult)
         assert result.created is True
         assert result.dry_run is False
-        assert result.work_item_id == "MCPT-042"
+        assert result.work_item_ids == ["MCPT-042"]
         assert result.payload_preview is None
+
+    async def test_multiple_items_return_ids_in_order(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {
+            "data": [
+                {"type": "workitems", "id": "MyProj/MCPT-1"},
+                {"type": "workitems", "id": "MyProj/MCPT-2"},
+            ]
+        }
+
+        result = await create_work_items(
+            mock_ctx,
+            project_id="MyProj",
+            items=[
+                WorkItemCreateSpec(title="a", type="task"),
+                WorkItemCreateSpec(title="b", type="task"),
+            ],
+            dry_run=False,
+        )
+
+        assert result.work_item_ids == ["MCPT-1", "MCPT-2"]
+        # A single POST creates the whole batch.
+        assert mock_client.post.call_count == 1
 
     async def test_post_called_with_correct_path_and_body(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -436,20 +426,14 @@ class TestCreateWorkItemHappyPath:
             "data": [{"type": "workitems", "id": "MyProj/MCPT-1"}]
         }
 
-        await create_work_item(
+        await create_work_items(
             mock_ctx,
             project_id="MyProj",
-            title="t",
-            type="task",
-            description=None,
-            status="open",
-            priority=None,
-            severity=None,
-            assignee_ids=["alice"],
-            due_date=None,
-            initial_estimate=None,
-            hyperlinks=None,
-            custom_fields=None,
+            items=[
+                WorkItemCreateSpec(
+                    title="t", type="task", status="open", assignee_ids=["alice"]
+                )
+            ],
             dry_run=False,
         )
 
@@ -471,20 +455,16 @@ class TestCreateWorkItemHappyPath:
             "data": [{"type": "workitems", "id": "MyProj/MCPT-1"}]
         }
 
-        await create_work_item(
+        await create_work_items(
             mock_ctx,
             project_id="MyProj",
-            title="t",
-            type="task",
-            description="**bold** [link](https://example.com)",
-            status=None,
-            priority=None,
-            severity=None,
-            assignee_ids=None,
-            due_date=None,
-            initial_estimate=None,
-            hyperlinks=None,
-            custom_fields=None,
+            items=[
+                WorkItemCreateSpec(
+                    title="t",
+                    type="task",
+                    description="**bold** [link](https://example.com)",
+                )
+            ],
             dry_run=False,
         )
 
@@ -511,20 +491,14 @@ class TestCreateWorkItemHappyPath:
             "data": [{"type": "workitems", "id": "MyProj/MCPT-1"}]
         }
 
-        await create_work_item(
+        await create_work_items(
             mock_ctx,
             project_id="MyProj",
-            title="t",
-            type="task",
-            description="[click](javascript:alert(1))",
-            status=None,
-            priority=None,
-            severity=None,
-            assignee_ids=None,
-            due_date=None,
-            initial_estimate=None,
-            hyperlinks=None,
-            custom_fields=None,
+            items=[
+                WorkItemCreateSpec(
+                    title="t", type="task", description="[click](javascript:alert(1))"
+                )
+            ],
             dry_run=False,
         )
 
@@ -536,7 +510,7 @@ class TestCreateWorkItemHappyPath:
         assert "href='javascript:" not in desc_html
 
 
-class TestCreateWorkItemErrorMapping:
+class TestCreateWorkItemsErrorMapping:
     """Tests that domain exceptions are mapped at the tool layer."""
 
     async def test_401_raises_permission_error(
@@ -545,20 +519,10 @@ class TestCreateWorkItemErrorMapping:
         mock_client.post.side_effect = PolarionAuthError("auth", status_code=401)
 
         with pytest.raises(PermissionError):
-            await create_work_item(
+            await create_work_items(
                 mock_ctx,
                 project_id="MyProj",
-                title="t",
-                type="task",
-                description=None,
-                status=None,
-                priority=None,
-                severity=None,
-                assignee_ids=None,
-                due_date=None,
-                initial_estimate=None,
-                hyperlinks=None,
-                custom_fields=None,
+                items=[WorkItemCreateSpec(title="t", type="task")],
                 dry_run=False,
             )
 
@@ -570,20 +534,10 @@ class TestCreateWorkItemErrorMapping:
         )
 
         with pytest.raises(ValueError, match="list_projects"):
-            await create_work_item(
+            await create_work_items(
                 mock_ctx,
                 project_id="ghost",
-                title="t",
-                type="task",
-                description=None,
-                status=None,
-                priority=None,
-                severity=None,
-                assignee_ids=None,
-                due_date=None,
-                initial_estimate=None,
-                hyperlinks=None,
-                custom_fields=None,
+                items=[WorkItemCreateSpec(title="t", type="task")],
                 dry_run=False,
             )
 
@@ -593,47 +547,46 @@ class TestCreateWorkItemErrorMapping:
         mock_client.post.side_effect = PolarionError("boom", status_code=500)
 
         with pytest.raises(RuntimeError, match="boom"):
-            await create_work_item(
+            await create_work_items(
                 mock_ctx,
                 project_id="MyProj",
-                title="t",
-                type="task",
-                description=None,
-                status=None,
-                priority=None,
-                severity=None,
-                assignee_ids=None,
-                due_date=None,
-                initial_estimate=None,
-                hyperlinks=None,
-                custom_fields=None,
+                items=[WorkItemCreateSpec(title="t", type="task")],
                 dry_run=False,
             )
 
 
-class TestCreateWorkItemResponseParsing:
-    """Tests for unexpected 2xx response shapes from Polarion."""
+class TestCreateWorkItemsResponseParsing:
+    """Tests for unexpected / partial 2xx response shapes from Polarion."""
+
+    async def test_id_count_mismatch_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Two items submitted, one id back -> possible partial commit.
+        mock_client.post.return_value = {
+            "data": [{"type": "workitems", "id": "MyProj/MCPT-1"}]
+        }
+
+        with pytest.raises(RuntimeError, match="list_work_items"):
+            await create_work_items(
+                mock_ctx,
+                project_id="MyProj",
+                items=[
+                    WorkItemCreateSpec(title="a", type="task"),
+                    WorkItemCreateSpec(title="b", type="task"),
+                ],
+                dry_run=False,
+            )
 
     async def test_empty_data_array_raises_runtime_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.post.return_value = {"data": []}
 
-        with pytest.raises(RuntimeError, match="no work-item ID"):
-            await create_work_item(
+        with pytest.raises(RuntimeError, match="list_work_items"):
+            await create_work_items(
                 mock_ctx,
                 project_id="MyProj",
-                title="t",
-                type="task",
-                description=None,
-                status=None,
-                priority=None,
-                severity=None,
-                assignee_ids=None,
-                due_date=None,
-                initial_estimate=None,
-                hyperlinks=None,
-                custom_fields=None,
+                items=[WorkItemCreateSpec(title="t", type="task")],
                 dry_run=False,
             )
 
@@ -642,86 +595,63 @@ class TestCreateWorkItemResponseParsing:
     ) -> None:
         mock_client.post.return_value = {"data": {"id": "MyProj/MCPT-1"}}
 
-        with pytest.raises(RuntimeError, match="no work-item ID"):
-            await create_work_item(
+        with pytest.raises(RuntimeError, match="list_work_items"):
+            await create_work_items(
                 mock_ctx,
                 project_id="MyProj",
-                title="t",
-                type="task",
-                description=None,
-                status=None,
-                priority=None,
-                severity=None,
-                assignee_ids=None,
-                due_date=None,
-                initial_estimate=None,
-                hyperlinks=None,
-                custom_fields=None,
-                dry_run=False,
-            )
-
-    async def test_missing_id_field_raises_runtime_error(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.post.return_value = {"data": [{"type": "workitems"}]}
-
-        with pytest.raises(RuntimeError, match="no work-item ID"):
-            await create_work_item(
-                mock_ctx,
-                project_id="MyProj",
-                title="t",
-                type="task",
-                description=None,
-                status=None,
-                priority=None,
-                severity=None,
-                assignee_ids=None,
-                due_date=None,
-                initial_estimate=None,
-                hyperlinks=None,
-                custom_fields=None,
+                items=[WorkItemCreateSpec(title="t", type="task")],
                 dry_run=False,
             )
 
 
-class TestCreateWorkItemFieldValidation:
-    """Verify ``min_length=1`` constraints attached to required parameters.
+class TestCreateWorkItemsFieldValidation:
+    """Verify constraints attached to ``items`` and to ``WorkItemCreateSpec``.
 
     FastMCP enforces these via JSON Schema at the MCP protocol layer
     before the tool function is invoked; calling the function directly
-    in unit tests bypasses that gate. To prove the constraint is wired
-    correctly, we rebuild a ``TypeAdapter`` from each parameter's
-    annotation + ``FieldInfo`` and assert the constraint actually
-    rejects bad input at the schema layer.
+    in unit tests bypasses that gate. The per-item constraints now live
+    on the spec model (validated directly), and the collection-level
+    ``min_length`` / ``max_length`` are proven by rebuilding a
+    ``TypeAdapter`` from the ``items`` parameter annotation + ``FieldInfo``.
     """
 
     @staticmethod
-    def _adapter_for(param_name: str) -> TypeAdapter[object]:
-        hints = get_type_hints(create_work_item)
-        sig = inspect.signature(create_work_item)
+    def _items_adapter() -> TypeAdapter[object]:
+        param_name = "items"
+        hints = get_type_hints(create_work_items)
+        sig = inspect.signature(create_work_items)
         field_info = sig.parameters[param_name].default
         return TypeAdapter(Annotated[hints[param_name], field_info])
 
-    def test_title_rejects_empty_string(self) -> None:
+    def test_empty_items_list_rejected(self) -> None:
         with pytest.raises(ValidationError):
-            self._adapter_for("title").validate_python("")
+            self._items_adapter().validate_python([])
 
-    def test_title_accepts_non_empty(self) -> None:
-        assert self._adapter_for("title").validate_python("hello") == "hello"
-
-    def test_type_rejects_empty_string(self) -> None:
+    def test_over_cap_items_list_rejected(self) -> None:
+        too_many = [{"title": "t", "type": "task"} for _ in range(51)]
         with pytest.raises(ValidationError):
-            self._adapter_for("type").validate_python("")
+            self._items_adapter().validate_python(too_many)
 
-    def test_type_accepts_non_empty(self) -> None:
-        assert self._adapter_for("type").validate_python("task") == "task"
+    def test_cap_boundary_accepted(self) -> None:
+        exactly_50 = [{"title": "t", "type": "task"} for _ in range(50)]
+        result = cast(list[object], self._items_adapter().validate_python(exactly_50))
+        assert len(result) == 50
 
-    def test_description_rejects_overlong_input(self) -> None:
-        """``max_length=MAX_BODY_HTML_LEN`` defends against runaway Markdown."""
-        adapter = self._adapter_for("description")
-        assert adapter.validate_python("hello") == "hello"
+    def test_spec_title_rejects_empty_string(self) -> None:
         with pytest.raises(ValidationError):
-            adapter.validate_python("x" * (2_000_000 + 1))
+            WorkItemCreateSpec(title="", type="task")
+
+    def test_spec_type_rejects_empty_string(self) -> None:
+        with pytest.raises(ValidationError):
+            WorkItemCreateSpec(title="t", type="")
+
+    def test_spec_description_rejects_overlong_input(self) -> None:
+        """``max_length`` on the spec defends against runaway Markdown."""
+        WorkItemCreateSpec(title="t", type="task", description="hello")
+        with pytest.raises(ValidationError):
+            WorkItemCreateSpec(
+                title="t", type="task", description="x" * (2_000_000 + 1)
+            )
 
 
 class TestBuildMoveToDocumentPayload:
@@ -1611,7 +1541,7 @@ class TestUpdateWorkItemDryRun:
         assert result.dry_run is True
         assert result.current is None
         assert result.changes == {"title": "New title"}
-        # payload_preview is populated on dry-run (mirrors create_work_item).
+        # payload_preview is populated on dry-run (mirrors create_work_items).
         assert result.payload_preview is not None
         item = cast(dict[str, object], result.payload_preview["data"])
         assert item["id"] == "MyProj/MCPT-1"
@@ -2826,7 +2756,7 @@ class TestWriteToolAnnotations:
         ("tool_name", "expected"),
         [
             (
-                "create_work_item",
+                "create_work_items",
                 {
                     "readOnlyHint": False,
                     "destructiveHint": False,
@@ -5174,24 +5104,19 @@ def reset_enum_guard_caches() -> None:
 
 
 async def _call_create_wi(mock_ctx: MagicMock, **overrides: object) -> object:
-    """Invoke ``create_work_item`` with explicit defaults for every Field."""
-    defaults: dict[str, object] = {
-        "project_id": "MyProj",
-        "title": "t",
-        "type": "task",
-        "description": None,
-        "status": None,
-        "priority": None,
-        "severity": None,
-        "assignee_ids": None,
-        "due_date": None,
-        "initial_estimate": None,
-        "hyperlinks": None,
-        "custom_fields": None,
-        "dry_run": False,
-    }
-    defaults.update(overrides)
-    return await create_work_item(mock_ctx, **defaults)  # type: ignore[arg-type]
+    """Invoke ``create_work_items`` with a single-spec default batch.
+
+    ``project_id`` / ``dry_run`` are top-level tool params; all other
+    overrides are per-item and fold into one ``WorkItemCreateSpec``.
+    """
+    project_id = cast(str, overrides.pop("project_id", "MyProj"))
+    dry_run = cast(bool, overrides.pop("dry_run", False))
+    spec_fields: dict[str, object] = {"title": "t", "type": "task"}
+    spec_fields.update(overrides)
+    spec = WorkItemCreateSpec(**spec_fields)  # type: ignore[arg-type]
+    return await create_work_items(
+        mock_ctx, project_id=project_id, items=[spec], dry_run=dry_run
+    )
 
 
 async def _call_create_doc(mock_ctx: MagicMock, **overrides: object) -> object:
@@ -5230,7 +5155,7 @@ async def _call_update_doc(mock_ctx: MagicMock, **overrides: object) -> object:
 
 
 class TestEnumGuardCreateWorkItem:
-    """Integration: ``create_work_item`` rejects ghost enum ids before POST."""
+    """Integration: ``create_work_items`` rejects ghost enum ids before POST."""
 
     async def test_unlisted_severity_raises_before_post(
         self,
@@ -5245,6 +5170,30 @@ class TestEnumGuardCreateWorkItem:
 
         with pytest.raises(ValueError, match="severity='ghost'"):
             await _call_create_wi(mock_ctx, severity="ghost")
+        mock_client.post.assert_not_called()
+
+    async def test_bad_enum_on_later_item_aborts_whole_batch(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        # The guard loop runs per item before any POST, so a ghost severity
+        # on the SECOND item must reject the whole batch with nothing sent.
+        mock_client.get.return_value = _enum_get_response(
+            ["task", "must_have", "should_have"]
+        )
+
+        with pytest.raises(ValueError, match="severity='ghost'"):
+            await create_work_items(
+                mock_ctx,
+                project_id="MyProj",
+                items=[
+                    WorkItemCreateSpec(title="ok", type="task", severity="must_have"),
+                    WorkItemCreateSpec(title="bad", type="task", severity="ghost"),
+                ],
+                dry_run=False,
+            )
         mock_client.post.assert_not_called()
 
     async def test_listed_severity_reaches_post(
@@ -5262,7 +5211,7 @@ class TestEnumGuardCreateWorkItem:
         mock_client.post.return_value = {"data": [{"id": "MyProj/MCPT-9"}]}
 
         result = await _call_create_wi(mock_ctx, severity="must_have")
-        assert result.work_item_id == "MCPT-9"  # type: ignore[attr-defined]
+        assert result.work_item_ids == ["MCPT-9"]  # type: ignore[attr-defined]
         mock_client.post.assert_awaited_once()
 
     async def test_guard_runs_on_dry_run_too(

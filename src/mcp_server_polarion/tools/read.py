@@ -992,7 +992,7 @@ async def list_work_item_enum_options(  # noqa: PLR0913
 ) -> PaginatedResult[EnumOption]:
     """List valid enum options for a work item field of the given type.
 
-    Call this before ``create_work_item`` / ``update_work_item`` when you
+    Call this before ``create_work_items`` / ``update_work_item`` when you
     need to pick a value for a work item's ``type`` / ``status`` /
     ``severity`` / ``priority`` / custom enum field. Polarion does NOT
     validate these values on write -- unknown ids are stored verbatim as
