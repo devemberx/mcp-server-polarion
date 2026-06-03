@@ -14,6 +14,7 @@ import pytest
 
 from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.core.exceptions import PolarionError, PolarionNotFoundError
+from mcp_server_polarion.models import WorkItemLinkSpec
 from mcp_server_polarion.tools import _cache as cache_mod
 from mcp_server_polarion.tools._cache import (
     record_document_custom_field_keys,
@@ -25,6 +26,7 @@ from mcp_server_polarion.tools._guard import (
     guard_document_enums,
     guard_work_item_custom_field_keys,
     guard_work_item_enums,
+    guard_work_item_link_targets,
 )
 
 
@@ -464,3 +466,105 @@ class TestGuardDocumentCustomFieldKeys:
             await guard_document_custom_field_keys(
                 mock_client, "P", "_default", "Doc", {"ghost_key": 1}
             )
+
+
+def _workitems_response(project_id: str, short_ids: list[str]) -> dict[str, object]:
+    """A JSON:API workitems list response (ids are ``project/short``)."""
+    return {
+        "data": [{"type": "workitems", "id": f"{project_id}/{i}"} for i in short_ids],
+        "meta": {"totalCount": len(short_ids)},
+    }
+
+
+def _link(target: str, *, project: str | None = None) -> WorkItemLinkSpec:
+    return WorkItemLinkSpec(
+        role="relates_to", target_work_item_id=target, target_project_id=project
+    )
+
+
+class TestGuardWorkItemLinkTargets:
+    """Target-existence guard for ``create_work_item_links`` (uncached)."""
+
+    async def test_all_targets_exist_one_get_per_project(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _workitems_response("P", ["A", "B"])
+
+        await guard_work_item_link_targets(mock_client, "P", [_link("A"), _link("B")])
+
+        mock_client.get.assert_awaited_once()
+        path, kwargs = (
+            mock_client.get.call_args.args[0],
+            mock_client.get.call_args.kwargs,
+        )
+        assert path == "/projects/P/workitems"
+        assert kwargs["params"]["query"] == "id:(A B)"
+        assert kwargs["params"]["fields[workitems]"] == "id"
+
+    async def test_missing_target_raises_value_error(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _workitems_response("P", ["A"])
+
+        with pytest.raises(ValueError, match="P/B") as exc:
+            await guard_work_item_link_targets(
+                mock_client, "P", [_link("A"), _link("B")]
+            )
+
+        assert "dangling" in str(exc.value)
+
+    async def test_cross_project_two_gets(self, mock_client: AsyncMock) -> None:
+        responses = {
+            "P": _workitems_response("P", ["A"]),
+            "Q": _workitems_response("Q", ["X"]),
+        }
+
+        async def fake_get(path: str, **kwargs: object) -> dict[str, object]:
+            project = path.split("/")[2]
+            return responses[project]
+
+        mock_client.get.side_effect = fake_get
+
+        await guard_work_item_link_targets(
+            mock_client, "P", [_link("A"), _link("X", project="Q")]
+        )
+
+        assert mock_client.get.await_count == 2
+
+    async def test_missing_in_cross_project_is_caught(
+        self, mock_client: AsyncMock
+    ) -> None:
+        async def fake_get(path: str, **kwargs: object) -> dict[str, object]:
+            project = path.split("/")[2]
+            return _workitems_response(project, ["A"] if project == "P" else [])
+
+        mock_client.get.side_effect = fake_get
+
+        with pytest.raises(ValueError, match="Q/X"):
+            await guard_work_item_link_targets(
+                mock_client, "P", [_link("A"), _link("X", project="Q")]
+            )
+
+    async def test_chunks_above_page_size(self, mock_client: AsyncMock) -> None:
+        ids = [f"WI-{n}" for n in range(150)]
+        mock_client.get.return_value = _workitems_response("P", ids)
+
+        await guard_work_item_link_targets(mock_client, "P", [_link(i) for i in ids])
+
+        assert mock_client.get.await_count == 2
+
+    async def test_unreachable_backend_blocks_write(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionError("backend down")
+
+        with pytest.raises(RuntimeError, match="Refusing the write"):
+            await guard_work_item_link_targets(mock_client, "P", [_link("A")])
+
+    async def test_missing_target_project_raises_value_error(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionNotFoundError("no such project")
+
+        with pytest.raises(ValueError, match="P/A"):
+            await guard_work_item_link_targets(mock_client, "P", [_link("A")])

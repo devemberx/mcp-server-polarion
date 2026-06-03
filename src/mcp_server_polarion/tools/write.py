@@ -52,6 +52,7 @@ from mcp_server_polarion.tools._guard import (
     guard_document_enums,
     guard_work_item_custom_field_keys,
     guard_work_item_enums,
+    guard_work_item_link_targets,
 )
 from mcp_server_polarion.tools._helpers import (
     STANDARD_DOCUMENT_ATTRIBUTES,
@@ -1917,6 +1918,11 @@ async def create_work_item_links(
     ``list_work_item_links(direction="forward")`` on a similar work item
     in the same project.
 
+    A nonexistent target is rejected before the write. Polarion accepts a
+    link to a missing target as a silent dangling link (HTTP 201, empty
+    title/type/status), so each target's existence is verified first and a
+    missing one raises ``ValueError`` -- on ``dry_run=True`` as well.
+
     Each spec's ``revision`` pins the link to a specific Polarion revision
     when set, otherwise the link targets the current HEAD. ``suspect``
     marks the link as needing re-review (usually False for new links).
@@ -1962,15 +1968,20 @@ async def create_work_item_links(
         None on real create).
 
     Raises:
-        ValueError: Source project or work item not found.
+        ValueError: Source project or work item not found, or a target work
+            item / target project that does not exist.
         PermissionError: Token lacks permission.
         RuntimeError: Other Polarion API errors (including duplicate link),
-            or accepted-but-no-ID response.
+            an unreachable target-validation request, or accepted-but-no-ID
+            response.
     """
     payload = _build_create_links_payload(
         source_project_id=project_id,
         links=links,
     )
+
+    client = get_client(ctx)
+    await guard_work_item_link_targets(client, project_id, links)
 
     if dry_run:
         return WorkItemLinksCreateResult(
@@ -1980,7 +1991,6 @@ async def create_work_item_links(
             payload_preview=payload,
         )
 
-    client = get_client(ctx)
     path = (
         f"/projects/{encode_path_segment(project_id)}"
         f"/workitems/{encode_path_segment(work_item_id)}/linkedworkitems"

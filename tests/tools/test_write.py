@@ -3572,8 +3572,22 @@ class TestExtractCreatedLinkIds:
         assert _extract_created_link_ids({"data": "oops"}) == []
 
 
+def _echo_targets_exist(
+    path: str, *, params: dict[str, object] | None = None, **_: object
+) -> dict[str, object]:
+    """Guard GET stub: report every id in the ``id:(...)`` query as existing."""
+    project = path.split("/")[2]
+    query = str((params or {}).get("query", ""))
+    ids = query.removeprefix("id:(").removesuffix(")").split()
+    return {"data": [{"type": "workitems", "id": f"{project}/{i}"} for i in ids]}
+
+
 class TestCreateWorkItemLinksDryRun:
     """Tests for ``create_work_item_links`` with ``dry_run=True``."""
+
+    @pytest.fixture(autouse=True)
+    def _stub_target_existence(self, mock_client: AsyncMock) -> None:
+        mock_client.get.side_effect = _echo_targets_exist
 
     async def test_dry_run_returns_payload_without_calling_post(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -3601,8 +3615,48 @@ class TestCreateWorkItemLinksDryRun:
         assert wi_rel["data"] == {"type": "workitems", "id": "MyProj/MCPT-2"}
 
 
+class TestCreateWorkItemLinksTargetGuard:
+    """The target-existence guard runs before the write, on dry-run too."""
+
+    async def test_dry_run_missing_target_raises_without_post(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {"data": []}
+
+        with pytest.raises(ValueError, match="MyProj/MCPT-2"):
+            await create_work_item_links(
+                mock_ctx,
+                project_id="MyProj",
+                work_item_id="MCPT-1",
+                links=[WorkItemLinkSpec(role="parent", target_work_item_id="MCPT-2")],
+                dry_run=True,
+            )
+
+        mock_client.post.assert_not_called()
+
+    async def test_real_missing_target_raises_without_post(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {"data": []}
+
+        with pytest.raises(ValueError, match="dangling"):
+            await create_work_item_links(
+                mock_ctx,
+                project_id="MyProj",
+                work_item_id="MCPT-1",
+                links=[WorkItemLinkSpec(role="parent", target_work_item_id="MCPT-2")],
+                dry_run=False,
+            )
+
+        mock_client.post.assert_not_called()
+
+
 class TestCreateWorkItemLinksHappyPath:
     """Tests for a successful ``create_work_item_links`` call."""
+
+    @pytest.fixture(autouse=True)
+    def _stub_target_existence(self, mock_client: AsyncMock) -> None:
+        mock_client.get.side_effect = _echo_targets_exist
 
     async def test_returns_composite_link_ids_on_201(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -3708,6 +3762,10 @@ class TestCreateWorkItemLinksHappyPath:
 class TestCreateWorkItemLinksErrorMapping:
     """Tests that domain exceptions are mapped at the tool layer."""
 
+    @pytest.fixture(autouse=True)
+    def _stub_target_existence(self, mock_client: AsyncMock) -> None:
+        mock_client.get.side_effect = _echo_targets_exist
+
     async def test_401_raises_permission_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
@@ -3761,6 +3819,10 @@ class TestCreateWorkItemLinksErrorMapping:
 
 class TestCreateWorkItemLinksResponseParsing:
     """Tests for unexpected 2xx response shapes from Polarion."""
+
+    @pytest.fixture(autouse=True)
+    def _stub_target_existence(self, mock_client: AsyncMock) -> None:
+        mock_client.get.side_effect = _echo_targets_exist
 
     async def test_empty_data_array_raises_runtime_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock

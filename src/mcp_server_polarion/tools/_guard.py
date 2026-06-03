@@ -33,6 +33,7 @@ import logging
 
 from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.core.exceptions import PolarionError, PolarionNotFoundError
+from mcp_server_polarion.models import WorkItemLinkSpec
 from mcp_server_polarion.tools._cache import (
     Resource,
     get_cached_enum_options,
@@ -48,6 +49,8 @@ from mcp_server_polarion.tools._helpers import (
     STANDARD_WORK_ITEM_ATTRIBUTES,
     WORK_ITEM_DETAIL_FIELDS,
     encode_path_segment,
+    extract_short_id,
+    safe_str,
 )
 
 logger = logging.getLogger("mcp_server_polarion._guard")
@@ -340,10 +343,87 @@ async def guard_document_custom_field_keys(
     )
 
 
+async def _existing_target_ids(
+    client: PolarionClient,
+    project_id: str,
+    target_ids: frozenset[str],
+) -> frozenset[str]:
+    """Return which *target_ids* exist in *project_id*, via ``id:(...)`` queries.
+
+    Chunked at ``_GUARD_PAGE_SIZE``: a single ``id:(...)`` query is bounded by
+    ``page[size]``, so more targets than that need successive queries. A 404
+    means the project does not exist; the caller treats every target there as
+    missing.
+    """
+    ordered = sorted(target_ids)
+    found: set[str] = set()
+    for start in range(0, len(ordered), _GUARD_PAGE_SIZE):
+        chunk = ordered[start : start + _GUARD_PAGE_SIZE]
+        params: dict[str, str | int] = {
+            "query": f"id:({' '.join(chunk)})",
+            "fields[workitems]": "id",
+            "page[size]": _GUARD_PAGE_SIZE,
+            "page[number]": 1,
+        }
+        path = f"/projects/{encode_path_segment(project_id)}/workitems"
+        response = await client.get(path, params=params)
+        data = response.get("data", [])
+        if isinstance(data, list):
+            for entry in data:
+                if isinstance(entry, dict):
+                    found.add(extract_short_id(safe_str(entry.get("id", ""))))
+    return frozenset(found)
+
+
+async def guard_work_item_link_targets(
+    client: PolarionClient,
+    source_project_id: str,
+    links: list[WorkItemLinkSpec],
+) -> None:
+    """Reject links whose target work item does not exist.
+
+    Polarion creates a dangling link (HTTP 201) to a nonexistent target -- the
+    target shows empty title/type/status in ``list_work_item_links`` and there
+    is no error to detect it. Groups requested targets by project, runs one
+    ``id:(...)`` query per project (chunked at 100), and raises ``ValueError``
+    listing any target that was not returned.
+
+    Fail-closed: an unreachable backend raises ``RuntimeError``; a 404 (the
+    target project does not exist) raises ``ValueError`` since every target
+    there would be dangling.
+    """
+    by_project: dict[str, set[str]] = {}
+    for spec in links:
+        target_project = spec.target_project_id or source_project_id
+        by_project.setdefault(target_project, set()).add(spec.target_work_item_id)
+
+    missing: list[str] = []
+    for project_id, requested in by_project.items():
+        try:
+            existing = await _existing_target_ids(
+                client, project_id, frozenset(requested)
+            )
+        except PolarionNotFoundError:
+            missing.extend(f"{project_id}/{wi}" for wi in sorted(requested))
+            continue
+        except PolarionError as exc:
+            raise _unreachable_write_block("link targets", project_id, exc) from exc
+        missing.extend(f"{project_id}/{wi}" for wi in sorted(requested - existing))
+
+    if missing:
+        raise ValueError(
+            f"Link target work item(s) {sorted(missing)} do not exist. "
+            f"Polarion accepts a nonexistent target as a silent dangling link "
+            f"(HTTP 201) with empty title/type/status -- use list_work_items to "
+            f"discover valid target ids before linking."
+        )
+
+
 __all__ = [
     "fetch_enum_option_ids",
     "guard_document_custom_field_keys",
     "guard_document_enums",
     "guard_work_item_custom_field_keys",
     "guard_work_item_enums",
+    "guard_work_item_link_targets",
 ]
