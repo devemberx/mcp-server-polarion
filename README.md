@@ -152,7 +152,7 @@ All list tools support pagination via `page_size` (1–100) and `page_number` pa
 | `create_document` | Create a new document |
 | `update_document` | Update document metadata, body, or workflow status |
 | `create_work_item_links` | Create one or more outgoing links from a source work item |
-| `update_work_item_links` | Update `suspect` / `revision` on one or more outgoing links |
+| `update_work_item_link` | Update `suspect` / `revision` on one outgoing link |
 | `delete_work_item_links` | Delete one or more outgoing links from a source work item |
 | `move_work_item_to_document` | Attach a work item to a document at a chosen position |
 | `move_work_item_from_document` | Detach a work item from its document |

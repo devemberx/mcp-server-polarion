@@ -29,7 +29,7 @@ WRITE_TOOLS: frozenset[str] = frozenset(
         "move_work_item_from_document",
         "create_work_item_links",
         "delete_work_item_links",
-        "update_work_item_links",
+        "update_work_item_link",
         "create_document",
         "update_document",
         "create_document_comments",
