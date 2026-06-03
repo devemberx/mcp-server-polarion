@@ -80,6 +80,7 @@ _extract_created_work_item_ids = _write_mod._extract_created_work_item_ids
 def _clear_guard_caches() -> None:
     """Drop the guard caches owned by ``tools/_cache.py``."""
     _cache_mod._enum_option_cache.clear()
+    _cache_mod._project_enum_cache.clear()
     _cache_mod._work_item_custom_key_cache.clear()
     _cache_mod._document_custom_key_cache.clear()
 
@@ -368,6 +369,71 @@ class TestCreateWorkItemsDryRun:
         item = cast(list[dict[str, object]], result.payload_preview["data"])[0]
         attributes = cast(dict[str, object], item["attributes"])
         assert attributes == {"title": "Dry test", "type": "task"}
+
+
+def _project_enum_get_response(enum_name: str, ids: list[str]) -> dict[str, object]:
+    """Single-enumeration response: ``data`` is a dict, options nested under it."""
+    return {
+        "data": {
+            "type": "enumerations",
+            "id": enum_name,
+            "attributes": {"options": [{"id": i, "name": i} for i in ids]},
+        }
+    }
+
+
+class TestCreateWorkItemsHyperlinkRoleGuard:
+    """``create_work_items`` validates each hyperlink role before writing."""
+
+    async def test_unknown_hyperlink_role_raises_without_post(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _project_enum_get_response(
+            "hyperlink-role", ["ref_int", "ref_ext"]
+        )
+
+        with pytest.raises(ValueError, match="ghost") as exc:
+            await create_work_items(
+                mock_ctx,
+                project_id="MyProj",
+                items=[
+                    WorkItemCreateSpec(
+                        title="t",
+                        type="task",
+                        hyperlinks=[Hyperlink(role="ghost", uri="https://e.com")],
+                    )
+                ],
+                dry_run=True,
+            )
+
+        assert "ref_ext" in str(exc.value)
+        mock_client.post.assert_not_called()
+
+    async def test_valid_hyperlink_role_proceeds_to_post(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _project_enum_get_response(
+            "hyperlink-role", ["ref_int", "ref_ext"]
+        )
+        mock_client.post.return_value = {
+            "data": [{"type": "workitems", "id": "MyProj/MCPT-1"}]
+        }
+
+        result = await create_work_items(
+            mock_ctx,
+            project_id="MyProj",
+            items=[
+                WorkItemCreateSpec(
+                    title="t",
+                    type="task",
+                    hyperlinks=[Hyperlink(role="ref_ext", uri="https://e.com")],
+                )
+            ],
+            dry_run=False,
+        )
+
+        assert result.created is True
+        mock_client.post.assert_called_once()
 
 
 class TestCreateWorkItemsHappyPath:
@@ -1520,6 +1586,27 @@ class TestUpdateWorkItemValidation:
         assert patch_path == "/projects/MyProj/workitems/MCPT-1?workflowAction=close"
         body = mock_client.patch.call_args.kwargs["json"]
         assert body["data"]["attributes"]["title"] == "closing this work item"
+
+
+class TestUpdateWorkItemHyperlinkRoleGuard:
+    """``update_work_item`` validates hyperlink roles before the PATCH."""
+
+    async def test_unknown_hyperlink_role_raises_without_patch(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _project_enum_get_response(
+            "hyperlink-role", ["ref_int", "ref_ext"]
+        )
+
+        with pytest.raises(ValueError, match="ghost") as exc:
+            await _call_update(
+                mock_ctx,
+                hyperlinks=[Hyperlink(role="ghost", uri="https://e.com")],
+                dry_run=True,
+            )
+
+        assert "ref_ext" in str(exc.value)
+        mock_client.patch.assert_not_called()
 
 
 class TestUpdateWorkItemDryRun:
@@ -3646,6 +3733,90 @@ class TestCreateWorkItemLinksTargetGuard:
                 work_item_id="MCPT-1",
                 links=[WorkItemLinkSpec(role="parent", target_work_item_id="MCPT-2")],
                 dry_run=False,
+            )
+
+        mock_client.post.assert_not_called()
+
+
+class TestCreateWorkItemLinksRoleGuard:
+    """The link-role guard runs after the target guard, before the write."""
+
+    @staticmethod
+    def _stub(valid_roles: list[str]) -> object:
+        """GET stub: echo targets as existing, serve the role enumeration."""
+
+        def fake_get(
+            path: str, *, params: dict[str, object] | None = None, **_: object
+        ) -> dict[str, object]:
+            if "/enumerations/" in path:
+                return _project_enum_get_response("workitem-link-role", valid_roles)
+            return _echo_targets_exist(path, params=params)
+
+        return fake_get
+
+    async def test_unknown_role_raises_without_post(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = self._stub(["parent", "relates_to"])
+
+        with pytest.raises(ValueError, match="ghost_role") as exc:
+            await create_work_item_links(
+                mock_ctx,
+                project_id="MyProj",
+                work_item_id="MCPT-1",
+                links=[
+                    WorkItemLinkSpec(role="ghost_role", target_work_item_id="MCPT-2")
+                ],
+                dry_run=True,
+            )
+
+        assert "relates_to" in str(exc.value)
+        mock_client.post.assert_not_called()
+
+    async def test_valid_role_proceeds_to_post(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = self._stub(["parent", "relates_to"])
+        mock_client.post.return_value = {
+            "data": [
+                {"type": "linkedworkitems", "id": "MyProj/MCPT-1/parent/MyProj/MCPT-2"}
+            ]
+        }
+
+        result = await create_work_item_links(
+            mock_ctx,
+            project_id="MyProj",
+            work_item_id="MCPT-1",
+            links=[WorkItemLinkSpec(role="parent", target_work_item_id="MCPT-2")],
+            dry_run=False,
+        )
+
+        assert result.created is True
+        mock_client.post.assert_called_once()
+
+    async def test_target_guard_runs_before_role_guard(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Missing target AND unknown role: the target guard runs first, so its
+        # error surfaces and the role enumeration is never fetched.
+        def fake_get(
+            path: str, *, params: dict[str, object] | None = None, **_: object
+        ) -> dict[str, object]:
+            if "/enumerations/" in path:
+                raise AssertionError("role guard ran before the target guard")
+            return {"data": []}
+
+        mock_client.get.side_effect = fake_get
+
+        with pytest.raises(ValueError, match="MyProj/MCPT-2"):
+            await create_work_item_links(
+                mock_ctx,
+                project_id="MyProj",
+                work_item_id="MCPT-1",
+                links=[
+                    WorkItemLinkSpec(role="ghost_role", target_work_item_id="MCPT-2")
+                ],
+                dry_run=True,
             )
 
         mock_client.post.assert_not_called()

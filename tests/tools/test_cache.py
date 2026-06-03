@@ -15,6 +15,7 @@ from mcp_server_polarion.tools._cache import (
     TTLCache,
     get_cached_documents,
     get_cached_enum_options,
+    get_cached_project_enum,
     get_document_custom_keys,
     get_work_item_custom_keys,
     invalidate_documents_cache,
@@ -22,6 +23,7 @@ from mcp_server_polarion.tools._cache import (
     record_work_item_custom_field_keys,
     store_cached_documents,
     store_cached_enum_options,
+    store_cached_project_enum,
 )
 
 
@@ -30,6 +32,7 @@ def _reset_caches() -> None:
     """Start each test with every module-level cache cold."""
     cache_mod._document_list_cache.clear()
     cache_mod._enum_option_cache.clear()
+    cache_mod._project_enum_cache.clear()
     cache_mod._work_item_custom_key_cache.clear()
     cache_mod._document_custom_key_cache.clear()
 
@@ -170,6 +173,31 @@ class TestEnumOptionCache:
 
         clock[0] += cache_mod._GUARD_TTL_SECONDS + 1.0
         assert get_cached_enum_options("P", "workitems", "severity", "task") is None
+
+
+class TestProjectEnumCache:
+    """Project-level enum wrappers keyed by (project, enum_name)."""
+
+    def test_store_then_get_hits(self) -> None:
+        store_cached_project_enum(
+            "P", "workitem-link-role", frozenset({"parent", "relates_to"})
+        )
+
+        assert get_cached_project_enum("P", "workitem-link-role") == frozenset(
+            {"parent", "relates_to"}
+        )
+
+    def test_keys_are_distinct_per_enum_and_project(self) -> None:
+        store_cached_project_enum("P", "workitem-link-role", frozenset({"parent"}))
+
+        assert get_cached_project_enum("P", "hyperlink-role") is None
+        assert get_cached_project_enum("Q", "workitem-link-role") is None
+
+    def test_expiry_uses_guard_ttl(self, clock: list[float]) -> None:
+        store_cached_project_enum("P", "hyperlink-role", frozenset({"ref_ext"}))
+
+        clock[0] += cache_mod._GUARD_TTL_SECONDS + 1.0
+        assert get_cached_project_enum("P", "hyperlink-role") is None
 
 
 class TestWorkItemCustomKeyRecord:

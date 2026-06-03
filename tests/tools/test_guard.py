@@ -26,10 +26,13 @@ from mcp_server_polarion.tools._cache import (
 )
 from mcp_server_polarion.tools._guard import (
     fetch_enum_option_ids,
+    fetch_project_enum_option_ids,
     guard_document_custom_field_keys,
     guard_document_enums,
+    guard_hyperlink_roles,
     guard_work_item_custom_field_keys,
     guard_work_item_enums,
+    guard_work_item_link_roles,
     guard_work_item_link_targets,
     partition_delete_links,
 )
@@ -39,6 +42,7 @@ from mcp_server_polarion.tools._guard import (
 def _reset_caches() -> None:
     """Drop any cache state leaked from prior tests in the session."""
     cache_mod._enum_option_cache.clear()
+    cache_mod._project_enum_cache.clear()
     cache_mod._work_item_custom_key_cache.clear()
     cache_mod._document_custom_key_cache.clear()
 
@@ -124,6 +128,16 @@ class TestFetchEnumOptionIds:
             )
 
         assert any("blocking write" in r.message for r in caplog.records)
+
+    async def test_auth_error_raises_permission_error(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
+
+        with pytest.raises(PermissionError, match="lacks permission"):
+            await fetch_enum_option_ids(
+                mock_client, "P", "workitems", "severity", "task"
+            )
 
     async def test_not_found_defers_instead_of_blocking(
         self,
@@ -408,6 +422,16 @@ class TestGuardWorkItemCustomFieldKeys:
                 mock_client, "P", "MCPT-1", "task", {"release_train_id": "RT-42"}
             )
 
+    async def test_priming_get_auth_error_raises_permission_error(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
+
+        with pytest.raises(PermissionError, match="lacks permission"):
+            await guard_work_item_custom_field_keys(
+                mock_client, "P", "MCPT-1", "task", {"release_train_id": "RT-42"}
+            )
+
 
 class TestGuardDocumentCustomFieldKeys:
     """Validation of ``update_document.custom_fields`` keys."""
@@ -468,6 +492,16 @@ class TestGuardDocumentCustomFieldKeys:
         mock_client.get.side_effect = PolarionError("backend down")
 
         with pytest.raises(RuntimeError, match="Refusing the write"):
+            await guard_document_custom_field_keys(
+                mock_client, "P", "_default", "Doc", {"ghost_key": 1}
+            )
+
+    async def test_priming_get_auth_error_raises_permission_error(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
+
+        with pytest.raises(PermissionError, match="lacks permission"):
             await guard_document_custom_field_keys(
                 mock_client, "P", "_default", "Doc", {"ghost_key": 1}
             )
@@ -577,6 +611,14 @@ class TestGuardWorkItemLinkTargets:
         with pytest.raises(RuntimeError, match="Refusing the write"):
             await guard_work_item_link_targets(mock_client, "P", [_link("A")])
 
+    async def test_auth_error_raises_permission_error(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
+
+        with pytest.raises(PermissionError, match="lacks permission"):
+            await guard_work_item_link_targets(mock_client, "P", [_link("A")])
+
     async def test_missing_target_project_raises_value_error(
         self, mock_client: AsyncMock
     ) -> None:
@@ -584,6 +626,200 @@ class TestGuardWorkItemLinkTargets:
 
         with pytest.raises(ValueError, match="P/A"):
             await guard_work_item_link_targets(mock_client, "P", [_link("A")])
+
+
+def _project_enum_response(enum_name: str, ids: list[str]) -> dict[str, object]:
+    """A single-enumeration response: ``data`` is a dict, options nested under it."""
+    return {
+        "data": {
+            "type": "enumerations",
+            "id": enum_name,
+            "attributes": {"options": [{"id": i, "name": i} for i in ids]},
+        }
+    }
+
+
+class TestFetchProjectEnumOptionIds:
+    """Single-enumeration GET parsing (dict ``data``) + caching + fail-closed."""
+
+    async def test_first_call_hits_polarion_and_parses_dict_options(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _project_enum_response(
+            "workitem-link-role", ["parent", "relates_to"]
+        )
+
+        result = await fetch_project_enum_option_ids(
+            mock_client, "P", "workitem-link-role"
+        )
+
+        assert result == frozenset({"parent", "relates_to"})
+        mock_client.get.assert_awaited_once()
+        path, kwargs = (
+            mock_client.get.call_args.args[0],
+            mock_client.get.call_args.kwargs,
+        )
+        assert path == "/projects/P/enumerations/~/workitem-link-role/~"
+        assert kwargs["params"]["fields[enumerations]"] == "@all"
+
+    async def test_second_call_uses_cache(self, mock_client: AsyncMock) -> None:
+        mock_client.get.return_value = _project_enum_response(
+            "hyperlink-role", ["ref_int", "ref_ext"]
+        )
+
+        await fetch_project_enum_option_ids(mock_client, "P", "hyperlink-role")
+        await fetch_project_enum_option_ids(mock_client, "P", "hyperlink-role")
+
+        assert mock_client.get.await_count == 1
+
+    async def test_cache_expiry_re_fetches(
+        self, mock_client: AsyncMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        mock_client.get.return_value = _project_enum_response("hyperlink-role", ["a"])
+        clock = [1000.0]
+        monkeypatch.setattr(cache_mod, "_now", lambda: clock[0])
+
+        await fetch_project_enum_option_ids(mock_client, "P", "hyperlink-role")
+        clock[0] += cache_mod._GUARD_TTL_SECONDS + 1
+        await fetch_project_enum_option_ids(mock_client, "P", "hyperlink-role")
+
+        assert mock_client.get.await_count == 2
+
+    async def test_polarion_error_blocks_write(self, mock_client: AsyncMock) -> None:
+        mock_client.get.side_effect = PolarionError("backend down")
+
+        with pytest.raises(RuntimeError, match="Refusing the write"):
+            await fetch_project_enum_option_ids(mock_client, "P", "workitem-link-role")
+
+    async def test_auth_error_raises_permission_error(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
+
+        with pytest.raises(PermissionError, match="lacks permission"):
+            await fetch_project_enum_option_ids(mock_client, "P", "workitem-link-role")
+
+    async def test_not_found_defers_with_empty_set(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionNotFoundError("nope", status_code=404)
+
+        result = await fetch_project_enum_option_ids(
+            mock_client, "P", "workitem-link-role"
+        )
+
+        assert result == frozenset()
+
+    async def test_not_found_result_is_cached(self, mock_client: AsyncMock) -> None:
+        mock_client.get.side_effect = PolarionNotFoundError("nope", status_code=404)
+
+        await fetch_project_enum_option_ids(mock_client, "P", "workitem-link-role")
+        await fetch_project_enum_option_ids(mock_client, "P", "workitem-link-role")
+
+        assert mock_client.get.await_count == 1
+
+    async def test_malformed_data_is_skipped(self, mock_client: AsyncMock) -> None:
+        mock_client.get.return_value = {
+            "data": {
+                "attributes": {
+                    "options": ["not-a-dict", {"id": ""}, {"id": "ok"}, {"name": "x"}]
+                }
+            }
+        }
+
+        result = await fetch_project_enum_option_ids(
+            mock_client, "P", "workitem-link-role"
+        )
+
+        assert result == frozenset({"ok"})
+
+
+class TestGuardWorkItemLinkRoles:
+    """Link-role guard for ``create_work_item_links``."""
+
+    async def test_valid_role_passes(self, mock_client: AsyncMock) -> None:
+        mock_client.get.return_value = _project_enum_response(
+            "workitem-link-role", ["parent", "relates_to"]
+        )
+
+        await guard_work_item_link_roles(mock_client, "P", ["relates_to", "parent"])
+
+    async def test_unknown_role_raises_with_options(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _project_enum_response(
+            "workitem-link-role", ["parent", "relates_to"]
+        )
+
+        with pytest.raises(ValueError, match="ghost_role") as exc:
+            await guard_work_item_link_roles(mock_client, "P", ["ghost_role"])
+
+        assert "relates_to" in str(exc.value)
+
+    async def test_dedup_one_get_for_repeated_roles(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _project_enum_response(
+            "workitem-link-role", ["parent"]
+        )
+
+        await guard_work_item_link_roles(mock_client, "P", ["parent", "parent"])
+
+        mock_client.get.assert_awaited_once()
+
+    async def test_empty_roles_skip_check(self, mock_client: AsyncMock) -> None:
+        await guard_work_item_link_roles(mock_client, "P", [])
+
+        mock_client.get.assert_not_awaited()
+
+    async def test_empty_option_set_defers(self, mock_client: AsyncMock) -> None:
+        mock_client.get.side_effect = PolarionNotFoundError("nope", status_code=404)
+
+        await guard_work_item_link_roles(mock_client, "P", ["anything"])
+
+    async def test_unreachable_backend_blocks_write(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionError("backend down")
+
+        with pytest.raises(RuntimeError, match="Refusing the write"):
+            await guard_work_item_link_roles(mock_client, "P", ["relates_to"])
+
+    async def test_auth_error_raises_permission_error(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
+
+        with pytest.raises(PermissionError, match="lacks permission"):
+            await guard_work_item_link_roles(mock_client, "P", ["relates_to"])
+
+
+class TestGuardHyperlinkRoles:
+    """Hyperlink-role guard for ``create_work_items`` / ``update_work_item``."""
+
+    async def test_valid_role_passes(self, mock_client: AsyncMock) -> None:
+        mock_client.get.return_value = _project_enum_response(
+            "hyperlink-role", ["ref_int", "ref_ext"]
+        )
+
+        await guard_hyperlink_roles(mock_client, "P", ["ref_ext"])
+
+    async def test_unknown_role_raises_with_options(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _project_enum_response(
+            "hyperlink-role", ["ref_int", "ref_ext"]
+        )
+
+        with pytest.raises(ValueError, match="ghost") as exc:
+            await guard_hyperlink_roles(mock_client, "P", ["ghost"])
+
+        assert "ref_int" in str(exc.value)
+
+    async def test_empty_roles_skip_check(self, mock_client: AsyncMock) -> None:
+        await guard_hyperlink_roles(mock_client, "P", [])
+
+        mock_client.get.assert_not_awaited()
 
 
 def _linkedworkitems_response(composite_ids: list[str]) -> dict[str, object]:

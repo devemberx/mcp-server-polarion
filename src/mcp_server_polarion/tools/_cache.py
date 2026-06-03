@@ -85,6 +85,12 @@ _document_list_cache: TTLCache[str, tuple[tuple[str, str], ...]] = TTLCache(
 _enum_option_cache: TTLCache[tuple[str, Resource, str, str], frozenset[str]] = TTLCache(
     _GUARD_TTL_SECONDS
 )
+# (project, enum_name) -> valid option ids for a project-level enumeration
+# (link role, hyperlink role). Keyed without a type axis: these enums are
+# project config, not scoped by work-item type the way status/severity are.
+_project_enum_cache: TTLCache[tuple[str, str], frozenset[str]] = TTLCache(
+    _GUARD_TTL_SECONDS
+)
 # (project, work_item_type) -> custom-field keys seen on get_work_item.
 _work_item_custom_key_cache: TTLCache[tuple[str, str], frozenset[str]] = TTLCache(
     _GUARD_TTL_SECONDS
@@ -133,6 +139,23 @@ def store_cached_enum_options(
 ) -> None:
     """Cache the valid option ids for the field/type for ``_GUARD_TTL_SECONDS``."""
     _enum_option_cache.set((project_id, resource, field_id, type_id), option_ids)
+
+
+def get_cached_project_enum(
+    project_id: str,
+    enum_name: str,
+) -> frozenset[str] | None:
+    """Return cached valid option ids for the project enum, or ``None`` on miss."""
+    return _project_enum_cache.get((project_id, enum_name))
+
+
+def store_cached_project_enum(
+    project_id: str,
+    enum_name: str,
+    option_ids: frozenset[str],
+) -> None:
+    """Cache the valid option ids for the project enum for ``_GUARD_TTL_SECONDS``."""
+    _project_enum_cache.set((project_id, enum_name), option_ids)
 
 
 def _record_custom_keys[KT: tuple[str, ...]](
@@ -197,6 +220,7 @@ __all__ = [
     "TTLCache",
     "get_cached_documents",
     "get_cached_enum_options",
+    "get_cached_project_enum",
     "get_document_custom_keys",
     "get_work_item_custom_keys",
     "invalidate_documents_cache",
@@ -204,4 +228,5 @@ __all__ = [
     "record_work_item_custom_field_keys",
     "store_cached_documents",
     "store_cached_enum_options",
+    "store_cached_project_enum",
 ]
