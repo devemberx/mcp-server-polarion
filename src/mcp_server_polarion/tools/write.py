@@ -1902,7 +1902,7 @@ async def create_work_item_links(
     links: list[WorkItemLinkSpec] = Field(  # noqa: B008
         min_length=1,
         max_length=MAX_BULK_ITEMS,
-        description=("One or more links to create under the source work item (1-50)."),
+        description="One or more links to create under the source work item (1-50).",
     ),
     dry_run: bool = Field(
         default=False,
