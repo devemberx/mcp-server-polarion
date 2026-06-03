@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import copy
 import logging
-from typing import Final, cast
+from typing import cast
 from urllib.parse import urlencode
 
 from fastmcp import Context
@@ -23,6 +23,7 @@ from mcp_server_polarion.core.exceptions import (
     PolarionNotFoundError,
 )
 from mcp_server_polarion.models import (
+    MAX_BODY_HTML_LEN,
     DocumentCommentsCreateResult,
     DocumentCommentSpec,
     DocumentCommentUpdateResult,
@@ -30,7 +31,7 @@ from mcp_server_polarion.models import (
     DocumentUpdateResult,
     Hyperlink,
     JsonValue,
-    WorkItemCreateResult,
+    WorkItemCreateSpec,
     WorkItemLinkRef,
     WorkItemLinksCreateResult,
     WorkItemLinksDeleteResult,
@@ -38,6 +39,7 @@ from mcp_server_polarion.models import (
     WorkItemLinkUpdateResult,
     WorkItemLinkUpdateSpec,
     WorkItemMoveResult,
+    WorkItemsCreateResult,
     WorkItemUpdateResult,
 )
 from mcp_server_polarion.server import mcp
@@ -72,27 +74,13 @@ from mcp_server_polarion.utils import (
 
 logger = logging.getLogger("mcp_server_polarion.tools.write")
 
-# Caps tool-layer body payloads so a prompt-injected caller cannot ship a
-# multi-megabyte blob to Polarion. Observed real document bodies stay
-# under ~30 KB, so 2 MiB leaves ~70x headroom.
-MAX_BODY_HTML_LEN: Final[int] = 2_000_000
 
-
-def _build_work_item_payload(  # noqa: PLR0913
+def _build_work_item_resource(
     *,
-    title: str,
-    type: str,
+    spec: WorkItemCreateSpec,
     description_html: str,
-    status: str | None,
-    priority: str | None,
-    severity: str | None,
-    assignee_ids: list[str] | None,
-    due_date: str | None,
-    initial_estimate: str | None,
-    hyperlinks: list[Hyperlink] | None,
-    custom_fields: dict[str, object] | None = None,
 ) -> dict[str, JsonValue]:
-    """Build the JSON:API request body for ``POST /projects/{p}/workitems``.
+    """Build one ``workitems`` resource object for a bulk create POST.
 
     Only attaches keys for values that are explicitly set — ``None``,
     empty strings, and empty lists are skipped so we never overwrite
@@ -100,47 +88,66 @@ def _build_work_item_payload(  # noqa: PLR0913
     entries are inlined into ``attributes`` alongside the standard
     fields via ``merge_custom_fields``; colliding keys raise
     ``ValueError`` so the caller cannot accidentally shadow an explicit
-    standard parameter.
+    standard parameter. ``description_html`` is supplied pre-converted so
+    this builder stays a pure data-shaping function.
     """
     attributes: dict[str, JsonValue] = {
-        "title": title,
-        "type": type,
+        "title": spec.title,
+        "type": spec.type,
     }
     if description_html:
         attributes["description"] = {
             "type": "text/html",
             "value": description_html,
         }
-    if status:
-        attributes["status"] = status
-    if priority:
-        attributes["priority"] = priority
-    if severity:
-        attributes["severity"] = severity
-    if due_date:
-        attributes["dueDate"] = due_date
-    if initial_estimate:
-        attributes["initialEstimate"] = initial_estimate
-    if hyperlinks:
+    if spec.status:
+        attributes["status"] = spec.status
+    if spec.priority:
+        attributes["priority"] = spec.priority
+    if spec.severity:
+        attributes["severity"] = spec.severity
+    if spec.due_date:
+        attributes["dueDate"] = spec.due_date
+    if spec.initial_estimate:
+        attributes["initialEstimate"] = spec.initial_estimate
+    if spec.hyperlinks:
         attributes["hyperlinks"] = [
-            {"role": h.role, "title": h.title, "uri": h.uri} for h in hyperlinks
+            {"role": h.role, "title": h.title, "uri": h.uri} for h in spec.hyperlinks
         ]
-    merge_custom_fields(attributes, custom_fields, STANDARD_WORK_ITEM_ATTRIBUTES)
+    merge_custom_fields(attributes, spec.custom_fields, STANDARD_WORK_ITEM_ATTRIBUTES)
 
     relationships: dict[str, JsonValue] = {}
-    if assignee_ids:
+    if spec.assignee_ids:
         relationships["assignee"] = {
-            "data": [{"type": "users", "id": uid} for uid in assignee_ids]
+            "data": [{"type": "users", "id": uid} for uid in spec.assignee_ids]
         }
 
-    item: dict[str, JsonValue] = {
+    resource: dict[str, JsonValue] = {
         "type": "workitems",
         "attributes": attributes,
     }
     if relationships:
-        item["relationships"] = relationships
+        resource["relationships"] = relationships
 
-    return {"data": [item]}
+    return resource
+
+
+def _build_create_work_items_payload(
+    *,
+    specs: list[WorkItemCreateSpec],
+    descriptions_html: list[str],
+) -> dict[str, JsonValue]:
+    """Build the JSON:API body for the bulk ``POST /projects/{p}/workitems``.
+
+    Each spec, paired with its pre-converted ``description_html``, produces
+    one resource object via ``_build_work_item_resource``; all are sent in a
+    single ``data`` array so N work items create in one request.
+    """
+    data: list[JsonValue] = [
+        _build_work_item_resource(spec=spec, description_html=html)
+        for spec, html in zip(specs, descriptions_html, strict=True)
+    ]
+    return {"data": data}
 
 
 def _extract_first_resource_id(response: dict[str, object]) -> str | None:
@@ -159,17 +166,24 @@ def _extract_first_resource_id(response: dict[str, object]) -> str | None:
     return full_id or None
 
 
-def _extract_created_id(response: dict[str, object]) -> str | None:
-    """Extract the short work-item ID from a 201 create response.
+def _extract_created_work_item_ids(response: dict[str, object]) -> list[str]:
+    """Return short work-item ids in order from a bulk 201 create response.
 
     Polarion returns ``{"data": [{"type": "workitems",
-    "id": "projectId/MCPT-042", ...}]}``.  Returns the short ID
-    (``"MCPT-042"``) or ``None`` if the response shape is unexpected.
+    "id": "projectId/MCPT-042", ...}, ...]}``. Each composite id is reduced
+    to its short form (``"MCPT-042"``), preserving input order. Empty list
+    on malformed shapes; callers should treat a count mismatch as failure.
     """
-    full_id = _extract_first_resource_id(response)
-    if full_id is None:
-        return None
-    return extract_short_id(full_id)
+    data = response.get("data")
+    if not isinstance(data, list):
+        return []
+    ids: list[str] = []
+    for item in data:
+        if isinstance(item, dict):
+            full_id = safe_str(item.get("id", ""))
+            if full_id:
+                ids.append(extract_short_id(full_id))
+    return ids
 
 
 def _extract_created_module_name(response: dict[str, object]) -> str | None:
@@ -346,7 +360,7 @@ def _build_update_work_item_payload(  # noqa: PLR0913
 ) -> dict[str, JsonValue]:
     """Build the JSON:API PATCH body for ``/projects/{p}/workitems/{work_item}``.
 
-    Mirrors ``_build_work_item_payload`` but produces a PATCH-shaped body:
+    Mirrors ``_build_work_item_resource`` but produces a PATCH-shaped body:
     ``data`` is a single resource object (not a list), with a required
     ``id`` of the form ``"{project_id}/{work_item_id}"``. Only attaches
     keys for values that are explicitly set — ``None``, empty strings,
@@ -496,8 +510,8 @@ def _build_create_document_payload(  # noqa: PLR0913
 ) -> dict[str, JsonValue]:
     """Build the JSON:API request body for ``POST .../spaces/{s}/documents``.
 
-    Mirrors ``_build_work_item_payload``'s POST shape: ``data`` is a
-    single-element list with ``type=documents`` and inline ``attributes``.
+    Mirrors ``_build_create_work_items_payload``'s POST shape: ``data`` is
+    a list with ``type=documents`` and inline ``attributes``.
     Only attaches keys for values that are explicitly set -- ``None`` and
     empty strings are skipped so we never overwrite Polarion defaults
     with empty values on creation. ``custom_fields`` entries are inlined
@@ -611,58 +625,15 @@ def _build_document_comment_update_payload(
         "openWorldHint": True,
     },
 )
-async def create_work_item(  # noqa: PLR0913
+async def create_work_items(
     ctx: Context,
-    project_id: str = Field(description="Polarion project ID."),
-    title: str = Field(
-        min_length=1, description="Work item title (required, non-empty)."
-    ),
-    type: str = Field(
+    project_id: str = Field(min_length=1, description="Polarion project ID."),
+    items: list[WorkItemCreateSpec] = Field(  # noqa: B008
         min_length=1,
-        description="Work item type (e.g. 'requirement', 'task', 'testCase').",
-    ),
-    description: str | None = Field(
-        default=None,
-        max_length=MAX_BODY_HTML_LEN,
-        description="Optional Markdown body; converted to sanitized HTML on write.",
-    ),
-    status: str | None = Field(
-        default=None,
+        max_length=50,
         description=(
-            "Optional initial workflow status (project default applies if omitted)."
-        ),
-    ),
-    priority: str | None = Field(
-        default=None,
-        description="Optional priority string (e.g. '50.0').",
-    ),
-    severity: str | None = Field(
-        default=None,
-        description="Optional severity classification (e.g. 'major', 'critical').",
-    ),
-    assignee_ids: list[str] | None = Field(  # noqa: B008
-        default=None,
-        description="Optional short user IDs to assign (e.g. ['alice', 'bob']).",
-    ),
-    due_date: str | None = Field(
-        default=None,
-        description="Optional due date 'YYYY-MM-DD'.",
-    ),
-    initial_estimate: str | None = Field(
-        default=None,
-        description="Optional Polarion duration (e.g. '5 1/2d', '1w 2d', '4h').",
-    ),
-    hyperlinks: list[Hyperlink] | None = Field(  # noqa: B008
-        default=None,
-        description=(
-            "Optional external hyperlinks; each must have ``role`` and ``uri``."
-        ),
-    ),
-    custom_fields: dict[str, object] | None = Field(  # noqa: B008
-        default=None,
-        description=(
-            "Optional custom fields keyed by Polarion field ID; "
-            "rich-text values must be ``{'type':'text/html','value':...}``."
+            "One or more work items to create in a single request "
+            "(1-50). Pass a single-element list to create just one."
         ),
     ),
     dry_run: bool = Field(
@@ -674,29 +645,36 @@ async def create_work_item(  # noqa: PLR0913
             "reachable even on a dry run."
         ),
     ),
-) -> WorkItemCreateResult:
-    """Create a new Polarion work item in a project. For every
-    enum-valued argument you pass (``type``, ``status``, ``severity``,
-    or ``custom_fields`` enum entries), you MUST first
-    call ``list_work_item_enum_options(project_id, field_id,
-    work_item_type)`` and confirm the value you intend to send appears
-    in the returned options. Unverified ids are accepted by Polarion
-    but persist as ghosts that never match Lucene queries. ``priority``
-    partly coerces (non-numeric → project default) but numeric
-    out-of-range still persists verbatim. ``custom_fields`` keys are
-    likewise unvalidated — pass keys taken from a prior
-    ``get_work_item``.
+) -> WorkItemsCreateResult:
+    """Create one or more Polarion work items in a single request, all in
+    the same project. For every enum-valued field you pass on any item
+    (``type``, ``status``, ``severity``, or ``custom_fields`` enum
+    entries), you MUST first call ``list_work_item_enum_options(project_id,
+    field_id, work_item_type)`` and confirm the value appears in the
+    returned options. Unverified ids are accepted by Polarion but persist
+    as ghosts that never match Lucene queries. ``priority`` partly coerces
+    (non-numeric → project default) but numeric out-of-range still
+    persists verbatim. ``custom_fields`` keys are likewise unvalidated —
+    pass keys taken from a prior ``get_work_item``.
 
-    The work item is created free-floating — to place it inside a
-    document at a specific outline position, follow up with
-    ``move_work_item_to_document``. Direct creation into a document via
-    the ``module`` relationship is intentionally NOT exposed: per the
-    Polarion API, such work items land in the document's recycle bin
-    until a separate Document Part is created, leaving them invisible
-    in the document body. Always pair create + move for a single,
-    visible result.
+    Bulk semantics: every item's enum guard, Markdown conversion, and
+    payload build run BEFORE any write, so a bad enum or colliding
+    custom-field key on ANY item rejects the whole batch with nothing sent.
+    Polarion's bulk POST is itself atomic — a server-rejected attribute on
+    one item fails the entire request and creates none. As a safeguard, if
+    the returned id count ever differs from the number of items submitted
+    the tool raises and you should re-query with ``list_work_items`` before
+    retrying. For per-item diagnostics, submit one spec per call.
 
-    Format asymmetry: ``description`` here is Markdown (converted to
+    Each work item is created free-floating — to place one inside a
+    document at a specific outline position, follow up per item with
+    ``move_work_item_to_document``. Direct creation into a document via the
+    ``module`` relationship is intentionally NOT exposed: per the Polarion
+    API such work items land in the document's recycle bin until a separate
+    Document Part is created, leaving them invisible in the document body.
+    Always pair create + move for a single, visible result.
+
+    Format asymmetry: each item's ``description`` is Markdown (converted to
     sanitized HTML on write) because greenfield authoring is natural for
     LLMs. After creation the round-trip pair is
     ``get_work_item(include_description_html=True)`` ↔
@@ -705,80 +683,66 @@ async def create_work_item(  # noqa: PLR0913
 
     Args:
         ctx: MCP tool context (injected automatically).
-        project_id: Polarion project ID.
-        title: Work item title.
-        type: Work item type.
-        description: Optional Markdown body.
-        status: Optional workflow status.
-        priority: Optional priority string.
-        severity: Optional severity classification.
-        assignee_ids: Optional short user IDs.
-        due_date: Optional ISO-8601 date.
-        initial_estimate: Optional duration string.
-        hyperlinks: Optional ``Hyperlink`` list.
-        custom_fields: Optional custom-field dict.
+        project_id: Polarion project ID shared by every item.
+        items: One or more ``WorkItemCreateSpec`` entries (1-50).
         dry_run: When True, return payload preview only.
 
     Returns:
-        WorkItemCreateResult with ``created``, ``dry_run``,
-        ``work_item_id`` (None on dry-run), and ``payload_preview``
-        (populated on dry-run; None on real create).
+        WorkItemsCreateResult with ``created``, ``dry_run``,
+        ``work_item_ids`` (short ids in input order; empty on dry-run),
+        and ``payload_preview`` (populated on dry-run; None on real create).
 
     Raises:
-        ValueError: Project not found, or custom-field key collides with
+        ValueError: Project not found, or a custom-field key collides with
             a standard Polarion attribute.
         PermissionError: Token lacks permission.
-        RuntimeError: Other Polarion API errors, or accepted-but-no-ID.
+        RuntimeError: Other Polarion API errors, or a returned-id count
+            that does not match the number of items submitted.
     """
     client = get_client(ctx)
-    await guard_work_item_enums(
-        client,
-        project_id,
-        work_item_type=type,
-        type=type,
-        status=status,
-        severity=severity,
-        priority=priority,
-    )
-    if custom_fields:
-        # Polarion exposes no project-config endpoint to enumerate valid
-        # custom-field keys, and on create there is no prior work item to
-        # observe. Surface the gap as a warning so an unknown key on
-        # create still leaves a forensic trail — the matching update path
-        # (``guard_work_item_custom_field_keys``) does enforce.
-        logger.warning(
-            "create_work_item.custom_fields cannot be schema-validated "
-            "(no project-config endpoint for custom-field keys); "
-            "ensure keys come from a prior get_work_item to avoid ghost "
-            "attributes. project=%s type=%s keys=%s",
+    for spec in items:
+        await guard_work_item_enums(
+            client,
             project_id,
-            type,
-            sorted(custom_fields),
+            work_item_type=spec.type,
+            type=spec.type,
+            status=spec.status,
+            severity=spec.severity,
+            priority=spec.priority,
         )
+    for index, spec in enumerate(items):
+        if spec.custom_fields:
+            # Polarion exposes no project-config endpoint to enumerate valid
+            # custom-field keys, and on create there is no prior work item to
+            # observe. Surface the gap as a warning so an unknown key on
+            # create still leaves a forensic trail — the matching update path
+            # (``guard_work_item_custom_field_keys``) does enforce.
+            logger.warning(
+                "create_work_items[%d].custom_fields cannot be schema-validated "
+                "(no project-config endpoint for custom-field keys); "
+                "ensure keys come from a prior get_work_item to avoid ghost "
+                "attributes. project=%s type=%s keys=%s",
+                index,
+                project_id,
+                spec.type,
+                sorted(spec.custom_fields),
+            )
 
-    description_html = (
-        sanitize_html(markdown_to_html(description)) if description else ""
-    )
+    descriptions_html = [
+        sanitize_html(markdown_to_html(spec.description)) if spec.description else ""
+        for spec in items
+    ]
 
-    payload = _build_work_item_payload(
-        title=title,
-        type=type,
-        description_html=description_html,
-        status=status,
-        priority=priority,
-        severity=severity,
-        assignee_ids=assignee_ids,
-        due_date=due_date,
-        initial_estimate=initial_estimate,
-        hyperlinks=hyperlinks,
-        custom_fields=custom_fields,
+    payload = _build_create_work_items_payload(
+        specs=items,
+        descriptions_html=descriptions_html,
     )
 
     if dry_run:
-        return WorkItemCreateResult(
+        return WorkItemsCreateResult(
             created=False,
             dry_run=True,
-            work_item_id=None,
+            work_item_ids=[],
             payload_preview=payload,
         )
 
@@ -787,7 +751,7 @@ async def create_work_item(  # noqa: PLR0913
         response = await client.post(path, json=cast(dict[str, object], payload))
     except PolarionAuthError as exc:
         raise PermissionError(
-            "Cannot create work item -- check your POLARION_TOKEN permissions."
+            "Cannot create work items -- check your POLARION_TOKEN permissions."
         ) from exc
     except PolarionNotFoundError as exc:
         raise ValueError(
@@ -795,19 +759,20 @@ async def create_work_item(  # noqa: PLR0913
             "Use `list_projects` to discover valid project IDs."
         ) from exc
     except PolarionError as exc:
-        raise RuntimeError(f"Failed to create work item: {exc.message}") from exc
+        raise RuntimeError(f"Failed to create work items: {exc.message}") from exc
 
-    new_id = _extract_created_id(response)
-    if new_id is None:
+    new_ids = _extract_created_work_item_ids(response)
+    if len(new_ids) != len(items):
         raise RuntimeError(
-            "Polarion accepted the create request but returned no work-item ID. "
-            "The work item may or may not exist; verify with list_work_items."
+            f"Polarion accepted the bulk create but returned {len(new_ids)} "
+            f"ids for {len(items)} requested items. The batch may be partially "
+            "created; verify with list_work_items before retrying."
         )
 
-    return WorkItemCreateResult(
+    return WorkItemsCreateResult(
         created=True,
         dry_run=False,
-        work_item_id=new_id,
+        work_item_ids=new_ids,
         payload_preview=None,
     )
 
@@ -925,8 +890,8 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     sanitization, so XSS/script filtering is delegated to Polarion's
     renderer — NEVER pass untrusted input. Pair with
     ``get_work_item(include_description_html=True)`` for the round-trip.
-    For greenfield authoring use ``create_work_item(description=...)``
-    (Markdown) — the two format paths never mix.
+    For greenfield authoring use ``create_work_items`` with a
+    ``description`` (Markdown) — the two format paths never mix.
 
     ``hyperlinks`` and ``assignee_ids`` REPLACE the existing lists (pass
     the full list, not a delta). ``custom_fields`` is partial — omitted
@@ -1541,7 +1506,7 @@ async def update_document(  # noqa: PLR0913
       do not need ids (Polarion rewrites them to a macro form on save).
       Unlike ``create_document`` no Markdown auto-stamping convenience is
       available on this path. For body text, create a new work item and
-      attach via ``create_work_item`` + ``move_work_item_to_document``.
+      attach via ``create_work_items`` + ``move_work_item_to_document``.
     - **DO NOT inject work item macro references**: appending
       ``<div id="polarion_wiki macro name=module-workitem;params=id=NEW">``
       creates a ``workitem_<NEW>`` part visible in

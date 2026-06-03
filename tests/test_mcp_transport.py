@@ -45,7 +45,7 @@ _READ_TOOL_NAMES: frozenset[str] = frozenset(
 )
 _WRITE_TOOL_NAMES: frozenset[str] = frozenset(
     {
-        "create_work_item",
+        "create_work_items",
         "update_work_item",
         "move_work_item_to_document",
         "move_work_item_from_document",
@@ -199,15 +199,14 @@ class TestEndToEndInvocation:
             )
         )
 
-    async def test_create_work_item_dry_run(self, mcp_client: _MCPClient) -> None:
+    async def test_create_work_items_dry_run(self, mcp_client: _MCPClient) -> None:
         with respx.mock(base_url=_BASE, assert_all_called=False) as mock:
             self._stub_type_options(mock)
             result = await mcp_client.call_tool(
-                "create_work_item",
+                "create_work_items",
                 {
                     "project_id": "MCP_Test_Project",
-                    "title": "smoke",
-                    "type": "task",
+                    "items": [{"title": "smoke", "type": "task"}],
                     "dry_run": True,
                 },
             )
@@ -216,12 +215,12 @@ class TestEndToEndInvocation:
         assert body is not None
         assert body["dry_run"] is True
         assert body["created"] is False
-        assert body["work_item_id"] is None
+        assert body["work_item_ids"] == []
         assert "payload_preview" in body
         assert body["payload_preview"]["data"][0]["type"] == "workitems"
         assert body["payload_preview"]["data"][0]["attributes"]["title"] == "smoke"
 
-    async def test_create_work_item_dry_run_materialises_result_data(
+    async def test_create_work_items_dry_run_materialises_result_data(
         self,
         mcp_client: _MCPClient,
         caplog: pytest.LogCaptureFixture,
@@ -236,11 +235,10 @@ class TestEndToEndInvocation:
         ):
             self._stub_type_options(mock)
             result = await mcp_client.call_tool(
-                "create_work_item",
+                "create_work_items",
                 {
                     "project_id": "MCP_Test_Project",
-                    "title": "smoke",
-                    "type": "task",
+                    "items": [{"title": "smoke", "type": "task"}],
                     "dry_run": True,
                 },
             )
@@ -250,5 +248,5 @@ class TestEndToEndInvocation:
         )
         assert result.data is not None
         assert result.data.dry_run is True
-        assert result.data.work_item_id is None
+        assert result.data.work_item_ids == []
         assert result.data.payload_preview is not None
