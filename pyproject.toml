@@ -4,10 +4,15 @@ version = "1.0.0"
 description = "MCP server for Polarion ALM — read and write documents and work items"
 readme = "README.md"
 authors = [{ name = "devemberx", email = "devemberx@gmail.com" }]
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["mcp", "polarion", "alm", "model-context-protocol", "fastmcp"]
 classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development",
+    "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.13",
-    "License :: OSI Approved :: MIT License",
 ]
 requires-python = ">=3.13"
 dependencies = [
@@ -19,6 +24,10 @@ dependencies = [
     "markdownify>=1.2.2",
     "markdown-it-py>=4.0.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/devemberx/mcp-server-polarion"
+Issues = "https://github.com/devemberx/mcp-server-polarion/issues"
 
 [project.scripts]
 mcp-server-polarion = "mcp_server_polarion.__main__:main"
