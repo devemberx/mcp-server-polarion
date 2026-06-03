@@ -496,8 +496,19 @@ async def partition_delete_links(
             "permissions."
         ) from exc
     except PolarionError as exc:
-        raise _unreachable_write_block(
-            "existing outgoing links", project_id, exc
+        logger.warning(
+            "guard blocking delete: could not read existing links for "
+            "project=%s work_item=%s (%s)",
+            project_id,
+            work_item_id,
+            exc.message,
+        )
+        raise RuntimeError(
+            f"Cannot read existing outgoing links for '{work_item_id}' in project "
+            f"'{project_id}' before deleting: Polarion request failed "
+            f"({exc.message}). Refusing the delete -- without the pre-read the "
+            f"matched / no-op split would be unverifiable. Retry once Polarion is "
+            f"reachable."
         ) from exc
 
     matched = [link_id for link_id in link_ids if link_id in existing]

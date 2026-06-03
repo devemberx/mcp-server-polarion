@@ -4253,7 +4253,7 @@ class TestDeleteWorkItemLinksErrorMapping:
         """A 5xx pre-read fails closed -- the delete is never attempted."""
         mock_client.get.side_effect = PolarionError("server error", status_code=500)
 
-        with pytest.raises(RuntimeError, match="Refusing the write"):
+        with pytest.raises(RuntimeError, match="Refusing the delete"):
             await delete_work_item_links(
                 mock_ctx,
                 project_id="MyProj",

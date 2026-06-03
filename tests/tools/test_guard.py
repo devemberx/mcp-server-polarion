@@ -13,7 +13,11 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mcp_server_polarion.core.client import PolarionClient
-from mcp_server_polarion.core.exceptions import PolarionError, PolarionNotFoundError
+from mcp_server_polarion.core.exceptions import (
+    PolarionAuthError,
+    PolarionError,
+    PolarionNotFoundError,
+)
 from mcp_server_polarion.models import WorkItemLinkSpec
 from mcp_server_polarion.tools import _cache as cache_mod
 from mcp_server_polarion.tools._cache import (
@@ -665,12 +669,25 @@ class TestPartitionDeleteLinks:
                 ["P/MCPT-1/parent/P/MCPT-2"],
             )
 
+    async def test_auth_error_raises_permission_error(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError("auth")
+
+        with pytest.raises(PermissionError):
+            await partition_delete_links(
+                mock_client,
+                "P",
+                "MCPT-1",
+                ["P/MCPT-1/parent/P/MCPT-2"],
+            )
+
     async def test_unreachable_backend_blocks_with_runtime_error(
         self, mock_client: AsyncMock
     ) -> None:
         mock_client.get.side_effect = PolarionError("backend down")
 
-        with pytest.raises(RuntimeError, match="Refusing the write"):
+        with pytest.raises(RuntimeError, match="Refusing the delete"):
             await partition_delete_links(
                 mock_client,
                 "P",
