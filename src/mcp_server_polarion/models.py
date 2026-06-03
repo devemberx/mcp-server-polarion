@@ -31,9 +31,12 @@ type JsonValue = (
     str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
 )
 
-# Caps body payloads so a prompt-injected caller cannot ship a multi-megabyte
-# blob to Polarion. Observed real document bodies stay under ~30 KB, so 2 MiB
-# leaves ~70x headroom. Single source of truth; ``tools.write`` imports this.
+# Caps a single body payload so a prompt-injected caller cannot ship a
+# multi-megabyte blob to Polarion. Observed real document bodies stay under
+# ~30 KB, so 2 MiB leaves ~70x headroom. This is a per-item bound; a bulk
+# ``create_work_items`` batch can carry it once per item, so the aggregate
+# request is bounded by item count, not by this constant alone. Single source
+# of truth; ``tools.write`` imports this.
 MAX_BODY_HTML_LEN: Final[int] = 2_000_000
 
 

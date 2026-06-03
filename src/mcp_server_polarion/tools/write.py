@@ -171,8 +171,11 @@ def _extract_created_work_item_ids(response: dict[str, object]) -> list[str]:
 
     Polarion returns ``{"data": [{"type": "workitems",
     "id": "projectId/MCPT-042", ...}, ...]}``. Each composite id is reduced
-    to its short form (``"MCPT-042"``), preserving input order. Empty list
-    on malformed shapes; callers should treat a count mismatch as failure.
+    to its short form (``"MCPT-042"``). Order mirrors the request positionally
+    and relies on Polarion echoing the ``data`` array in submission order — the
+    count check at the call site catches a missing id, not a reordered one.
+    Empty list on malformed shapes; callers should treat a count mismatch as
+    failure.
     """
     data = response.get("data")
     if not isinstance(data, list):
