@@ -30,6 +30,7 @@ endpoint from blocking every enum-bearing write on an instance that lacks it.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 
 from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.core.exceptions import PolarionError, PolarionNotFoundError
@@ -37,11 +38,13 @@ from mcp_server_polarion.models import WorkItemLinkSpec
 from mcp_server_polarion.tools._cache import (
     Resource,
     get_cached_enum_options,
+    get_cached_project_enum,
     get_document_custom_keys,
     get_work_item_custom_keys,
     record_document_custom_field_keys,
     record_work_item_custom_field_keys,
     store_cached_enum_options,
+    store_cached_project_enum,
 )
 from mcp_server_polarion.tools._helpers import (
     DOCUMENT_DETAIL_FIELDS,
@@ -419,11 +422,155 @@ async def guard_work_item_link_targets(
         )
 
 
+async def fetch_project_enum_option_ids(
+    client: PolarionClient,
+    project_id: str,
+    enum_name: str,
+) -> frozenset[str]:
+    """Return the valid option ids for a project-level enumeration.
+
+    Used for enums Polarion does not expose through ``getAvailableOptions``
+    (link role, hyperlink role). Reads the single-enumeration resource
+    ``/projects/{p}/enumerations/~/{enum}/~`` -- far lighter than the bulk
+    ``getProjectEnumerations`` listing, which returns every enum including
+    large dynamic ones. Unlike ``getAvailableOptions`` (a list ``data``), this
+    single-resource response returns ``data`` as a dict whose options live at
+    ``data.attributes.options[].id``.
+
+    Cached for the guard TTL. Same fail-closed contract as
+    :func:`fetch_enum_option_ids`: a 404 means the enumeration is unsupported
+    here, so the guard defers (empty set); any other error after the client's
+    backoff raises ``RuntimeError`` to block the write.
+    """
+    cached = get_cached_project_enum(project_id, enum_name)
+    if cached is not None:
+        return cached
+
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/enumerations/~/{encode_path_segment(enum_name)}/~"
+    )
+    try:
+        response = await client.get(path, params={"fields[enumerations]": "@all"})
+    except PolarionNotFoundError:
+        logger.warning(
+            "enumeration '%s' returned 404 for project=%s; skipping role "
+            "validation -- the enumeration is unsupported here, so there is "
+            "nothing to validate against.",
+            enum_name,
+            project_id,
+        )
+        store_cached_project_enum(project_id, enum_name, frozenset())
+        return frozenset()
+    except PolarionError as exc:
+        raise _unreachable_write_block(f"{enum_name} options", project_id, exc) from exc
+
+    ids: set[str] = set()
+    data = response.get("data", {})
+    if isinstance(data, dict):
+        attributes = data.get("attributes")
+        options = attributes.get("options") if isinstance(attributes, dict) else None
+        if isinstance(options, list):
+            for entry in options:
+                if not isinstance(entry, dict):
+                    continue
+                opt_id = entry.get("id")
+                if isinstance(opt_id, str) and opt_id:
+                    ids.add(opt_id)
+
+    option_ids = frozenset(ids)
+    store_cached_project_enum(project_id, enum_name, option_ids)
+    return option_ids
+
+
+async def _check_project_enum_roles(  # noqa: PLR0913
+    client: PolarionClient,
+    project_id: str,
+    enum_name: str,
+    roles: Iterable[str],
+    *,
+    field_label: str,
+    discovery_hint: str,
+) -> None:
+    requested = {role for role in roles if role}
+    if not requested:
+        return
+
+    option_ids = await fetch_project_enum_option_ids(client, project_id, enum_name)
+    # An empty set is the lenient "no options / enum unsupported here" case
+    # that already deferred above, not the unreachable failure that raised.
+    if not option_ids:
+        return
+
+    unknown = sorted(requested - option_ids)
+    if unknown:
+        raise ValueError(
+            f"{field_label} id(s) {unknown} are not valid in project "
+            f"'{project_id}'. Valid options: {sorted(option_ids)}. "
+            f"Polarion accepts an unknown {field_label} as a silent ghost that "
+            f"never matches Lucene queries -- {discovery_hint}"
+        )
+
+
+async def guard_work_item_link_roles(
+    client: PolarionClient,
+    project_id: str,
+    roles: Iterable[str],
+) -> None:
+    """Reject ``create_work_item_links`` roles not in ``workitem-link-role``.
+
+    Polarion stores an unknown link role verbatim (HTTP 201) and it never
+    matches Lucene -- a ghost link with no error to detect it. Validates every
+    requested role against the project's ``workitem-link-role`` enumeration and
+    raises ``ValueError`` listing the valid ids on a miss; fail-closed
+    (``RuntimeError``) if the enumeration cannot be reached.
+    """
+    await _check_project_enum_roles(
+        client,
+        project_id,
+        "workitem-link-role",
+        roles,
+        field_label="role",
+        discovery_hint=(
+            "read an existing link with list_work_item_links to see the "
+            "project's configured roles."
+        ),
+    )
+
+
+async def guard_hyperlink_roles(
+    client: PolarionClient,
+    project_id: str,
+    roles: Iterable[str],
+) -> None:
+    """Reject hyperlink roles not in the project's ``hyperlink-role`` enum.
+
+    ``Hyperlink.role`` on ``create_work_items`` / ``update_work_item`` accepts
+    only configured ids (typically ``ref_int`` / ``ref_ext``); an unknown role
+    persists as a silent ghost on the work item. Validates against the
+    ``hyperlink-role`` enumeration and raises ``ValueError`` on a miss;
+    fail-closed if it cannot be reached.
+    """
+    await _check_project_enum_roles(
+        client,
+        project_id,
+        "hyperlink-role",
+        roles,
+        field_label="hyperlink role",
+        discovery_hint=(
+            "use a configured id such as 'ref_int' (internal) or 'ref_ext' (external)."
+        ),
+    )
+
+
 __all__ = [
     "fetch_enum_option_ids",
+    "fetch_project_enum_option_ids",
     "guard_document_custom_field_keys",
     "guard_document_enums",
+    "guard_hyperlink_roles",
     "guard_work_item_custom_field_keys",
     "guard_work_item_enums",
+    "guard_work_item_link_roles",
     "guard_work_item_link_targets",
 ]
