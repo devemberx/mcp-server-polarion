@@ -23,7 +23,7 @@ CheckResult = tuple[bool, str]
 
 WRITE_TOOLS: frozenset[str] = frozenset(
     {
-        "create_work_item",
+        "create_work_items",
         "update_work_item",
         "move_work_item_to_document",
         "move_work_item_from_document",
@@ -65,7 +65,7 @@ def check_heading_to_doc(
     """A heading must be added via update_document, not create/move."""
     names = _names(trajectory)
     wrong = [
-        n for n in ("create_work_item", "move_work_item_to_document") if n in names
+        n for n in ("create_work_items", "move_work_item_to_document") if n in names
     ]
     if wrong:
         return (
