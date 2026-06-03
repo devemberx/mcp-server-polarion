@@ -636,10 +636,13 @@ class WorkItemLinksCreateResult(BaseModel):
 class WorkItemLinksDeleteResult(BaseModel):
     """Result of a ``delete_work_item_links`` operation.
 
-    ``link_ids`` echoes the REQUEST — Polarion silently ignores body-level
-    refs that do not match an existing link, so the echo is not a list of
-    what was actually deleted. Cross-check with ``list_work_item_links``
-    if exact accounting is required.
+    ``link_ids`` echoes the REQUEST — all composite ids the call submitted,
+    in input order. ``deleted_link_ids`` and ``not_found_link_ids`` are the
+    verified split: the tool pre-reads the source work item's existing
+    outgoing links and partitions the request into refs that matched an
+    existing link (deleted, or would be on dry-run) and refs that matched
+    nothing (no-ops Polarion silently ignores). Both are populated whenever
+    the op returns; an unreachable pre-read fails closed before any delete.
     """
 
     deleted: bool = Field(description="True on a real delete; False on dry-run.")
@@ -647,6 +650,14 @@ class WorkItemLinksDeleteResult(BaseModel):
     link_ids: list[str] = Field(
         default_factory=list,
         description="Composite 5-segment ids reconstructed from the request refs.",
+    )
+    deleted_link_ids: list[str] = Field(
+        default_factory=list,
+        description="Requested ids that matched an existing outgoing link.",
+    )
+    not_found_link_ids: list[str] = Field(
+        default_factory=list,
+        description="Requested ids with no matching outgoing link (silent no-ops).",
     )
     payload_preview: Mapping[str, object] | None = Field(
         default=None,
