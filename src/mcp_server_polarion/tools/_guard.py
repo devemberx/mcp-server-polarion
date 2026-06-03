@@ -32,7 +32,11 @@ from __future__ import annotations
 import logging
 
 from mcp_server_polarion.core.client import PolarionClient
-from mcp_server_polarion.core.exceptions import PolarionError, PolarionNotFoundError
+from mcp_server_polarion.core.exceptions import (
+    PolarionAuthError,
+    PolarionError,
+    PolarionNotFoundError,
+)
 from mcp_server_polarion.models import WorkItemLinkSpec
 from mcp_server_polarion.tools._cache import (
     Resource,
@@ -419,6 +423,88 @@ async def guard_work_item_link_targets(
         )
 
 
+async def _existing_forward_link_ids(
+    client: PolarionClient,
+    project_id: str,
+    work_item_id: str,
+) -> frozenset[str]:
+    """Return the composite ids of every outgoing link on the source work item.
+
+    Pages ``/workitems/{wi}/linkedworkitems`` requesting only ``id`` until a
+    short page. Each ``data[].id`` is already the five-segment composite
+    ``<srcProj>/<srcWI>/<role>/<tgtProj>/<tgtWI>`` that the delete payload
+    reconstructs, so the result can be set-membership-tested directly. A
+    ``PolarionNotFoundError`` propagates -- the source work item is missing.
+    """
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/workitems/{encode_path_segment(work_item_id)}/linkedworkitems"
+    )
+    found: set[str] = set()
+    page_number = 1
+    while True:
+        params: dict[str, str | int] = {
+            "fields[linkedworkitems]": "id",
+            "page[size]": _GUARD_PAGE_SIZE,
+            "page[number]": page_number,
+        }
+        response = await client.get(path, params=params)
+        data = response.get("data", [])
+        if not isinstance(data, list):
+            break
+        for entry in data:
+            if isinstance(entry, dict):
+                link_id = entry.get("id")
+                if isinstance(link_id, str) and link_id:
+                    found.add(link_id)
+        if len(data) < _GUARD_PAGE_SIZE:
+            break
+        page_number += 1
+    return frozenset(found)
+
+
+async def partition_delete_links(
+    client: PolarionClient,
+    project_id: str,
+    work_item_id: str,
+    link_ids: list[str],
+) -> tuple[list[str], list[str]]:
+    """Split requested delete refs into ``(matched, not_found)`` against reality.
+
+    Pre-reads the source work item's existing outgoing links and partitions
+    *link_ids* (preserving input order) into refs that matched an existing
+    link and refs that matched nothing. Polarion deletes the former and
+    silently ignores the latter, so this is the only way to surface the
+    no-ops the 204 hides; the caller reports both and still deletes (a no-op
+    delete is non-destructive, so it is never raised).
+
+    Fail-closed: a missing source work item raises ``ValueError``; an auth
+    failure raises ``PermissionError``; any other unreachable-backend error
+    raises ``RuntimeError`` -- the split must be trustworthy before a delete
+    is reported.
+    """
+    try:
+        existing = await _existing_forward_link_ids(client, project_id, work_item_id)
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Source work item '{work_item_id}' not found in project "
+            f"'{project_id}'. Use `list_work_items` to discover valid IDs."
+        ) from exc
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot read existing work item links -- check your POLARION_TOKEN "
+            "permissions."
+        ) from exc
+    except PolarionError as exc:
+        raise _unreachable_write_block(
+            "existing outgoing links", project_id, exc
+        ) from exc
+
+    matched = [link_id for link_id in link_ids if link_id in existing]
+    not_found = [link_id for link_id in link_ids if link_id not in existing]
+    return matched, not_found
+
+
 __all__ = [
     "fetch_enum_option_ids",
     "guard_document_custom_field_keys",
@@ -426,4 +512,5 @@ __all__ = [
     "guard_work_item_custom_field_keys",
     "guard_work_item_enums",
     "guard_work_item_link_targets",
+    "partition_delete_links",
 ]

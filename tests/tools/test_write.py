@@ -3988,12 +3988,24 @@ class TestBuildDeleteLinksPayload:
         assert ids_in_body == link_ids
 
 
+def _forward_links_response(composite_ids: list[str]) -> dict[str, object]:
+    """A JSON:API forward-link page used by the delete pre-read."""
+    return {
+        "data": [{"type": "linkedworkitems", "id": cid} for cid in composite_ids],
+        "meta": {"totalCount": len(composite_ids)},
+    }
+
+
 class TestDeleteWorkItemLinksDryRun:
     """Tests for ``delete_work_item_links`` with ``dry_run=True``."""
 
     async def test_dry_run_returns_payload_without_calling_delete(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
+        mock_client.get.return_value = _forward_links_response(
+            ["MyProj/MCPT-1/parent/MyProj/MCPT-2"]
+        )
+
         result = await delete_work_item_links(
             mock_ctx,
             project_id="MyProj",
@@ -4014,6 +4026,9 @@ class TestDeleteWorkItemLinksDryRun:
             "MyProj/MCPT-1/parent/MyProj/MCPT-2",
             "MyProj/MCPT-1/verifies/MyProj/MCPT-3",
         ]
+        # The pre-read runs on dry_run so the preview's split is accurate.
+        assert result.deleted_link_ids == ["MyProj/MCPT-1/parent/MyProj/MCPT-2"]
+        assert result.not_found_link_ids == ["MyProj/MCPT-1/verifies/MyProj/MCPT-3"]
         assert result.payload_preview is not None
         body_ids = [
             cast(dict[str, object], item)["id"]
@@ -4028,6 +4043,9 @@ class TestDeleteWorkItemLinksHappyPath:
     async def test_returns_deleted_true_on_204(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
+        mock_client.get.return_value = _forward_links_response(
+            ["MyProj/MCPT-1/parent/MyProj/MCPT-2"]
+        )
         mock_client.delete.return_value = {}
 
         result = await delete_work_item_links(
@@ -4042,11 +4060,54 @@ class TestDeleteWorkItemLinksHappyPath:
         assert result.deleted is True
         assert result.dry_run is False
         assert result.link_ids == ["MyProj/MCPT-1/parent/MyProj/MCPT-2"]
+        assert result.deleted_link_ids == ["MyProj/MCPT-1/parent/MyProj/MCPT-2"]
+        assert result.not_found_link_ids == []
         assert result.payload_preview is None
+
+    async def test_matched_and_no_op_split_on_mixed_batch(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _forward_links_response(
+            ["MyProj/MCPT-1/parent/MyProj/MCPT-2"]
+        )
+        mock_client.delete.return_value = {}
+
+        result = await delete_work_item_links(
+            mock_ctx,
+            project_id="MyProj",
+            work_item_id="MCPT-1",
+            links=[
+                WorkItemLinkRef(role="parent", target_work_item_id="MCPT-2"),
+                WorkItemLinkRef(role="verifies", target_work_item_id="MCPT-3"),
+            ],
+            dry_run=False,
+        )
+
+        mock_client.delete.assert_awaited_once()
+        assert result.deleted_link_ids == ["MyProj/MCPT-1/parent/MyProj/MCPT-2"]
+        assert result.not_found_link_ids == ["MyProj/MCPT-1/verifies/MyProj/MCPT-3"]
+
+    async def test_full_miss_reports_all_not_found(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _forward_links_response([])
+        mock_client.delete.return_value = {}
+
+        result = await delete_work_item_links(
+            mock_ctx,
+            project_id="MyProj",
+            work_item_id="MCPT-1",
+            links=[WorkItemLinkRef(role="parent", target_work_item_id="MCPT-2")],
+            dry_run=False,
+        )
+
+        assert result.deleted_link_ids == []
+        assert result.not_found_link_ids == ["MyProj/MCPT-1/parent/MyProj/MCPT-2"]
 
     async def test_delete_called_with_correct_path_and_body(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
+        mock_client.get.return_value = _forward_links_response([])
         mock_client.delete.return_value = {}
 
         await delete_work_item_links(
@@ -4072,6 +4133,7 @@ class TestDeleteWorkItemLinksHappyPath:
     async def test_target_project_defaults_to_source(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
+        mock_client.get.return_value = _forward_links_response([])
         mock_client.delete.return_value = {}
 
         result = await delete_work_item_links(
@@ -4091,6 +4153,9 @@ class TestDeleteWorkItemLinksErrorMapping:
     async def test_401_raises_permission_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
+        mock_client.get.return_value = _forward_links_response(
+            ["MyProj/MCPT-1/parent/MyProj/MCPT-2"]
+        )
         mock_client.delete.side_effect = PolarionAuthError("auth", status_code=401)
 
         with pytest.raises(PermissionError):
@@ -4113,6 +4178,9 @@ class TestDeleteWorkItemLinksErrorMapping:
         (confirmed against the testdrive instance, 2026-05-22), so the
         only 404 the tool layer sees is the source-WI variant.
         """
+        mock_client.get.return_value = _forward_links_response(
+            ["MyProj/MCPT-1/parent/MyProj/MCPT-2"]
+        )
         mock_client.delete.side_effect = PolarionNotFoundError(
             "not found", status_code=404
         )
@@ -4131,6 +4199,9 @@ class TestDeleteWorkItemLinksErrorMapping:
     async def test_generic_polarion_error_raises_runtime_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
+        mock_client.get.return_value = _forward_links_response(
+            ["MyProj/MCPT-1/parent/MyProj/MCPT-2"]
+        )
         mock_client.delete.side_effect = PolarionError("server error", status_code=500)
 
         with pytest.raises(RuntimeError, match="delete work item links"):
@@ -4143,6 +4214,54 @@ class TestDeleteWorkItemLinksErrorMapping:
                 ],
                 dry_run=False,
             )
+
+    async def test_preread_404_raises_value_error_about_source_wi(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionNotFoundError(
+            "not found", status_code=404
+        )
+
+        with pytest.raises(ValueError, match="Source work item 'MCPT-1' not found"):
+            await delete_work_item_links(
+                mock_ctx,
+                project_id="MyProj",
+                work_item_id="MCPT-1",
+                links=[WorkItemLinkRef(role="parent", target_work_item_id="MCPT-2")],
+                dry_run=False,
+            )
+        mock_client.delete.assert_not_called()
+
+    async def test_preread_401_raises_permission_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError("auth", status_code=401)
+
+        with pytest.raises(PermissionError):
+            await delete_work_item_links(
+                mock_ctx,
+                project_id="MyProj",
+                work_item_id="MCPT-1",
+                links=[WorkItemLinkRef(role="parent", target_work_item_id="MCPT-2")],
+                dry_run=False,
+            )
+        mock_client.delete.assert_not_called()
+
+    async def test_preread_unreachable_blocks_before_delete(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """A 5xx pre-read fails closed -- the delete is never attempted."""
+        mock_client.get.side_effect = PolarionError("server error", status_code=500)
+
+        with pytest.raises(RuntimeError, match="Refusing the write"):
+            await delete_work_item_links(
+                mock_ctx,
+                project_id="MyProj",
+                work_item_id="MCPT-1",
+                links=[WorkItemLinkRef(role="parent", target_work_item_id="MCPT-2")],
+                dry_run=False,
+            )
+        mock_client.delete.assert_not_called()
 
 
 class TestDeleteWorkItemLinksFieldValidation:
