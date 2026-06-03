@@ -691,7 +691,7 @@ class WorkItemLinkUpdateSpec(BaseModel):
 
 
 class WorkItemLinkUpdateResult(BaseModel):
-    """Result of an ``update_work_item_links`` operation."""
+    """Result of an ``update_work_item_link`` operation."""
 
     updated: bool = Field(description="True on a real PATCH; False on dry-run.")
     dry_run: bool = Field(description="Whether this was a dry-run.")

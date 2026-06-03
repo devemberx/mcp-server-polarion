@@ -546,12 +546,23 @@ class TestGuardWorkItemLinkTargets:
             )
 
     async def test_chunks_above_page_size(self, mock_client: AsyncMock) -> None:
-        ids = [f"WI-{n}" for n in range(150)]
-        mock_client.get.return_value = _workitems_response("P", ids)
+        ids = sorted(f"WI-{n}" for n in range(150))
+
+        async def fake_get(path: str, **kwargs: object) -> dict[str, object]:
+            query = str(kwargs["params"]["query"])  # type: ignore[index]
+            chunk = query.removeprefix("id:(").removesuffix(")").split()
+            return _workitems_response("P", chunk)
+
+        mock_client.get.side_effect = fake_get
 
         await guard_work_item_link_targets(mock_client, "P", [_link(i) for i in ids])
 
         assert mock_client.get.await_count == 2
+        queries = [
+            str(call.kwargs["params"]["query"])
+            for call in mock_client.get.await_args_list
+        ]
+        assert [q.count(" ") + 1 for q in queries] == [100, 50]
 
     async def test_unreachable_backend_blocks_write(
         self, mock_client: AsyncMock
