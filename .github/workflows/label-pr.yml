@@ -1,0 +1,57 @@
+name: Label PR by title
+
+# GitHub's native release-note grouping (.github/release.yml) keys off PR
+# labels, not commit messages. This maps each PR's conventional-commit title
+# prefix to the matching label so the auto-generated release notes group
+# cleanly. pull_request_target so labels also land on fork PRs; the title is
+# passed via env (never interpolated into the shell) and no PR code is run.
+on:
+  pull_request_target:
+    types: [opened, edited, reopened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Apply label from conventional-commit title
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+
+          # Parse "<type>(scope)!: subject" — type and the optional ! marker.
+          type="$(printf '%s' "$PR_TITLE" | sed -nE 's/^([a-z]+)(\([^)]*\))?!?:.*/\1/p')"
+          bang="$(printf '%s' "$PR_TITLE" | sed -nE 's/^[a-z]+(\([^)]*\))?(!):.*/\2/p')"
+
+          declare -A map=(
+            [feat]=feature
+            [fix]=bug
+            [perf]=performance
+            [refactor]=refactor
+            [docs]=documentation
+            [test]=test
+            [ci]=ci
+            [chore]=chore
+          )
+
+          labels=()
+          [ -n "${map[$type]:-}" ] && labels+=("${map[$type]}")
+          [ -n "$bang" ] && labels+=("breaking")
+
+          if [ ${#labels[@]} -eq 0 ]; then
+            echo "Title has no conventional-commit type; nothing to label."
+            exit 0
+          fi
+
+          # Idempotently ensure each label exists, then apply.
+          for l in "${labels[@]}"; do
+            gh label create "$l" --repo "$REPO" --color ededed >/dev/null 2>&1 || true
+          done
+          gh pr edit "$PR_NUMBER" --repo "$REPO" \
+            --add-label "$(IFS=,; echo "${labels[*]}")"

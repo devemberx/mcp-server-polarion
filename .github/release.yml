@@ -1,0 +1,29 @@
+# Drives the grouping of `gh release create --generate-notes` (publish.yml).
+# Categories match the conventional-commit types the commit-msg hook enforces;
+# label-pr.yml stamps each PR with the corresponding label from its title.
+changelog:
+  exclude:
+    labels:
+      - skip-changelog
+  categories:
+    - title: ⚠ Breaking Changes
+      labels:
+        - breaking
+    - title: 🚀 Features
+      labels:
+        - feature
+    - title: 🐛 Bug Fixes
+      labels:
+        - bug
+    - title: ⚡ Performance
+      labels:
+        - performance
+    - title: ♻ Refactor
+      labels:
+        - refactor
+    - title: 📝 Documentation
+      labels:
+        - documentation
+    - title: 🧰 Maintenance
+      labels:
+        - "*"

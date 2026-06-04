@@ -1,6 +1,6 @@
 ---
 name: deploy
-description: Deploy (release/version bump/tag) automation for mcp-server-polarion. Bumps version in pyproject.toml + uv.lock, commits with conventional message, creates structured annotated tag, and pushes to trigger PyPI publish workflow. Triggers on "/deploy", or any release/version bump/tag request.
+description: Deploy (release/version bump/tag) automation for mcp-server-polarion. Bumps version in pyproject.toml + uv.lock, commits with conventional message, creates a date-only annotated tag, and pushes it to trigger the PyPI publish workflow, which then auto-publishes a categorized GitHub Release. Triggers on "/deploy", or any release/version bump/tag request.
 ---
 
 # Deploy Skill
@@ -99,46 +99,21 @@ git push origin main
 
 No auto-retry on failure — surface error and let the user decide.
 
-## Step 6 — Draft tag annotation (interactive)
+## Step 6 — Create date-only tag locally
 
-Categorize each commit since `$PREV_TAG`:
-- `breaking` or `!:` in subject → **Breaking**
-- `feat(tool):` prefix → **New tools** (extract tool name and PR # from subject)
-- other `feat:` → **New**
-- `chore:` / `docs:` / `ci:` / `refactor:` / `test:` / `fix:` → **Misc**
-
-Write the draft to `/tmp/tag-msg-v${NEW_VERSION}.txt` using the Write tool. A temp file is required: `git tag -a -m` repeated flattens to paragraphs and breaks the labeled-section layout; `-F` preserves exact whitespace and newlines.
-
-Format:
-
-```
-<one-line headline, ≤72 chars, derived from highest-impact change>
-
-Breaking:
-- ...
-
-New tools:
-- tool_name (#PR) — short description
-
-New:
-- feature description
-
-Misc:
-- mechanical change
-```
-
-Omit empty sections entirely. Show file contents to the user via AskUserQuestion (`approve` / `edit` / `cancel`); on `edit`, rewrite the temp file with the user's replacement text.
-
-## Step 7 — Create tag locally
+The tag annotation carries only the release date; all the human-readable detail lives in the GitHub Release (Step 8). Keeping the tag minimal means the published-version marker never drifts from the curated release notes.
 
 ```bash
-git tag -a "v${NEW_VERSION}" -F "/tmp/tag-msg-v${NEW_VERSION}.txt"
-git show "v${NEW_VERSION}" --no-patch  # verify annotation rendered correctly
+RELEASE_DATE=$(date +%F)  # UTC release date, YYYY-MM-DD
+git tag -a "v${NEW_VERSION}" -m "Release v${NEW_VERSION} (${RELEASE_DATE})"
+git show "v${NEW_VERSION}" --no-patch  # verify the one-line annotation
 ```
 
-## Step 8 — Push tag (confirm #2, with irreversibility warning)
+No temp file, no interactive draft — the message is a single deterministic line.
 
-AskUserQuestion with this exact warning text: **"Pushing tag v${NEW_VERSION} triggers `.github/workflows/publish.yml` → TestPyPI → PyPI. IRREVERSIBLE (PyPI blocks re-uploading the same version). Continue?"** Options: `push` / `cancel`.
+## Step 7 — Push tag (confirm #2, with irreversibility warning)
+
+AskUserQuestion with this exact warning text: **"Pushing tag v${NEW_VERSION} triggers `.github/workflows/publish.yml` → evals → TestPyPI → PyPI → GitHub Release. IRREVERSIBLE (PyPI blocks re-uploading the same version). Continue?"** Options: `push` / `cancel`.
 
 ```bash
 git push origin "v${NEW_VERSION}"
@@ -146,11 +121,14 @@ git push origin "v${NEW_VERSION}"
 
 On failure: local tag still exists; user can retry with `git push origin v${NEW_VERSION}` or delete locally via `git tag -d v${NEW_VERSION}`.
 
-## Step 9 — Post-push summary
+The GitHub Release is created automatically by the `release` job in `publish.yml` after PyPI succeeds — `gh release create --generate-notes` builds categorized notes from the PRs merged since the previous tag, grouped per `.github/release.yml`. Do NOT create a release by hand here; a manual `gh release create` would collide with the workflow (`release already exists`). Categorization quality depends on each merged PR carrying the right label, which `.github/workflows/label-pr.yml` stamps from the PR's conventional-commit title.
+
+## Step 8 — Post-push summary
 
 ```bash
 OWNER_REPO=$(git remote get-url origin | sed -E 's#.*github\.com[:/]([^/]+/[^/.]+).*#\1#')
 echo "Released v${NEW_VERSION}"
+echo "Release notes (auto-published after PyPI): https://github.com/${OWNER_REPO}/releases/tag/v${NEW_VERSION}"
 echo "Watch: https://github.com/${OWNER_REPO}/actions"
 ```
 
@@ -162,3 +140,5 @@ echo "Watch: https://github.com/${OWNER_REPO}/actions"
 - NEVER `git commit --amend` after a hook rejection.
 - ALWAYS confirm before commit push AND tag push (2 separate confirms).
 - ALWAYS show diff / draft to user before destructive ops.
+- NEVER put categorized release notes in the tag — the tag carries only the release date; notes are auto-generated into the GitHub Release by `publish.yml`.
+- NEVER run `gh release create` by hand during deploy — the workflow owns it; a manual release collides with the workflow's `release` job.
