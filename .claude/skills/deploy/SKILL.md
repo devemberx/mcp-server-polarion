@@ -101,7 +101,7 @@ No auto-retry on failure — surface error and let the user decide.
 
 ## Step 6 — Create date-only tag locally
 
-The tag annotation carries only the release date; all the human-readable detail lives in the GitHub Release (Step 8). Keeping the tag minimal means the published-version marker never drifts from the curated release notes.
+The tag annotation carries only the release date; all the human-readable detail lives in the GitHub Release (Step 7). Keeping the tag minimal means the published-version marker never drifts from the curated release notes.
 
 ```bash
 RELEASE_DATE=$(date +%F)  # UTC release date, YYYY-MM-DD
