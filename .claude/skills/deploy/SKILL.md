@@ -72,7 +72,7 @@ awk '{print length}' <<<"- ${BULLET1}"                                  # ≤120
 awk '{print length}' <<<"- ${BULLET2}"                                  # ≤120
 ```
 
-Commit (never `--no-verify`):
+Commit (never `--no-verify`). For the co-author trailer use the model running this deploy session — substitute its name (e.g. `Opus 4.8`) for `<model>` below; never hardcode a fixed version, it goes stale as the model changes:
 
 ```bash
 git add pyproject.toml uv.lock
@@ -82,7 +82,7 @@ chore(meta): bump version to X.Y.Z
 - <bullet 1>
 - <bullet 2>
 
-Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
+Co-Authored-By: Claude <model> <noreply@anthropic.com>
 EOF
 )"
 ```
