@@ -26,8 +26,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Parse "<type>(scope)!: subject" — type and the optional ! marker.
+          # Parse "<type>(scope)!: subject" — type, scope, and the optional ! marker.
           type="$(printf '%s' "$PR_TITLE" | sed -nE 's/^([a-z]+)(\([^)]*\))?!?:.*/\1/p')"
+          scope="$(printf '%s' "$PR_TITLE" | sed -nE 's/^[a-z]+\(([^)]*)\)!?:.*/\1/p')"
           bang="$(printf '%s' "$PR_TITLE" | sed -nE 's/^[a-z]+(\([^)]*\))?(!):.*/\2/p')"
 
           declare -A map=(
@@ -42,7 +43,12 @@ jobs:
           )
 
           labels=()
-          [ -n "${map[$type]:-}" ] && labels+=("${map[$type]}")
+          # Dependency bumps (dependabot uses "(deps)" / "(deps-dev)") get their
+          # own label so release notes can group them under Dependencies.
+          case "$scope" in
+            deps|deps-dev) labels+=("dependencies") ;;
+            *) [ -n "${map[$type]:-}" ] && labels+=("${map[$type]}") ;;
+          esac
           [ -n "$bang" ] && labels+=("breaking")
 
           if [ ${#labels[@]} -eq 0 ]; then
@@ -54,5 +60,8 @@ jobs:
           for l in "${labels[@]}"; do
             gh label create "$l" --repo "$REPO" --color ededed >/dev/null 2>&1 || true
           done
-          gh pr edit "$PR_NUMBER" --repo "$REPO" \
-            --add-label "$(IFS=,; echo "${labels[*]}")"
+          # `gh pr edit --add-label` fails on this repo (Projects-classic
+          # deprecation poisons its GraphQL call), so add via the REST endpoint.
+          args=()
+          for l in "${labels[@]}"; do args+=(-f "labels[]=$l"); done
+          gh api -X POST "repos/$REPO/issues/$PR_NUMBER/labels" "${args[@]}" >/dev/null
