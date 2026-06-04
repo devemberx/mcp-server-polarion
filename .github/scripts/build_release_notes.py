@@ -32,9 +32,18 @@ def main() -> None:
     tag = os.environ["GITHUB_REF_NAME"]
 
     result = subprocess.run(
-        ["gh", "api", f"repos/{repo}/releases/generate-notes", "-X", "POST",
-         "-f", f"tag_name={tag}"],
-        capture_output=True, text=True, check=True,
+        [
+            "gh",
+            "api",
+            f"repos/{repo}/releases/generate-notes",
+            "-X",
+            "POST",
+            "-f",
+            f"tag_name={tag}",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
     )
     body = json.loads(result.stdout)["body"]
 
