@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Build a GitHub Release body: GitHub's categorized auto-notes (grouped per
-`.github/release.yml`), prefixed with the curated highlights carried in the
-annotated tag's own message body. The deploy skill writes the highlights into
-the tag, so nothing accumulates in the repo tree. Reads GITHUB_REPOSITORY /
+`.github/release.yml`), prefixed with a `## Highlights` block built from the
+curated bullets carried in the annotated tag's own message body. The deploy
+skill writes the bullets into the tag (no heading there — this script adds it),
+so nothing accumulates in the repo tree. Reads GITHUB_REPOSITORY /
 GITHUB_REF_NAME, prints markdown to stdout.
 
 CI helper (not part of the shipped package), so printing to stdout is the
@@ -23,8 +24,9 @@ def _gh(*args: str) -> str:
 
 
 def tag_highlights(repo: str, tag: str) -> str:
-    """Curated highlights = the annotated tag's message minus its first
-    (dated marker) line. Empty for a lightweight or date-only tag."""
+    """Curated highlight bullets = the annotated tag's message minus its first
+    (dated marker) line, without the `## Highlights` heading (the caller adds
+    it). Empty for a lightweight or date-only tag."""
     ref = json.loads(_gh("api", f"repos/{repo}/git/refs/tags/{tag}"))
     obj = ref["object"]
     if obj["type"] != "tag":
@@ -51,6 +53,7 @@ def main() -> None:
     parts: list[str] = []
     intro = tag_highlights(repo, tag)
     if intro:
+        parts.append("## Highlights")
         parts.append(intro)
         parts.append("")
     parts.append(body)
