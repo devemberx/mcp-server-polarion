@@ -11,6 +11,7 @@ on:
 
 permissions:
   pull-requests: write
+  issues: write  # gh label create writes to the labels (issues) endpoint
 
 jobs:
   label:
