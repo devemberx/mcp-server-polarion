@@ -56,7 +56,21 @@ uv lock                          # syncs uv.lock self-entry
 git diff pyproject.toml uv.lock  # show diff to user
 ```
 
-## Step 4 — Draft commit (interactive)
+## Step 4 — Draft release highlights (interactive)
+
+The GitHub Release groups PRs into categories automatically, but the **Highlights** block at the top is curated prose — the one part the tag-triggered workflow cannot write, since no LLM runs there. Draft it here and commit it so the tag points to a commit that contains it; `build_release_notes.py` reads `.github/release-notes/v${NEW_VERSION}.md` on tag push and falls back to no Highlights when the file is absent.
+
+From the commits since `$PREV_TAG`, write 3–5 plain-language bullets describing what *matters* to a user — not a restatement of PR titles. Show the draft to the user via AskUserQuestion (`approve` / `edit` / `skip`). On `skip`, write no file (release ships category list only). Otherwise write it with the Write tool to `.github/release-notes/v${NEW_VERSION}.md`:
+
+```markdown
+## Highlights
+- <plain-language summary of a major change>
+- <another>
+```
+
+English only (repo-artifact convention).
+
+## Step 5 — Draft commit (interactive)
 
 Draft two body bullets:
 - **Bullet 1** (motivation/themes, ≤120 chars) — derive from commits since `$PREV_TAG`.
@@ -72,10 +86,10 @@ awk '{print length}' <<<"- ${BULLET1}"                                  # ≤120
 awk '{print length}' <<<"- ${BULLET2}"                                  # ≤120
 ```
 
-Commit (never `--no-verify`):
+Commit (never `--no-verify`) — stage the highlights file too when Step 4 wrote one:
 
 ```bash
-git add pyproject.toml uv.lock
+git add pyproject.toml uv.lock .github/release-notes/v${NEW_VERSION}.md 2>/dev/null || git add pyproject.toml uv.lock
 git commit -m "$(cat <<'EOF'
 chore(meta): bump version to X.Y.Z
 
@@ -89,7 +103,7 @@ EOF
 
 On commit-msg hook rejection: surface the hook output, redo `git commit` with corrected message. **Never `--amend`** — hook rejection means no commit was made, so amending would mutate the previous (unrelated) commit and silently corrupt history.
 
-## Step 5 — Push commit (confirm #1)
+## Step 6 — Push commit (confirm #1)
 
 AskUserQuestion: "Push commit to origin/main? Makes the bump public but does NOT trigger the publish workflow yet." Options: `push` / `cancel`.
 
@@ -99,9 +113,9 @@ git push origin main
 
 No auto-retry on failure — surface error and let the user decide.
 
-## Step 6 — Create date-only tag locally
+## Step 7 — Create date-only tag locally
 
-The tag annotation carries only the release date; all the human-readable detail lives in the GitHub Release (Step 7). Keeping the tag minimal means the published-version marker never drifts from the curated release notes.
+The tag annotation carries only the release date; all the human-readable detail lives in the GitHub Release (Step 8). Keeping the tag minimal means the published-version marker never drifts from the curated release notes.
 
 ```bash
 RELEASE_DATE=$(date +%F)  # UTC release date, YYYY-MM-DD
@@ -111,7 +125,7 @@ git show "v${NEW_VERSION}" --no-patch  # verify the one-line annotation
 
 No temp file, no interactive draft — the message is a single deterministic line.
 
-## Step 7 — Push tag (confirm #2, with irreversibility warning)
+## Step 8 — Push tag (confirm #2, with irreversibility warning)
 
 AskUserQuestion with this exact warning text: **"Pushing tag v${NEW_VERSION} triggers `.github/workflows/publish.yml` → evals → TestPyPI → PyPI → GitHub Release. IRREVERSIBLE (PyPI blocks re-uploading the same version). Continue?"** Options: `push` / `cancel`.
 
@@ -121,9 +135,9 @@ git push origin "v${NEW_VERSION}"
 
 On failure: local tag still exists; user can retry with `git push origin v${NEW_VERSION}` or delete locally via `git tag -d v${NEW_VERSION}`.
 
-The GitHub Release is created automatically by the `release` job in `publish.yml` after PyPI succeeds — `gh release create --generate-notes` builds categorized notes from the PRs merged since the previous tag, grouped per `.github/release.yml`. Do NOT create a release by hand here; a manual `gh release create` would collide with the workflow (`release already exists`). Categorization quality depends on each merged PR carrying the right label, which `.github/workflows/label-pr.yml` stamps from the PR's conventional-commit title.
+The GitHub Release is created automatically by the `release` job in `publish.yml` after PyPI succeeds: `build_release_notes.py` prepends the Step 4 highlights file (when present) to GitHub's categorized notes, grouped per `.github/release.yml`. Do NOT create a release by hand here; a manual `gh release create` would collide with the workflow (`release already exists`). Categorization quality depends on each merged PR carrying the right label, which `.github/workflows/label-pr.yml` stamps from the PR's conventional-commit title.
 
-## Step 8 — Post-push summary
+## Step 9 — Post-push summary
 
 ```bash
 OWNER_REPO=$(git remote get-url origin | sed -E 's#.*github\.com[:/]([^/]+/[^/.]+).*#\1#')

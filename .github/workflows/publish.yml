@@ -82,8 +82,8 @@ jobs:
           # Idempotent: a job re-run after a transient failure must not collide
           # with an already-created release.
           gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 && exit 0
-          # Categorized notes (grouped per .github/release.yml) plus a Highlights
-          # list prepended from the Features section.
+          # Categorized notes (grouped per .github/release.yml), prefixed with
+          # curated highlights from .github/release-notes/<tag>.md when present.
           python3 .github/scripts/build_release_notes.py > "${RUNNER_TEMP}/notes.md"
           gh release create "${GITHUB_REF_NAME}" \
             --verify-tag \
