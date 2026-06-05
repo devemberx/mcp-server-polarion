@@ -18,8 +18,10 @@ import subprocess
 
 
 def _gh(*args: str) -> str:
+    # Capture stdout only; let stderr inherit so gh's error message lands in the
+    # CI log when a call fails (check=True still fails the step on non-zero).
     return subprocess.run(
-        ["gh", *args], capture_output=True, text=True, check=True
+        ["gh", *args], stdout=subprocess.PIPE, text=True, check=True
     ).stdout
 
 
@@ -27,7 +29,9 @@ def tag_highlights(repo: str, tag: str) -> str:
     """Curated highlight bullets = the annotated tag's message minus its first
     (dated marker) line, without the `## Highlights` heading (the caller adds
     it). Empty for a lightweight or date-only tag."""
-    ref = json.loads(_gh("api", f"repos/{repo}/git/refs/tags/{tag}"))
+    # Singular `git/ref/` returns one object; plural `git/refs/` prefix-matches
+    # and yields an array when a sibling tag shares the prefix (e.g. -rc).
+    ref = json.loads(_gh("api", f"repos/{repo}/git/ref/tags/{tag}"))
     obj = ref["object"]
     if obj["type"] != "tag":
         return ""
