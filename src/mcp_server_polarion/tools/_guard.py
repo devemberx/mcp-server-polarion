@@ -114,14 +114,8 @@ async def fetch_enum_option_ids(
 ) -> frozenset[str]:
     """Return the valid option ids for ``(project, resource, field, type)``.
 
-    Cached for the guard TTL. Fail-closed on a *reachable-but-erroring*
-    backend: after the client's own 429/5xx backoff, a 5xx or auth error
-    raises ``RuntimeError`` so the caller's write is blocked rather than
-    risking a ghost. A 404 is the exception -- it means ``getAvailableOptions``
-    is unsupported on this instance (or the field/project path does not
-    exist), so there is nothing to validate against; the guard defers (empty
-    set) rather than block every enum-bearing write. A genuinely wrong target
-    makes the subsequent write fail loudly, so deferring cannot mask a ghost.
+    Cached for the guard TTL. Fail-closed per the module contract: a reachable
+    error raises, a 404 defers (empty set, endpoint/field unsupported here).
     """
     cached = get_cached_enum_options(project_id, resource, field_id, type_id)
     if cached is not None:
@@ -465,15 +459,12 @@ async def fetch_project_enum_option_ids(
     Used for enums Polarion does not expose through ``getAvailableOptions``
     (link role, hyperlink role). Reads the single-enumeration resource
     ``/projects/{p}/enumerations/~/{enum}/~`` -- far lighter than the bulk
-    ``getProjectEnumerations`` listing, which returns every enum including
-    large dynamic ones. Unlike ``getAvailableOptions`` (a list ``data``), this
-    single-resource response returns ``data`` as a dict whose options live at
-    ``data.attributes.options[].id``.
+    ``getProjectEnumerations`` listing. Unlike ``getAvailableOptions`` (a list
+    ``data``), this single-resource response returns ``data`` as a dict whose
+    options live at ``data.attributes.options[].id``.
 
-    Cached for the guard TTL. Same fail-closed contract as
-    :func:`fetch_enum_option_ids`: a 404 means the enumeration is unsupported
-    here, so the guard defers (empty set); any other error after the client's
-    backoff raises ``RuntimeError`` to block the write.
+    Cached for the guard TTL; same fail-closed contract as
+    :func:`fetch_enum_option_ids`.
     """
     cached = get_cached_project_enum(project_id, enum_name)
     if cached is not None:
