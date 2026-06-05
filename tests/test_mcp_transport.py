@@ -60,6 +60,13 @@ _WRITE_TOOL_NAMES: frozenset[str] = frozenset(
 )
 EXPECTED_TOOL_NAMES: frozenset[str] = _READ_TOOL_NAMES | _WRITE_TOOL_NAMES
 
+# Resources are registered alongside tools but excluded from ``list_tools``;
+# this set is the forcing function for ``@mcp.resource`` the way
+# ``EXPECTED_TOOL_NAMES`` is for ``@mcp.tool``.
+EXPECTED_RESOURCE_URIS: frozenset[str] = frozenset(
+    {"polarion://guides/sql-query-recipes"}
+)
+
 
 @pytest.fixture
 def _polarion_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -85,6 +92,25 @@ class TestToolRegistration:
     async def test_all_expected_tools_registered(self, mcp_client: _MCPClient) -> None:
         names = {t.name for t in await mcp_client.list_tools()}
         assert names == EXPECTED_TOOL_NAMES
+
+
+class TestResourceRegistration:
+    """Every expected resource reaches the MCP transport and reads back."""
+
+    async def test_all_expected_resources_registered(
+        self, mcp_client: _MCPClient
+    ) -> None:
+        uris = {str(r.uri) for r in await mcp_client.list_resources()}
+        assert uris == EXPECTED_RESOURCE_URIS
+
+    async def test_sql_recipes_resource_reads(self, mcp_client: _MCPClient) -> None:
+        # ``list_work_items`` tells the LLM it MUST read this resource before
+        # hand-writing SQL, so a dead URI would strand that instruction.
+        contents = await mcp_client.read_resource("polarion://guides/sql-query-recipes")
+        assert contents
+        text = contents[0].text
+        assert "list_work_items SQL recipes" in text
+        assert "POLARION.STRUCT_WORKITEM_LINKEDWORKITEMS" in text
 
 
 @pytest.mark.parametrize("tool_name", sorted(EXPECTED_TOOL_NAMES))
