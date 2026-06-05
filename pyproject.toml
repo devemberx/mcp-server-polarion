@@ -67,6 +67,8 @@ select = ["E", "W", "F", "I", "UP", "B", "SIM", "ANN", "PL", "C4", "PTH", "RUF",
 "evals/**" = ["ANN", "PLR", "S101", "S105", "S106", "S603", "S607", "E402"]
 # Claude Code PreToolUse hooks: local tooling scripts, not shipped in the wheel.
 ".claude/hooks/**" = ["PLR"]
+# Release-notes CI helper: shells out to `gh`, not shipped in the wheel.
+".github/scripts/**" = ["S603", "S607"]
 
 [tool.mypy]
 python_version = "3.13"

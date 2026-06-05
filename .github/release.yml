@@ -24,6 +24,9 @@ changelog:
     - title: 📝 Documentation
       labels:
         - documentation
+    - title: ":dependabot: Dependencies"
+      labels:
+        - dependencies
     - title: 🧰 Maintenance
       labels:
         - "*"
