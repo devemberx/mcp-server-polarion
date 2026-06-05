@@ -92,14 +92,10 @@ def _build_work_item_resource(
 ) -> dict[str, JsonValue]:
     """Build one ``workitems`` resource object for a bulk create POST.
 
-    Only attaches keys for values that are explicitly set — ``None``,
-    empty strings, and empty lists are skipped so we never overwrite
-    Polarion defaults with empty values on creation. ``custom_fields``
-    entries are inlined into ``attributes`` alongside the standard
-    fields via ``merge_custom_fields``; colliding keys raise
-    ``ValueError`` so the caller cannot accidentally shadow an explicit
-    standard parameter. ``description_html`` is supplied pre-converted so
-    this builder stays a pure data-shaping function.
+    Skips unset values so creation never overwrites Polarion defaults with
+    empties. ``custom_fields`` inline into ``attributes`` via
+    ``merge_custom_fields``, which raises on a key colliding with a standard
+    field. ``description_html`` arrives pre-converted (pure data-shaping).
     """
     attributes: dict[str, JsonValue] = {
         "title": spec.title,
@@ -177,15 +173,11 @@ def _extract_first_resource_id(response: dict[str, object]) -> str | None:
 
 
 def _extract_created_work_item_ids(response: dict[str, object]) -> list[str]:
-    """Return short work-item ids in order from a bulk 201 create response.
+    """Return short work-item ids in submission order from a bulk 201 response.
 
-    Polarion returns ``{"data": [{"type": "workitems",
-    "id": "projectId/MCPT-042", ...}, ...]}``. Each composite id is reduced
-    to its short form (``"MCPT-042"``). Order mirrors the request positionally
-    and relies on Polarion echoing the ``data`` array in submission order — the
-    count check at the call site catches a missing id, not a reordered one.
-    Empty list on malformed shapes; callers should treat a count mismatch as
-    failure.
+    Relies on Polarion echoing ``data`` in submission order; the call-site
+    count check catches a missing id, not a reordered one. Empty on malformed
+    shapes.
     """
     data = response.get("data")
     if not isinstance(data, list):
@@ -215,13 +207,9 @@ def _extract_created_module_name(response: dict[str, object]) -> str | None:
 
 
 def _extract_created_link_ids(response: dict[str, object]) -> list[str]:
-    """Return composite link ids verbatim from a bulk create-link response.
-
-    Polarion returns ``{"data": [{"type": "linkedworkitems",
-    "id": "<srcProj>/<srcWI>/<role>/<tgtProj>/<tgtWI>", ...}, ...]}``.
-    Preserves input order and is the path identifier for subsequent
-    PATCH / DELETE of the same links. Empty list on malformed shapes;
-    callers should treat empty as a failure.
+    """Return composite link ids verbatim, in input order, from a bulk
+    create-link response. These are the path id for later PATCH / DELETE.
+    Empty on malformed shapes (callers treat empty as failure).
     """
     data = response.get("data")
     if not isinstance(data, list):
@@ -373,14 +361,9 @@ def _build_update_work_item_payload(  # noqa: PLR0913
 ) -> dict[str, JsonValue]:
     """Build the JSON:API PATCH body for ``/projects/{p}/workitems/{work_item}``.
 
-    Mirrors ``_build_work_item_resource`` but produces a PATCH-shaped body:
-    ``data`` is a single resource object (not a list), with a required
-    ``id`` of the form ``"{project_id}/{work_item_id}"``. Only attaches
-    keys for values that are explicitly set — ``None``, empty strings,
-    and empty lists are skipped so we never overwrite Polarion attributes
-    with empty values on update. ``custom_fields`` entries are inlined
-    into ``attributes`` alongside the standard fields via
-    ``merge_custom_fields``; colliding keys raise ``ValueError``.
+    The PATCH shape of ``_build_work_item_resource``: a single ``data``
+    resource object with a required ``id`` ``"{project_id}/{work_item_id}"``.
+    Skips unset values so an update never blanks an existing attribute.
     """
     attributes: dict[str, JsonValue] = {}
     if title:
@@ -436,12 +419,9 @@ def _build_move_to_document_payload(
 ) -> dict[str, JsonValue]:
     """Build the request body for the ``moveToDocument`` action endpoint.
 
-    Note: this endpoint is NOT JSON:API — the body is a flat object
-    with ``targetDocument``, plus AT MOST one of ``previousPart`` or
-    ``nextPart``. Both omitted is valid and means "append at end" per
-    the Polarion REST API. The tool layer validates the at-most-one
-    invariant before calling this helper, but we re-check here so a
-    future direct caller cannot ship a body Polarion would reject.
+    NOT JSON:API — a flat object with ``targetDocument`` plus at most one of
+    ``previousPart`` / ``nextPart`` (both omitted = append at end). The
+    at-most-one invariant is re-checked here to fail closed for direct callers.
     """
     if previous_part_id is not None and next_part_id is not None:
         msg = (
@@ -473,20 +453,11 @@ def _build_update_document_payload(  # noqa: PLR0913
 ) -> dict[str, JsonValue]:
     """Build the JSON:API request body for ``PATCH .../documents/{d}``.
 
-    Mirrors ``_build_update_work_item_payload``'s PATCH shape: ``data`` is
-    a single resource object (NOT a list) with a required ``id`` of the
-    form ``"{project_id}/{space_id}/{document_name}"``. Only attaches
-    keys for values that are explicitly set -- ``None`` values are
-    skipped so JSON:API omit-preserve takes effect (the server keeps
-    the existing server-side value). ``custom_fields`` entries are
-    inlined into ``attributes`` via ``merge_custom_fields``; colliding
-    keys raise ``ValueError``.
-
-    ``home_page_content_html`` is treated as RAW Polarion HTML and is
-    wrapped verbatim into ``{"type":"text/html","value":...}`` — no
-    sanitization, no Markdown conversion. The body-clearing guard
-    (rejecting empty strings) lives in the tool layer (``update_document``)
-    rather than here so direct callers can opt out if needed.
+    Same PATCH shape as ``_build_update_work_item_payload`` (single ``data``
+    object, required ``id`` ``"{project_id}/{space_id}/{document_name}"``),
+    skipping unset values. ``home_page_content_html`` is RAW Polarion HTML
+    wrapped verbatim into ``{"type":"text/html","value":...}`` — the
+    empty-string body-clearing guard lives in the tool layer, not here.
     """
     attributes: dict[str, JsonValue] = {}
     if title is not None:
@@ -523,13 +494,8 @@ def _build_create_document_payload(  # noqa: PLR0913
 ) -> dict[str, JsonValue]:
     """Build the JSON:API request body for ``POST .../spaces/{s}/documents``.
 
-    Mirrors ``_build_create_work_items_payload``'s POST shape: ``data`` is
-    a list with ``type=documents`` and inline ``attributes``.
-    Only attaches keys for values that are explicitly set -- ``None`` and
-    empty strings are skipped so we never overwrite Polarion defaults
-    with empty values on creation. ``custom_fields`` entries are inlined
-    into ``attributes`` alongside the standard fields via
-    ``merge_custom_fields``; colliding keys raise ``ValueError``.
+    POST shape (``data`` list, ``type=documents``, inline ``attributes``),
+    skipping unset values so creation never overwrites Polarion defaults.
     """
     attributes: dict[str, JsonValue] = {
         "moduleName": module_name,
@@ -629,9 +595,7 @@ def _build_document_comment_update_payload(
     tags={"write"},
     timeout=60.0,
     annotations={
-        # Pure additive operation per MCP spec — creates a new work item without
-        # mutating existing data, so destructiveHint is False. Not idempotent
-        # because retrying with the same input creates a duplicate.
+        # Additive: non-destructive, but non-idempotent (a retry duplicates).
         "readOnlyHint": False,
         "destructiveHint": False,
         "idempotentHint": False,
@@ -652,52 +616,44 @@ async def create_work_items(
     dry_run: bool = Field(
         default=False,
         description=(
-            "When True, validate inputs and return the payload preview "
-            "without writing. The enum guard still queries Polarion "
-            "(getAvailableOptions), so the validation endpoint must be "
-            "reachable even on a dry run."
+            "When True, return the payload preview without writing; the enum "
+            "guard still calls Polarion's getAvailableOptions, so that "
+            "endpoint must be reachable."
         ),
     ),
 ) -> WorkItemsCreateResult:
-    """Create one or more Polarion work items in a single request, all in
-    the same project. For every enum-valued field you pass on any item
-    (``type``, ``status``, ``severity``, or ``custom_fields`` enum
-    entries), you MUST first call ``list_work_item_enum_options(project_id,
-    field_id, work_item_type)`` and confirm the value appears in the
-    returned options. Unverified ids are accepted by Polarion but persist
-    as ghosts that never match Lucene queries. ``priority`` partly coerces
-    (non-numeric → project default) but numeric out-of-range still
-    persists verbatim. ``custom_fields`` keys are likewise unvalidated —
-    pass keys taken from a prior ``get_work_item``.
+    """Create one or more Polarion work items (1-50) in a single request, all
+    in the same project.
 
-    Each item's ``hyperlinks[].role`` is validated against the project's
-    ``hyperlink-role`` enumeration (typically ``ref_int`` / ``ref_ext``); an
-    unknown role raises ``ValueError`` before any write, since Polarion would
-    otherwise store it as a silent ghost.
+    For every enum-valued field on any item (``type``, ``status``,
+    ``severity``, ``custom_fields`` enum entries) you MUST first confirm the
+    value via ``list_work_item_enum_options(project_id, field_id,
+    work_item_type)`` — unverified ids are accepted by Polarion but persist as
+    ghosts that never match Lucene. ``priority`` partly coerces (non-numeric →
+    project default; numeric out-of-range still persists verbatim).
+    ``custom_fields`` keys are unvalidated and defined per project+type, so
+    take them from an existing work item of the same ``type`` via
+    ``get_work_item``. Each ``hyperlinks[].role`` is validated against the
+    project's ``hyperlink-role`` enumeration (``ValueError`` on an unknown role
+    before any write).
 
-    Bulk semantics: every item's enum guard, Markdown conversion, and
-    payload build run BEFORE any write, so a bad enum or colliding
-    custom-field key on ANY item rejects the whole batch with nothing sent.
-    Polarion's bulk POST is itself atomic — a server-rejected attribute on
-    one item fails the entire request and creates none. As a safeguard, if
-    the returned id count ever differs from the number of items submitted
-    the tool raises and you should re-query with ``list_work_items`` before
-    retrying. For per-item diagnostics, submit one spec per call.
+    Bulk semantics: enum guards, Markdown conversion, and payload build all run
+    BEFORE any write, and Polarion's bulk POST is atomic — a bad enum, colliding
+    custom-field key, or any server-rejected attribute on one item rejects the
+    whole batch with nothing created. The tool raises if the returned id count
+    differs from the number submitted; re-query ``list_work_items`` first.
 
-    Each work item is created free-floating — to place one inside a
-    document at a specific outline position, follow up per item with
-    ``move_work_item_to_document``. Direct creation into a document via the
-    ``module`` relationship is intentionally NOT exposed: per the Polarion
-    API such work items land in the document's recycle bin until a separate
-    Document Part is created, leaving them invisible in the document body.
-    Always pair create + move for a single, visible result.
+    Each item is created free-floating — to place one in a document at an
+    outline position, follow up with ``move_work_item_to_document``. Direct
+    creation into a document (via ``module``) is intentionally not exposed: such
+    items land in the recycle bin, invisible in the body. Always pair
+    create + move.
 
-    Format asymmetry: each item's ``description`` is Markdown (converted to
-    sanitized HTML on write) because greenfield authoring is natural for
-    LLMs. After creation the round-trip pair is
+    Format asymmetry: ``description`` is Markdown (converted to sanitized HTML
+    on write); after creation the round-trip pair is
     ``get_work_item(include_description_html=True)`` ↔
-    ``update_work_item(description_html=...)`` which speaks raw HTML
-    verbatim. The two formats never mix.
+    ``update_work_item(description_html=...)`` (raw HTML verbatim). The two
+    formats never mix.
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -735,16 +691,14 @@ async def create_work_items(
     )
     for index, spec in enumerate(items):
         if spec.custom_fields:
-            # Polarion exposes no project-config endpoint to enumerate valid
-            # custom-field keys, and on create there is no prior work item to
-            # observe. Surface the gap as a warning so an unknown key on
-            # create still leaves a forensic trail — the matching update path
-            # (``guard_work_item_custom_field_keys``) does enforce.
+            # Create can't hard-guard keys (no project-config endpoint, no prior
+            # item to observe) the way update_work_item does — warn instead.
             logger.warning(
                 "create_work_items[%d].custom_fields cannot be schema-validated "
                 "(no project-config endpoint for custom-field keys); "
-                "ensure keys come from a prior get_work_item to avoid ghost "
-                "attributes. project=%s type=%s keys=%s",
+                "ensure keys come from an existing work item of this type via "
+                "get_work_item to avoid ghost attributes. "
+                "project=%s type=%s keys=%s",
                 index,
                 project_id,
                 spec.type,
@@ -817,16 +771,11 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
         min_length=1,
         description="Short ID of an EXISTING work item (e.g. 'MCPT-042').",
     ),
-    title: str | None = Field(
-        default=None, description="New title (None to leave unchanged)."
-    ),
+    title: str | None = None,
     description_html: str | None = Field(
         default=None,
         max_length=MAX_BODY_HTML_LEN,
-        description=(
-            "New raw Polarion HTML body (round-trip shape from get_work_item); "
-            "'' is a no-op."
-        ),
+        description="New raw Polarion HTML body (round-trip shape from get_work_item).",
     ),
     status: str | None = Field(
         default=None,
@@ -838,9 +787,7 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
         default=None,
         description="New priority string (e.g. '50.0').",
     ),
-    severity: str | None = Field(
-        default=None, description="New severity classification."
-    ),
+    severity: str | None = None,
     due_date: str | None = Field(
         default=None, description="New due date 'YYYY-MM-DD'."
     ),
@@ -894,54 +841,43 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     dry_run: bool = Field(
         default=False,
         description=(
-            "When True, validate inputs and return the payload preview "
-            "without writing. The enum/custom-field guards still query "
-            "Polarion (a priming read plus getAvailableOptions), so the "
-            "work item must be readable and the validation endpoint reachable "
-            "even on a dry run."
+            "When True, return the payload preview without writing; "
+            "enum/custom-field guards still query Polarion, so the work item "
+            "must be readable and the validation endpoint reachable."
         ),
     ),
 ) -> WorkItemUpdateResult:
     """Update an existing Polarion work item.
 
-    PATCHes the supplied fields and follows up with a GET so the caller
-    can confirm the change in ``current``. ``None`` / empty string /
-    empty list all mean ``leave unchanged`` — this tool exposes no path
-    to clear a field.
+    PATCHes the supplied fields and follows up with a GET so the caller can
+    confirm the change in ``current``. ``None`` / empty string / empty list all
+    mean ``leave unchanged`` — there is no path to clear a field.
 
     ``description_html`` is RAW Polarion HTML, sent verbatim with no
-    sanitization, so XSS/script filtering is delegated to Polarion's
-    renderer — NEVER pass untrusted input. Pair with
-    ``get_work_item(include_description_html=True)`` for the round-trip.
-    For greenfield authoring use ``create_work_items`` with a
-    ``description`` (Markdown) — the two format paths never mix.
+    sanitization (XSS filtering is Polarion's job — NEVER pass untrusted input);
+    pair with ``get_work_item(include_description_html=True)`` for the
+    round-trip. For greenfield authoring use ``create_work_items`` with a
+    Markdown ``description`` — the two paths never mix.
 
-    ``hyperlinks`` and ``assignee_ids`` REPLACE the existing lists (pass
-    the full list, not a delta). Each hyperlink's ``role`` is validated
-    against the project's ``hyperlink-role`` enumeration (typically
-    ``ref_int`` / ``ref_ext``) and an unknown role raises ``ValueError``
-    before the PATCH (on ``dry_run`` too), since Polarion would otherwise
-    store it as a silent ghost. ``custom_fields`` is partial — omitted
-    keys are preserved. Unknown custom-field IDs silently persist as
-    ghost attributes; pass keys from a prior read to avoid creating them.
+    ``hyperlinks`` and ``assignee_ids`` REPLACE the existing lists (pass the
+    full list, not a delta). Each hyperlink ``role`` is validated against the
+    project's ``hyperlink-role`` enumeration (``ValueError`` before the PATCH,
+    on ``dry_run`` too, since an unknown role would persist as a ghost).
+    ``custom_fields`` is partial (omitted keys preserved); unknown keys are
+    rejected unless seen on a prior ``get_work_item`` for this type (one priming
+    read on a miss) — otherwise they would persist as ghost attributes.
 
-    The ``module`` relationship is NOT exposed here: Polarion rejects
-    PATCHes that attempt to modify it. To attach, detach, or move a
-    work item between documents, use ``move_work_item_to_document`` /
+    The ``module`` relationship is NOT exposed (Polarion rejects PATCHes that
+    touch it) — attach/detach/move via ``move_work_item_to_document`` /
     ``move_work_item_from_document``.
 
-    Prefer ``workflow_action`` over a raw ``status`` edit so the project's
-    transition rules run. ``workflow_action`` and ``change_type_to`` MUST
-    be paired with at least one body field — Polarion rejects empty PATCH
-    bodies (HTTP 400 "At least one of the members is required"). Polarion
-    itself does not validate ``status`` / ``severity`` / ``resolution`` /
-    ``priority`` / ``change_type_to`` ids, so this tool does: an unknown id
-    raises ``ValueError`` listing the valid options before the PATCH (on
-    ``dry_run`` too). When ``change_type_to`` is set, ``status`` /
-    ``severity`` / ``resolution`` are validated against the target type's
-    options. Unknown ``custom_fields`` keys are likewise rejected unless
-    seen on a prior ``get_work_item`` for this type (the tool does one
-    priming read on a miss).
+    Prefer ``workflow_action`` over a raw ``status`` edit so transition rules
+    run. ``workflow_action`` and ``change_type_to`` MUST be paired with at least
+    one body field (Polarion rejects empty PATCH bodies). Unknown ``status`` /
+    ``severity`` / ``resolution`` / ``priority`` / ``change_type_to`` ids raise
+    ``ValueError`` listing the valid options before the PATCH (on ``dry_run``
+    too); with ``change_type_to`` set, ``status`` / ``severity`` /
+    ``resolution`` are validated against the target type's options.
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -1033,11 +969,8 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
         custom_fields=custom_fields,
     )
 
-    # Polarion's PATCH endpoint rejects bodies with neither attributes
-    # nor relationships ("At least one of the members is required"),
-    # even when only the workflowAction / changeTypeTo query params are
-    # used. Catch this at the tool layer with an actionable message
-    # rather than letting Polarion 400.
+    # Polarion 400s on a PATCH body with neither attributes nor relationships,
+    # even when only workflowAction / changeTypeTo is set — catch it here.
     payload_data = cast(dict[str, JsonValue], payload["data"])
     if "attributes" not in payload_data and "relationships" not in payload_data:
         raise ValueError(
@@ -1054,11 +987,9 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
         f"/workitems/{encode_path_segment(work_item_id)}"
     )
 
-    # When any enum or custom-field arg is set, fetch the work item once
-    # so we know its type (enum options are type-scoped) and so the
-    # custom-key cache is primed for ``guard_work_item_custom_field_keys``.
-    # Runs on dry_run too so preview surfaces the same ValueError the
-    # real call would raise.
+    # Enum/custom-field args need the item's type (enum options are
+    # type-scoped) and prime the custom-key guard cache, so fetch once —
+    # on dry_run too, so preview raises the same ValueError as a real call.
     work_item_type = ""
     if status or severity or priority or resolution or change_type_to or custom_fields:
         try:
@@ -1094,12 +1025,10 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
                     current_detail.custom_fields.keys(),
                 )
 
-        # status / severity / resolution / priority are scoped by the
-        # work item's type. When ``change_type_to`` is set, validate them
-        # against the target type's options, since the patch lands the
-        # item in the new type. ``type`` is checked first inside the guard
-        # (against the ``~`` axis), so an invalid ``change_type_to`` raises
-        # before it is ever used as the scoping axis.
+        # Scope status/severity/resolution/priority by the target type
+        # (``change_type_to`` if set, since the patch lands there). The guard
+        # checks ``type`` first, so an invalid change_type_to raises before
+        # it is reused as the scoping axis.
         effective_type = change_type_to or work_item_type or "~"
         await guard_work_item_enums(
             client,
@@ -1172,11 +1101,8 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
         fallback_id=work_item_id,
     )
     if not include_current_description_html:
-        # Mirror ``get_work_item(include_description_html=False)`` —
-        # the body still travels over the wire (Polarion @all surfaces
-        # customs), but we blank it here to keep the LLM-facing
-        # ``current.description_html`` small for the common metadata-
-        # only update.
+        # Blank the returned body (it still came over the wire) to keep the
+        # common metadata-only update small — mirrors get_work_item.
         current = current.model_copy(update={"description_html": ""})
 
     return WorkItemUpdateResult(
@@ -1192,9 +1118,7 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     tags={"write"},
     timeout=60.0,
     annotations={
-        # idempotentHint=False: repeating moveToDocument against an
-        # already-moved work item may 400 instead of no-opping, so the
-        # action is treated as non-idempotent.
+        # Non-idempotent: re-moving an already-moved item may 400, not no-op.
         "readOnlyHint": False,
         "destructiveHint": True,
         "idempotentHint": False,
@@ -1237,35 +1161,29 @@ async def move_work_item_to_document(  # noqa: PLR0913
 ) -> WorkItemMoveResult:
     """Move a work item into a Polarion document at a specific position.
 
-    Calls the ``moveToDocument`` action endpoint, which updates the work item's
-    ``module`` relationship, inserts a document part at the specified
-    position, and assigns a proper ``outline_number`` — atomically. This
-    is the ONLY supported way to attach a work item body to a document; editing
-    ``homePageContent`` directly to inject a macro reference leaves the
-    ``module`` relationship unset and produces an inconsistent state.
+    Calls the ``moveToDocument`` action endpoint, which atomically updates the
+    work item's ``module`` relationship, inserts a document part at the
+    position, and assigns an ``outline_number``. This is the ONLY supported way
+    to attach a work item body to a document — editing ``homePageContent`` to
+    inject a macro reference leaves ``module`` unset, an inconsistent state.
 
-    Heading-type work items are rejected (HTTP 400 "Cannot move
-    headings"); headings must be created inside their target document.
-    If the work item is already in a different document, this detaches it from
-    the source — the operation is a move, not a copy. To detach a work
-    item back to free-floating (no document), use
-    ``move_work_item_from_document`` — the ``module`` relationship
-    cannot be cleared via PATCH.
+    Heading-type work items are rejected (HTTP 400) — headings must be created
+    inside their target document. If the item is already in another document
+    this detaches it from the source (a move, not a copy); to detach back to
+    free-floating use ``move_work_item_from_document`` (``module`` cannot be
+    cleared via PATCH).
 
-    Provide AT MOST one of ``previous_part_id`` (insert AFTER) /
-    ``next_part_id`` (insert BEFORE); if both are omitted the work item
-    is appended at the end of the target document. Discover part IDs
-    with ``read_document_parts``.
+    Provide AT MOST one of ``previous_part_id`` (insert AFTER) / ``next_part_id``
+    (insert BEFORE); omit both to append at the end. Discover part IDs with
+    ``read_document_parts``.
 
-    Side effect: this server auto-creates an outgoing link from the
-    moved work item to its enclosing section heading. The role is
-    project-configurable (commonly ``parent`` or ``relates_to``), so
-    discover it by inspecting forward links on a known-attached work
-    item in the same project. The auto-link appears in
-    ``list_work_item_links(direction="forward")`` after the move and is
-    silently removed by ``move_work_item_from_document``. The role
-    collides with any same-role link created from the same source --
-    see the "phantom success" note on ``create_work_item_links``.
+    Side effect: the server auto-creates an outgoing link from the moved item to
+    its enclosing heading. The role is project-configurable (commonly
+    ``parent`` / ``relates_to``) — inspect forward links on a known-attached
+    item to find it. It appears in ``list_work_item_links(direction="forward")``
+    after the move, is silently removed by ``move_work_item_from_document``, and
+    collides with any same-role link from the same source (see the "phantom
+    success" note on ``create_work_item_links``).
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -1346,9 +1264,7 @@ async def move_work_item_to_document(  # noqa: PLR0913
     tags={"write"},
     timeout=60.0,
     annotations={
-        # idempotentHint=False: calling moveFromDocument twice against the
-        # same work item returns HTTP 400 the second time (the work item
-        # is already free-floating).
+        # Non-idempotent: a second moveFromDocument 400s (already free-floating).
         "readOnlyHint": False,
         "destructiveHint": True,
         "idempotentHint": False,
@@ -1369,22 +1285,17 @@ async def move_work_item_from_document(
 ) -> WorkItemMoveResult:
     """Detach a work item from its document, returning it to free-floating state.
 
-    Inverse of ``move_work_item_to_document``. Calls the
-    ``moveFromDocument`` action endpoint, which clears the work item's
-    ``module`` relationship and removes the corresponding document part.
-    This is the ONLY supported detach path because Polarion rejects PATCH
-    attempts on the ``module`` relationship.
+    Inverse of ``move_work_item_to_document``. Calls the ``moveFromDocument``
+    action endpoint, which clears the work item's ``module`` relationship and
+    removes its document part — the ONLY supported detach path (Polarion rejects
+    PATCH on ``module``). The work item itself is preserved (history, links,
+    attributes) and reappears as free-floating, visible to ``list_work_items``;
+    re-attach via ``move_work_item_to_document``.
 
-    The work item resource itself is preserved (with all history, links,
-    and attributes) and reappears as a free-floating work item visible to
-    ``list_work_items`` but not to any document. To re-attach, call
-    ``move_work_item_to_document``.
-
-    Calling this on a work item that is already free-floating returns
-    HTTP 400, surfaced here as ``RuntimeError`` — not idempotent.
-    Heading-type work items CAN be detached; the heading becomes a
-    free-floating work item with ``space_id=""`` and ``outline_number=""``
-    (orphan-like state, but the work item is intact).
+    NOT idempotent: calling it on an already free-floating item returns HTTP 400
+    (``RuntimeError``). Heading-type items CAN be detached — the heading becomes
+    a free-floating work item with ``space_id=""`` / ``outline_number=""``
+    (orphan-like but intact).
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -1460,9 +1371,7 @@ async def update_document(  # noqa: PLR0913
         min_length=1,
         description="Document name within ``space_id``.",
     ),
-    title: str | None = Field(
-        default=None, description="New title (None to leave unchanged)."
-    ),
+    title: str | None = None,
     status: str | None = Field(
         default=None,
         description=(
@@ -1496,64 +1405,49 @@ async def update_document(  # noqa: PLR0913
     dry_run: bool = Field(
         default=False,
         description=(
-            "When True, validate inputs and return the payload preview "
-            "without writing. The enum/custom-field guards still query "
-            "Polarion (a priming read plus getAvailableOptions), so the "
-            "document must be readable and the validation endpoint reachable "
-            "even on a dry run."
+            "When True, return the payload preview without writing; "
+            "enum/custom-field guards still query Polarion, so the document "
+            "must be readable and the validation endpoint reachable."
         ),
     ),
 ) -> DocumentUpdateResult:
     """Update a Polarion document's metadata or body.
 
-    PATCHes only the attributes you set; omitted fields are preserved
-    server-side. Unlike ``update_work_item`` this does NOT follow up
-    with a GET — call ``get_document`` if you need the refreshed state.
+    PATCHes only the attributes you set; omitted fields are preserved. Unlike
+    ``update_work_item`` this does NOT follow up with a GET — call
+    ``get_document`` for the refreshed state.
 
     ``home_page_content_html`` is the round-trip pair for
-    ``get_document(include_homepage_content_html=True)``. The HTML is
-    sent verbatim with no sanitization, so XSS/script filtering is
-    delegated to Polarion's renderer — NEVER pass untrusted input.
-    Empty string is rejected (would wipe the body and orphan every
-    heading); pass ``'<p></p>'`` for a near-empty body.
+    ``get_document(include_homepage_content_html=True)``, sent verbatim with no
+    sanitization (XSS filtering is Polarion's job — NEVER pass untrusted input).
+    Empty string is rejected (would wipe the body and orphan every heading);
+    pass ``'<p></p>'`` for a near-empty body.
 
-    Body-write behaviour:
+    Body-write rules:
 
-    - **Heading auto-create**: inline ``<h1>..<h4>`` tags become heading
-      work items with ``module`` and ``outline_number`` set automatically.
-      A bare ``<hN>Title</hN>`` alone is safe.
-    - **Orphan headings**: removing an ``<hN>`` removes the part but
-      leaves the heading work item behind (still ``module``-linked, no
-      ``outline_number``).
-    - **DO NOT inject anchorless ``<p>`` paragraphs**: ``<h3>X</h3>
-      <p>Body</p>`` lets the PATCH succeed but the next
-      ``read_document_parts`` returns HTTP 500. Polarion's stored
-      paragraphs all carry ``id="polarion_..."`` anchors; raw ``<p>``
-      breaks server-side part derivation. The same applies to anchorless
-      ``<ul>``, ``<ol>``, ``<table>``, ``<div>``, ``<blockquote>``, and
-      ``<pre>``. The caller is responsible for stamping a unique
-      non-empty ``id=`` on every such block before PATCH; ``<h1>..<h4>``
-      do not need ids (Polarion rewrites them to a macro form on save).
-      Unlike ``create_document`` no Markdown auto-stamping convenience is
-      available on this path. For body text, create a new work item and
-      attach via ``create_work_items`` + ``move_work_item_to_document``.
-    - **DO NOT inject work item macro references**: appending
-      ``<div id="polarion_wiki macro name=module-workitem;params=id=NEW">``
-      creates a ``workitem_<NEW>`` part visible in
-      ``read_document_parts`` but leaves the work item's ``module`` relationship
-      unset (``space_id=""``, ``outline_number=""``) — an inconsistent
-      half-attached state. Always attach via
+    - **Headings auto-create**: inline ``<h1>..<h4>`` become heading work items
+      with ``module`` / ``outline_number`` set; a bare ``<hN>Title</hN>`` is safe
+      and needs no id. Removing an ``<hN>`` drops the part but leaves the heading
+      work item (still ``module``-linked, no ``outline_number``).
+    - **Anchorless blocks break parts**: ``<h3>X</h3><p>Body</p>`` PATCHes 200 but
+      the next ``read_document_parts`` returns HTTP 500 — Polarion's stored blocks
+      all carry ``id="polarion_..."`` anchors. Every anchorless ``<p>`` / ``<ul>``
+      / ``<ol>`` / ``<table>`` / ``<div>`` / ``<blockquote>`` / ``<pre>`` needs a
+      unique non-empty ``id=`` (the tool raises ``ValueError`` before the PATCH
+      otherwise, on ``dry_run`` too). This raw-HTML path has no Markdown
+      auto-stamping; for body text prefer ``create_work_items`` +
       ``move_work_item_to_document``.
+    - **No macro references**: injecting
+      ``<div id="polarion_wiki macro name=module-workitem;params=id=NEW">`` makes
+      a ``workitem_<NEW>`` part but leaves the work item's ``module`` unset
+      (``space_id=""``, ``outline_number=""``) — a half-attached state. Always
+      attach via ``move_work_item_to_document``.
 
-    Workflow: prefer ``workflow_action`` over a raw ``status`` edit so
-    project rules run. ``workflow_action`` MUST be paired with at least
-    one attribute field — Polarion rejects empty PATCH bodies. Polarion
-    itself does not validate ``status`` / ``type`` ids, so this tool does:
-    an unknown id raises ``ValueError`` listing the valid options. Unknown
-    ``custom_fields`` keys are likewise rejected unless seen on a prior
-    ``get_document`` for this document (the tool does one priming read on
-    a miss). An anchorless non-heading block in ``home_page_content_html``
-    raises ``ValueError`` before the write — stamp ids first.
+    Workflow: prefer ``workflow_action`` over a raw ``status`` edit so project
+    rules run; it MUST be paired with at least one attribute field (Polarion
+    rejects empty PATCH bodies). Unknown ``status`` / ``type`` ids raise
+    ``ValueError`` listing the valid options; unknown ``custom_fields`` keys are
+    rejected unless seen on a prior ``get_document`` (one priming read on a miss).
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -1621,11 +1515,9 @@ async def update_document(  # noqa: PLR0913
         )
 
     client = get_client(ctx)
-    # Guard type / status with type-agnostic options. For status this is
-    # less precise than scoping by the document's current type, but
-    # matches the cost trade-off used by ``create_document`` (no extra
-    # GET); the goal is to catch the obvious ghost-id cases (e.g.
-    # ``productRequirementSpecification``).
+    # Guard type/status against type-agnostic options — less precise than
+    # scoping by the document's type, but avoids the extra GET and still
+    # catches obvious ghost ids.
     await guard_document_enums(
         client,
         project_id,
@@ -1634,9 +1526,8 @@ async def update_document(  # noqa: PLR0913
         status=status,
     )
 
-    # Build first: ``merge_custom_fields`` rejects keys that shadow a standard
-    # attribute (e.g. ``title`` / ``homePageContent``) -- a more fundamental
-    # error than an unknown custom key, and cheaper than the guard's GET.
+    # Build first: merge_custom_fields rejects keys shadowing a standard
+    # attribute — a more fundamental error, and cheaper than the guard's GET.
     payload = _build_update_document_payload(
         project_id=project_id,
         space_id=space_id,
@@ -1647,9 +1538,8 @@ async def update_document(  # noqa: PLR0913
         home_page_content_html=home_page_content_html,
         custom_fields=custom_fields,
     )
-    # Hard guard: reject custom-field keys never seen on a prior get_document
-    # for this document (priming GET on cache miss). Polarion persists unknown
-    # keys as invisible ghosts, so an update with an unvetted key is corruption.
+    # Hard guard: reject custom-field keys unseen on a prior get_document
+    # (priming GET on miss) — Polarion persists unknown keys as silent ghosts.
     await guard_document_custom_field_keys(
         client,
         project_id,
@@ -1701,9 +1591,7 @@ async def update_document(  # noqa: PLR0913
     tags={"write"},
     timeout=60.0,
     annotations={
-        # Pure additive operation per MCP spec -- creates a new document without
-        # mutating existing data, so destructiveHint is False. Not idempotent
-        # because retrying with the same module_name returns HTTP 409.
+        # Additive: non-destructive, but non-idempotent (duplicate module_name 409s).
         "readOnlyHint": False,
         "destructiveHint": False,
         "idempotentHint": False,
@@ -1746,52 +1634,49 @@ async def create_document(  # noqa: PLR0913
     custom_fields: dict[str, object] | None = Field(  # noqa: B008
         default=None,
         description=(
-            "Optional custom fields keyed by Polarion field ID; "
+            "Optional custom fields keyed by Polarion field ID; take keys "
+            "from a sibling document via get_document to avoid ghost keys; "
             "rich-text values must be ``{'type':'text/html','value':...}``."
         ),
     ),
     dry_run: bool = Field(
         default=False,
         description=(
-            "When True, validate inputs and return the payload preview "
-            "without writing. The enum guard still queries Polarion "
-            "(getAvailableOptions), so the validation endpoint must be "
-            "reachable even on a dry run."
+            "When True, return the payload preview without writing; the enum "
+            "guard still calls Polarion's getAvailableOptions, so that "
+            "endpoint must be reachable."
         ),
     ),
 ) -> DocumentCreateResult:
-    """Create a new Polarion document in a space. Before calling this
-    tool, you MUST call ``list_documents(project_id, space_id)`` and
-    confirm ``module_name`` is not already present in the returned list
-    — duplicates return HTTP 409, surfaced as ``RuntimeError``. For
-    every enum-valued argument you pass (``type``, ``status``, or
-    ``custom_fields`` enum entries), supply only ids returned by
-    ``list_document_enum_options(project_id, field_id, document_type)``;
-    unverified ids persist as ghosts that never match Lucene.
-    ``custom_fields`` keys are likewise unvalidated — pass keys taken
-    from a prior ``get_document``.
+    """Create a new Polarion document in a space.
+
+    Before calling, you MUST call ``list_documents(project_id, space_id)`` and
+    confirm ``module_name`` is not already present — it must be unique within
+    the space, and a duplicate returns HTTP 409 (``RuntimeError``). For every
+    enum-valued argument (``type``, ``status``, ``custom_fields`` enum entries)
+    supply only ids returned by
+    ``list_document_enum_options(project_id, field_id, document_type)`` —
+    unverified ids persist as ghosts that never match Lucene. ``custom_fields``
+    keys are unvalidated too — take them from a sibling document via
+    ``get_document``.
 
     The document starts empty (or with the optional ``home_page_content``
-    body) and headings / work item parts can be added later via
-    ``update_document`` and ``move_work_item_to_document``.
-    ``module_name`` is Polarion's persistent identifier within the space
-    and appears in every subsequent URL.
+    body); add headings / work-item parts later via ``update_document`` and
+    ``move_work_item_to_document``. ``module_name`` is Polarion's persistent
+    identifier within the space and appears in every subsequent URL.
 
-    Format asymmetry: ``home_page_content`` here is Markdown (converted
-    to sanitized HTML on write) because greenfield authoring is natural
-    for LLMs. After creation the round-trip pair is
+    Format asymmetry: ``home_page_content`` is Markdown (converted to sanitized
+    HTML on write); after creation the round-trip pair is
     ``get_document(include_homepage_content_html=True)`` ↔
-    ``update_document(home_page_content_html=...)`` which speaks raw HTML
-    verbatim. The two formats never mix.
+    ``update_document(home_page_content_html=...)`` (raw HTML verbatim). The two
+    formats never mix.
 
-    When ``home_page_content`` is provided, every block-level element of
-    the rendered HTML (``<p>``, ``<ul>``, ``<ol>``, ``<table>``, ``<div>``,
-    ``<blockquote>``, ``<pre>``) is stamped with a unique
-    ``id="polarion_mcp_N"`` anchor. Without these ids the document saves
-    but the next ``read_document_parts`` returns HTTP 500. Headings
-    ``<h1>..<h4>`` are intentionally skipped — Polarion rewrites their
-    ids into a ``polarion_wiki macro name=module-workitem`` macro form on
-    save.
+    When ``home_page_content`` is provided, every block-level element (``<p>``,
+    ``<ul>``, ``<ol>``, ``<table>``, ``<div>``, ``<blockquote>``, ``<pre>``) is
+    stamped with a unique ``id="polarion_mcp_N"`` anchor — without these the
+    next ``read_document_parts`` returns HTTP 500. ``<h1>..<h4>`` are skipped
+    (Polarion rewrites them to a ``polarion_wiki macro name=module-workitem``
+    form on save).
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -1826,15 +1711,13 @@ async def create_document(  # noqa: PLR0913
         status=status,
     )
     if custom_fields:
-        # No project-config endpoint lists valid custom-field keys, and a
-        # brand-new document has no prior get to learn them from, so create
-        # cannot hard-guard keys the way update_document does. Warn; the LLM
-        # is expected to source keys from a sibling get_document.
+        # Create cannot hard-guard keys (no project-config endpoint, no prior
+        # get to learn them) the way update_document does — warn instead.
         logger.warning(
             "create_document.custom_fields cannot be schema-validated "
             "(no project-config endpoint for custom-field keys); ensure keys "
-            "come from a prior get_document to avoid ghost attributes. "
-            "project=%s module=%s keys=%s",
+            "come from a sibling document via get_document to avoid ghost "
+            "attributes. project=%s module=%s keys=%s",
             project_id,
             module_name,
             sorted(custom_fields),
@@ -1888,8 +1771,7 @@ async def create_document(  # noqa: PLR0913
             "The document may or may not exist; verify with list_documents."
         )
 
-    # Drop any stale list_documents entry so the new document appears on the
-    # very next call instead of waiting for the 60s TTL to expire.
+    # Drop the stale list_documents cache so the new doc shows on the next call.
     invalidate_documents_cache(project_id)
 
     return DocumentCreateResult(
@@ -1904,9 +1786,7 @@ async def create_document(  # noqa: PLR0913
     tags={"write"},
     timeout=60.0,
     annotations={
-        # Pure additive operation per MCP spec -- adds link records without
-        # mutating existing work items. Not idempotent: retrying the same
-        # (role, target) on an already-linked pair returns HTTP 409.
+        # Additive: non-destructive, non-idempotent (a duplicate role+target 409s).
         "readOnlyHint": False,
         "destructiveHint": False,
         "idempotentHint": False,
@@ -1932,58 +1812,38 @@ async def create_work_item_links(
 ) -> WorkItemLinksCreateResult:
     """Create one or more outgoing links (1-50) from a single source work item.
 
-    All links share the same source (``project_id`` / ``work_item_id``)
-    and are sent as a single bulk JSON:API request. For each spec
-    ``target_project_id`` defaults to ``project_id`` for the common
-    same-project case; pass it explicitly only for cross-project links.
-    The orientation matches ``list_work_item_links(direction="forward")``
-    on the source.
+    All links share the source (``project_id`` / ``work_item_id``) and post as
+    one atomic bulk JSON:API request. Per spec, ``target_project_id`` defaults
+    to ``project_id`` (set it only for cross-project links); ``revision`` pins
+    the link to a revision (else HEAD); ``suspect`` marks it for re-review
+    (usually False). Orientation matches
+    ``list_work_item_links(direction="forward")`` on the source.
 
-    Polarion does not validate link roles server-side -- an unknown ``role``
-    would be stored verbatim and never match subsequent queries -- so the
-    tool validates each ``role`` against the project's ``workitem-link-role``
-    enumeration first and raises ``ValueError`` listing the valid ids on a
-    miss (on ``dry_run=True`` as well).
+    Polarion validates neither role nor target, so the tool guards both before
+    the POST (on ``dry_run=True`` too): each ``role`` is checked against the
+    project's ``workitem-link-role`` enumeration (``ValueError`` listing the
+    valid ids on a miss), and each target's existence is verified (a missing
+    target would otherwise store as a silent dangling link with empty
+    title/type/status -- ``ValueError`` on a miss).
 
-    A nonexistent target is rejected before the write. Polarion accepts a
-    link to a missing target as a silent dangling link (HTTP 201, empty
-    title/type/status), so each target's existence is verified first and a
-    missing one raises ``ValueError`` -- on ``dry_run=True`` as well.
+    Returned ``link_ids`` are five-segment composites
+    ``<srcProj>/<srcWI>/<role>/<tgtProj>/<tgtWI>`` in input order -- the path
+    ids for later ``delete_work_item_links``. The POST is atomic: any Polarion
+    rejection (e.g. a duplicate (role, target) pair -> HTTP 409) rolls back the
+    whole batch, so a 4xx means nothing committed -- re-query
+    ``list_work_item_links(direction="forward")`` before retrying. The tool also
+    raises if a 2xx returns an id count differing from the number submitted.
 
-    Each spec's ``revision`` pins the link to a specific Polarion revision
-    when set, otherwise the link targets the current HEAD. ``suspect``
-    marks the link as needing re-review (usually False for new links).
-
-    The returned ``link_ids`` are five-segment composites
-    ``<srcProj>/<srcWI>/<role>/<tgtProj>/<tgtWI>`` in input order, and
-    are the path identifiers for future delete/PATCH of the same links
-    via ``delete_work_item_links``.
-
-    Bulk semantics: the POST is atomic. A link Polarion rejects -- e.g. a
-    duplicate (role, target) pair (HTTP 409) -- rolls back the whole batch,
-    including the links listed before and after it; nothing is committed.
-    Target existence and role validity are both checked before the POST (see
-    the role note above), so the batch is refused at the tool layer rather
-    than landing a dangling or ghost link. A 4xx from Polarion still means the
-    entire batch was refused; nothing is committed. As a safeguard, if a 2xx
-    response ever returns an id count different from the number of links
-    submitted the tool raises; re-query with
-    ``list_work_item_links(direction="forward")`` before retrying. For
-    per-link diagnostics, send one spec per call.
-
-    Phantom-success on same-role conflict: when the source work item is
-    attached to a document, ``move_work_item_to_document`` auto-creates
-    one outgoing link (role depends on project config -- see that
-    tool's docstring). Posting a NEW link with the SAME role from the
-    same source returns 201 and echoes the requested
-    ``link_id`` -- but the new link is NOT persisted. The pre-existing
-    auto-link remains the only forward link, with its original target.
-    There is no error to detect this client-side. After every create
-    on an in-document source, verify the actual stored state with
-    ``list_work_item_links(direction="forward")`` on the source AND
-    ``list_work_item_links(direction="back")`` on the intended target;
-    if your link is missing, detach via ``move_work_item_from_document``,
-    create the link, then re-attach with ``move_work_item_to_document``.
+    Phantom-success footgun: when the source is in a document,
+    ``move_work_item_to_document`` already auto-created one outgoing link (role
+    is project-config-dependent). Posting a NEW link with the SAME role returns
+    201 and echoes the ``link_id`` but is NOT persisted -- the auto-link stays
+    the only forward link, and there is no client-side error. After creating on
+    an in-document source, verify with
+    ``list_work_item_links(direction="forward")`` on the source and
+    ``(direction="back")`` on the target; if missing, detach via
+    ``move_work_item_from_document``, create the link, then re-attach with
+    ``move_work_item_to_document``.
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -2065,9 +1925,7 @@ async def create_work_item_links(
     tags={"write"},
     timeout=60.0,
     annotations={
-        # Destructive: removes existing link records. Idempotent at the
-        # body level -- Polarion silently ignores ids that don't match
-        # an existing link and returns 204 regardless.
+        # Destructive but idempotent: unmatched ids are ignored, 204 regardless.
         "readOnlyHint": False,
         "destructiveHint": True,
         "idempotentHint": True,
@@ -2093,32 +1951,24 @@ async def delete_work_item_links(
 ) -> WorkItemLinksDeleteResult:
     """Delete one or more outgoing links (1-50) from a single source work item.
 
-    Mirrors ``create_work_item_links``: same source coordinates, structured
-    refs for each target. Only **outgoing** ("forward") links are removed
-    through this endpoint. Back links are removed by calling this tool on
-    the *other* work item (the one owning the outgoing side). External
-    hyperlinks live on ``hyperlinks`` and are managed via
-    ``update_work_item``.
+    Mirrors ``create_work_item_links``: same source coordinates, structured refs
+    per target. Only **outgoing** ("forward") links are removed — delete a back
+    link by calling this tool on the other work item. External hyperlinks live
+    on ``hyperlinks`` (managed via ``update_work_item``).
 
-    How to identify links:
-    - From a prior ``create_work_item_links`` call: reuse the same specs
-      (drop ``suspect`` / ``revision`` -- delete needs only role + target).
-    - From ``list_work_item_links(direction="forward")``: each item's
-      ``role`` and ``id`` (the target's short ID) form one ref;
-      ``target_project_id`` defaults to ``project_id`` for same-project.
+    Identify links from a prior ``create_work_item_links`` (reuse the specs,
+    dropping ``suspect`` / ``revision`` — delete needs only role + target) or
+    from ``list_work_item_links(direction="forward")`` (each item's ``role`` +
+    ``id`` form a ref; ``target_project_id`` defaults to ``project_id``).
 
-    Polarion's delete is idempotent and silent: it removes refs that match
-    an existing outgoing link, ignores refs that don't, and returns 204
-    either way with no body -- so a stale ref looks identical to a real
-    delete. To make that visible, the tool first reads the source work
-    item's existing outgoing links (one extra GET, paginated) and splits
-    the request into ``deleted_link_ids`` (matched, removed) and
-    ``not_found_link_ids`` (no-ops). The delete still succeeds either way
-    -- a no-op is reported, never raised, so re-deleting an already-removed
-    link stays idempotent. Inspect ``not_found_link_ids`` to tell whether a
-    ref actually matched. The pre-read is fail-closed: an unreachable
-    backend raises ``RuntimeError`` before any delete, so the split is
-    always trustworthy when the call returns.
+    Polarion's delete is idempotent and silent — it removes matching refs,
+    ignores the rest, and returns 204 either way, so a stale ref looks like a
+    real delete. To make that visible the tool first reads the source's existing
+    outgoing links (one paginated GET) and splits the request into
+    ``deleted_link_ids`` (matched) and ``not_found_link_ids`` (no-ops); a no-op
+    is reported, never raised, so re-deleting stays idempotent. The pre-read is
+    fail-closed — an unreachable backend raises ``RuntimeError`` before any
+    delete, so the split is always trustworthy when the call returns.
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -2199,8 +2049,7 @@ async def delete_work_item_links(
     tags={"write"},
     timeout=60.0,
     annotations={
-        # Not destructive (no deletion). Not idempotent: re-PATCHing with the
-        # same values still increments Polarion's revision history.
+        # Non-destructive, non-idempotent (a re-PATCH still bumps the revision).
         "readOnlyHint": False,
         "destructiveHint": False,
         "idempotentHint": False,
@@ -2238,25 +2087,13 @@ async def update_work_item_link(  # noqa: PLR0913
 ) -> WorkItemLinkUpdateResult:
     """Update ``suspect`` / ``revision`` on one existing outgoing work item link.
 
-    Use this to clear a ``suspect`` flag after a reviewer signs off, or to
-    pin a link to a specific revision. Identify the link first with
-    ``list_work_item_links(direction="forward")``: the ``role`` and target
-    work item ID together address one specific link.
-
-    ``suspect`` and ``revision`` are tri-state: an explicit ``True`` /
-    ``False`` / string value updates that attribute, while ``None`` (the
-    default) leaves the existing server-side value alone. This differs
-    from ``create_work_item_links`` where ``suspect`` defaults to ``False``
-    (a concrete value). At least one of ``suspect`` / ``revision`` must be
-    provided -- passing both as ``None`` is rejected because Polarion
-    would 400 on the resulting empty PATCH body.
-
-    To update multiple links, call this tool once per link. Unlike
-    ``create_work_item_links`` / ``delete_work_item_links``, the PATCH
-    endpoint has no server-side bulk equivalent.
-
-    Polarion does not validate link role ids server-side, so a typo in
-    ``role`` returns 404 -- the link simply does not exist under that role.
+    Use to clear a ``suspect`` flag after sign-off or pin a link to a revision.
+    Identify the link first with ``list_work_item_links(direction="forward")``
+    (its ``role`` + target id address one link). ``suspect`` / ``revision`` are
+    tri-state: an explicit value updates that attribute, ``None`` (default)
+    leaves it unchanged — at least one must be set (an all-``None`` PATCH 400s).
+    One link per call: the PATCH endpoint has no bulk equivalent. A typo in
+    ``role`` returns 404 (no link exists under that role).
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -2334,9 +2171,7 @@ async def update_work_item_link(  # noqa: PLR0913
     tags={"write"},
     timeout=60.0,
     annotations={
-        # Pure additive operation — creates new comments without mutating
-        # existing data, so destructiveHint is False. Not idempotent
-        # because retrying with the same input creates duplicate comments.
+        # Additive: non-destructive, but non-idempotent (a retry duplicates comments).
         "readOnlyHint": False,
         "destructiveHint": False,
         "idempotentHint": False,
@@ -2365,29 +2200,15 @@ async def create_document_comments(  # noqa: PLR0913
 ) -> DocumentCommentsCreateResult:
     """Create one or more comments on a Polarion document in a single request.
 
-    All comments in ``comments`` are sent in a single POST to
-    ``/projects/{p}/spaces/{s}/documents/{d}/comments``.  Polarion
-    returns a 201 with the IDs of all created comments.
+    All ``comments`` post together; Polarion returns 201 with the new IDs.
 
-    **Thread model**: a comment with ``parent_comment_id=None`` is a
-    top-level review comment.  To reply to an existing comment, set
-    ``parent_comment_id`` to the short ID returned in
-    ``list_document_comments`` (e.g. ``'c42'``); the tool composes the
-    full four-segment path ``proj/space/doc/c42`` that the Polarion API
-    requires.
-
-    **Text format**: ``'text/plain'`` (default) stores the body
-    verbatim.  Use ``'text/html'`` for HTML-formatted bodies — the HTML
-    is sent as-is, no sanitization.
-
-    **resolved**: omitting the field (``None``) lets Polarion default to
-    ``False``; pass ``True`` to create a pre-resolved comment.
-
-    **author_id**: omit to have Polarion use the authenticated token's
-    user.
-
-    This operation is NOT idempotent — retrying with the same input
-    creates duplicate comments.
+    Thread model: ``parent_comment_id=None`` is a top-level comment; to reply,
+    set it to the short ID from ``list_document_comments`` (e.g. ``'c42'``) and
+    the tool composes the required 4-segment path ``proj/space/doc/c42``.
+    ``text_format`` ``'text/plain'`` (default) stores verbatim; ``'text/html'``
+    is sent as-is (no sanitization). Omit ``resolved`` to default to False, or
+    pass True for a pre-resolved comment; omit ``author_id`` to use the token's
+    user. NOT idempotent — retrying creates duplicates.
 
     Args:
         ctx: MCP tool context (injected automatically).
@@ -2512,23 +2333,14 @@ async def update_document_comment(  # noqa: PLR0913
 ) -> DocumentCommentUpdateResult:
     """Resolve or re-open a single document comment.
 
-    Sends PATCH to
-    ``/projects/{p}/spaces/{s}/documents/{d}/comments/{commentId}``
-    with ``{"resolved": <bool>}`` — the only patchable attribute on a
-    document comment. Use ``list_document_comments`` to discover the
-    short comment ID (last segment of the full 4-part path).
+    PATCHes ``{"resolved": <bool>}`` — the only patchable attribute. Use
+    ``list_document_comments`` to find the short comment ID (last segment of the
+    4-part path).
 
-    Root comments only: Polarion accepts this PATCH only on top-level
-    comments (``parent_comment_id`` is ``None`` in
-    ``list_document_comments``). Calling it on a reply — any comment
-    with a non-null ``parent_comment_id`` — returns HTTP 400 "Resolved
-    field can be set only for root comments" and surfaces as
-    ``RuntimeError``. Filter for ``parent_comment_id is None`` before
-    calling. There is no server-side workflow to resolve an individual
-    reply; resolving the root marks the entire thread resolved.
-
-    This operation is idempotent: marking a comment resolved twice leaves
-    the same server state as marking it resolved once.
+    Root comments only: Polarion accepts this PATCH only on top-level comments
+    (``parent_comment_id is None``); on a reply it returns HTTP 400 ("Resolved
+    field can be set only for root comments") → ``RuntimeError``, so filter
+    first. Resolving the root marks the whole thread resolved. Idempotent.
 
     Args:
         ctx: MCP tool context (injected automatically).
