@@ -37,6 +37,7 @@ _READ_TOOL_NAMES: frozenset[str] = frozenset(
         "read_document_parts",
         "read_document",
         "list_work_items",
+        "get_sql_query_recipes",
         "get_work_item",
         "read_work_item",
         "list_work_item_links",
@@ -85,6 +86,20 @@ class TestToolRegistration:
     async def test_all_expected_tools_registered(self, mcp_client: _MCPClient) -> None:
         names = {t.name for t in await mcp_client.list_tools()}
         assert names == EXPECTED_TOOL_NAMES
+
+
+class TestSqlRecipeGallery:
+    """The SQL recipe gallery reaches the transport as a callable tool."""
+
+    async def test_get_sql_query_recipes_reads(self, mcp_client: _MCPClient) -> None:
+        # ``list_work_items`` tells the LLM it MUST call this tool before
+        # hand-writing SQL, so an empty payload would strand that instruction.
+        result = await mcp_client.call_tool("get_sql_query_recipes", {})
+        body = result.structured_content
+        assert body is not None
+        recipes = body["recipes"]
+        assert "list_work_items SQL recipes" in recipes
+        assert "POLARION.STRUCT_WORKITEM_LINKEDWORKITEMS" in recipes
 
 
 @pytest.mark.parametrize("tool_name", sorted(EXPECTED_TOOL_NAMES))

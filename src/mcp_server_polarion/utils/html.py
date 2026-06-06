@@ -70,11 +70,9 @@ _DECOMPOSE_TAGS: Final[frozenset[str]] = frozenset({"script", "style"})
 # (javascript:, data:, vbscript:, etc.) is stripped to prevent stored XSS.
 _SAFE_URL_SCHEMES: Final[frozenset[str]] = frozenset({"http", "https", "mailto"})
 
-# Upper bound on cells materialised for a single merged-cell expansion
-# (``colspan * rowspan``).  Per-attribute clamp is 1000, so without this
-# total bound an adversarial ``colspan="1000" rowspan="1000"`` would yield
-# 1M tag clones for a single cell.  10k cells comfortably accommodates any
-# realistic Polarion table while keeping worst-case allocation bounded.
+# Upper bound on cells materialised per merged-cell expansion (colspan*rowspan).
+# Bounds an adversarial colspan="1000" rowspan="1000" (1M clones) while still
+# covering any realistic Polarion table.
 _MAX_CELLS_PER_MERGE: Final[int] = 10_000
 
 # markdown-it-py renderer: CommonMark base + GFM tables.
@@ -279,11 +277,9 @@ def _rectangularize_table(table: Tag) -> None:
                 if attr in cell.attrs:
                     del cell.attrs[attr]
 
-            # Place the original + colspan duplicates one column at a time,
-            # skipping positions already reserved by a rowspan from above.
-            # The cell may therefore land at non-contiguous column indices —
-            # the same behaviour browsers exhibit when a colspan is pushed
-            # past a rowspan reservation.
+            # Place original + colspan duplicates one column at a time, skipping
+            # columns already reserved by a rowspan above (so a cell may land on
+            # non-contiguous indices, as browsers do).
             placed_cols: list[int] = []
             for j in range(colspan):
                 while col_idx in layout:

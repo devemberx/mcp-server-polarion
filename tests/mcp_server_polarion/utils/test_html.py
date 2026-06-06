@@ -317,10 +317,8 @@ class TestHtmlToMarkdownMergedCells:
 
     def test_table_pathological_span_product_bounded(self) -> None:
         """colspan*rowspan is clamped to keep worst-case allocation bounded."""
-        # Per-attr clamp is 1000 each — without the product clamp this would
-        # try to materialise 1M tag clones.  With _MAX_CELLS_PER_MERGE=10000
-        # it stays bounded; we just assert the call returns in reasonable
-        # time and the first row carries the merged value.
+        # 1000*1000 per-attr clamps would materialise 1M clones without the
+        # product clamp; _MAX_CELLS_PER_MERGE bounds it so the call returns.
         html = (
             '<table><tbody><tr><td colspan="1000" rowspan="1000">M</td>'
             "<td>Z</td></tr></tbody></table>"

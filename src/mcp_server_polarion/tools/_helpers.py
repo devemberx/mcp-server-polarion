@@ -46,10 +46,10 @@ class WorkItemSummaryKwargs(TypedDict):
 # Polarion enforces a hard cap of 100 server-side.
 DEFAULT_PAGE_SIZE: Final[int] = 100
 
-# Sparse fieldsets. Detail / document fetches use ``@all`` because this
-# Polarion server inlines custom fields under ``attributes`` and silently
-# drops narrower ``customFields.*`` tokens. ``WORK_ITEM_PART_FIELDS`` stays tight
-# because ``DocumentPart`` does not surface embedded-work item customs.
+# Sparse fieldsets. Detail/document fetches use ``@all`` because this server
+# inlines custom fields under ``attributes`` and drops narrower
+# ``customFields.*`` tokens; ``WORK_ITEM_PART_FIELDS`` stays tight (parts
+# surface no embedded customs).
 WORK_ITEM_LIST_FIELDS: Final[str] = "title,type,status,priority,updated,module,assignee"
 WORK_ITEM_DETAIL_FIELDS: Final[str] = "@all"
 WORK_ITEM_PART_FIELDS: Final[str] = "title,type,status,description,outlineNumber"
@@ -62,12 +62,10 @@ DOCUMENT_COMMENT_LIST_FIELDS: Final[str] = (
     "created,resolved,text,author,parentComment,childComments"
 )
 
-# Canonical standard attribute names per the Polarion REST OpenAPI schema.
-# Used by ``extract_custom_fields`` as an allowlist: anything appearing in
-# a response's ``attributes`` that is NOT in this set is treated as a
-# project-defined custom field. Sourced verbatim from the OpenAPI workitem
-# schema; a future Polarion release that adds new standard attributes
-# would misclassify them as custom until this set is updated.
+# Standard attribute allowlist (Polarion REST OpenAPI schema). Anything in a
+# response's ``attributes`` outside this set is treated as a custom field, so a
+# future Polarion release adding standard attributes misclassifies them until
+# this set is updated.
 STANDARD_WORK_ITEM_ATTRIBUTES: Final[frozenset[str]] = frozenset(
     {
         "id",

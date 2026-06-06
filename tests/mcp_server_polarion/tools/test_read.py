@@ -638,7 +638,7 @@ class TestListDocuments:
         """Different project IDs do not share cache entries."""
 
         async def _mock_get(_path, *, params=None):
-            # Echo project from path? Simpler: return distinct document per call.
+            # Return a distinct document per call so cross-project sharing shows up.
             return {
                 "data": [
                     {

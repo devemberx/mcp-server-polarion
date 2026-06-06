@@ -65,11 +65,9 @@ class TTLCache[K, V]:
 
 Resource = Literal["workitems", "documents"]
 
-# Enum options and custom-field schema are project config, near-static within
-# a session. The binding TTL constraint is not freshness but the ghost-safety
-# window: if an admin removes an option mid-session, a stale entry keeps
-# accepting the now-invalid value until expiry. 60s keeps that window short
-# while staying well inside the <=3 req/s budget.
+# Enum options and custom-field schema are near-static project config. The TTL
+# is bounded by ghost-safety, not freshness: a stale entry keeps accepting an
+# option an admin removed mid-session until expiry, so 60s caps that window.
 _GUARD_TTL_SECONDS: Final[float] = 60.0
 
 # The document listing is mutable: a freshly created document must surface
