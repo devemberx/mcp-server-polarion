@@ -22,7 +22,10 @@ jobs:
         run: uv python install 3.13
 
       - name: Install dependencies
-        run: uv sync --dev
+        # Include the evals group so the eval harness' unit tests actually run
+        # here (importorskip'd otherwise) — this is the only place pytest runs
+        # on a PR; evals.yml is workflow_dispatch-only and never runs pytest.
+        run: uv sync --dev --group evals
 
       - name: Run ruff (lint + format check)
         run: |
