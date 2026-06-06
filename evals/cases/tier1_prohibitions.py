@@ -24,7 +24,8 @@ deterministically:
 Silent-corruption modes that *can* be guarded server-side (ghost enum ids,
 ghost custom-field keys, out-of-range priority, anchorless body blocks) are
 enforced by ``mcp_server_polarion.tools._guard`` / ``utils.html`` and verified
-by ``tests/tools/test_guard.py`` / ``tests/utils/test_html.py`` -- they do not
+by ``tests/mcp_server_polarion/tools/test_guard.py`` /
+``tests/mcp_server_polarion/utils/test_html.py`` -- they do not
 appear here so the gate spends its runs on behaviours unit tests cannot reach.
 """
 

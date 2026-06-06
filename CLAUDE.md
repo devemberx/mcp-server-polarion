@@ -11,7 +11,7 @@ MCP server giving AI assistants read/write access to Polarion ALM via MCP. FastM
 ```bash
 uv sync --dev                                            # install deps
 uv run pytest                                            # all tests
-uv run pytest tests/tools/test_read.py::TestGetWorkItem  # single class
+uv run pytest tests/mcp_server_polarion/tools/test_read.py::TestGetWorkItem  # single class
 uv run pytest -k test_page_size_rejects_above_max        # single test
 uv run ruff check . && uv run ruff format . && uv run mypy src/  # lint + format + types
 uv run mcp-server-polarion                               # run server (stdio)
@@ -46,11 +46,12 @@ CI: `ruff check` → `ruff format --check` → `mypy` → `pytest`.
 
 Applies to ALL comments/docstrings (tools, helpers, inline, CLAUDE.md).
 
-- One line per field description; omit when name + type say everything. Both model and tool-param `Field(description=...)` count against load context, so **omit when the name is unambiguous** (`id`, `title`, `status`, `page_size`) and never restate schema-encoded constraints (`ge`/`le`/`default`/`Literal`/type). Corollaries: `e.g.` examples are input-only (they steer the LLM's choice on input specs; drop on output models, where it reads the value); don't repeat dry-run / `payload_preview` semantics per result model. Keep non-obvious semantics: units, empty-conditions, round-trip/read-only contracts, tri-state `None`, ordering. Invariant: `tests/test_models.py::test_field_descriptions_are_non_empty_when_set`.
-- State facts plainly — no `WARNING:`/`FOOTGUN:`/`NOTE:` prefixes, no banner dividers (`# ---`).
-- No dev-narrative ("verified via smoke test", "we tried X then Y", "as of vN") — that belongs in commits/PRs.
-- **CLAUDE.md is dev-only** — other MCP hosts never load it; anything an MCP-user LLM needs must live in the `@mcp.tool` docstring.
-- Module docstrings explain *why*; timing/sizing/refactor history goes inline next to what it constrains.
+- Field descriptions stay one line; skip when name + type say everything. Cross-model invariant: `tests/mcp_server_polarion/test_models.py::test_field_descriptions_are_non_empty_when_set`.
+- No `WARNING:` / `FOOTGUN:` / `NOTE:` prefix upgrades — state the fact plainly.
+- No dev-narrative ("verified via smoke test", "we tried X then switched to Y", "as of vN") — belongs in commit messages and PR descriptions.
+- No banner-divider comments (`# ---`, `# === Section ===`).
+- **CLAUDE.md is dev-only.** Other MCP hosts (Cursor / Copilot / generic FastMCP clients) never load it — anything an MCP-user LLM needs must live inside the `@mcp.tool` docstring, even if it duplicates content here.
+- Module docstrings explain *why* the module exists; specific timing / sizing / refactor history goes inline next to the thing it constrains.
 
 ## Polarion API & Gotchas
 
@@ -85,9 +86,13 @@ Applies to ALL comments/docstrings (tools, helpers, inline, CLAUDE.md).
 
 ## Testing
 
-`pytest-asyncio` `mode=auto`. **Tool tests** (`tests/tools/`) call tool functions directly with an injected `mock_client` (FastMCP 3.0 `@mcp.tool` returns the original fn). **Client tests** (`tests/core/test_client.py`) use `respx`; shared fixtures in `tests/conftest.py` (`write_delay=0` for real clients). Pydantic `Field` constraints bypass FastMCP JSON Schema on direct calls — verify via `TypeAdapter` (`TestCreateWorkItemFieldValidation`).
+`tests/` mirrors every source tree one-to-one — `tests/mcp_server_polarion/` (with `core/`, `tools/`, `utils/`) mirrors the package, `tests/evals/` mirrors `evals/` (`evaluators/`, `harness/`, `cases/`), and `tests/claude_hooks/` + `tests/github_scripts/` mirror the loose scripts under `.claude/hooks/` + `.github/scripts/`. One test module per source module; `conftest.py` stays at the `tests/` root so its shared fixtures reach the whole tree.
 
-**Transport tests** (`tests/test_mcp_transport.py`) drive the server through `fastmcp.Client(mcp)` in-memory transport end to end (registration → schema → lifespan → real `PolarionClient` → mocked HTTP). Adding a `@mcp.tool` requires updating `EXPECTED_TOOL_NAMES` — the forcing function.
+`pytest-asyncio` in `mode=auto`. **Tool tests** (`tests/mcp_server_polarion/tools/`) call tool functions directly with an injected `mock_client` (FastMCP 3.0's `@mcp.tool` returns the original function). **Client tests** (`tests/mcp_server_polarion/core/test_client.py`) use `respx`. Shared fixtures live in `tests/conftest.py`; pass `write_delay=0` for real `PolarionClient` instances. Pydantic `Field` constraints bypass FastMCP's JSON Schema on direct calls — verify via `TypeAdapter` reconstruction (see `TestCreateWorkItemFieldValidation`).
+
+**Transport tests** (`tests/mcp_server_polarion/test_mcp_transport.py`) drive the server through `fastmcp.Client(mcp)` in-memory transport so registration → JSON Schema → lifespan → `get_client(ctx)` → real `PolarionClient` → mocked HTTP runs end to end. Adding a new `@mcp.tool` requires updating `EXPECTED_TOOL_NAMES` — that is the forcing function. The fixture monkeypatches `_WRITE_DELAY_SECONDS` because the lifespan constructs `PolarionClient` itself.
+
+Tests for the eval harness (`tests/evals/`) import `strands` / `strands_evals`, only present in the `evals` dependency group, so they open with `pytest.importorskip` — they run in CI because `ci.yml` syncs `--group evals`, and skip (rather than error) on a bare `uv sync --dev`.
 
 ## Evals — Tier-1 deploy gate
 

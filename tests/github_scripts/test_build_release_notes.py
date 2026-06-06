@@ -8,30 +8,21 @@ the workflow itself.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 from pathlib import Path
-from types import ModuleType
 
 import pytest
 
+from tests.conftest import load_module_from_path
+
 SCRIPT = (
-    Path(__file__).resolve().parent.parent
+    Path(__file__).resolve().parents[2]
     / ".github"
     / "scripts"
     / "build_release_notes.py"
 )
 
-
-def _load() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("build_release_notes", SCRIPT)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-brn = _load()
+brn = load_module_from_path(SCRIPT, "build_release_notes")
 
 
 def _fake_gh(*, ref_object: dict[str, str], message: str | None = None):
