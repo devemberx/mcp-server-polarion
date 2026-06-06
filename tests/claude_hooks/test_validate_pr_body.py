@@ -7,24 +7,15 @@ the `main()` stdin/exit-code path is left to manual / e2e checks.
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
-from types import ModuleType
 
 import pytest
 
+from tests.conftest import load_module_from_path
+
 HOOKS_DIR = Path(__file__).resolve().parents[2] / ".claude" / "hooks"
 
-
-def _load(filename: str, module_name: str) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(module_name, HOOKS_DIR / filename)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-body = _load("validate-pr-body.py", "validate_pr_body")
+body = load_module_from_path(HOOKS_DIR / "validate-pr-body.py", "validate_pr_body")
 
 
 class TestBodyClassify:

@@ -7,24 +7,15 @@ left to the workflow itself.
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
-from types import ModuleType
+
+from tests.conftest import load_module_from_path
 
 SCRIPT = (
     Path(__file__).resolve().parents[2] / ".github" / "scripts" / "mcp_scan_summary.py"
 )
 
-
-def _load() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("mcp_scan_summary", SCRIPT)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-mss = _load()
+mss = load_module_from_path(SCRIPT, "mcp_scan_summary")
 
 
 class TestRender:

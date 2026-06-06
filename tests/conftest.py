@@ -2,12 +2,29 @@
 
 from __future__ import annotations
 
+import importlib.util
 from collections.abc import AsyncIterator
+from pathlib import Path
+from types import ModuleType
 
 import pytest
 
 from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.core.config import PolarionConfig
+
+
+def load_module_from_path(path: Path, module_name: str) -> ModuleType:
+    """Import a standalone script by file path.
+
+    The tracked hooks (`.claude/hooks/`) and CI scripts (`.github/scripts/`) live
+    outside the package and some use hyphenated names, so they can't be imported
+    normally; their tests load them through here.
+    """
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 @pytest.fixture
