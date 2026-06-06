@@ -1,10 +1,7 @@
 name: Label PR by title
 
-# GitHub's native release-note grouping (.github/release.yml) keys off PR
-# labels, not commit messages. This maps each PR's conventional-commit title
-# prefix to the matching label so the auto-generated release notes group
-# cleanly. pull_request_target so labels also land on fork PRs; the title is
-# passed via env (never interpolated into the shell) and no PR code is run.
+# Maps each PR's conventional-commit title prefix to a label for .github/release.yml grouping.
+# Uses pull_request_target for fork PR access; title passed via env, no PR code runs.
 on:
   pull_request_target:
     types: [opened, edited, reopened]
@@ -26,11 +23,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Parse "<type>(scope)!: subject" — type, scope, and the optional ! marker.
+          # 1. Parse title "type(scope)!: subject" into components.
+          #    Example: "feat(auth)!: add OAuth" → type=feat  scope=auth  bang=!
           type="$(printf '%s' "$PR_TITLE" | sed -nE 's/^([a-z]+)(\([^)]*\))?!?:.*/\1/p')"
           scope="$(printf '%s' "$PR_TITLE" | sed -nE 's/^[a-z]+\(([^)]*)\)!?:.*/\1/p')"
           bang="$(printf '%s' "$PR_TITLE" | sed -nE 's/^[a-z]+(\([^)]*\))?(!):.*/\2/p')"
 
+          # 2. Map commit type → release-note label.
           declare -A map=(
             [feat]=feature
             [fix]=bug
@@ -43,10 +42,8 @@ jobs:
           )
 
           labels=()
-          # Dependency bumps (dependabot uses "(deps)" / "(deps-dev)") get their
-          # own label so release notes can group them under Dependencies.
           case "$scope" in
-            deps|deps-dev) labels+=("dependencies") ;;
+            deps|deps-dev) labels+=("dependencies") ;;  # dependabot: group under Dependencies
             *) [ -n "${map[$type]:-}" ] && labels+=("${map[$type]}") ;;
           esac
           [ -n "$bang" ] && labels+=("breaking")
@@ -56,12 +53,11 @@ jobs:
             exit 0
           fi
 
-          # Idempotently ensure each label exists, then apply.
+          # 3. Create missing labels, then apply to the PR.
           for l in "${labels[@]}"; do
             gh label create "$l" --repo "$REPO" --color ededed >/dev/null 2>&1 || true
           done
-          # `gh pr edit --add-label` fails on this repo (Projects-classic
-          # deprecation poisons its GraphQL call), so add via the REST endpoint.
+          # gh pr edit --add-label fails here (Projects-classic GraphQL bug); use REST.
           args=()
           for l in "${labels[@]}"; do args+=(-f "labels[]=$l"); done
           gh api -X POST "repos/$REPO/issues/$PR_NUMBER/labels" "${args[@]}" >/dev/null

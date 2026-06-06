@@ -3,7 +3,7 @@ name: Security Scan
 on:
   workflow_call:
   schedule:
-    - cron: '0 18 * * *'   # daily 18:00 UTC — re-scan code against updated YARA rules
+    - cron: '0 18 * * *'   # daily 18:00 UTC
   workflow_dispatch:
 
 permissions:
@@ -75,11 +75,9 @@ jobs:
         run: uv python install 3.13
 
       - name: Export production-only requirements
-        # Scan only the deps that ship in the wheel. Dev/eval-only groups
-        # (ruff, mypy, strands-agents, ...) never reach end users via PyPI
-        # so their CVEs should not gate publish; Dependabot still tracks
-        # them on its own cadence. --no-hashes is required because the OSV
-        # scanner's pip parser does not read the multiline hash form.
+        # Scan only the deps that ship in the wheel.
+        # --no-hashes is required 
+        # because the OSV scanner's pip parser does not read the multiline hash form.
         run: |
           uv export --no-dev --no-emit-project --no-hashes \
             --format requirements-txt > runtime-requirements.txt
