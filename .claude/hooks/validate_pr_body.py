@@ -1,34 +1,17 @@
 #!/usr/bin/env python3
 """PreToolUse hook: block PR/issue body Bash invocations that violate repo conventions.
 
-Triggered before every Bash tool call. Skips silently unless the command is one of:
-  - gh pr (create|edit)
-  - gh issue (create|edit|comment)
-  - gh pr comment
-  - gh api ... /pulls/... (body= or body=@)
-  - gh api ... /issues/... (body= or body=@)
+Triggered on: gh pr (create|edit|comment), gh issue (create|edit|comment),
+gh api .../pulls/... or .../issues/...
 
-When triggered, extracts the body content from the command, then enforces these
-rules:
+Rules:
+  1. English-only — no non-ASCII characters in the body.
+  2. Template checkboxes preserved — every checkbox from PULL_REQUEST_TEMPLATE.md
+     must appear (PR create/edit only).
+  3. ## Changes section — exactly two non-empty bullets, each <= 120 chars
+     (PR create/edit only).
 
-  1. **English-only.** No Hangul characters (U+AC00-D7A3, U+3131-318E) anywhere in
-     the body. Per ``feedback_repo_artifacts_english`` memory and CLAUDE.md.
-
-  2. **Template checkboxes preserved.** For PR create/edit only, every
-     ``- [ ] ...`` / ``- [x] ...`` line in ``.github/PULL_REQUEST_TEMPLATE.md``
-     must appear in the body (state ``[ ]`` vs ``[x]`` is irrelevant). Per
-     CLAUDE.md: "flip ``[ ]`` -> ``[x]`` for matching items; do not delete
-     unchecked options."
-
-  3. **Changes section in commit-body format.** For PR create/edit only, the
-     ``## Changes`` section must hold exactly two non-empty ``- `` bullets, each
-     <= 120 chars -- the same rule the squash commit body follows (the template
-     marks Changes as "these become the squash commit body"). Empty template
-     stubs (``- `` with no text) do not count, so an unfilled section fails.
-
-Exit codes:
-  0 = allow tool call (no violation, or command is unrelated)
-  2 = block tool call; stderr message reaches Claude as feedback
+Exit 0 = allow, exit 2 = block.
 """
 
 from __future__ import annotations
@@ -39,7 +22,14 @@ import shlex
 import sys
 from pathlib import Path
 
-HANGUL_RE = re.compile(r"[가-힣ㄱ-ㆎ]")
+NON_ASCII_RE = re.compile(r"[^\x00-\x7F]")
+EMOJI_RE = re.compile(
+    "[\U0001f000-\U0001faff"  # pictographs, emoticons, transport, flags
+    "\U00002600-\U000027bf"  # misc symbols + dingbats
+    "\U00002b00-\U00002bff"  # misc symbols and arrows
+    "\U0000fe00-\U0000fe0f"  # variation selectors
+    "\U0000200d]"  # zero-width joiner (emoji sequences)
+)
 CHECKBOX_RE = re.compile(r"^- \[[ x]\] (.+)$", re.MULTILINE)
 CHANGES_HEADER_RE = re.compile(r"^##\s+Changes\s*$", re.IGNORECASE | re.MULTILINE)
 NEXT_SECTION_RE = re.compile(r"^##\s", re.MULTILINE)
@@ -70,25 +60,21 @@ def main() -> int:
 
     body = extract_body(cmd)
     if body is None:
-        # No body argument found; nothing to validate. e.g. `gh pr edit --title` only.
         return 0
 
     errors: list[str] = []
-    if HANGUL_RE.search(body):
+    if has_disallowed_non_ascii(body):
         errors.append(
-            "Body contains Korean characters. Per repo convention "
-            "(memory: feedback_repo_artifacts_english, CLAUDE.md), PR/issue/commit "
-            "artifacts stay in English even when the chat is in Korean. Rewrite "
-            "the body in English."
+            "Body contains non-ASCII characters (other than emoji). Per repo "
+            "convention PR/issue/commit artifacts must be in English."
         )
 
     if kind == "pr":
         missing = missing_template_boxes(body)
         if missing:
             errors.append(
-                "Body is missing template checkboxes. Per CLAUDE.md: "
-                "'flip [ ] -> [x] for matching items; do NOT delete unchecked "
-                "options.' Include these lines (toggle state as needed):\n"
+                "Body is missing template checkboxes. "
+                "Do NOT delete unchecked options."
                 + "\n".join(f"    - [ ] {m}" for m in missing)
             )
         errors.extend(changes_format_errors(body))
@@ -102,10 +88,11 @@ def main() -> int:
     return 0
 
 
+def has_disallowed_non_ascii(body: str) -> bool:
+    return bool(NON_ASCII_RE.search(EMOJI_RE.sub("", body)))
+
+
 def classify(cmd: str) -> str | None:
-    """Return 'pr' for PR create/edit (needs template check), 'other' for everything
-    else that takes a body (Hangul check only), or None to skip the hook entirely.
-    """
     if PR_CREATE_EDIT_RE.search(cmd):
         return "pr"
     if (
@@ -123,9 +110,6 @@ def classify(cmd: str) -> str | None:
 
 
 def extract_body(cmd: str) -> str | None:
-    """Pull the body out of a gh-CLI argv. Returns None when no body arg is present
-    or when a referenced file cannot be read.
-    """
     try:
         argv = shlex.split(cmd)
     except ValueError:
@@ -165,8 +149,6 @@ def _read_file(path: str) -> str | None:
 
 
 def missing_template_boxes(body: str) -> list[str]:
-    """Return template checkbox labels absent from body. Empty list if none missing
-    or if the template file is missing (tolerant: no template = no enforcement)."""
     template = Path.cwd() / TEMPLATE_PATH
     if not template.exists():
         return []
@@ -180,11 +162,6 @@ def missing_template_boxes(body: str) -> list[str]:
 
 
 def changes_format_errors(body: str) -> list[str]:
-    """Validate the ``## Changes`` section against the commit-body rules: exactly
-    two non-empty ``- `` bullets, each <= 120 chars. Empty stub bullets (``- ``
-    with no text) are not counted, so the unfilled template fails. Returns an empty
-    list when the section is absent (tolerant: a non-template body is not enforced).
-    """
     header = CHANGES_HEADER_RE.search(body)
     if header is None:
         return []
@@ -196,9 +173,8 @@ def changes_format_errors(body: str) -> list[str]:
     errors: list[str] = []
     if len(bullets) != REQUIRED_BULLETS:
         errors.append(
-            f"The ## Changes section must contain exactly {REQUIRED_BULLETS} "
-            f"non-empty bullets (- ...), found {len(bullets)}. These become the "
-            "squash commit body (motivation, then change); fill the template stub."
+            f"The ## Changes section must contain exactly {REQUIRED_BULLETS}. "
+            f"These become the squash commit body (motivation, then change)"
         )
     for ln in bullets:
         if len(ln) > BULLET_LIMIT:
