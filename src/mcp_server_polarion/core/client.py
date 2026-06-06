@@ -129,15 +129,10 @@ class PolarionClient:
             timeout=httpx.Timeout(_DEFAULT_TIMEOUT_SECONDS),
             verify=config.polarion_verify_ssl,
         )
-        # Polarion forbids concurrent requests; ``asyncio.Lock`` ensures that
-        # every HTTP call (retry sleeps and post-mutation ``_write_delay``
-        # included) serialises through this client. The lock is acquired by
-        # the public methods so the write-delay sleep stays inside the
-        # critical section. Lazy construction so the lock binds to the
-        # running event loop on first use rather than at init time. The
-        # lock is NOT reentrant — never call a public method from inside
-        # ``_request`` (or any code already holding the lock) or the client
-        # will deadlock.
+        # Polarion forbids concurrent requests; the public methods hold this
+        # lock across the whole call (retry sleeps and post-mutation
+        # _write_delay included) to serialise. Lazy so it binds to the running
+        # loop. NOT reentrant — never call a public method while holding it.
         self._request_lock: asyncio.Lock | None = None
 
     def _get_request_lock(self) -> asyncio.Lock:

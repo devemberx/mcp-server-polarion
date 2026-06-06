@@ -1807,11 +1807,9 @@ class TestUpdateWorkItemHappyPath:
     async def test_current_carries_custom_fields_from_post_patch_get(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # Polarion inlines customs as top-level attributes; this work item happens to
-        # have ``riskLevel`` and ``effortHours`` populated. The post-PATCH
-        # GET reuses ``parse_work_item_detail`` so they must land on
-        # ``result.current.custom_fields`` automatically — guarding the
-        # cross-tool inheritance the fix relies on.
+        # Polarion inlines customs as top-level attributes; the post-PATCH GET
+        # reuses ``parse_work_item_detail``, so populated customs (riskLevel,
+        # effortHours) must land on ``result.current.custom_fields`` automatically.
         mock_client.patch.return_value = {}
         get_response = _make_get_response(title="after")
         data = cast(dict[str, object], get_response["data"])
