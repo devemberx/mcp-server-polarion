@@ -1,1 +1,1 @@
-from __future__ import annotations
+"""Tests for the pure utility functions — HTML conversion and sanitization."""

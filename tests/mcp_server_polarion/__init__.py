@@ -1,1 +1,1 @@
-from __future__ import annotations
+"""Tests for the mcp_server_polarion package."""
