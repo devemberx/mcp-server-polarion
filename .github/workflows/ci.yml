@@ -13,18 +13,16 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v7
 
       - name: Set up Python
         run: uv python install 3.13
 
       - name: Install dependencies
-        # Include the evals group so the eval harness' unit tests actually run
-        # here (importorskip'd otherwise) — this is the only place pytest runs
-        # on a PR; evals.yml is workflow_dispatch-only and never runs pytest.
+        # Include the evals group so the eval harness' unit tests actually run here
         run: uv sync --dev --group evals
 
       - name: Run ruff (lint + format check)

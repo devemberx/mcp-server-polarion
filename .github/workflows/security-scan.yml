@@ -3,7 +3,7 @@ name: Security Scan
 on:
   workflow_call:
   schedule:
-    - cron: '0 18 * * *'   # daily 18:00 UTC — re-scan code against updated YARA rules
+    - cron: '0 18 * * *'   # daily 18:00 UTC
   workflow_dispatch:
 
 permissions:
@@ -14,10 +14,10 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v7
 
       - name: Set up Python
         run: uv python install 3.13
@@ -54,7 +54,7 @@ jobs:
 
       - name: Upload report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mcp-scan-report
           path: scan-result.json
@@ -66,20 +66,18 @@ jobs:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v7
 
       - name: Set up Python
         run: uv python install 3.13
 
       - name: Export production-only requirements
-        # Scan only the deps that ship in the wheel. Dev/eval-only groups
-        # (ruff, mypy, strands-agents, ...) never reach end users via PyPI
-        # so their CVEs should not gate publish; Dependabot still tracks
-        # them on its own cadence. --no-hashes is required because the OSV
-        # scanner's pip parser does not read the multiline hash form.
+        # Scan only the deps that ship in the wheel.
+        # --no-hashes is required 
+        # because the OSV scanner's pip parser does not read the multiline hash form.
         run: |
           uv export --no-dev --no-emit-project --no-hashes \
             --format requirements-txt > runtime-requirements.txt
@@ -96,7 +94,7 @@ jobs:
 
       - name: Upload report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: osv-scan-report
           path: osv-result.txt
