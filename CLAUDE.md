@@ -11,7 +11,7 @@ MCP server giving AI assistants read/write access to Polarion ALM via the Model 
 ```bash
 uv sync --dev                                            # install deps
 uv run pytest                                            # all tests
-uv run pytest tests/tools/test_read.py::TestGetWorkItem  # single class
+uv run pytest tests/mcp_server_polarion/tools/test_read.py::TestGetWorkItem  # single class
 uv run pytest -k test_page_size_rejects_above_max        # single test
 uv run ruff check . && uv run ruff format . && uv run mypy src/  # lint + format + types
 uv run mcp-server-polarion                               # run server (stdio)
@@ -46,7 +46,7 @@ CI: `ruff check` → `ruff format --check` → `mypy` → `pytest`.
 
 Applies to ALL comments / docstrings (tools, helpers, inline, CLAUDE.md).
 
-- Field descriptions stay one line; skip when name + type say everything. Cross-model invariant: `tests/test_models.py::test_field_descriptions_are_non_empty_when_set`.
+- Field descriptions stay one line; skip when name + type say everything. Cross-model invariant: `tests/mcp_server_polarion/test_models.py::test_field_descriptions_are_non_empty_when_set`.
 - No `WARNING:` / `FOOTGUN:` / `NOTE:` prefix upgrades — state the fact plainly.
 - No dev-narrative ("verified via smoke test", "we tried X then switched to Y", "as of vN") — belongs in commit messages and PR descriptions.
 - No banner-divider comments (`# ---`, `# === Section ===`).
@@ -85,9 +85,13 @@ Applies to ALL comments / docstrings (tools, helpers, inline, CLAUDE.md).
 
 ## Testing
 
-`pytest-asyncio` in `mode=auto`. **Tool tests** (`tests/tools/`) call tool functions directly with an injected `mock_client` (FastMCP 3.0's `@mcp.tool` returns the original function). **Client tests** (`tests/core/test_client.py`) use `respx`. Shared fixtures live in `tests/conftest.py`; pass `write_delay=0` for real `PolarionClient` instances. Pydantic `Field` constraints bypass FastMCP's JSON Schema on direct calls — verify via `TypeAdapter` reconstruction (see `TestCreateWorkItemFieldValidation`).
+`tests/` mirrors every source tree one-to-one — `tests/mcp_server_polarion/` (with `core/`, `tools/`, `utils/`) mirrors the package, `tests/evals/` mirrors `evals/` (`evaluators/`, `harness/`, `cases/`), and `tests/claude_hooks/` + `tests/github_scripts/` mirror the loose scripts under `.claude/hooks/` + `.github/scripts/`. One test module per source module; `conftest.py` stays at the `tests/` root so its shared fixtures reach the whole tree.
 
-**Transport tests** (`tests/test_mcp_transport.py`) drive the server through `fastmcp.Client(mcp)` in-memory transport so registration → JSON Schema → lifespan → `get_client(ctx)` → real `PolarionClient` → mocked HTTP runs end to end. Adding a new `@mcp.tool` requires updating `EXPECTED_TOOL_NAMES` — that is the forcing function. The fixture monkeypatches `_WRITE_DELAY_SECONDS` because the lifespan constructs `PolarionClient` itself.
+`pytest-asyncio` in `mode=auto`. **Tool tests** (`tests/mcp_server_polarion/tools/`) call tool functions directly with an injected `mock_client` (FastMCP 3.0's `@mcp.tool` returns the original function). **Client tests** (`tests/mcp_server_polarion/core/test_client.py`) use `respx`. Shared fixtures live in `tests/conftest.py`; pass `write_delay=0` for real `PolarionClient` instances. Pydantic `Field` constraints bypass FastMCP's JSON Schema on direct calls — verify via `TypeAdapter` reconstruction (see `TestCreateWorkItemFieldValidation`).
+
+**Transport tests** (`tests/mcp_server_polarion/test_mcp_transport.py`) drive the server through `fastmcp.Client(mcp)` in-memory transport so registration → JSON Schema → lifespan → `get_client(ctx)` → real `PolarionClient` → mocked HTTP runs end to end. Adding a new `@mcp.tool` requires updating `EXPECTED_TOOL_NAMES` — that is the forcing function. The fixture monkeypatches `_WRITE_DELAY_SECONDS` because the lifespan constructs `PolarionClient` itself.
+
+Tests for the eval harness (`tests/evals/`) import `strands` / `strands_evals`, only present in the `evals` dependency group, so they open with `pytest.importorskip` — they run in CI because `ci.yml` syncs `--group evals`, and skip (rather than error) on a bare `uv sync --dev`.
 
 ## Evals — Tier-1 deploy gate
 
@@ -102,4 +106,4 @@ Full rules in [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md). Quick referenc
 - **PR Type of Change checklist** ([.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md)): flip `[ ]` → `[x]`; don't delete unchecked options.
 - **Squash merge only.** The squash commit follows the standard commit-message format above (subject + 2-bullet body). NEVER pass `--subject` to `gh pr merge` — let the PR title (already length-budgeted for `(#NNN)`) become the subject verbatim.
 - **Force push** on feature branches only after explicit user authorization; never to `main`.
-- **Claude PR hooks** ([.claude/hooks/](.claude/hooks/), wired via `.claude/settings.json` `PreToolUse` on `Bash`): `validate-pr-body.py` checks `gh pr/issue create|edit|comment` (and `gh api` PR/issue) bodies are English-only and preserve template checkboxes; `validate-pr-merge.py` guards `gh pr merge` — squash-only, no `--subject`, explicit 2-bullet conventional-format `--body`, Claude co-author trailer. They run as harness hooks (exit 2 blocks the call), not CI — covered by `tests/test_claude_hooks.py`.
+- **Claude PR hooks** ([.claude/hooks/](.claude/hooks/), wired via `.claude/settings.json` `PreToolUse` on `Bash`): `validate-pr-body.py` checks `gh pr/issue create|edit|comment` (and `gh api` PR/issue) bodies are English-only and preserve template checkboxes; `validate-pr-merge.py` guards `gh pr merge` — squash-only, no `--subject`, explicit 2-bullet conventional-format `--body`, Claude co-author trailer. They run as harness hooks (exit 2 blocks the call), not CI — covered by `tests/claude_hooks/`.

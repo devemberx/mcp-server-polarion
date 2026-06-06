@@ -8,8 +8,10 @@ trajectory alone, so the same input always yields the same verdict.
 Silent-corruption modes that the mcp-server tool layer now guards
 deterministically (ghost enum ids, ghost custom-field keys, out-of-range
 priority, anchorless body blocks) live in ``mcp_server_polarion.tools._guard``
-and ``utils.html`` and are covered by ``tests/tools/test_guard.py`` and
-``tests/utils/test_html.py``; checks here target the LLM-behavioural rules
+and ``utils.html`` and are covered by
+``tests/mcp_server_polarion/tools/test_guard.py`` and
+``tests/mcp_server_polarion/utils/test_html.py``; checks here target the
+LLM-behavioural rules
 that cannot be guarded server-side.
 """
 
