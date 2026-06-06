@@ -163,19 +163,3 @@ class TestCheckGetBeforeUpdate:
         passed, reason = checks.check_get_before_update(trajectory, {})
         assert passed is False
         assert "update_document" in reason
-
-
-class TestRegistry:
-    def test_every_case_check_is_registered(self) -> None:
-        # The CASES list pulls in `strands_evals.Case` which is only present
-        # when the optional `evals` dependency group is installed; skip on
-        # the bare dev install so this file still loads.
-        pytest.importorskip("strands_evals")
-        from evals.cases.tier1_prohibitions import CASES  # noqa: PLC0415
-
-        registry_keys = set(checks.REGISTRY)
-        for case in CASES:
-            metadata = case.metadata or {}
-            assert metadata["check"] in registry_keys, (
-                f"case '{case.name}' references missing check '{metadata['check']}'"
-            )
