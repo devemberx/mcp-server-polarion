@@ -1,8 +1,8 @@
-"""Unit tests for the `validate-pr-body` PreToolUse hook in `.claude/hooks/`.
+"""Unit tests for the `validate_pr_body` PreToolUse hook in `.claude/hooks/`.
 
-The hook script uses a hyphenated filename (not importable as a normal module), so
-it is loaded by path via importlib. These tests cover the pure helper functions;
-the `main()` stdin/exit-code path is left to manual / e2e checks.
+The hook script lives outside any package, so it is loaded by path via importlib.
+These tests cover the pure helper functions; the `main()` stdin/exit-code path is
+left to manual / e2e checks.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from tests.conftest import load_module_from_path
 
 HOOKS_DIR = Path(__file__).resolve().parents[2] / ".claude" / "hooks"
 
-body = load_module_from_path(HOOKS_DIR / "validate-pr-body.py", "validate_pr_body")
+body = load_module_from_path(HOOKS_DIR / "validate_pr_body.py", "validate_pr_body")
 
 
 class TestBodyClassify:
@@ -60,6 +60,9 @@ class TestBodyExtractBody:
     def test_long_flag(self) -> None:
         assert body.extract_body("gh pr create --body 'hello'") == "hello"
 
+    def test_long_flag_equals(self) -> None:
+        assert body.extract_body("gh pr create --body=hello") == "hello"
+
     def test_field_body(self) -> None:
         assert body.extract_body("gh api /x -f body=hello") == "hello"
 
@@ -68,16 +71,48 @@ class TestBodyExtractBody:
         f.write_text("filed")
         assert body.extract_body(f"gh api /x -f body=@{f}") == "filed"
 
+    def test_body_file_flag(self, tmp_path: Path) -> None:
+        f = tmp_path / "b.txt"
+        f.write_text("from file")
+        assert body.extract_body(f"gh pr create --body-file {f}") == "from file"
+
+    def test_body_file_equals(self, tmp_path: Path) -> None:
+        f = tmp_path / "b.txt"
+        f.write_text("from file")
+        assert body.extract_body(f"gh pr create --body-file={f}") == "from file"
+
+    def test_body_file_unreadable(self, tmp_path: Path) -> None:
+        missing = tmp_path / "nope.txt"
+        assert body.extract_body(f"gh pr create --body-file {missing}") is None
+
     def test_no_body(self) -> None:
         assert body.extract_body("gh pr edit --title only") is None
 
 
-class TestHangulDetection:
-    def test_matches_korean(self) -> None:
-        assert body.HANGUL_RE.search("이것은 한국어")
+class TestNonAsciiDetection:
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "이것은 한국어",  # Korean
+            "café résumé",  # Latin accents
+            "naïve façade",  # diacritics
+            "emoji 🚀 plus 한글",  # emoji allowed but Korean still blocks
+        ],
+    )
+    def test_blocks_non_ascii_letters(self, text: str) -> None:
+        assert body.has_disallowed_non_ascii(text)
 
-    def test_ignores_english(self) -> None:
-        assert body.HANGUL_RE.search("plain english only") is None
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "plain english only - [x] done!",
+            "ship it 🚀",  # lone emoji
+            "done ✅ and 🎉",  # symbol + emoji
+            "flags 🇰🇷 and family 👨‍👩‍👧 sequences",  # regional indicators + ZWJ
+        ],
+    )
+    def test_allows_ascii_and_emoji(self, text: str) -> None:
+        assert not body.has_disallowed_non_ascii(text)
 
 
 class TestMissingTemplateBoxes:
@@ -128,7 +163,7 @@ class TestChangesFormatErrors:
         # the unfilled "- \n- " stub has no text, so it counts as zero bullets
         text = "## Changes\n\n- \n- \n\n## Testing\n"
         errs = body.changes_format_errors(text)
-        assert any("found 0" in e for e in errs)
+        assert any("exactly 2" in e for e in errs)
 
     def test_over_limit_bullet(self) -> None:
         text = f"## Changes\n\n- {'x' * 130}\n- ok\n\n## Testing\n"

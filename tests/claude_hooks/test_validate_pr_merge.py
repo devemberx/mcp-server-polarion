@@ -1,8 +1,8 @@
-"""Unit tests for the `validate-pr-merge` PreToolUse hook in `.claude/hooks/`.
+"""Unit tests for the `validate_pr_merge` PreToolUse hook in `.claude/hooks/`.
 
-The hook script uses a hyphenated filename (not importable as a normal module), so
-it is loaded by path via importlib. These tests cover the pure helper functions;
-the `main()` stdin/exit-code path is left to manual / e2e checks.
+The hook script lives outside any package, so it is loaded by path via importlib.
+These tests cover the pure helper functions; the `main()` stdin/exit-code path is
+left to manual / e2e checks.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from tests.conftest import load_module_from_path
 
 HOOKS_DIR = Path(__file__).resolve().parents[2] / ".claude" / "hooks"
 
-merge = load_module_from_path(HOOKS_DIR / "validate-pr-merge.py", "validate_pr_merge")
+merge = load_module_from_path(HOOKS_DIR / "validate_pr_merge.py", "validate_pr_merge")
 
 
 def argv(cmd: str) -> list[str]:
@@ -89,6 +89,19 @@ class TestMergeExtractBody:
         f = tmp_path / "body.txt"
         f.write_text("from file")
         assert merge.extract_body(argv(f"gh pr merge -F {f}")) == (True, "from file")
+
+    def test_body_file_glued(self, tmp_path: Path) -> None:
+        f = tmp_path / "body.txt"
+        f.write_text("from file")
+        assert merge.extract_body(argv(f"gh pr merge -F{f}")) == (True, "from file")
+
+    def test_body_file_equals(self, tmp_path: Path) -> None:
+        f = tmp_path / "body.txt"
+        f.write_text("from file")
+        assert merge.extract_body(argv(f"gh pr merge --body-file={f}")) == (
+            True,
+            "from file",
+        )
 
     def test_body_file_unreadable(self, tmp_path: Path) -> None:
         missing = tmp_path / "nope.txt"
