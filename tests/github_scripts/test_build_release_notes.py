@@ -16,7 +16,7 @@ from types import ModuleType
 import pytest
 
 SCRIPT = (
-    Path(__file__).resolve().parent.parent
+    Path(__file__).resolve().parents[2]
     / ".github"
     / "scripts"
     / "build_release_notes.py"
