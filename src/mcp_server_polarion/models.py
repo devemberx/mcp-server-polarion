@@ -169,6 +169,17 @@ class DocumentReadResult(BaseModel):
     has_more: bool = False
 
 
+class SqlRecipeGallery(BaseModel):
+    """Copy-paste SQL recipe gallery returned by ``get_sql_query_recipes``.
+
+    ``recipes`` is a self-contained Markdown document: table schema plus
+    parameterised recipes for document scope, custom-field search, and
+    traceability. Adapt a recipe rather than hand-writing joins.
+    """
+
+    recipes: str
+
+
 class WorkItemSummary(BaseModel):
     """Compact work-item representation for list and search results.
 

@@ -37,6 +37,7 @@ _READ_TOOL_NAMES: frozenset[str] = frozenset(
         "read_document_parts",
         "read_document",
         "list_work_items",
+        "get_sql_query_recipes",
         "get_work_item",
         "read_work_item",
         "list_work_item_links",
@@ -59,13 +60,6 @@ _WRITE_TOOL_NAMES: frozenset[str] = frozenset(
     }
 )
 EXPECTED_TOOL_NAMES: frozenset[str] = _READ_TOOL_NAMES | _WRITE_TOOL_NAMES
-
-# Resources are registered alongside tools but excluded from ``list_tools``;
-# this set is the forcing function for ``@mcp.resource`` the way
-# ``EXPECTED_TOOL_NAMES`` is for ``@mcp.tool``.
-EXPECTED_RESOURCE_URIS: frozenset[str] = frozenset(
-    {"polarion://guides/sql-query-recipes"}
-)
 
 
 @pytest.fixture
@@ -94,23 +88,18 @@ class TestToolRegistration:
         assert names == EXPECTED_TOOL_NAMES
 
 
-class TestResourceRegistration:
-    """Every expected resource reaches the MCP transport and reads back."""
+class TestSqlRecipeGallery:
+    """The SQL recipe gallery reaches the transport as a callable tool."""
 
-    async def test_all_expected_resources_registered(
-        self, mcp_client: _MCPClient
-    ) -> None:
-        uris = {str(r.uri) for r in await mcp_client.list_resources()}
-        assert uris == EXPECTED_RESOURCE_URIS
-
-    async def test_sql_recipes_resource_reads(self, mcp_client: _MCPClient) -> None:
-        # ``list_work_items`` tells the LLM it MUST read this resource before
-        # hand-writing SQL, so a dead URI would strand that instruction.
-        contents = await mcp_client.read_resource("polarion://guides/sql-query-recipes")
-        assert contents
-        text = contents[0].text
-        assert "list_work_items SQL recipes" in text
-        assert "POLARION.STRUCT_WORKITEM_LINKEDWORKITEMS" in text
+    async def test_get_sql_query_recipes_reads(self, mcp_client: _MCPClient) -> None:
+        # ``list_work_items`` tells the LLM it MUST call this tool before
+        # hand-writing SQL, so an empty payload would strand that instruction.
+        result = await mcp_client.call_tool("get_sql_query_recipes", {})
+        body = result.structured_content
+        assert body is not None
+        recipes = body["recipes"]
+        assert "list_work_items SQL recipes" in recipes
+        assert "POLARION.STRUCT_WORKITEM_LINKEDWORKITEMS" in recipes
 
 
 @pytest.mark.parametrize("tool_name", sorted(EXPECTED_TOOL_NAMES))
