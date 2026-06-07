@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class ProjectSummary(BaseModel):
@@ -10,4 +10,4 @@ class ProjectSummary(BaseModel):
 
     id: str
     name: str
-    active: bool = Field(default=True, description="False means archived.")
+    active: bool = True
