@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Build a GitHub Release body: GitHub's categorized auto-notes (grouped per
-`.github/release.yml`), prefixed with a `## Highlights` block built from the
-curated bullets carried in the annotated tag's own message body. The deploy
-skill writes the bullets into the tag (no heading there — this script adds it),
-so nothing accumulates in the repo tree. Reads GITHUB_REPOSITORY /
-GITHUB_REF_NAME, prints markdown to stdout.
+"""Build a GitHub Release body for the CI publish workflow.
 
-CI helper (not part of the shipped package), so printing to stdout is the
-intended contract — it does not fall under the server's no-print rule.
+Combines two sections:
+  1. ## Highlights — curated bullets from the annotated tag's message body
+     (the deploy skill writes them into the tag; this script adds the heading).
+  2. Auto-generated change notes — GitHub's categorized list per .github/release.yml.
+
+Reads GITHUB_REPOSITORY and GITHUB_REF_NAME; prints markdown to stdout.
+CI helper — printing to stdout is the intended contract here.
 """
 
 from __future__ import annotations
@@ -26,11 +26,6 @@ def _gh(*args: str) -> str:
 
 
 def tag_highlights(repo: str, tag: str) -> str:
-    """Curated highlight bullets = the annotated tag's message minus its first
-    (dated marker) line, without the `## Highlights` heading (the caller adds
-    it). Empty for a lightweight or date-only tag."""
-    # Singular `git/ref/` returns one object; plural `git/refs/` prefix-matches
-    # and yields an array when a sibling tag shares the prefix (e.g. -rc).
     ref = json.loads(_gh("api", f"repos/{repo}/git/ref/tags/{tag}"))
     obj = ref["object"]
     if obj["type"] != "tag":

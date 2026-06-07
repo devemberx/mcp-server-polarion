@@ -1,6 +1,6 @@
 ---
 name: deploy
-description: Deploy (release/version bump/tag) automation for mcp-server-polarion. Bumps version in pyproject.toml + uv.lock, commits with conventional message, creates an annotated tag carrying the curated release highlights, and pushes it to trigger the PyPI publish workflow, which then auto-publishes a categorized GitHub Release. Triggers on "/deploy", or any release/version bump/tag request.
+description: Deployment skill for mcp-server-polarion. Automates version bump, tag creation, and PyPI publish. Triggers on `/deploy` or any release/version bump/tag request.
 ---
 
 # Deploy Skill
