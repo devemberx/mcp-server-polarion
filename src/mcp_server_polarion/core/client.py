@@ -1,9 +1,9 @@
 """Async HTTP client for the Polarion REST API v1.
 
-``PolarionClient`` wraps :class:`httpx.AsyncClient` with bearer-token
-authentication, JSON:API error mapping (401/403 → ``PolarionAuthError``,
-404 → ``PolarionNotFoundError``, others → ``PolarionError``),
-exponential-backoff retry on 429/5xx, and a post-mutation delay.
+``PolarionClient`` wraps :class:`httpx.AsyncClient` with bearer auth,
+JSON:API error mapping (401/403 → ``PolarionAuthError``, 404 →
+``PolarionNotFoundError``, else ``PolarionError``), 429/5xx
+exponential-backoff retry, and a post-mutation delay.
 """
 
 from __future__ import annotations
@@ -43,18 +43,15 @@ _MAX_ERROR_DETAIL_LEN: Final[int] = 200
 
 
 def _extract_json_api_detail(body: object) -> str:
-    """Extract a concise detail string from a JSON:API response body.
+    """Extract a concise detail from a JSON:API body.
 
-    Prefers ``errors[*].detail`` (or ``errors[*].title``) from the
-    JSON:API error object array.  Falls back to a truncated string
-    representation of the full body.
+    Prefers ``errors[*].detail``/``title``; falls back to truncated body.
 
     Args:
         body: Decoded JSON response body.
 
     Returns:
-        A human-readable error detail string, at most
-        ``_MAX_ERROR_DETAIL_LEN`` characters.
+        Detail string, truncated to ``_MAX_ERROR_DETAIL_LEN`` chars.
     """
     if not isinstance(body, dict):
         return str(body)[:_MAX_ERROR_DETAIL_LEN]
@@ -78,9 +75,8 @@ def _sanitize_error_text(raw: str) -> str:
         raw: Raw response body text (may contain HTML).
 
     Returns:
-        Plain text with HTML tags removed, at most
-        ``_MAX_ERROR_DETAIL_LEN`` characters.  A trailing ellipsis (…)
-        is appended when the text is truncated.
+        Plain text, HTML stripped, truncated to ``_MAX_ERROR_DETAIL_LEN``
+        chars with a trailing … when truncated.
     """
     clean = re.sub(r"<[^>]+>", " ", raw)
     clean = " ".join(clean.split())
@@ -92,9 +88,8 @@ def _sanitize_error_text(raw: str) -> str:
 class PolarionClient:
     """Async HTTP client for the Polarion REST API.
 
-    The client is designed to be created once and reused for the lifetime
-    of the MCP server (managed via the ``lifespan`` context in
-    ``server.py``).
+    Created once and reused for the MCP server lifetime (via the
+    ``lifespan`` context in ``server.py``).
 
     Usage::
 
@@ -103,12 +98,11 @@ class PolarionClient:
             data = await client.get("/projects")
 
     Args:
-        config: A ``PolarionConfig`` instance supplying URL and token.
-        write_delay: Seconds to wait after each write operation
-            (default 1.5 s).
+        config: ``PolarionConfig`` supplying URL and token.
+        write_delay: Seconds to wait after each write (default 1.5 s).
 
     Attributes:
-        base_url: The resolved REST API v1 base URL.
+        base_url: Resolved REST API v1 base URL.
     """
 
     def __init__(
@@ -129,10 +123,8 @@ class PolarionClient:
             timeout=httpx.Timeout(_DEFAULT_TIMEOUT_SECONDS),
             verify=config.polarion_verify_ssl,
         )
-        # Polarion forbids concurrent requests; the public methods hold this
-        # lock across the whole call (retry sleeps and post-mutation
-        # _write_delay included) to serialise. Lazy so it binds to the running
-        # loop. NOT reentrant — never call a public method while holding it.
+        # Lazily bound to the running loop; serializes all calls (Polarion
+        # forbids concurrency). Not reentrant.
         self._request_lock: asyncio.Lock | None = None
 
     def _get_request_lock(self) -> asyncio.Lock:
@@ -191,10 +183,8 @@ class PolarionClient:
     ) -> dict[str, object]:
         """Send a ``POST`` request (write operation).
 
-        A short delay is applied **after** the request succeeds to account
-        for Polarion cluster propagation. The delay runs inside the request
-        lock so the next caller cannot start its own request during the
-        propagation window.
+        Sleeps ``_write_delay`` after success, inside the lock, for
+        cluster propagation before the next call.
 
         Args:
             path: URL path relative to the base API URL.
@@ -216,8 +206,7 @@ class PolarionClient:
     ) -> dict[str, object]:
         """Send a ``PATCH`` request (write operation).
 
-        A short delay is applied **after** the request succeeds, inside the
-        request lock — same contract as ``post``.
+        Same post-success delay contract as :meth:`post`.
 
         Args:
             path: URL path relative to the base API URL.
@@ -239,11 +228,9 @@ class PolarionClient:
     ) -> dict[str, object]:
         """Send a ``DELETE`` request (write operation).
 
-        Polarion's bulk-delete endpoints require a JSON:API body listing
-        the resource ids to remove; ``httpx`` permits a body on DELETE
-        and Polarion's REST gateway accepts it. A short delay is applied
-        **after** the request succeeds, inside the request lock — same
-        contract as ``post`` / ``patch``.
+        ``json`` carries bulk-delete resource ids — non-standard for
+        DELETE, but ``httpx`` and Polarion's gateway both accept it.
+        Same post-success delay contract as :meth:`post`/:meth:`patch`.
 
         Args:
             path: URL path relative to the base API URL.
@@ -267,9 +254,8 @@ class PolarionClient:
     ) -> dict[str, object]:
         """Execute an HTTP request with retry and error mapping.
 
-        Retries up to ``_MAX_RETRIES`` times on transient errors (429,
-        5xx) using exponential backoff.  Non-retryable errors are raised
-        immediately.
+        Retries 429/5xx up to ``_MAX_RETRIES`` times with exponential
+        backoff; other errors raise immediately.
 
         Args:
             method: HTTP method (GET, POST, PATCH, DELETE).
@@ -286,10 +272,8 @@ class PolarionClient:
             PolarionError: On other non-2xx responses after all retries
                 are exhausted.
         """
-        # Caller (``get`` / ``post`` / ``patch`` / ``delete``) is responsible
-        # for holding ``_request_lock`` so the retry-backoff sleep stays
-        # inside the critical section — dropping the lock between retries
-        # would let another caller slip in and get 429'd by the same backoff.
+        # Lock held across retries — releasing mid-backoff would let another
+        # caller slip in and hit the same 429.
         last_exception: PolarionError | None = None
         backoff = _INITIAL_BACKOFF_SECONDS
 
@@ -308,7 +292,6 @@ class PolarionClient:
                 ) from exc
 
             if response.is_success:
-                # Some responses (e.g. 204 No Content) have empty bodies.
                 if response.status_code == _HTTP_NO_CONTENT or not response.content:
                     return {}
                 body: object = response.json()
@@ -316,10 +299,8 @@ class PolarionClient:
                     return {"data": body}
                 return body
 
-            # Map status codes to domain exceptions.
             error = self._map_status_to_error(response)
 
-            # Retry only on transient errors.
             is_retryable = response.status_code in _RETRYABLE_STATUS_CODES
             if is_retryable and attempt < _MAX_RETRIES:
                 logger.warning(
@@ -338,7 +319,6 @@ class PolarionClient:
 
             raise error
 
-        # All retries exhausted — raise the most recent error.
         if last_exception is not None:
             raise last_exception
 

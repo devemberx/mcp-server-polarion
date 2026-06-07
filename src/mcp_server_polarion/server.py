@@ -26,18 +26,7 @@ class LifespanContext(TypedDict):
 async def _lifespan(
     _server: FastMCP[LifespanContext],
 ) -> AsyncIterator[LifespanContext]:
-    """Initialize and clean up shared resources for the MCP server.
-
-    Creates a ``PolarionClient`` from environment configuration and
-    makes it available to all tools via the lifespan context.
-
-    Args:
-        _server: The FastMCP server instance (provided automatically).
-
-    Yields:
-        A dict containing the ``polarion_client`` key mapped to an
-        active ``PolarionClient`` instance.
-    """
+    """Open one shared ``PolarionClient`` for all tools; close on shutdown."""
     setup_logging()
     config = PolarionConfig()  # type: ignore[call-arg]
     logger.info("Connecting to Polarion at %s", config.polarion_url)

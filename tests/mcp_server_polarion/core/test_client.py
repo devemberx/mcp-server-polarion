@@ -501,9 +501,7 @@ class TestSerialization:
             nonlocal in_flight, max_in_flight
             in_flight += 1
             max_in_flight = max(max_in_flight, in_flight)
-            # Yield so the event loop can wake the other coroutine; without the
-            # lock both calls would reach this point and ``max_in_flight`` would
-            # rise to 2.
+            # Yield to the other coroutine; without the lock max_in_flight would hit 2.
             await asyncio.sleep(0)
             in_flight -= 1
             return httpx.Response(200, json={"data": []})
@@ -521,12 +519,11 @@ class TestSerialization:
             assert max_in_flight == 1
 
     async def test_write_delay_keeps_lock_held(self) -> None:
-        """A GET dispatched during a POST's write_delay must wait, not overlap.
+        """A GET during a POST's write_delay must wait, not overlap.
 
-        The write_delay sleep runs inside the request lock — otherwise a
-        second caller could slip in during Polarion's propagation window
-        and defeat the "no concurrent requests" guarantee. Verified by
-        timing: the GET must start at least ``write_delay`` after the POST.
+        The write_delay sleep runs inside the request lock, else a second
+        caller slips in during the propagation window. Timed: the GET must
+        start at least write_delay after the POST.
         """
         post_start: list[float] = []
         get_start: list[float] = []
@@ -552,8 +549,7 @@ class TestSerialization:
                 )
 
         assert post_start and get_start
-        # Allow a small scheduling slack so the assertion isn't flaky on
-        # slow CI workers; the real margin is full ``write_delay``.
+        # 0.9 slack absorbs CI scheduling jitter; real margin is full write_delay.
         assert get_start[0] - post_start[0] >= write_delay * 0.9, (
             f"GET started {get_start[0] - post_start[0]:.3f}s after POST; "
             f"expected ≥ {write_delay * 0.9:.3f}s (write_delay held by lock)."

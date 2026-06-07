@@ -67,9 +67,8 @@ def _polarion_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Set env vars the lifespan reads and zero out write-delay sleeps."""
     monkeypatch.setenv("POLARION_URL", _POLARION_HOST)
     monkeypatch.setenv("POLARION_TOKEN", "test-token-secret")
-    # ``PolarionClient`` is constructed inside ``_lifespan`` so its
-    # ``write_delay`` constructor arg is unreachable from the test; patch
-    # the module-level default instead to keep the write-tool case fast.
+    # The lifespan builds PolarionClient itself, so patch the module default
+    # rather than its write_delay arg to keep write-tool cases fast.
     monkeypatch.setattr(_client_mod, "_WRITE_DELAY_SECONDS", 0.0)
 
 
@@ -92,8 +91,8 @@ class TestSqlRecipeGallery:
     """The SQL recipe gallery reaches the transport as a callable tool."""
 
     async def test_get_sql_query_recipes_reads(self, mcp_client: _MCPClient) -> None:
-        # ``list_work_items`` tells the LLM it MUST call this tool before
-        # hand-writing SQL, so an empty payload would strand that instruction.
+        # list_work_items points the LLM here before hand-writing SQL, so the
+        # payload must not be empty.
         result = await mcp_client.call_tool("get_sql_query_recipes", {})
         body = result.structured_content
         assert body is not None
@@ -240,10 +239,9 @@ class TestEndToEndInvocation:
         mcp_client: _MCPClient,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        # Regression guard: result-model fields with recursive type aliases
-        # produce a `$defs` self-reference that fastmcp 3.3.1's
-        # json_schema_to_type cannot rebuild, leaving result.data unmaterialised
-        # and logging "Error parsing structured content" on every write call.
+        # Regression: recursive-alias fields make a $defs self-reference that
+        # fastmcp's json_schema_to_type can't rebuild, leaving result.data
+        # unmaterialised and logging "Error parsing structured content".
         with (
             caplog.at_level("WARNING", logger="fastmcp"),
             respx.mock(base_url=_BASE, assert_all_called=False) as mock,
