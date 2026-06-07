@@ -11,7 +11,7 @@ MCP server giving AI assistants read/write access to Polarion ALM via MCP. FastM
 ```bash
 uv sync --dev                                            # install deps
 uv run pytest                                            # all tests
-uv run pytest tests/mcp_server_polarion/tools/test_read.py::TestGetWorkItem  # single class
+uv run pytest tests/mcp_server_polarion/tools/test_work_items.py::TestGetWorkItem  # single class
 uv run pytest -k test_page_size_rejects_above_max        # single test
 uv run ruff check . && uv run ruff format . && uv run mypy src/  # lint + format + types
 uv run mcp-server-polarion                               # run server (stdio)
@@ -22,9 +22,9 @@ CI: `ruff check` → `ruff format --check` → `mypy` → `pytest`.
 ## Architecture
 
 - **`core/`** — `client.py` (async httpx wrapper: 429/5xx backoff, post-mutation delay, maps to `PolarionError`/`PolarionAuthError`/`PolarionNotFoundError`), `config.py` (Pydantic settings `POLARION_URL`/`POLARION_TOKEN`), `logging.py` (stderr-only), `exceptions.py`. Every module: `logging.getLogger("mcp_server_polarion.<module>")`.
-- **`tools/`** — `read.py` / `write.py` (each write tool has a `_build_*_payload` helper as the unit-test seam), `_helpers.py` (sparse-fieldset constants, JSON:API extractors, pagination, custom-field merge), `_cache.py` (generic `TTLCache[K, V]` + all cache state behind get/store/record wrappers), `_guard.py` (enum / custom-field write guards; reads `_cache.py`).
+- **`tools/`** — domain-grouped tool modules: `projects.py`, `work_items.py` (incl. SQL recipes), `documents.py`, `links.py`, `comments.py`, `moves.py` (each create/update tool has a `_build_*_payload` helper as the unit-test seam). Importing each in `tools/__init__.py` registers its `@mcp.tool`s. Shared layer under **`tools/_shared/`** — `helpers.py` (sparse-fieldset constants, JSON:API extractors, pagination, custom-field merge, `MAX_BULK_ITEMS`, `build_enum_option`), `cache.py` (generic `TTLCache[K, V]` + all cache state behind get/store/record wrappers), `guard.py` (enum / custom-field write guards; reads `cache.py`). `tools/guides/` holds on-demand data (`sql_query_recipes.md`).
 - **`utils/html.py`** — Markdown ↔ HTML (markdownify + BeautifulSoup4 sanitize), `stamp_block_ids` (write-side anchor injection), `first_anchorless_block` (reject anchorless body blocks).
-- **`models.py`** — Pydantic v2. `PaginatedResult[T]` wraps all list responses.
+- **`models/`** — Pydantic v2, grouped by domain (`common`, `projects`, `documents`, `work_items`, `links`, `comments`) and re-exported from `models/__init__.py`. `PaginatedResult[T]` wraps all list responses.
 - **`server.py`** — FastMCP instance; lifespan opens/closes `PolarionClient`.
 
 ## Non-Negotiable Rules
@@ -46,7 +46,7 @@ CI: `ruff check` → `ruff format --check` → `mypy` → `pytest`.
 
 Applies to ALL comments/docstrings (tools, helpers, inline, CLAUDE.md).
 
-- Field descriptions stay one line; skip when name + type say everything. Cross-model invariant: `tests/mcp_server_polarion/test_models.py::test_field_descriptions_are_non_empty_when_set`.
+- Field descriptions stay one line; skip when name + type say everything. Cross-model invariant: `tests/mcp_server_polarion/models/test_invariants.py::test_field_descriptions_are_non_empty_when_set`.
 - No `WARNING:` / `FOOTGUN:` / `NOTE:` prefix upgrades — state the fact plainly.
 - No dev-narrative ("verified via smoke test", "we tried X then switched to Y", "as of vN") — belongs in commit messages and PR descriptions.
 - No banner-divider comments (`# ---`, `# === Section ===`).
@@ -69,7 +69,7 @@ Applies to ALL comments/docstrings (tools, helpers, inline, CLAUDE.md).
   - Guarded updates: `update_work_item.custom_fields`→`guard_work_item_custom_field_keys` (keys in a `(project, type)` set from `get_work_item`); `update_document.custom_fields`→`guard_document_custom_field_keys` (`(project, space, document)` set from `get_document`). Cache miss = one priming GET. Create paths can't be validated (no config endpoint) → stderr warning only.
 - **Enum validation is absent in Polarion**, enforced at the tool layer. Unknown `type`/`status`/`severity`/`priority`/`resolution` would persist and never match Lucene; `guard_work_item_enums` / `guard_document_enums` fetch `getAvailableOptions` and raise `ValueError` with the valid ids. `type` is checked first (an invalid `change_type_to` raises before being reused as the scoping axis; status/severity/resolution are scoped by target type).
   - **Link / hyperlink roles** aren't in `getAvailableOptions`: `guard_work_item_link_roles` / `guard_hyperlink_roles` fetch `GET /projects/{p}/enumerations/~/{enumName}/~` (`workitem-link-role`/`hyperlink-role`) via `fetch_project_enum_option_ids`. That response's `data` is a **dict** (`data.attributes.options[].id`), unlike `getAvailableOptions`'s list.
-- **Guards are fail-closed.** A validation GET that errors after backoff blocks the write: auth failure → `PermissionError`, else → `RuntimeError` (a ghost write is invisible in the UI and unrecoverable). Lone lenient case: a *successful* empty option set defers to Polarion. TTL `_GUARD_TTL_SECONDS` = 60s; tests drive expiry by patching `tools._cache._now`.
+- **Guards are fail-closed.** A validation GET that errors after backoff blocks the write: auth failure → `PermissionError`, else → `RuntimeError` (a ghost write is invisible in the UI and unrecoverable). Lone lenient case: a *successful* empty option set defers to Polarion. TTL `_GUARD_TTL_SECONDS` = 60s; tests drive expiry by patching `tools._shared.cache._now`.
 
 ### Document writes
 
@@ -88,7 +88,7 @@ Applies to ALL comments/docstrings (tools, helpers, inline, CLAUDE.md).
 
 `tests/` mirrors every source tree one-to-one — `tests/mcp_server_polarion/` (with `core/`, `tools/`, `utils/`) mirrors the package, `tests/evals/` mirrors `evals/` (`evaluators/`, `harness/`, `cases/`), and `tests/claude_hooks/` + `tests/github_scripts/` mirror the loose scripts under `.claude/hooks/` + `.github/scripts/`. One test module per source module; `conftest.py` stays at the `tests/` root so its shared fixtures reach the whole tree.
 
-`pytest-asyncio` in `mode=auto`. **Tool tests** (`tests/mcp_server_polarion/tools/`) call tool functions directly with an injected `mock_client` (FastMCP 3.0's `@mcp.tool` returns the original function). **Client tests** (`tests/mcp_server_polarion/core/test_client.py`) use `respx`. Shared fixtures live in `tests/conftest.py`; pass `write_delay=0` for real `PolarionClient` instances. Pydantic `Field` constraints bypass FastMCP's JSON Schema on direct calls — verify via `TypeAdapter` reconstruction (see `TestCreateWorkItemFieldValidation`).
+`pytest-asyncio` in `mode=auto`. **Tool tests** (`tests/mcp_server_polarion/tools/`) call tool functions directly with an injected `mock_client` (FastMCP 3.0's `@mcp.tool` returns the original function). **Client tests** (`tests/mcp_server_polarion/core/test_client.py`) use `respx`. `mock_client` / `mock_ctx` + autouse guard-cache reset live in `tests/mcp_server_polarion/tools/conftest.py`; root `tests/conftest.py` holds `polarion_config` / `polarion_client` (pass `write_delay=0` for real `PolarionClient` instances). Pydantic `Field` constraints bypass FastMCP's JSON Schema on direct calls — verify via `TypeAdapter` reconstruction (see `TestCreateWorkItemFieldValidation`).
 
 **Transport tests** (`tests/mcp_server_polarion/test_mcp_transport.py`) drive the server through `fastmcp.Client(mcp)` in-memory transport so registration → JSON Schema → lifespan → `get_client(ctx)` → real `PolarionClient` → mocked HTTP runs end to end. Adding a new `@mcp.tool` requires updating `EXPECTED_TOOL_NAMES` — that is the forcing function. The fixture monkeypatches `_WRITE_DELAY_SECONDS` because the lifespan constructs `PolarionClient` itself.
 

@@ -1,13 +1,13 @@
 """Shared helpers for MCP tool implementations.
 
-Internal module used by ``tools.read`` and ``tools.write``. The helpers
-defined here are for internal use within the ``tools`` package and are
-**not** part of the public package API.
+Internal module used by the domain tool modules. The helpers defined here
+are for internal use within the ``tools`` package and are **not** part of
+the public package API.
 
 Body fields (``description``, ``homePageContent``) are passed through as
 raw Polarion HTML on the get/update round-trip path — Markdown conversion
 is reserved for synthesis paths (``read_document``, embedded work item bodies
-inside ``read_document_parts``) and lives in ``tools.read``.
+inside ``read_document_parts``) and lives in ``tools.documents``.
 """
 
 from __future__ import annotations
@@ -21,12 +21,19 @@ from fastmcp import Context
 from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.models import (
     DocumentComment,
+    EnumOption,
     Hyperlink,
     JsonValue,
     WorkItemDetail,
     WorkItemLink,
     WorkItemSummary,
 )
+
+# Caps how many items a single bulk write may carry. Polarion allows no
+# concurrent requests and throttles at ~3 req/s, so an unbounded batch is a
+# rate-limit and payload-size hazard; 50 bounds one request without forcing
+# callers to paginate typical work. Shared by every bulk write tool.
+MAX_BULK_ITEMS: Final[int] = 50
 
 
 class WorkItemSummaryKwargs(TypedDict):
@@ -651,16 +658,33 @@ def build_document_comment(item: dict[str, object]) -> DocumentComment:
     )
 
 
+def build_enum_option(entry: dict[str, object]) -> EnumOption:
+    def _bool(key: str) -> bool:
+        value = entry.get(key)
+        return value if isinstance(value, bool) else False
+
+    return EnumOption(
+        id=safe_str(entry.get("id", "")),
+        name=safe_str(entry.get("name", "")),
+        description=safe_str(entry.get("description", "")),
+        default=_bool("default"),
+        hidden=_bool("hidden"),
+        terminal=_bool("terminal"),
+    )
+
+
 __all__: list[str] = [
     "DEFAULT_PAGE_SIZE",
     "DOCUMENT_COMMENT_LIST_FIELDS",
     "DOCUMENT_DETAIL_FIELDS",
+    "MAX_BULK_ITEMS",
     "STANDARD_DOCUMENT_ATTRIBUTES",
     "STANDARD_WORK_ITEM_ATTRIBUTES",
     "WORK_ITEM_DETAIL_FIELDS",
     "WORK_ITEM_LIST_FIELDS",
     "WORK_ITEM_PART_FIELDS",
     "build_document_comment",
+    "build_enum_option",
     "build_included_work_item_map",
     "build_work_item_summary_kwargs",
     "compute_has_more",

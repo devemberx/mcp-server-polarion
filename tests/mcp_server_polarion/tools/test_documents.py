@@ -1,334 +1,170 @@
-"""Tests for the 9 read-only MCP tools.
-
-Each tool is tested by calling the async function directly with a mock
-``PolarionClient`` injected via a mock ``Context``.
-"""
+"""Tests for the document query/read/create/update tools."""
 
 from __future__ import annotations
 
 import inspect
 from collections.abc import Iterator
-from typing import Annotated, get_type_hints
+from typing import Annotated, cast, get_type_hints
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.core.exceptions import (
     PolarionAuthError,
     PolarionError,
     PolarionNotFoundError,
 )
 from mcp_server_polarion.models import (
-    DocumentComment,
+    DocumentCreateResult,
     DocumentDetail,
     DocumentPart,
     DocumentReadResult,
+    DocumentUpdateResult,
     EnumOption,
     PaginatedResult,
-    ProjectSummary,
-    WorkItemDetail,
-    WorkItemLink,
-    WorkItemRead,
 )
 from mcp_server_polarion.server import mcp
-from mcp_server_polarion.tools import _cache as _cache_mod
-from mcp_server_polarion.tools import read as _read_mod
+from mcp_server_polarion.tools import documents as _mod
+from mcp_server_polarion.tools._shared import cache as _cache_mod
+from mcp_server_polarion.tools.documents import (
+    _build_create_document_payload,
+    _build_update_document_payload,
+    create_document,
+    get_document,
+    list_document_enum_options,
+    list_documents,
+    read_document,
+    read_document_parts,
+    update_document,
+)
 
-# ``@mcp.tool`` returns the original function unchanged (not a FunctionTool
-# wrapper), so the tool callables are referenced directly.
-get_document = _read_mod.get_document
-list_document_comments = _read_mod.list_document_comments
-list_document_enum_options = _read_mod.list_document_enum_options
-read_document_parts = _read_mod.read_document_parts
-list_work_item_links = _read_mod.list_work_item_links
-get_work_item = _read_mod.get_work_item
-list_documents = _read_mod.list_documents
-list_projects = _read_mod.list_projects
-list_work_item_enum_options = _read_mod.list_work_item_enum_options
-list_work_items = _read_mod.list_work_items
-read_document = _read_mod.read_document
-read_work_item = _read_mod.read_work_item
+_STATUS_DATA: list[dict[str, object]] = [
+    {
+        "id": "draft",
+        "name": "Draft",
+        "description": "Initial state",
+        "default": True,
+        "hidden": False,
+        "terminal": False,
+    },
+    {
+        "id": "inreview",
+        "name": "In Review",
+        "default": False,
+        "hidden": False,
+        "terminal": False,
+    },
+    {
+        "id": "approved",
+        "name": "Approved",
+        "default": False,
+        "hidden": False,
+        "terminal": True,
+    },
+]
 
 
-@pytest.fixture
-def mock_client() -> AsyncMock:
-    """Return a mock PolarionClient with async methods."""
-    client = AsyncMock(spec=PolarionClient)
-    client.get = AsyncMock()
-    return client
+def _make_part(
+    *,
+    type_: str,
+    part_id: str = "polarion_x",
+    title: str = "",
+    content: str = "",
+    description: str = "",
+    level: int = 0,
+    work_item_id: str = "",
+    outline_number: str = "",
+) -> DocumentPart:
+    """Build a ``DocumentPart`` with sensible defaults for render-rule tests."""
+    return DocumentPart(
+        id=part_id,
+        title=title,
+        content=content,
+        type=type_,  # type: ignore[arg-type]
+        level=level,
+        description=description,
+        work_item_id=work_item_id,
+        work_item_type="",
+        work_item_status="",
+        external=False,
+        outline_number=outline_number,
+        next_part_id="",
+    )
 
 
-@pytest.fixture
-def mock_ctx(mock_client: AsyncMock) -> MagicMock:
-    """Return a mock FastMCP Context with the mock client."""
-    ctx = MagicMock()
-    ctx.lifespan_context = {
-        "polarion_client": mock_client,
+def _stub_parts(
+    monkeypatch: pytest.MonkeyPatch, parts: list[DocumentPart]
+) -> AsyncMock:
+    """Replace ``read_document_parts`` with an AsyncMock returning *parts*.
+
+    Returns the mock so individual tests can assert call arguments. Page
+    metadata is derived from the part list so pagination defaults stay
+    sensible without each test having to spell them out.
+    """
+    stub = AsyncMock(
+        return_value=PaginatedResult[DocumentPart](
+            items=parts,
+            total_count=len(parts),
+            page=1,
+            page_size=100,
+            has_more=False,
+        )
+    )
+    monkeypatch.setattr(_mod, "read_document_parts", stub)
+    return stub
+
+
+def _enum_get_response(ids: list[str]) -> dict[str, object]:
+    """Shape a ``getAvailableOptions`` reply for the guard tests."""
+    return {
+        "data": [{"id": i, "name": i} for i in ids],
+        "meta": {"totalCount": len(ids)},
     }
-    return ctx
 
 
-class TestListProjects:
-    """Tests for the ``list_projects`` tool."""
+async def _call_create_doc(mock_ctx: MagicMock, **overrides: object) -> object:
+    """Invoke ``create_document`` with explicit defaults for every Field."""
+    defaults: dict[str, object] = {
+        "project_id": "MyProj",
+        "space_id": "_default",
+        "module_name": "Doc",
+        "title": "x",
+        "type": "systemRequirementSpecification",
+        "status": None,
+        "home_page_content": None,
+        "custom_fields": None,
+        "dry_run": False,
+    }
+    defaults.update(overrides)
+    return await create_document(mock_ctx, **defaults)  # type: ignore[arg-type]
 
-    async def test_returns_projects(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": [
-                {
-                    "type": "projects",
-                    "id": "proj1",
-                    "attributes": {"name": "Project One", "active": True},
-                },
-                {
-                    "type": "projects",
-                    "id": "proj2",
-                    "attributes": {"name": "Project Two", "active": False},
-                },
-            ],
-            "meta": {"totalCount": 2},
-        }
 
-        result = await list_projects(
-            mock_ctx,
-            query=None,
-            page_size=100,
-            page_number=1,
-        )
+async def _call_update_doc(mock_ctx: MagicMock, **overrides: object) -> object:
+    """Invoke ``update_document`` with explicit defaults for every Field."""
+    defaults: dict[str, object] = {
+        "project_id": "MyProj",
+        "space_id": "_default",
+        "document_name": "Doc",
+        "title": None,
+        "status": None,
+        "type": None,
+        "home_page_content_html": None,
+        "custom_fields": None,
+        "workflow_action": None,
+        "dry_run": False,
+    }
+    defaults.update(overrides)
+    return await update_document(mock_ctx, **defaults)  # type: ignore[arg-type]
 
-        assert isinstance(result, PaginatedResult)
-        assert len(result.items) == 2
-        assert result.total_count == 2
-        assert result.page == 1
-        assert result.page_size == 100
-        assert result.has_more is False
-        p1 = ProjectSummary(id="proj1", name="Project One", active=True)
-        assert result.items[0] == p1
-        p2 = ProjectSummary(id="proj2", name="Project Two", active=False)
-        assert result.items[1] == p2
 
-    async def test_active_defaults_true_when_missing(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": [
-                {
-                    "type": "projects",
-                    "id": "proj1",
-                    "attributes": {"name": "No Active Field"},
-                },
-                {
-                    "type": "projects",
-                    "id": "proj2",
-                    "attributes": {"name": "Non-bool Active", "active": "yes"},
-                },
-            ],
-            "meta": {"totalCount": 2},
-        }
-
-        result = await list_projects(
-            mock_ctx,
-            query=None,
-            page_size=100,
-            page_number=1,
-        )
-
-        assert result.items[0].active is True
-        assert result.items[1].active is True
-
-    async def test_requests_active_field(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": [],
-            "meta": {"totalCount": 0},
-        }
-
-        await list_projects(
-            mock_ctx,
-            query=None,
-            page_size=100,
-            page_number=1,
-        )
-
-        _, kwargs = mock_client.get.call_args
-        assert "active" in kwargs["params"]["fields[projects]"].split(",")
-
-    async def test_empty_projects(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": [],
-            "meta": {"totalCount": 0},
-        }
-
-        result = await list_projects(
-            mock_ctx,
-            query=None,
-            page_size=100,
-            page_number=1,
-        )
-
-        assert result.items == []
-        assert result.total_count == 0
-        assert result.has_more is False
-
-    async def test_pagination_params_forwarded(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": [
-                {
-                    "type": "projects",
-                    "id": "proj2",
-                    "attributes": {"name": "Project 2"},
-                },
-                {
-                    "type": "projects",
-                    "id": "proj3",
-                    "attributes": {"name": "Project 3"},
-                },
-            ],
-            "meta": {"totalCount": 5},
-        }
-
-        result = await list_projects(
-            mock_ctx,
-            query=None,
-            page_size=2,
-            page_number=2,
-        )
-
-        assert result.total_count == 5
-        assert len(result.items) == 2
-        assert result.page == 2
-        assert result.has_more is True
-        assert result.items[0].id == "proj2"
-        assert result.items[1].id == "proj3"
-
-        _, kwargs = mock_client.get.call_args
-        assert kwargs["params"]["page[size]"] == 2
-        assert kwargs["params"]["page[number]"] == 2
-
-    async def test_auth_error_raises_permission_error(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.side_effect = PolarionAuthError(
-            "Unauthorized",
-            status_code=401,
-        )
-
-        with pytest.raises(PermissionError, match="POLARION_TOKEN"):
-            await list_projects(
-                mock_ctx,
-                query=None,
-                page_size=100,
-                page_number=1,
-            )
-
-    async def test_generic_error_raises_runtime_error(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.side_effect = PolarionError(
-            "Server error",
-            status_code=500,
-        )
-
-        with pytest.raises(RuntimeError, match="Failed to list"):
-            await list_projects(
-                mock_ctx,
-                query=None,
-                page_size=100,
-                page_number=1,
-            )
-
-    async def test_query_param_forwarded(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": [],
-            "meta": {"totalCount": 0},
-        }
-
-        await list_projects(
-            mock_ctx,
-            query="name:ILCU*",
-            page_size=100,
-            page_number=1,
-        )
-
-        _, kwargs = mock_client.get.call_args
-        assert kwargs["params"]["query"] == "name:ILCU*"
-
-    async def test_query_none_omits_param(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": [],
-            "meta": {"totalCount": 0},
-        }
-
-        await list_projects(
-            mock_ctx,
-            query=None,
-            page_size=100,
-            page_number=1,
-        )
-
-        _, kwargs = mock_client.get.call_args
-        assert "query" not in kwargs["params"]
-
-    async def test_query_returns_matching_items(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": [
-                {
-                    "type": "projects",
-                    "id": "proj1",
-                    "attributes": {"name": "ILCU Main"},
-                },
-            ],
-            "meta": {"totalCount": 1},
-        }
-
-        result = await list_projects(
-            mock_ctx,
-            query="name:ILCU*",
-            page_size=100,
-            page_number=1,
-        )
-
-        assert isinstance(result, PaginatedResult)
-        assert len(result.items) == 1
-        assert result.items[0].id == "proj1"
-
-    async def test_total_count_floor_when_api_returns_zero(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        """totalCount=0 with items present uses item count."""
-        mock_client.get.return_value = {
-            "data": [
-                {
-                    "type": "projects",
-                    "id": "proj1",
-                    "attributes": {"name": "Project One"},
-                },
-            ],
-            "meta": {"totalCount": 0},
-        }
-
-        result = await list_projects(
-            mock_ctx,
-            query=None,
-            page_size=100,
-            page_number=1,
-        )
-
-        assert result.total_count >= 1
+@pytest.fixture
+def reset_enum_guard_caches() -> None:
+    """Drop guard caches between integration tests so each scenario starts cold."""
+    _cache_mod._enum_option_cache.clear()
+    _cache_mod._project_enum_cache.clear()
+    _cache_mod._work_item_custom_key_cache.clear()
+    _cache_mod._document_custom_key_cache.clear()
 
 
 class TestListDocuments:
@@ -1069,32 +905,6 @@ class TestGetDocument:
         assert kwargs_b["params"]["fields[documents]"] == "@all"
 
 
-_STATUS_DATA: list[dict[str, object]] = [
-    {
-        "id": "draft",
-        "name": "Draft",
-        "description": "Initial state",
-        "default": True,
-        "hidden": False,
-        "terminal": False,
-    },
-    {
-        "id": "inreview",
-        "name": "In Review",
-        "default": False,
-        "hidden": False,
-        "terminal": False,
-    },
-    {
-        "id": "approved",
-        "name": "Approved",
-        "default": False,
-        "hidden": False,
-        "terminal": True,
-    },
-]
-
-
 class TestListDocumentEnumOptions:
     """Tests for the ``list_document_enum_options`` tool."""
 
@@ -1312,242 +1122,6 @@ class TestListDocumentEnumOptionsFieldValidation:
     def _adapter_for(param_name: str) -> TypeAdapter[object]:
         hints = get_type_hints(list_document_enum_options)
         sig = inspect.signature(list_document_enum_options)
-        field_info = sig.parameters[param_name].default
-        return TypeAdapter(Annotated[hints[param_name], field_info])
-
-    def test_page_size_rejects_above_max(self) -> None:
-        with pytest.raises(ValidationError):
-            self._adapter_for("page_size").validate_python(101)
-
-    def test_page_size_accepts_max(self) -> None:
-        assert self._adapter_for("page_size").validate_python(100) == 100
-
-    def test_page_size_rejects_zero(self) -> None:
-        with pytest.raises(ValidationError):
-            self._adapter_for("page_size").validate_python(0)
-
-    def test_page_number_rejects_zero(self) -> None:
-        with pytest.raises(ValidationError):
-            self._adapter_for("page_number").validate_python(0)
-
-
-class TestListWorkItemEnumOptions:
-    """Tests for the ``list_work_item_enum_options`` tool."""
-
-    async def test_returns_enum_options(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": _STATUS_DATA,
-            "meta": {"totalCount": 3},
-        }
-
-        result = await list_work_item_enum_options(
-            mock_ctx,
-            project_id="MCP_Test_Project",
-            field_id="status",
-            work_item_type="task",
-            page_size=100,
-            page_number=1,
-        )
-
-        assert isinstance(result, PaginatedResult)
-        assert len(result.items) == 3
-        assert result.total_count == 3
-        assert result.has_more is False
-        first = result.items[0]
-        assert isinstance(first, EnumOption)
-        assert first.id == "draft"
-        assert first.name == "Draft"
-        assert first.description == "Initial state"
-        assert first.default is True
-        assert first.terminal is False
-        assert result.items[2].terminal is True
-
-    async def test_request_path_and_params(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": [],
-            "meta": {"totalCount": 0},
-        }
-
-        await list_work_item_enum_options(
-            mock_ctx,
-            project_id="MCP_Test_Project",
-            field_id="status",
-            work_item_type="task",
-            page_size=50,
-            page_number=2,
-        )
-
-        args, kwargs = mock_client.get.call_args
-        assert args[0] == (
-            "/projects/MCP_Test_Project"
-            "/workitems/fields/status"
-            "/actions/getAvailableOptions"
-        )
-        params = kwargs["params"]
-        assert params["type"] == "task"
-        assert params["page[size]"] == 50
-        assert params["page[number]"] == 2
-
-    async def test_type_agnostic_tilde_passes_through(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": [],
-            "meta": {"totalCount": 0},
-        }
-
-        await list_work_item_enum_options(
-            mock_ctx,
-            project_id="MCP_Test_Project",
-            field_id="type",
-            work_item_type="~",
-            page_size=100,
-            page_number=1,
-        )
-
-        _, kwargs = mock_client.get.call_args
-        assert kwargs["params"]["type"] == "~"
-
-    async def test_missing_optional_fields_default(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": [{"id": "open", "name": "Open"}],
-            "meta": {"totalCount": 1},
-        }
-
-        result = await list_work_item_enum_options(
-            mock_ctx,
-            project_id="MCP_Test_Project",
-            field_id="status",
-            work_item_type="task",
-            page_size=100,
-            page_number=1,
-        )
-
-        opt = result.items[0]
-        assert opt.id == "open"
-        assert opt.description == ""
-        assert opt.default is False
-        assert opt.hidden is False
-        assert opt.terminal is False
-
-    async def test_non_bool_flag_falls_back_to_false(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": [
-                {
-                    "id": "weird",
-                    "name": "Weird",
-                    "default": "true",
-                    "hidden": 1,
-                    "terminal": None,
-                }
-            ],
-            "meta": {"totalCount": 1},
-        }
-
-        result = await list_work_item_enum_options(
-            mock_ctx,
-            project_id="MCP_Test_Project",
-            field_id="status",
-            work_item_type="task",
-            page_size=100,
-            page_number=1,
-        )
-
-        opt = result.items[0]
-        assert opt.default is False
-        assert opt.hidden is False
-        assert opt.terminal is False
-
-    async def test_pagination_has_more(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": _STATUS_DATA * 34,
-            "meta": {"totalCount": 150},
-        }
-
-        result = await list_work_item_enum_options(
-            mock_ctx,
-            project_id="MCP_Test_Project",
-            field_id="status",
-            work_item_type="task",
-            page_size=100,
-            page_number=1,
-        )
-
-        assert result.total_count == 150
-        assert result.has_more is True
-
-    async def test_not_found_raises_value_error(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.side_effect = PolarionNotFoundError(
-            "Not found",
-            status_code=404,
-        )
-
-        with pytest.raises(ValueError, match="No enum options"):
-            await list_work_item_enum_options(
-                mock_ctx,
-                project_id="MCP_Test_Project",
-                field_id="nope",
-                work_item_type="task",
-                page_size=100,
-                page_number=1,
-            )
-
-    async def test_auth_error_raises_permission_error(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.side_effect = PolarionAuthError(
-            "Unauthorized",
-            status_code=401,
-        )
-
-        with pytest.raises(PermissionError, match="POLARION_TOKEN"):
-            await list_work_item_enum_options(
-                mock_ctx,
-                project_id="MCP_Test_Project",
-                field_id="status",
-                work_item_type="task",
-                page_size=100,
-                page_number=1,
-            )
-
-    async def test_generic_error_raises_runtime_error(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.side_effect = PolarionError(
-            "Server error",
-            status_code=500,
-        )
-
-        with pytest.raises(RuntimeError, match="Failed to list enum options"):
-            await list_work_item_enum_options(
-                mock_ctx,
-                project_id="MCP_Test_Project",
-                field_id="status",
-                work_item_type="task",
-                page_size=100,
-                page_number=1,
-            )
-
-
-class TestListWorkItemEnumOptionsFieldValidation:
-    """Verify Field constraints on ``list_work_item_enum_options`` parameters."""
-
-    @staticmethod
-    def _adapter_for(param_name: str) -> TypeAdapter[object]:
-        hints = get_type_hints(list_work_item_enum_options)
-        sig = inspect.signature(list_work_item_enum_options)
         field_info = sig.parameters[param_name].default
         return TypeAdapter(Annotated[hints[param_name], field_info])
 
@@ -2049,56 +1623,6 @@ class TestReadDocumentParts:
 
         assert len(result.items) == 2
         assert result.total_count >= 2
-
-
-def _make_part(
-    *,
-    type_: str,
-    part_id: str = "polarion_x",
-    title: str = "",
-    content: str = "",
-    description: str = "",
-    level: int = 0,
-    work_item_id: str = "",
-    outline_number: str = "",
-) -> DocumentPart:
-    """Build a ``DocumentPart`` with sensible defaults for render-rule tests."""
-    return DocumentPart(
-        id=part_id,
-        title=title,
-        content=content,
-        type=type_,  # type: ignore[arg-type]
-        level=level,
-        description=description,
-        work_item_id=work_item_id,
-        work_item_type="",
-        work_item_status="",
-        external=False,
-        outline_number=outline_number,
-        next_part_id="",
-    )
-
-
-def _stub_parts(
-    monkeypatch: pytest.MonkeyPatch, parts: list[DocumentPart]
-) -> AsyncMock:
-    """Replace ``read_document_parts`` with an AsyncMock returning *parts*.
-
-    Returns the mock so individual tests can assert call arguments. Page
-    metadata is derived from the part list so pagination defaults stay
-    sensible without each test having to spell them out.
-    """
-    stub = AsyncMock(
-        return_value=PaginatedResult[DocumentPart](
-            items=parts,
-            total_count=len(parts),
-            page=1,
-            page_size=100,
-            has_more=False,
-        )
-    )
-    monkeypatch.setattr(_read_mod, "read_document_parts", stub)
-    return stub
 
 
 class TestReadDocument:
@@ -2650,7 +2174,7 @@ class TestReadDocument:
                 has_more=True,
             )
         )
-        monkeypatch.setattr(_read_mod, "read_document_parts", stub)
+        monkeypatch.setattr(_mod, "read_document_parts", stub)
 
         result = await read_document(
             mock_ctx,
@@ -2702,1660 +2226,1445 @@ class TestReadDocumentFieldValidation:
         assert self._adapter_for("page_number").validate_python(1) == 1
 
 
-class TestListWorkItems:
-    """Tests for the ``list_work_items`` tool."""
+class TestBuildUpdateDocumentPayload:
+    """Tests for the private ``_build_update_document_payload`` helper."""
 
-    async def test_returns_work_items(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": [
-                {
-                    "type": "workitems",
-                    "id": "proj1/MCPT-001",
-                    "attributes": {
-                        "title": "Login Feature",
-                        "type": "requirement",
-                        "status": "draft",
-                        "priority": "90.0",
-                        "updated": "2026-04-29T10:23:00Z",
-                    },
-                    "relationships": {
-                        "module": {
-                            "data": {
-                                "type": "documents",
-                                "id": "proj1/Design/Software Requirement Specification",
-                            }
-                        },
-                        "assignee": {
-                            "data": [
-                                {"type": "users", "id": "proj1/alice"},
-                                {"type": "users", "id": "proj1/bob"},
-                            ]
-                        },
-                    },
-                },
-                {
-                    "type": "workitems",
-                    "id": "proj1/MCPT-002",
-                    "attributes": {
-                        "title": "Logout Feature",
-                        "type": "requirement",
-                        "status": "approved",
-                    },
-                    "relationships": {
-                        "module": {"data": None},
-                        "assignee": {"data": []},
-                    },
-                },
-            ],
-            "meta": {"totalCount": 2},
+    def test_only_set_fields_appear_in_attributes(self) -> None:
+        # Skip-None semantics: omitted fields are not serialized so
+        # JSON:API omit-preserve takes effect server-side.
+        payload = _build_update_document_payload(
+            project_id="MyProj",
+            space_id="Requirements",
+            document_name="SRS",
+            title="New Title",
+            status=None,
+            type=None,
+        )
+
+        # data is a single dict (PATCH-shape), NOT a list.
+        assert payload == {
+            "data": {
+                "type": "documents",
+                "id": "MyProj/Requirements/SRS",
+                "attributes": {"title": "New Title"},
+            }
+        }
+        assert isinstance(payload["data"], dict)
+
+    def test_all_three_fields_serialised_when_set(self) -> None:
+        payload = _build_update_document_payload(
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title="T",
+            status="approved",
+            type="req_specification",
+        )
+
+        data = cast(dict[str, object], payload["data"])
+        attributes = cast(dict[str, object], data["attributes"])
+        assert attributes == {
+            "title": "T",
+            "status": "approved",
+            "type": "req_specification",
         }
 
-        result = await list_work_items(
-            mock_ctx,
-            project_id="proj1",
-            query=None,
-            page_size=100,
-            page_number=1,
+    def test_no_attributes_when_all_fields_are_none(self) -> None:
+        # Helper produces a body with no ``attributes`` key when every
+        # field is None. The tool layer rejects this case before
+        # reaching the helper, but a future direct caller should not
+        # silently emit an empty PATCH body.
+        payload = _build_update_document_payload(
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title=None,
+            status=None,
+            type=None,
         )
 
-        assert isinstance(result, PaginatedResult)
-        assert len(result.items) == 2
-        assert result.total_count == 2
+        data = cast(dict[str, object], payload["data"])
+        assert "attributes" not in data
+        assert data["id"] == "MyProj/S/D"
 
-        first = result.items[0]
-        assert first.id == "MCPT-001"
-        assert first.title == "Login Feature"
-        assert first.priority == "90.0"
-        assert first.updated == "2026-04-29T10:23:00Z"
-        assert first.space_id == "Design"
-        assert first.document_name == "Software Requirement Specification"
-        assert first.assignee_ids == ["alice", "bob"]
+    def test_homepagecontent_omitted_when_not_passed(self) -> None:
+        # JSON:API omit-preserve: body stays untouched when the caller
+        # does not pass ``home_page_content_html``.
+        payload = _build_update_document_payload(
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title="T",
+            status="approved",
+            type="generic",
+        )
+        body_str = repr(payload)
+        assert "homePageContent" not in body_str
 
-        second = result.items[1]
-        assert second.id == "MCPT-002"
-        assert second.priority == ""
-        assert second.updated == ""
-        assert second.space_id == ""
-        assert second.document_name == ""
-        assert second.assignee_ids == []
-
-    async def test_sparse_fieldset_requested(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": [],
-            "meta": {"totalCount": 0},
-        }
-
-        await list_work_items(
-            mock_ctx,
-            project_id="proj1",
-            query=None,
-            page_size=100,
-            page_number=1,
+    def test_home_page_content_html_wrapped_verbatim(self) -> None:
+        # Raw HTML pass-through — no sanitization, no markdownify.
+        raw = '<p>x <span class="polarion-rte-link" data-item-id="MCPT-1">y</span></p>'
+        payload = _build_update_document_payload(
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title=None,
+            status=None,
+            type=None,
+            home_page_content_html=raw,
         )
 
-        _, kwargs = mock_client.get.call_args
-        assert "fields[workitems]" in kwargs["params"]
+        data = cast(dict[str, object], payload["data"])
+        attributes = cast(dict[str, object], data["attributes"])
+        assert attributes["homePageContent"] == {"type": "text/html", "value": raw}
 
-    async def test_project_not_found(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.side_effect = PolarionNotFoundError(
-            "Not found",
-            status_code=404,
+    def test_document_name_with_slashes_preserved_verbatim(self) -> None:
+        # JSON body IDs must NOT be URL-encoded.
+        payload = _build_update_document_payload(
+            project_id="MyProj",
+            space_id="Design",
+            document_name="Folder/Sub Doc",
+            title="t",
+            status=None,
+            type=None,
         )
 
-        with pytest.raises(ValueError, match="not found"):
-            await list_work_items(
-                mock_ctx,
-                project_id="missing",
-                query=None,
-                page_size=100,
-                page_number=1,
+        data = cast(dict[str, object], payload["data"])
+        assert data["id"] == "MyProj/Design/Folder/Sub Doc"
+
+    def test_custom_fields_inlined_in_document_patch(self) -> None:
+        payload = _build_update_document_payload(
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title=None,
+            status=None,
+            type=None,
+            home_page_content_html=None,
+            custom_fields={"complianceLevel": "L3", "reviewerName": "alice"},
+        )
+        data = cast(dict[str, object], payload["data"])
+        attributes = cast(dict[str, object], data["attributes"])
+        assert attributes == {"complianceLevel": "L3", "reviewerName": "alice"}
+
+    def test_custom_fields_collision_raises_for_document_standard(self) -> None:
+        # ``moduleFolder`` is in the document standard set — collision.
+        with pytest.raises(ValueError, match="custom_fields keys collide"):
+            _build_update_document_payload(
+                project_id="MyProj",
+                space_id="S",
+                document_name="D",
+                title=None,
+                status=None,
+                type=None,
+                home_page_content_html=None,
+                custom_fields={"moduleFolder": "Other"},
             )
 
-    async def test_strips_project_prefix_from_id(
+
+class TestUpdateDocumentValidation:
+    """Tool-layer validation that protects against empty / no-op PATCHes."""
+
+    async def test_no_fields_raises_value_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = {
-            "data": [
-                {
-                    "id": "myproject/WI-100",
-                    "attributes": {
-                        "title": "Test",
-                        "type": "task",
-                        "status": "open",
-                    },
-                },
-            ],
-            "meta": {"totalCount": 1},
-        }
+        with pytest.raises(ValueError, match="at least one"):
+            await update_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="S",
+                document_name="D",
+                title=None,
+                status=None,
+                type=None,
+                home_page_content_html=None,
+                custom_fields=None,
+                workflow_action=None,
+                dry_run=True,
+            )
+        mock_client.patch.assert_not_called()
 
-        result = await list_work_items(
+    async def test_workflow_action_alone_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        with pytest.raises(ValueError, match="workflow_action alone"):
+            await update_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="S",
+                document_name="D",
+                title=None,
+                status=None,
+                type=None,
+                home_page_content_html=None,
+                custom_fields=None,
+                workflow_action="approve",
+                dry_run=True,
+            )
+        mock_client.patch.assert_not_called()
+
+    async def test_workflow_action_with_status_passes(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # workflow_action paired with at least one attribute is OK.
+        result = await update_document(
             mock_ctx,
-            project_id="myproject",
-            query=None,
-            page_size=100,
-            page_number=1,
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title=None,
+            status="approved",
+            type=None,
+            home_page_content_html=None,
+            custom_fields=None,
+            workflow_action="approve",
+            dry_run=True,
         )
+        assert result.dry_run is True
 
-        assert result.items[0].id == "WI-100"
-
-    async def test_query_param_forwarded(
+    async def test_custom_fields_alone_satisfies_at_least_one_check(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
+        # custom_fields counts as a body field on update_document too. The
+        # priming GET lets the custom-field guard see ``documentVersion``.
         mock_client.get.return_value = {
-            "data": [],
-            "meta": {"totalCount": 0},
+            "data": {"attributes": {"title": "D", "documentVersion": "0.1"}}
         }
-
-        await list_work_items(
+        result = await update_document(
             mock_ctx,
-            project_id="proj1",
-            query="type:testCase",
-            page_size=100,
-            page_number=1,
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title=None,
+            status=None,
+            type=None,
+            home_page_content_html=None,
+            custom_fields={"documentVersion": "0.2"},
+            workflow_action=None,
+            dry_run=True,
         )
+        assert result.dry_run is True
 
-        _, kwargs = mock_client.get.call_args
-        assert kwargs["params"]["query"] == "type:testCase"
-
-    async def test_query_none_omits_param(
+    async def test_workflow_action_with_custom_fields_passes(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
+        # workflow_action paired with custom_fields-only should also
+        # satisfy the body-field check.
         mock_client.get.return_value = {
-            "data": [],
-            "meta": {"totalCount": 0},
+            "data": {"attributes": {"title": "D", "documentVersion": "0.1"}}
         }
-
-        await list_work_items(
+        result = await update_document(
             mock_ctx,
-            project_id="proj1",
-            query=None,
-            page_size=100,
-            page_number=1,
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title=None,
+            status=None,
+            type=None,
+            home_page_content_html=None,
+            custom_fields={"documentVersion": "0.2"},
+            workflow_action="approve",
+            dry_run=True,
         )
+        assert result.dry_run is True
 
-        _, kwargs = mock_client.get.call_args
-        assert "query" not in kwargs["params"]
-
-    async def test_sql_prefix_query_passed_verbatim(
+    async def test_workflow_action_with_home_page_content_html_passes(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        sql_query = (
-            "SQL:(SELECT item.* FROM POLARION.WORKITEM item "
-            "WHERE item.C_TYPE = 'requirement')"
-        )
-        mock_client.get.return_value = {
-            "data": [],
-            "meta": {"totalCount": 0},
-        }
+        """workflow_action paired with home_page_content_html only is OK.
 
-        await list_work_items(
-            mock_ctx,
-            project_id="proj1",
-            query=sql_query,
-            page_size=100,
-            page_number=1,
-        )
-
-        _, kwargs = mock_client.get.call_args
-        assert kwargs["params"]["query"] == sql_query
-
-    async def test_query_returns_matching_items(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": [
-                {
-                    "id": "proj1/MCPT-001",
-                    "attributes": {
-                        "title": "Login Feature",
-                        "type": "requirement",
-                        "status": "approved",
-                    },
-                },
-            ],
-            "meta": {"totalCount": 1},
-        }
-
-        result = await list_work_items(
-            mock_ctx,
-            project_id="proj1",
-            query="type:requirement AND status:approved",
-            page_size=100,
-            page_number=1,
-        )
-
-        assert isinstance(result, PaginatedResult)
-        assert len(result.items) == 1
-        assert result.items[0].id == "MCPT-001"
-
-    async def test_total_count_floor_when_api_returns_zero(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        """When Polarion omits totalCount (returns 0), use item count as minimum."""
-        mock_client.get.return_value = {
-            "data": [
-                {
-                    "id": "proj1/MCPT-001",
-                    "attributes": {
-                        "title": "A",
-                        "type": "requirement",
-                        "status": "open",
-                    },
-                },
-                {
-                    "id": "proj1/MCPT-002",
-                    "attributes": {
-                        "title": "B",
-                        "type": "requirement",
-                        "status": "open",
-                    },
-                },
-            ],
-            "meta": {"totalCount": 0},  # Polarion quirk: 0 even when items exist
-        }
-
-        result = await list_work_items(
-            mock_ctx,
-            project_id="proj1",
-            query="type:requirement",
-            page_size=100,
-            page_number=1,
-        )
-
-        # total_count should be at least 2 (the number of returned items)
-        assert result.total_count >= 2
-
-
-class TestGetWorkItem:
-    """Tests for the ``get_work_item`` tool."""
-
-    async def test_returns_work_item_detail(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": {
-                "type": "workitems",
-                "id": "proj1/MCPT-001",
-                "attributes": {
-                    "title": "Login Feature",
-                    "type": "requirement",
-                    "status": "draft",
-                    "priority": "75.0",
-                    "updated": "2026-04-29T10:23:00Z",
-                    "created": "2026-04-01T09:00:00Z",
-                    "outlineNumber": "1.2.3",
-                    "hyperlinks": [
-                        {
-                            "role": "ref_ext",
-                            "title": "Spec",
-                            "uri": "https://example.com/spec",
-                        },
-                        {"role": "impl", "title": "", "uri": ""},
-                    ],
-                    "description": {
-                        "type": "text/html",
-                        "value": (
-                            "<p>User must be able to <strong>log in</strong>.</p>"
-                        ),
-                    },
-                },
-                "relationships": {
-                    "module": {
-                        "data": {
-                            "type": "documents",
-                            "id": "proj1/Design/SRS",
-                        }
-                    },
-                    "assignee": {"data": [{"type": "users", "id": "proj1/alice"}]},
-                    "author": {"data": {"type": "users", "id": "proj1/bob"}},
-                },
-            },
-        }
-
-        result = await get_work_item(
-            mock_ctx,
-            project_id="proj1",
-            work_item_id="MCPT-001",
-            include_description_html=True,
-        )
-
-        assert isinstance(result, WorkItemDetail)
-        assert result.id == "MCPT-001"
-        assert result.title == "Login Feature"
-        assert result.type == "requirement"
-        assert result.status == "draft"
-        assert result.priority == "75.0"
-        assert result.updated == "2026-04-29T10:23:00Z"
-        assert result.created == "2026-04-01T09:00:00Z"
-        assert result.outline_number == "1.2.3"
-        assert result.space_id == "Design"
-        assert result.document_name == "SRS"
-        assert result.assignee_ids == ["alice"]
-        assert result.author_id == "bob"
-        # Entry without uri is skipped.
-        assert len(result.hyperlinks) == 1
-        assert result.hyperlinks[0].role == "ref_ext"
-        assert result.hyperlinks[0].uri == "https://example.com/spec"
-        # Raw HTML passthrough — <p>/<strong> survive verbatim, no markdownify.
-        assert result.description_html == (
-            "<p>User must be able to <strong>log in</strong>.</p>"
-        )
-        assert result.project_id == "proj1"
-        assert result.custom_fields == {}
-
-    async def test_include_description_html_false_blanks_field(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        """include_description_html=False → description_html blanked.
-
-        ``@all`` is the only sparse-fieldset that surfaces custom fields,
-        so the body still travels over the wire; the tool layer is
-        responsible for stripping it from the response to save LLM
-        context tokens. The default at the FastMCP layer is False; here
-        we pass it explicitly because direct-call tests bypass the
-        FastMCP Field default unwrap.
+        Polarion rejects empty PATCH bodies, so workflow_action MUST come
+        with at least one attribute. home_page_content_html is one such
+        attribute — this guard prevents the body-field check from
+        regressing to "title/status/type/custom_fields only".
         """
-        mock_client.get.return_value = {
-            "data": {
-                "id": "proj1/MCPT-007",
-                "attributes": {
-                    "title": "work item",
-                    "type": "task",
-                    "status": "draft",
-                    "description": {
-                        "type": "text/html",
-                        "value": "<p>should be hidden</p>",
-                    },
-                },
-            },
+        result = await update_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title=None,
+            status=None,
+            type=None,
+            home_page_content_html='<p id="b1">new body</p>',
+            custom_fields=None,
+            workflow_action="approve",
+            dry_run=True,
+        )
+        assert result.dry_run is True
+        # Sanity: payload includes both the body and the workflow query param.
+        assert result.payload_preview is not None
+        item = cast(dict[str, object], result.payload_preview["data"])
+        attributes = cast(dict[str, object], item["attributes"])
+        assert attributes["homePageContent"] == {
+            "type": "text/html",
+            "value": '<p id="b1">new body</p>',
         }
 
-        result = await get_work_item(
-            mock_ctx,
-            project_id="proj1",
-            work_item_id="MCPT-007",
-            include_description_html=False,
-        )
-
-        assert result.description_html == ""
-        # Other metadata still populated.
-        assert result.title == "work item"
-
-    async def test_polarion_specific_markup_round_trips(
+    async def test_custom_fields_collision_raises(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Polarion-specific spans / data-* attributes must survive on read.
+        with pytest.raises(ValueError, match="custom_fields keys collide"):
+            await update_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="S",
+                document_name="D",
+                title="t",
+                status=None,
+                type=None,
+                home_page_content_html=None,
+                custom_fields={"title": "y"},
+                workflow_action=None,
+                dry_run=True,
+            )
+        mock_client.patch.assert_not_called()
 
-        Core round-trip guarantee for update_work_item(description_html=).
+    async def test_custom_fields_homepagecontent_collision_raises(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """`homePageContent` is a STANDARD_DOCUMENT_ATTRIBUTES key.
+
+        Allowing it via ``custom_fields`` would let a caller bypass the
+        explicit ``home_page_content_html`` parameter (and its empty-string
+        guard). The merge helper raises on collision; pin that semantics.
         """
+        with pytest.raises(ValueError, match="custom_fields keys collide"):
+            await update_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="S",
+                document_name="D",
+                title="t",
+                status=None,
+                type=None,
+                home_page_content_html=None,
+                custom_fields={
+                    "homePageContent": {
+                        "type": "text/html",
+                        "value": "<p>sneak</p>",
+                    }
+                },
+                workflow_action=None,
+                dry_run=True,
+            )
+        mock_client.patch.assert_not_called()
+
+
+class TestUpdateDocumentDryRun:
+    """Tests for ``update_document`` with ``dry_run=True``."""
+
+    async def test_dry_run_returns_payload_without_calling_patch(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        result = await update_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="Requirements",
+            document_name="SRS",
+            title="New Title",
+            status=None,
+            type=None,
+            home_page_content_html=None,
+            custom_fields=None,
+            workflow_action=None,
+            dry_run=True,
+        )
+
+        mock_client.patch.assert_not_called()
+        assert isinstance(result, DocumentUpdateResult)
+        assert result.updated is False
+        assert result.dry_run is True
+        assert result.payload_preview is not None
+        data = cast(dict[str, object], result.payload_preview["data"])
+        assert data["type"] == "documents"
+        attributes = cast(dict[str, object], data["attributes"])
+        assert attributes == {"title": "New Title"}
+
+
+class TestUpdateDocumentHappyPath:
+    """Tests for a successful ``update_document`` call."""
+
+    async def test_returns_updated_true_on_204(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.return_value = {}
+
+        result = await update_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="Requirements",
+            document_name="SRS",
+            title="New Title",
+            status=None,
+            type=None,
+            home_page_content_html=None,
+            custom_fields=None,
+            workflow_action=None,
+            dry_run=False,
+        )
+
+        assert isinstance(result, DocumentUpdateResult)
+        assert result.updated is True
+        assert result.dry_run is False
+        assert result.payload_preview is None
+
+    async def test_patch_called_with_correct_path_and_body(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.return_value = {}
+
+        await update_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="Requirements",
+            document_name="My Doc",
+            title="T",
+            status=None,
+            type=None,
+            home_page_content_html=None,
+            custom_fields=None,
+            workflow_action=None,
+            dry_run=False,
+        )
+
+        args, kwargs = mock_client.patch.call_args
+        expected_path = "/projects/MyProj/spaces/Requirements/documents/My%20Doc"
+        assert args == (expected_path,)
+        body = kwargs["json"]
+        assert isinstance(body["data"], dict)
+        assert body["data"]["id"] == "MyProj/Requirements/My Doc"
+        assert body["data"]["attributes"] == {"title": "T"}
+
+    async def test_workflow_action_appended_as_query_param(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.return_value = {}
+
+        await update_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title=None,
+            status="approved",
+            type=None,
+            home_page_content_html=None,
+            custom_fields=None,
+            workflow_action="approve",
+            dry_run=False,
+        )
+
+        args, _ = mock_client.patch.call_args
+        path = args[0]
+        assert path.startswith("/projects/MyProj/spaces/S/documents/D")
+        assert "workflowAction=approve" in path
+
+    async def test_home_page_content_html_is_sent_verbatim(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """home_page_content_html passes through with no sanitization."""
+        mock_client.patch.return_value = {}
+
         raw = (
-            '<p>Refs <span class="polarion-rte-link" '
-            'data-item-id="MCPT-9" data-scope="proj1">MCPT-9</span></p>'
+            '<p id="b1">Body with <span class="polarion-rte-link" '
+            'data-item-id="MCPT-1">link</span></p>'
         )
-        mock_client.get.return_value = {
-            "data": {
-                "id": "proj1/MCPT-008",
-                "attributes": {
-                    "title": "RT",
-                    "type": "task",
-                    "status": "draft",
-                    "description": {"type": "text/html", "value": raw},
-                },
-            },
-        }
-
-        result = await get_work_item(
+        await update_document(
             mock_ctx,
-            project_id="proj1",
-            work_item_id="MCPT-008",
-            include_description_html=True,
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title=None,
+            status=None,
+            type=None,
+            home_page_content_html=raw,
+            custom_fields=None,
+            workflow_action=None,
+            dry_run=False,
         )
 
-        assert result.description_html == raw
+        _, kwargs = mock_client.patch.call_args
+        attributes = kwargs["json"]["data"]["attributes"]
+        assert attributes["homePageContent"] == {"type": "text/html", "value": raw}
+        # Nothing else slipped in.
+        assert set(attributes.keys()) == {"homePageContent"}
 
-    async def test_defect_severity_and_open_resolution(
+    async def test_home_page_content_html_omitted_when_not_passed(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = {
-            "data": {
-                "id": "proj1/MCPT-500",
-                "attributes": {
-                    "title": "Login crashes",
-                    "type": "defect",
-                    "status": "open",
-                    "severity": "blocker",
-                },
-            },
-        }
+        """Omit-preserve: no homePageContent in body when not passed."""
+        mock_client.patch.return_value = {}
 
-        result = await get_work_item(
+        await update_document(
             mock_ctx,
-            project_id="proj1",
-            work_item_id="MCPT-500",
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title="T",
+            status="approved",
+            type="generic",
+            home_page_content_html=None,
+            custom_fields=None,
+            workflow_action=None,
+            dry_run=False,
         )
 
-        assert result.severity == "blocker"
-        assert result.resolution == ""
+        _, kwargs = mock_client.patch.call_args
+        body_str = repr(kwargs["json"])
+        assert "homePageContent" not in body_str
 
-    async def test_no_description(
+    async def test_home_page_content_html_empty_string_raises(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = {
-            "data": {
-                "id": "proj1/MCPT-002",
-                "attributes": {
-                    "title": "Minimal",
-                    "type": "task",
-                    "status": "open",
-                },
-            },
-        }
-
-        result = await get_work_item(
-            mock_ctx,
-            project_id="proj1",
-            work_item_id="MCPT-002",
-            include_description_html=True,
-        )
-
-        assert result.description_html == ""
-        # Default values for new detail-only fields.
-        assert result.author_id == ""
-        assert result.created == ""
-        assert result.severity == ""
-        assert result.resolution == ""
-        assert result.outline_number == ""
-        assert result.hyperlinks == []
-
-    async def test_not_found_raises_value_error(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.side_effect = PolarionNotFoundError(
-            "Not found",
-            status_code=404,
-        )
-
-        with pytest.raises(ValueError, match="not found"):
-            await get_work_item(
+        """Empty string is rejected at the tool layer (body-wipe guard)."""
+        with pytest.raises(ValueError, match="would wipe"):
+            await update_document(
                 mock_ctx,
-                project_id="proj1",
-                work_item_id="MCPT-999",
+                project_id="MyProj",
+                space_id="S",
+                document_name="D",
+                title=None,
+                status=None,
+                type=None,
+                home_page_content_html="",
+                custom_fields=None,
+                workflow_action=None,
+                dry_run=False,
             )
+        mock_client.patch.assert_not_called()
 
-    async def test_api_path_includes_work_item_id(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": {
-                "id": "proj1/MCPT-010",
-                "attributes": {
-                    "title": "Test",
-                    "type": "task",
-                    "status": "open",
-                },
-            },
-        }
-
-        await get_work_item(
-            mock_ctx,
-            project_id="proj1",
-            work_item_id="MCPT-010",
-        )
-
-        call_path = mock_client.get.call_args[0][0]
-        expected = "/projects/proj1/workitems/MCPT-010"
-        assert call_path == expected
-
-    async def test_custom_fields_populated_from_response(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        """Inline non-standard attributes flow through as ``custom_fields``."""
-        rich_value = {"type": "text/html", "value": "<p>note</p>"}
-        mock_client.get.return_value = {
-            "data": {
-                "id": "proj1/MCPT-999",
-                "attributes": {
-                    # Standard attributes — present but excluded from custom_fields.
-                    "title": "work item with customs",
-                    "type": "softwarerequirement",
-                    "status": "approved",
-                    "priority": "50.0",
-                    # Inline custom attributes — top-level keys, not nested.
-                    "riskLevel": "high",
-                    "category": "user",
-                    "effortHours": 12.0,
-                    "reviewerNote": rich_value,
-                },
-            },
-        }
-
-        result = await get_work_item(
-            mock_ctx,
-            project_id="proj1",
-            work_item_id="MCPT-999",
-        )
-
-        # Raw passthrough: rich-text values stay as the original
-        # {type, value} dict — they are NOT converted to Markdown.
-        assert result.custom_fields == {
-            "riskLevel": "high",
-            "category": "user",
-            "effortHours": 12.0,
-            "reviewerNote": rich_value,
-        }
-
-    async def test_custom_fields_empty_when_only_standard_attrs(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        """All-standard attributes → empty custom_fields dict."""
-        mock_client.get.return_value = {
-            "data": {
-                "id": "proj1/MCPT-100",
-                "attributes": {
-                    "title": "No customs",
-                    "type": "task",
-                    "status": "open",
-                },
-            },
-        }
-
-        result = await get_work_item(
-            mock_ctx,
-            project_id="proj1",
-            work_item_id="MCPT-100",
-        )
-
-        assert result.custom_fields == {}
-
-    async def test_sparse_fieldset_uses_all_token(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        """``fields[workitems]=@all`` is the only token that surfaces customs."""
-        mock_client.get.return_value = {
-            "data": {
-                "id": "proj1/MCPT-1",
-                "attributes": {"title": "x", "type": "task", "status": "open"},
-            },
-        }
-
-        await get_work_item(
-            mock_ctx,
-            project_id="proj1",
-            work_item_id="MCPT-1",
-        )
-
-        _, kwargs = mock_client.get.call_args
-        assert kwargs["params"]["fields[workitems]"] == "@all"
-
-
-class TestReadWorkItem:
-    """Tests for the ``read_work_item`` tool.
-
-    Delegates the fetch + error mapping to ``get_work_item`` and converts
-    the raw HTML body to Markdown via ``html_to_markdown()``.
-    """
-
-    async def test_html_body_converted_to_markdown(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": {
-                "type": "workitems",
-                "id": "proj1/MCPT-001",
-                "attributes": {
-                    "title": "Login Feature",
-                    "type": "requirement",
-                    "status": "draft",
-                    "priority": "75.0",
-                    "outlineNumber": "1.2.3",
-                    "description": {
-                        "type": "text/html",
-                        "value": (
-                            "<p>User must be able to <strong>log in</strong>.</p>"
-                        ),
-                    },
-                },
-                "relationships": {
-                    "module": {
-                        "data": {"type": "documents", "id": "proj1/Design/SRS"},
-                    },
-                    "author": {"data": {"type": "users", "id": "proj1/bob"}},
-                },
-            },
-        }
-
-        result = await read_work_item(
-            mock_ctx,
-            project_id="proj1",
-            work_item_id="MCPT-001",
-        )
-
-        assert isinstance(result, WorkItemRead)
-        assert result.id == "MCPT-001"
-        assert result.title == "Login Feature"
-        assert "**log in**" in result.description
-        assert "<p>" not in result.description
-        assert "<strong>" not in result.description
-        assert result.outline_number == "1.2.3"
-        assert result.space_id == "Design"
-        assert result.document_name == "SRS"
-        assert result.author_id == "bob"
-        assert result.project_id == "proj1"
-
-    async def test_empty_description_yields_empty_markdown(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": {
-                "id": "proj1/MCPT-002",
-                "attributes": {
-                    "title": "Minimal",
-                    "type": "task",
-                    "status": "open",
-                },
-            },
-        }
-
-        result = await read_work_item(
-            mock_ctx,
-            project_id="proj1",
-            work_item_id="MCPT-002",
-        )
-
-        assert result.description == ""
-
-    async def test_polarion_specific_markup_collapses_to_text(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        """Polarion span/data-* attributes get stripped by html_to_markdown.
-
-        Marks the read-only contract: WorkItemRead.description is NOT a
-        round-trip shape — feeding it back to update_work_item would lose
-        the polarion-rte-link span. The round-trip pair lives on
-        get_work_item / update_work_item.
-        """
-        raw = (
-            '<p>Refs <span class="polarion-rte-link" '
-            'data-item-id="MCPT-9" data-scope="proj1">MCPT-9</span></p>'
-        )
-        mock_client.get.return_value = {
-            "data": {
-                "id": "proj1/MCPT-008",
-                "attributes": {
-                    "title": "RT",
-                    "type": "task",
-                    "status": "draft",
-                    "description": {"type": "text/html", "value": raw},
-                },
-            },
-        }
-
-        result = await read_work_item(
-            mock_ctx,
-            project_id="proj1",
-            work_item_id="MCPT-008",
-        )
-
-        assert "MCPT-9" in result.description
-        assert "polarion-rte-link" not in result.description
-        assert "data-item-id" not in result.description
-
-    async def test_not_found_raises_value_error(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.side_effect = PolarionNotFoundError(
-            "Not found",
-            status_code=404,
-        )
-
-        with pytest.raises(ValueError, match="not found"):
-            await read_work_item(
-                mock_ctx,
-                project_id="proj1",
-                work_item_id="MCPT-999",
-            )
-
-    async def test_auth_error_raises_permission_error(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.side_effect = PolarionAuthError(
-            "Unauthorized",
-            status_code=401,
-        )
-
-        with pytest.raises(PermissionError):
-            await read_work_item(
-                mock_ctx,
-                project_id="proj1",
-                work_item_id="MCPT-001",
-            )
-
-    async def test_generic_error_raises_runtime_error(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.side_effect = PolarionError(
-            "boom",
-            status_code=500,
-        )
-
-        with pytest.raises(RuntimeError, match="boom"):
-            await read_work_item(
-                mock_ctx,
-                project_id="proj1",
-                work_item_id="MCPT-001",
-            )
-
-    async def test_metadata_fields_carry_through(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        """Defect-specific fields (severity, resolution) and customs survive."""
-        rich_value = {"type": "text/html", "value": "<p>note</p>"}
-        mock_client.get.return_value = {
-            "data": {
-                "id": "proj1/MCPT-500",
-                "attributes": {
-                    "title": "Login crashes",
-                    "type": "defect",
-                    "status": "closed",
-                    "severity": "blocker",
-                    "resolution": "fixed",
-                    "hyperlinks": [
-                        {
-                            "role": "ref_ext",
-                            "title": "Spec",
-                            "uri": "https://example.com/spec",
-                        },
-                    ],
-                    "riskLevel": "high",
-                    "reviewerNote": rich_value,
-                },
-            },
-        }
-
-        result = await read_work_item(
-            mock_ctx,
-            project_id="proj1",
-            work_item_id="MCPT-500",
-        )
-
-        assert result.severity == "blocker"
-        assert result.resolution == "fixed"
-        assert len(result.hyperlinks) == 1
-        assert result.hyperlinks[0].uri == "https://example.com/spec"
-        # Custom fields stay raw — rich-text dicts are NOT converted to Markdown
-        # because the same dict shape round-trips through update_work_item.
-        assert result.custom_fields == {
-            "riskLevel": "high",
-            "reviewerNote": rich_value,
-        }
-
-    async def test_no_description_html_field_on_model(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        """WorkItemRead does not expose description_html — read-only contract."""
-        mock_client.get.return_value = {
-            "data": {
-                "id": "proj1/MCPT-1",
-                "attributes": {"title": "x", "type": "task", "status": "open"},
-            },
-        }
-
-        result = await read_work_item(
-            mock_ctx,
-            project_id="proj1",
-            work_item_id="MCPT-1",
-        )
-
-        assert not hasattr(result, "description_html")
-
-
-class TestListWorkItemLinks:
-    """Tests for the ``list_work_item_links`` tool.
-
-    Each call returns a single page in a single direction (``forward`` or
-    ``back``). Pagination matches the convention used by other list tools.
-    """
-
-    async def test_forward_returns_paginated_result(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": [
-                {
-                    "id": "proj1/MCPT-001/parent/proj1/MCPT-010",
-                    "attributes": {"role": "parent", "suspect": False},
-                    "relationships": {
-                        "workItem": {
-                            "data": {
-                                "type": "workitems",
-                                "id": "proj1/MCPT-010",
-                            }
-                        },
-                    },
-                },
-            ],
-            "included": [
-                {
-                    "type": "workitems",
-                    "id": "proj1/MCPT-010",
-                    "attributes": {
-                        "title": "Parent Item",
-                        "type": "heading",
-                        "status": "open",
-                    },
-                    "relationships": {
-                        "module": {
-                            "data": {
-                                "type": "documents",
-                                "id": "proj1/Design/SRS",
-                            }
-                        },
-                    },
-                },
-            ],
-            "meta": {"totalCount": 1},
-        }
-
-        result = await list_work_item_links(
-            mock_ctx,
-            project_id="proj1",
-            work_item_id="MCPT-001",
-            direction="forward",
-            page_size=100,
-            page_number=1,
-        )
-
-        assert isinstance(result, PaginatedResult)
-        assert result.total_count == 1
-        assert result.page == 1
-        assert result.page_size == 100
-        assert result.has_more is False
-        assert len(result.items) == 1
-
-        fwd = result.items[0]
-        assert isinstance(fwd, WorkItemLink)
-        assert fwd.direction == "forward"
-        assert fwd.id == "MCPT-010"
-        assert fwd.role == "parent"
-        assert fwd.title == "Parent Item"
-        assert fwd.suspect is False
-        assert fwd.type == "heading"
-        assert fwd.status == "open"
-        assert fwd.space_id == "Design"
-        assert fwd.document_name == "SRS"
-
-    async def test_forward_signals_has_more_when_total_exceeds_page(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        # Simulate page 1 of a 5-item set with page_size=2 — server returns
-        # the first 2 items, meta.totalCount reports the full collection
-        # size, and has_more should be True (2 * 1 < 5).
-        mock_client.get.return_value = {
-            "data": [
-                {
-                    "id": f"proj1/MCPT-001/parent/proj1/MCPT-{i:03d}",
-                    "attributes": {"role": "parent", "suspect": False},
-                    "relationships": {
-                        "workItem": {
-                            "data": {
-                                "type": "workitems",
-                                "id": f"proj1/MCPT-{i:03d}",
-                            }
-                        },
-                    },
-                }
-                for i in range(2)
-            ],
-            "included": [
-                {
-                    "type": "workitems",
-                    "id": f"proj1/MCPT-{i:03d}",
-                    "attributes": {
-                        "title": f"work item {i}",
-                        "type": "requirement",
-                        "status": "open",
-                    },
-                }
-                for i in range(2)
-            ],
-            "meta": {"totalCount": 5},
-        }
-
-        result = await list_work_item_links(
-            mock_ctx,
-            project_id="proj1",
-            work_item_id="MCPT-001",
-            direction="forward",
-            page_size=2,
-            page_number=1,
-        )
-
-        assert result.total_count == 5
-        assert result.page == 1
-        assert result.page_size == 2
-        assert result.has_more is True
-        assert len(result.items) == 2
-
-    async def test_forward_passes_pagination_params(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {"data": []}
-
-        await list_work_item_links(
-            mock_ctx,
-            project_id="proj1",
-            work_item_id="MCPT-001",
-            direction="forward",
-            page_size=25,
-            page_number=3,
-        )
-
-        calls = mock_client.get.call_args_list
-        assert len(calls) == 1
-        assert calls[0][0][0] == "/projects/proj1/workitems/MCPT-001/linkedworkitems"
-        params = calls[0][1]["params"]
-        assert params["fields[linkedworkitems]"] == "@all"
-        assert params["include"] == "workItem"
-        assert params["page[size]"] == 25
-        assert params["page[number]"] == 3
-
-    async def test_back_returns_paginated_result(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": [
-                {
-                    "id": "proj1/MCPT-020",
-                    "attributes": {
-                        "title": "Related Item",
-                        "type": "requirement",
-                        "status": "draft",
-                    },
-                    "relationships": {
-                        "module": {
-                            "data": {
-                                "type": "documents",
-                                "id": "proj1/Requirements/SysRS",
-                            }
-                        },
-                    },
-                },
-                {
-                    "id": "proj1/MCPT-030",
-                    "attributes": {
-                        "title": "Verifier Item",
-                        "type": "testCase",
-                        "status": "approved",
-                    },
-                },
-            ],
-            "meta": {"totalCount": 2},
-        }
-
-        result = await list_work_item_links(
-            mock_ctx,
-            project_id="proj1",
-            work_item_id="MCPT-001",
-            direction="back",
-            page_size=100,
-            page_number=1,
-        )
-
-        assert isinstance(result, PaginatedResult)
-        assert result.total_count == 2
-        assert result.has_more is False
-        assert len(result.items) == 2
-
-        back_by_id = {item.id: item for item in result.items}
-        assert set(back_by_id) == {"MCPT-020", "MCPT-030"}
-        for item in result.items:
-            assert item.direction == "back"
-            assert item.role is None
-            assert item.suspect is False
-        assert back_by_id["MCPT-020"].type == "requirement"
-        assert back_by_id["MCPT-020"].space_id == "Requirements"
-        assert back_by_id["MCPT-020"].document_name == "SysRS"
-        assert back_by_id["MCPT-030"].space_id == ""
-
-    async def test_back_passes_pagination_params(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {"data": []}
-
-        await list_work_item_links(
-            mock_ctx,
-            project_id="proj1",
-            work_item_id="MCPT-001",
-            direction="back",
-            page_size=10,
-            page_number=2,
-        )
-
-        calls = mock_client.get.call_args_list
-        assert len(calls) == 1
-        assert calls[0][0][0] == "/projects/proj1/workitems"
-        params = calls[0][1]["params"]
-        assert params["query"] == "linkedWorkItems:MCPT-001"
-        assert params["page[size]"] == 10
-        assert params["page[number]"] == 2
-
-    async def test_no_links_returns_empty_page(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {"data": []}
-
-        result = await list_work_item_links(
-            mock_ctx,
-            project_id="proj1",
-            work_item_id="MCPT-001",
-            direction="forward",
-            page_size=100,
-            page_number=1,
-        )
-
-        assert result.items == []
-        assert result.total_count == 0
-        assert result.has_more is False
-
-    async def test_forward_not_found_raises_value_error(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.side_effect = PolarionNotFoundError(
-            "Not found",
-            status_code=404,
-        )
-
-        with pytest.raises(ValueError, match="not found"):
-            await list_work_item_links(
-                mock_ctx,
-                project_id="proj1",
-                work_item_id="MCPT-999",
-                direction="forward",
-                page_size=100,
-                page_number=1,
-            )
-
-    async def test_back_not_found_raises_value_error(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.side_effect = PolarionNotFoundError(
-            "Not found",
-            status_code=404,
-        )
-
-        with pytest.raises(ValueError, match="not found"):
-            await list_work_item_links(
-                mock_ctx,
-                project_id="proj1",
-                work_item_id="MCPT-999",
-                direction="back",
-                page_size=100,
-                page_number=1,
-            )
-
-    async def test_auth_error_raises_permission_error(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.side_effect = PolarionAuthError(
-            "Forbidden",
-            status_code=403,
-        )
-
-        with pytest.raises(PermissionError, match="POLARION_TOKEN"):
-            await list_work_item_links(
-                mock_ctx,
-                project_id="proj1",
-                work_item_id="MCPT-001",
-                direction="forward",
-                page_size=100,
-                page_number=1,
-            )
-
-    async def test_back_polarion_error_raises_runtime_error(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.side_effect = PolarionError(
-            "Boom",
-            status_code=500,
-        )
-
-        with pytest.raises(RuntimeError, match="Backlink query failed"):
-            await list_work_item_links(
-                mock_ctx,
-                project_id="proj1",
-                work_item_id="MCPT-001",
-                direction="back",
-                page_size=100,
-                page_number=1,
-            )
-
-    async def test_direction_default_is_forward_in_registered_schema(
-        self,
-    ) -> None:
-        """Guard the JSON-Schema default for ``direction``.
-
-        Direct invocation cannot exercise FastMCP's default-injection
-        (passing the ``Field(...)`` sentinel through), so the registered
-        tool schema is the authoritative place to verify the default
-        the LLM will see. Regressions here would silently break the
-        zero-arg call path.
-        """
-        tools = await mcp.list_tools()
-        tool = next(t for t in tools if t.name == "list_work_item_links")
-        direction_schema = tool.parameters["properties"]["direction"]
-        assert direction_schema["default"] == "forward"
-        assert direction_schema["enum"] == ["forward", "back"]
-
-    @pytest.mark.parametrize(
-        "bad_id",
-        [
-            "MCPT-1 OR title:*",
-            "MCPT-1:foo",
-            "*MCPT*",
-            "MCPT-1\\",
-            "MCPT-1/MCPT-2",
-            "MCPT 1",
-            "",
-        ],
-    )
-    async def test_back_direction_rejects_lucene_metacharacters(
+    @pytest.mark.parametrize("whitespace", ["   ", "\n", "\t", "\n\n  \t"])
+    async def test_home_page_content_html_whitespace_raises(
         self,
         mock_ctx: MagicMock,
         mock_client: AsyncMock,
-        bad_id: str,
+        whitespace: str,
     ) -> None:
-        """Back-link Lucene query is built from the raw id; bad chars must abort."""
-        with pytest.raises(ValueError, match="Lucene"):
-            await list_work_item_links(
+        """Whitespace-only strings strip to '' on the server, so reject too."""
+        with pytest.raises(ValueError, match="would wipe"):
+            await update_document(
                 mock_ctx,
-                project_id="proj1",
-                work_item_id=bad_id,
-                direction="back",
-                page_size=10,
-                page_number=1,
+                project_id="MyProj",
+                space_id="S",
+                document_name="D",
+                title=None,
+                status=None,
+                type=None,
+                home_page_content_html=whitespace,
+                custom_fields=None,
+                workflow_action=None,
+                dry_run=False,
             )
-        mock_client.get.assert_not_called()
+        mock_client.patch.assert_not_called()
 
-
-class TestListDocumentComments:
-    """Tests for the ``list_document_comments`` tool."""
-
-    async def test_returns_paginated_result(
+    async def test_home_page_content_html_alone_passes_has_attrs_guard(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = {
-            "data": [
-                {
-                    "type": "document_comments",
-                    "id": "proj1/Design/SRS/cmt-1",
-                    "attributes": {
-                        "id": "cmt-1",
-                        "created": "2026-04-01T12:00:00Z",
-                        "resolved": False,
-                        "text": {"type": "text/html", "value": "<p>Review me</p>"},
-                    },
-                    "relationships": {
-                        "author": {
-                            "data": {"type": "users", "id": "alice"},
-                        },
-                    },
-                },
-            ],
-            "meta": {"totalCount": 1},
-        }
-
-        result = await list_document_comments(
+        """home_page_content_html alone counts as a body field."""
+        result = await update_document(
             mock_ctx,
-            project_id="proj1",
-            space_id="Design",
-            document_name="SRS",
-            page_size=100,
-            page_number=1,
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title=None,
+            status=None,
+            type=None,
+            home_page_content_html='<p id="b1">x</p>',
+            custom_fields=None,
+            workflow_action=None,
+            dry_run=True,
         )
+        assert result.dry_run is True
 
-        assert isinstance(result, PaginatedResult)
-        assert result.total_count == 1
-        assert result.page == 1
-        assert result.page_size == 100
-        assert result.has_more is False
-        assert len(result.items) == 1
-
-        comment = result.items[0]
-        assert isinstance(comment, DocumentComment)
-        assert comment.id == "cmt-1"
-        assert comment.created == "2026-04-01T12:00:00Z"
-        assert comment.resolved is False
-        assert comment.text == "<p>Review me</p>"
-        assert comment.text_format == "text/html"
-        assert comment.author_id == "alice"
-        assert comment.parent_comment_id is None
-        assert comment.child_comment_ids == []
-
-    async def test_extracts_thread_relationships(
+    async def test_explicit_empty_title_is_serialized(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = {
-            "data": [
-                {
-                    "type": "document_comments",
-                    "id": "proj1/Design/SRS/cmt-reply",
-                    "attributes": {
-                        "id": "cmt-reply",
-                        "created": "2026-04-02T09:00:00Z",
-                        "resolved": True,
-                        "text": {"type": "text/html", "value": "<p>thanks</p>"},
-                    },
-                    "relationships": {
-                        "author": {"data": {"type": "users", "id": "bob"}},
-                        "parentComment": {
-                            "data": {
-                                "type": "document_comments",
-                                "id": "proj1/Design/SRS/cmt-root",
-                            },
-                        },
-                        "childComments": {
-                            "data": [
-                                {
-                                    "type": "document_comments",
-                                    "id": "proj1/Design/SRS/cmt-grand-1",
-                                },
-                                {
-                                    "type": "document_comments",
-                                    "id": "proj1/Design/SRS/cmt-grand-2",
-                                },
-                            ],
-                        },
-                    },
-                },
-            ],
-            "meta": {"totalCount": 1},
-        }
+        # ``title=""`` differs from ``title=None``: the empty string
+        # passes the at-least-one check and IS sent in attributes,
+        # clearing the title server-side.
+        mock_client.patch.return_value = {}
 
-        result = await list_document_comments(
+        await update_document(
             mock_ctx,
-            project_id="proj1",
-            space_id="Design",
-            document_name="SRS",
-            page_size=100,
-            page_number=1,
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title="",
+            status=None,
+            type=None,
+            home_page_content_html=None,
+            custom_fields=None,
+            workflow_action=None,
+            dry_run=False,
         )
 
-        comment = result.items[0]
-        assert comment.resolved is True
-        assert comment.parent_comment_id == "cmt-root"
-        assert comment.child_comment_ids == ["cmt-grand-1", "cmt-grand-2"]
+        _, kwargs = mock_client.patch.call_args
+        attributes = kwargs["json"]["data"]["attributes"]
+        assert attributes == {"title": ""}
 
-    async def test_handles_plain_text_format(
+    async def test_path_url_encodes_special_chars_in_space_id(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = {
-            "data": [
-                {
-                    "type": "document_comments",
-                    "id": "proj1/Design/SRS/cmt-plain",
-                    "attributes": {
-                        "id": "cmt-plain",
-                        "created": "2026-04-03T00:00:00Z",
-                        "resolved": False,
-                        "text": {
-                            "type": "text/plain",
-                            "value": "raw <not html> text",
-                        },
-                    },
-                    "relationships": {},
-                },
-            ],
-            "meta": {"totalCount": 1},
-        }
+        mock_client.patch.return_value = {}
 
-        result = await list_document_comments(
+        await update_document(
             mock_ctx,
-            project_id="proj1",
-            space_id="Design",
-            document_name="SRS",
-            page_size=100,
-            page_number=1,
-        )
-
-        comment = result.items[0]
-        assert comment.text_format == "text/plain"
-        assert comment.text == "raw <not html> text"
-
-    async def test_missing_relationships_default_to_none(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": [
-                {
-                    "type": "document_comments",
-                    "id": "proj1/Design/SRS/cmt-empty",
-                    "attributes": {
-                        "id": "cmt-empty",
-                        "created": "2026-04-04T00:00:00Z",
-                        "resolved": False,
-                    },
-                },
-            ],
-            "meta": {"totalCount": 1},
-        }
-
-        result = await list_document_comments(
-            mock_ctx,
-            project_id="proj1",
-            space_id="Design",
-            document_name="SRS",
-            page_size=100,
-            page_number=1,
-        )
-
-        comment = result.items[0]
-        assert comment.author_id is None
-        assert comment.parent_comment_id is None
-        assert comment.child_comment_ids == []
-        assert comment.text == ""
-        assert comment.text_format == "text/html"
-
-    async def test_signals_has_more_when_total_exceeds_page(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": [
-                {
-                    "type": "document_comments",
-                    "id": f"proj1/Design/SRS/cmt-{i}",
-                    "attributes": {
-                        "id": f"cmt-{i}",
-                        "created": "2026-04-01T00:00:00Z",
-                        "resolved": False,
-                        "text": {"type": "text/html", "value": "<p>x</p>"},
-                    },
-                    "relationships": {},
-                }
-                for i in range(2)
-            ],
-            "meta": {"totalCount": 5},
-        }
-
-        result = await list_document_comments(
-            mock_ctx,
-            project_id="proj1",
-            space_id="Design",
-            document_name="SRS",
-            page_size=2,
-            page_number=1,
-        )
-
-        assert result.total_count == 5
-        assert result.has_more is True
-        assert len(result.items) == 2
-
-    async def test_passes_pagination_and_fieldset_params(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {"data": []}
-
-        await list_document_comments(
-            mock_ctx,
-            project_id="proj1",
-            space_id="_default",
-            document_name="SRS",
-            page_size=25,
-            page_number=3,
-        )
-
-        calls = mock_client.get.call_args_list
-        assert len(calls) == 1
-        assert calls[0][0][0] == (
-            "/projects/proj1/spaces/_default/documents/SRS/comments"
-        )
-        params = calls[0][1]["params"]
-        assert params["fields[document_comments]"] == (
-            "created,resolved,text,author,parentComment,childComments"
-        )
-        assert params["include"] == "childComments"
-        assert params["page[size]"] == 25
-        assert params["page[number]"] == 3
-
-    async def test_url_encodes_space_and_document_name(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {"data": []}
-
-        await list_document_comments(
-            mock_ctx,
-            project_id="proj1",
+            project_id="MyProj",
             space_id="My Space",
-            document_name="A/B Doc",
-            page_size=100,
-            page_number=1,
+            document_name="D",
+            title="t",
+            status=None,
+            type=None,
+            home_page_content_html=None,
+            custom_fields=None,
+            workflow_action=None,
+            dry_run=False,
         )
 
-        path = mock_client.get.call_args_list[0][0][0]
-        assert path == (
-            "/projects/proj1/spaces/My%20Space/documents/A%2FB%20Doc/comments"
-        )
+        args, _ = mock_client.patch.call_args
+        assert args == ("/projects/MyProj/spaces/My%20Space/documents/D",)
 
-    async def test_not_found_raises_value_error(
+    async def test_workflow_action_url_encoded_when_special(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.side_effect = PolarionNotFoundError(
-            "Not found",
-            status_code=404,
+        # urlencode is responsible for escaping action IDs that contain
+        # whitespace or other reserved chars; this locks the contract.
+        mock_client.patch.return_value = {}
+
+        await update_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title=None,
+            status="approved",
+            type=None,
+            home_page_content_html=None,
+            custom_fields=None,
+            workflow_action="needs review",
+            dry_run=False,
         )
 
-        with pytest.raises(ValueError, match="Design/SRS"):
-            await list_document_comments(
-                mock_ctx,
-                project_id="proj1",
-                space_id="Design",
-                document_name="SRS",
-                page_size=100,
-                page_number=1,
-            )
+        args, _ = mock_client.patch.call_args
+        path = args[0]
+        # Space in action ID -> "+" or "%20"; both are valid URL
+        # encodings and Polarion accepts either.
+        assert "workflowAction=needs+review" in path or (
+            "workflowAction=needs%20review" in path
+        )
 
-    async def test_auth_error_raises_permission_error(
+
+class TestUpdateDocumentErrorMapping:
+    """Tests that domain exceptions are mapped at the tool layer."""
+
+    async def test_401_raises_permission_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.side_effect = PolarionAuthError(
-            "Forbidden",
-            status_code=403,
-        )
+        mock_client.patch.side_effect = PolarionAuthError("auth", status_code=401)
 
-        with pytest.raises(PermissionError, match="POLARION_TOKEN"):
-            await list_document_comments(
+        with pytest.raises(PermissionError):
+            await update_document(
                 mock_ctx,
-                project_id="proj1",
-                space_id="Design",
-                document_name="SRS",
-                page_size=100,
-                page_number=1,
+                project_id="MyProj",
+                space_id="S",
+                document_name="D",
+                title="t",
+                status=None,
+                type=None,
+                home_page_content_html=None,
+                custom_fields=None,
+                workflow_action=None,
+                dry_run=False,
             )
 
-    async def test_polarion_error_raises_runtime_error(
+    async def test_404_raises_value_error_with_doc_in_message(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.side_effect = PolarionError(
-            "Boom",
-            status_code=500,
+        mock_client.patch.side_effect = PolarionNotFoundError(
+            "not found", status_code=404
         )
 
-        with pytest.raises(RuntimeError, match="Failed to list comments"):
-            await list_document_comments(
+        with pytest.raises(ValueError, match="ghost-document") as exc_info:
+            await update_document(
                 mock_ctx,
-                project_id="proj1",
-                space_id="Design",
-                document_name="SRS",
-                page_size=100,
-                page_number=1,
+                project_id="MyProj",
+                space_id="ghost-space",
+                document_name="ghost-document",
+                title="t",
+                status=None,
+                type=None,
+                home_page_content_html=None,
+                custom_fields=None,
+                workflow_action=None,
+                dry_run=False,
+            )
+        assert "ghost-space" in str(exc_info.value)
+
+    async def test_other_error_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.side_effect = PolarionError("boom", status_code=500)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            await update_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="S",
+                document_name="D",
+                title="t",
+                status=None,
+                type=None,
+                home_page_content_html=None,
+                custom_fields=None,
+                workflow_action=None,
+                dry_run=False,
             )
 
 
-class TestReadPathEncoding:
-    """Every read tool that builds a URL must URL-encode each path segment.
+class TestUpdateDocumentFieldValidation:
+    """Verify ``min_length=1`` constraints on required path parameters."""
 
-    Without encoding, a project/space/document/work-item id containing a
-    space, slash, or other reserved character would either generate a
-    malformed URL or — worse — allow path traversal (``../``) into a
-    different Polarion resource. These tests pin the encoding behavior so
-    a future refactor cannot silently drop ``encode_path_segment()`` from
-    one of the read paths.
+    @staticmethod
+    def _adapter_for(param_name: str) -> TypeAdapter[object]:
+        hints = get_type_hints(update_document)
+        sig = inspect.signature(update_document)
+        field_info = sig.parameters[param_name].default
+        return TypeAdapter(Annotated[hints[param_name], field_info])
+
+    def test_space_id_rejects_empty_string(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("space_id").validate_python("")
+
+    def test_document_name_rejects_empty_string(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("document_name").validate_python("")
+
+    def test_optional_metadata_fields_accept_none(self) -> None:
+        for name in ("title", "status", "type", "workflow_action"):
+            assert self._adapter_for(name).validate_python(None) is None
+
+    def test_home_page_content_html_rejects_overlong_input(self) -> None:
+        """``max_length=MAX_BODY_HTML_LEN`` defends against runaway HTML."""
+        adapter = self._adapter_for("home_page_content_html")
+        assert adapter.validate_python("<p>ok</p>") == "<p>ok</p>"
+        with pytest.raises(ValidationError):
+            adapter.validate_python("x" * (2_000_000 + 1))
+
+
+class TestUpdateDocumentPitfallDocumentation:
+    """Lock the two body-edit pitfalls into the public docstring so a
+    future slim pass cannot silently delete them.
+
+    The pitfalls were reproduced against the live testdrive server and are
+    user-facing (MCP hosts on other platforms never load CLAUDE.md), so the
+    warnings must stay inside ``update_document.__doc__``.
     """
 
-    @pytest.fixture(autouse=True)
-    def _clear_doc_cache(self) -> Iterator[None]:
-        _cache_mod._document_list_cache.clear()
-        yield
-        _cache_mod._document_list_cache.clear()
-
-    async def test_list_documents_encodes_project_id(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {"data": [], "meta": {"totalCount": 0}}
-
-        await list_documents(
-            mock_ctx,
-            project_id="My Proj",
-            page_size=100,
-            page_number=1,
+    def test_docstring_warns_about_anchorless_paragraph_returning_500(self) -> None:
+        """Anchorless <p> appended via update_document breaks read_document_parts."""
+        document = update_document.__doc__ or ""
+        assert "anchorless" in document, (
+            "update_document docstring must mention the anchorless <p> pitfall"
+        )
+        assert "HTTP 500" in document, (
+            "update_document docstring must surface that the next read_document_parts "
+            "call returns HTTP 500 after an anchorless <p> append"
+        )
+        assert "move_work_item_to_document" in document, (
+            "update_document docstring must point callers at the correct attach path"
         )
 
-        call_path = mock_client.get.call_args[0][0]
-        assert call_path == "/projects/My%20Proj/workitems"
+    def test_docstring_warns_about_macro_div_module_relationship_gap(self) -> None:
+        """Macro <div> reference injected via update_document leaves module unset."""
+        document = update_document.__doc__ or ""
+        assert "polarion_wiki macro" in document, (
+            "update_document docstring must mention the polarion_wiki macro pitfall"
+        )
+        assert "module" in document, (
+            "update_document docstring must surface that the work item's module "
+            "relationship stays unset after a macro <div> injection"
+        )
 
-    async def test_get_document_encodes_all_segments(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": {"attributes": {"title": "T", "id": "D"}}
+
+class TestBuildCreateDocumentPayload:
+    """Tests for the private ``_build_create_document_payload`` helper."""
+
+    def test_minimal_payload_has_only_required_attrs(self) -> None:
+        payload = _build_create_document_payload(
+            module_name="MySpec",
+            title="My Spec",
+            type="req_specification",
+            home_page_content_html="",
+            status=None,
+        )
+
+        assert payload == {
+            "data": [
+                {
+                    "type": "documents",
+                    "attributes": {
+                        "moduleName": "MySpec",
+                        "title": "My Spec",
+                        "type": "req_specification",
+                    },
+                }
+            ]
+        }
+        item = cast(list[dict[str, object]], payload["data"])[0]
+        attributes = cast(dict[str, object], item["attributes"])
+        assert "status" not in attributes
+        assert "homePageContent" not in attributes
+
+    def test_status_attached_when_set(self) -> None:
+        payload = _build_create_document_payload(
+            module_name="MySpec",
+            title="t",
+            type="generic",
+            home_page_content_html="",
+            status="draft",
+        )
+
+        item = cast(list[dict[str, object]], payload["data"])[0]
+        attributes = cast(dict[str, object], item["attributes"])
+        assert attributes["status"] == "draft"
+
+    def test_home_page_content_wrapped_as_html_block(self) -> None:
+        payload = _build_create_document_payload(
+            module_name="MySpec",
+            title="t",
+            type="generic",
+            home_page_content_html="<p>Hi</p>",
+            status=None,
+        )
+
+        item = cast(list[dict[str, object]], payload["data"])[0]
+        attributes = cast(dict[str, object], item["attributes"])
+        assert attributes["homePageContent"] == {
+            "type": "text/html",
+            "value": "<p>Hi</p>",
         }
 
-        await get_document(
-            mock_ctx,
-            project_id="My Proj",
-            space_id="My Space",
-            document_name="My Doc",
+    def test_skips_none_status_and_empty_body(self) -> None:
+        payload = _build_create_document_payload(
+            module_name="MySpec",
+            title="t",
+            type="generic",
+            home_page_content_html="",
+            status=None,
         )
 
-        call_path = mock_client.get.call_args[0][0]
-        assert call_path == ("/projects/My%20Proj/spaces/My%20Space/documents/My%20Doc")
+        item = cast(list[dict[str, object]], payload["data"])[0]
+        attributes = cast(dict[str, object], item["attributes"])
+        assert set(attributes.keys()) == {"moduleName", "title", "type"}
 
-    async def test_read_document_parts_encodes_all_segments(
+    def test_custom_fields_inlined_alongside_standard_attrs(self) -> None:
+        payload = _build_create_document_payload(
+            module_name="MySpec",
+            title="t",
+            type="generic",
+            home_page_content_html="",
+            status=None,
+            custom_fields={"projectOwner": "alice", "phase": "design"},
+        )
+
+        item = cast(list[dict[str, object]], payload["data"])[0]
+        attributes = cast(dict[str, object], item["attributes"])
+        assert attributes["projectOwner"] == "alice"
+        assert attributes["phase"] == "design"
+
+    def test_custom_fields_collision_with_standard_attr_raises(self) -> None:
+        with pytest.raises(ValueError, match="title"):
+            _build_create_document_payload(
+                module_name="MySpec",
+                title="t",
+                type="generic",
+                home_page_content_html="",
+                status=None,
+                custom_fields={"title": "duplicate"},
+            )
+
+
+class TestCreateDocumentDryRun:
+    """Tests for ``create_document`` with ``dry_run=True``."""
+
+    async def test_dry_run_returns_payload_without_calling_post(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = {"data": [], "meta": {"totalCount": 0}}
-
-        await read_document_parts(
+        result = await create_document(
             mock_ctx,
-            project_id="My Proj",
-            space_id="My Space",
-            document_name="My Doc",
-            page_size=100,
-            page_number=1,
+            project_id="MyProj",
+            space_id="_default",
+            module_name="MySpec",
+            title="Dry test",
+            type="req_specification",
+            status=None,
+            home_page_content=None,
+            custom_fields=None,
+            dry_run=True,
         )
 
-        call_path = mock_client.get.call_args[0][0]
-        assert call_path == (
-            "/projects/My%20Proj/spaces/My%20Space/documents/My%20Doc/parts"
-        )
-
-    async def test_list_work_items_encodes_project_id(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {"data": [], "meta": {"totalCount": 0}}
-
-        await list_work_items(
-            mock_ctx,
-            project_id="My Proj",
-            query=None,
-            page_size=100,
-            page_number=1,
-        )
-
-        call_path = mock_client.get.call_args[0][0]
-        assert call_path == "/projects/My%20Proj/workitems"
-
-    async def test_get_work_item_encodes_project_id_and_work_item_id(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": {
-                "type": "workitems",
-                "id": "My Proj/MCPT-1",
-                "attributes": {
-                    "title": "T",
-                    "type": "requirement",
-                    "status": "draft",
-                },
-                "relationships": {},
-            }
+        mock_client.post.assert_not_called()
+        assert isinstance(result, DocumentCreateResult)
+        assert result.dry_run is True
+        assert result.created is False
+        assert result.document_name is None
+        assert result.payload_preview is not None
+        assert isinstance(result.payload_preview, dict)
+        item = cast(list[dict[str, object]], result.payload_preview["data"])[0]
+        attributes = cast(dict[str, object], item["attributes"])
+        assert attributes == {
+            "moduleName": "MySpec",
+            "title": "Dry test",
+            "type": "req_specification",
         }
 
-        await get_work_item(
-            mock_ctx,
-            project_id="My Proj",
-            work_item_id="MCPT 1",
-        )
 
-        call_path = mock_client.get.call_args[0][0]
-        assert call_path == "/projects/My%20Proj/workitems/MCPT%201"
+class TestCreateDocumentHappyPath:
+    """Tests for a successful ``create_document`` call."""
 
-    async def test_list_work_item_links_forward_encodes_all_segments(
+    async def test_returns_document_name_on_201(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = {"data": [], "meta": {"totalCount": 0}}
+        mock_client.post.return_value = {
+            "data": [
+                {
+                    "type": "documents",
+                    "id": "MyProj/_default/MySpec",
+                    "links": {"self": "..."},
+                }
+            ]
+        }
 
-        await list_work_item_links(
+        result = await create_document(
             mock_ctx,
-            project_id="My Proj",
-            work_item_id="MCPT 1",
-            direction="forward",
-            page_size=100,
-            page_number=1,
+            project_id="MyProj",
+            space_id="_default",
+            module_name="MySpec",
+            title="Real",
+            type="req_specification",
+            status=None,
+            home_page_content=None,
+            custom_fields=None,
+            dry_run=False,
         )
 
-        call_path = mock_client.get.call_args[0][0]
-        assert call_path == ("/projects/My%20Proj/workitems/MCPT%201/linkedworkitems")
+        assert isinstance(result, DocumentCreateResult)
+        assert result.created is True
+        assert result.dry_run is False
+        assert result.document_name == "MySpec"
+        assert result.payload_preview is None
 
-    async def test_list_work_item_links_back_encodes_project_id(
+    async def test_post_called_with_correct_path_and_body(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # work_item_id is rejected by the Lucene allowlist before encoding;
-        # use a safe id and verify only project_id is encoded.
-        mock_client.get.return_value = {"data": [], "meta": {"totalCount": 0}}
+        mock_client.post.return_value = {
+            "data": [{"type": "documents", "id": "MyProj/_default/MySpec"}]
+        }
 
-        await list_work_item_links(
+        await create_document(
             mock_ctx,
-            project_id="My Proj",
-            work_item_id="MCPT-1",
-            direction="back",
-            page_size=100,
-            page_number=1,
+            project_id="MyProj",
+            space_id="_default",
+            module_name="MySpec",
+            title="t",
+            type="req_specification",
+            status="draft",
+            home_page_content=None,
+            custom_fields=None,
+            dry_run=False,
         )
 
-        call_path = mock_client.get.call_args[0][0]
-        assert call_path == "/projects/My%20Proj/workitems"
+        args, kwargs = mock_client.post.call_args
+        assert args == ("/projects/MyProj/spaces/_default/documents",)
+        body = kwargs["json"]
+        item = body["data"][0]
+        assert item["type"] == "documents"
+        assert item["attributes"]["moduleName"] == "MySpec"
+        assert item["attributes"]["title"] == "t"
+        assert item["attributes"]["type"] == "req_specification"
+        assert item["attributes"]["status"] == "draft"
 
-    async def test_list_document_comments_encodes_all_segments(
+    async def test_path_url_encodes_special_chars(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = {"data": [], "meta": {"totalCount": 0}}
+        mock_client.post.return_value = {
+            "data": [{"type": "documents", "id": "Proj With Space/My Space/MySpec"}]
+        }
 
-        await list_document_comments(
+        await create_document(
             mock_ctx,
-            project_id="My Proj",
+            project_id="Proj With Space",
             space_id="My Space",
-            document_name="My Doc",
-            page_size=100,
-            page_number=1,
+            module_name="MySpec",
+            title="t",
+            type="generic",
+            status=None,
+            home_page_content=None,
+            custom_fields=None,
+            dry_run=False,
         )
 
-        call_path = mock_client.get.call_args[0][0]
-        assert call_path == (
-            "/projects/My%20Proj/spaces/My%20Space/documents/My%20Doc/comments"
+        args, _ = mock_client.post.call_args
+        assert args == ("/projects/Proj%20With%20Space/spaces/My%20Space/documents",)
+
+    async def test_home_page_content_markdown_converted_and_sanitized(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {
+            "data": [{"type": "documents", "id": "MyProj/_default/MySpec"}]
+        }
+
+        await create_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="_default",
+            module_name="MySpec",
+            title="t",
+            type="generic",
+            status=None,
+            home_page_content="**bold** [link](https://example.com)",
+            custom_fields=None,
+            dry_run=False,
         )
+
+        _, kwargs = mock_client.post.call_args
+        body = kwargs["json"]["data"][0]["attributes"]["homePageContent"]
+        assert body["type"] == "text/html"
+        assert "<strong>bold</strong>" in body["value"]
+        assert 'href="https://example.com"' in body["value"]
+
+    async def test_home_page_content_stamps_unique_block_ids(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Every block-level element from the target set gets a unique
+        ``polarion_mcp_N`` id; headings are intentionally left bare so
+        Polarion can rewrite them to the macro form on save."""
+        mock_client.post.return_value = {
+            "data": [{"type": "documents", "id": "MyProj/_default/MySpec"}]
+        }
+
+        await create_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="_default",
+            module_name="MySpec",
+            title="t",
+            type="generic",
+            status=None,
+            home_page_content="# H\n\npara1\n\n* item\n\npara2",
+            custom_fields=None,
+            dry_run=False,
+        )
+
+        _, kwargs = mock_client.post.call_args
+        body_html = kwargs["json"]["data"][0]["attributes"]["homePageContent"]["value"]
+        assert '<p id="polarion_mcp_0">' in body_html
+        assert '<ul id="polarion_mcp_1">' in body_html
+        assert '<p id="polarion_mcp_2">' in body_html
+        assert "<h1>" in body_html
+        assert "<h1 id=" not in body_html
+
+    async def test_home_page_content_strips_dangerous_link_schemes(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {
+            "data": [{"type": "documents", "id": "MyProj/_default/MySpec"}]
+        }
+
+        await create_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="_default",
+            module_name="MySpec",
+            title="t",
+            type="generic",
+            status=None,
+            home_page_content="[click](javascript:alert(1))",
+            custom_fields=None,
+            dry_run=False,
+        )
+
+        _, kwargs = mock_client.post.call_args
+        body_html = kwargs["json"]["data"][0]["attributes"]["homePageContent"]["value"]
+        assert 'href="javascript:' not in body_html
+        assert "href='javascript:" not in body_html
+
+    async def test_document_name_with_slashes_extracted_correctly(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """``split_module_id`` preserves slashes in the document_name segment."""
+        mock_client.post.return_value = {
+            "data": [{"type": "documents", "id": "MyProj/_default/Folder/Sub/Doc"}]
+        }
+
+        result = await create_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="_default",
+            module_name="Folder/Sub/Doc",
+            title="t",
+            type="generic",
+            status=None,
+            home_page_content=None,
+            custom_fields=None,
+            dry_run=False,
+        )
+
+        assert result.document_name == "Folder/Sub/Doc"
+
+    async def test_invalidates_documents_cache_on_success(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """``create_document`` drops the project's docs cache entry on 201."""
+        _cache_mod.store_cached_documents("MyProj", [("_default", "OldDoc")])
+        mock_client.post.return_value = {
+            "data": [{"type": "documents", "id": "MyProj/_default/MySpec"}]
+        }
+
+        await create_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="_default",
+            module_name="MySpec",
+            title="t",
+            type="generic",
+            status=None,
+            home_page_content=None,
+            custom_fields=None,
+            dry_run=False,
+        )
+
+        assert _cache_mod.get_cached_documents("MyProj") is None
+
+    async def test_does_not_invalidate_cache_on_failure(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Cache is preserved when the POST raises — no half-state change."""
+        _cache_mod.store_cached_documents("MyProj", [("_default", "OldDoc")])
+        mock_client.post.side_effect = PolarionError("boom", status_code=500)
+
+        with pytest.raises(RuntimeError):
+            await create_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="_default",
+                module_name="MySpec",
+                title="t",
+                type="generic",
+                status=None,
+                home_page_content=None,
+                custom_fields=None,
+                dry_run=False,
+            )
+
+        cached = _cache_mod.get_cached_documents("MyProj")
+        assert cached == [("_default", "OldDoc")]
+        _cache_mod.invalidate_documents_cache("MyProj")
+
+
+class TestCreateDocumentErrorMapping:
+    """Tests that domain exceptions are mapped at the tool layer."""
+
+    async def test_401_raises_permission_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.side_effect = PolarionAuthError("auth", status_code=401)
+
+        with pytest.raises(PermissionError):
+            await create_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="_default",
+                module_name="MySpec",
+                title="t",
+                type="generic",
+                status=None,
+                home_page_content=None,
+                custom_fields=None,
+                dry_run=False,
+            )
+
+    async def test_404_raises_value_error_mentioning_project_and_space(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.side_effect = PolarionNotFoundError(
+            "not found", status_code=404
+        )
+
+        with pytest.raises(ValueError, match="space") as exc_info:
+            await create_document(
+                mock_ctx,
+                project_id="ghost",
+                space_id="ghost_space",
+                module_name="MySpec",
+                title="t",
+                type="generic",
+                status=None,
+                home_page_content=None,
+                custom_fields=None,
+                dry_run=False,
+            )
+        assert "ghost" in str(exc_info.value)
+        assert "ghost_space" in str(exc_info.value)
+
+    async def test_other_error_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.side_effect = PolarionError("conflict", status_code=409)
+
+        with pytest.raises(RuntimeError, match="conflict"):
+            await create_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="_default",
+                module_name="MySpec",
+                title="t",
+                type="generic",
+                status=None,
+                home_page_content=None,
+                custom_fields=None,
+                dry_run=False,
+            )
+
+
+class TestCreateDocumentResponseParsing:
+    """Tests for unexpected 2xx response shapes from Polarion."""
+
+    async def test_empty_data_array_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {"data": []}
+
+        with pytest.raises(RuntimeError, match="no document name"):
+            await create_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="_default",
+                module_name="MySpec",
+                title="t",
+                type="generic",
+                status=None,
+                home_page_content=None,
+                custom_fields=None,
+                dry_run=False,
+            )
+
+    async def test_data_not_a_list_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {"data": {"id": "MyProj/_default/MySpec"}}
+
+        with pytest.raises(RuntimeError, match="no document name"):
+            await create_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="_default",
+                module_name="MySpec",
+                title="t",
+                type="generic",
+                status=None,
+                home_page_content=None,
+                custom_fields=None,
+                dry_run=False,
+            )
+
+    async def test_two_segment_id_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """``split_module_id`` returns ``('','')`` for under-3-segment IDs."""
+        mock_client.post.return_value = {
+            "data": [{"type": "documents", "id": "MyProj/MySpec"}]
+        }
+
+        with pytest.raises(RuntimeError, match="no document name"):
+            await create_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="_default",
+                module_name="MySpec",
+                title="t",
+                type="generic",
+                status=None,
+                home_page_content=None,
+                custom_fields=None,
+                dry_run=False,
+            )
+
+
+class TestCreateDocumentFieldValidation:
+    """Verify ``min_length`` / ``max_length`` constraints on parameters."""
+
+    @staticmethod
+    def _adapter_for(param_name: str) -> TypeAdapter[object]:
+        hints = get_type_hints(create_document)
+        sig = inspect.signature(create_document)
+        field_info = sig.parameters[param_name].default
+        return TypeAdapter(Annotated[hints[param_name], field_info])
+
+    def test_project_id_rejects_empty_string(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("project_id").validate_python("")
+
+    def test_space_id_rejects_empty_string(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("space_id").validate_python("")
+
+    def test_module_name_rejects_empty_string(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("module_name").validate_python("")
+
+    def test_module_name_accepts_non_empty(self) -> None:
+        assert self._adapter_for("module_name").validate_python("MySpec") == "MySpec"
+
+    def test_title_rejects_empty_string(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("title").validate_python("")
+
+    def test_type_rejects_empty_string(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("type").validate_python("")
+
+    def test_home_page_content_rejects_overlong_input(self) -> None:
+        adapter = self._adapter_for("home_page_content")
+        assert adapter.validate_python("hello") == "hello"
+        with pytest.raises(ValidationError):
+            adapter.validate_python("x" * (2_000_000 + 1))
+
+
+class TestCreateDocumentRegistration:
+    """The tool must be registered on the FastMCP server instance."""
+
+    async def test_create_document_tool_registered(self) -> None:
+        tools = await mcp.list_tools()
+        assert any(tool.name == "create_document" for tool in tools)
+
+
+class TestCreateDocumentDocstringGuidance:
+    """Verify enum-resolution and ghost-write guidance lives in the docstring.
+
+    Per CLAUDE.md, the write tools' docstrings are the only enforcement
+    against ghost-enum writes — the server does not validate enum IDs.
+    """
+
+    def test_docstring_mentions_list_document_enum_options(self) -> None:
+        document = create_document.__doc__ or ""
+        assert "list_document_enum_options" in document
+
+    def test_docstring_mentions_ghost_writes(self) -> None:
+        document = create_document.__doc__ or ""
+        assert "ghost" in document.lower()
+
+    def test_docstring_mentions_module_name_uniqueness(self) -> None:
+        document = create_document.__doc__ or ""
+        assert "unique" in document.lower()
+        assert "409" in document or "conflict" in document.lower()
+
+
+class TestEnumGuardCreateDocument:
+    """Integration: ``create_document`` rejects ghost document types."""
+
+    async def test_unlisted_type_raises_before_post(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        mock_client.get.return_value = _enum_get_response(
+            ["systemRequirementSpecification", "softwareRequirementSpecification"]
+        )
+
+        with pytest.raises(ValueError, match="type='productRequirementSpecification'"):
+            await _call_create_doc(
+                mock_ctx,
+                module_name="NewSpec",
+                type="productRequirementSpecification",
+            )
+        mock_client.post.assert_not_called()
+
+
+class TestEnumGuardUpdateDocument:
+    """Integration: ``update_document`` rejects ghost type / status."""
+
+    async def test_unlisted_status_raises_before_patch(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        mock_client.get.return_value = _enum_get_response(["draft", "approved"])
+
+        with pytest.raises(ValueError, match="status='ghost'"):
+            await _call_update_doc(mock_ctx, status="ghost")
+        mock_client.patch.assert_not_called()
+
+    async def test_unknown_custom_field_key_raises_via_priming_get(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        # Cache miss → guard does one inline get_document-shaped read; the
+        # unknown key is absent from the document's customs, so it rejects.
+        mock_client.get.return_value = {
+            "data": {"attributes": {"title": "x", "doc_risk": 3}}
+        }
+
+        with pytest.raises(ValueError, match="ghost_key"):
+            await _call_update_doc(mock_ctx, custom_fields={"ghost_key": 1})
+        mock_client.patch.assert_not_called()
+
+    async def test_known_custom_field_key_passes_guard(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": {"attributes": {"title": "x", "doc_risk": 3}}
+        }
+
+        result = await _call_update_doc(
+            mock_ctx, custom_fields={"doc_risk": 9}, dry_run=True
+        )
+        assert result.dry_run is True  # type: ignore[attr-defined]
+
+
+class TestUpdateDocumentAnchorlessGuard:
+    """Integration: ``update_document`` rejects anchorless body blocks."""
+
+    async def test_anchorless_paragraph_raises(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        with pytest.raises(ValueError, match="anchorless <p>"):
+            await _call_update_doc(
+                mock_ctx, home_page_content_html="<p>Note</p>", dry_run=True
+            )
+        mock_client.patch.assert_not_called()
+
+    async def test_stamped_paragraph_passes(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        result = await _call_update_doc(
+            mock_ctx,
+            home_page_content_html='<p id="polarion_mcp_1">Note</p>',
+            dry_run=True,
+        )
+        assert result.dry_run is True  # type: ignore[attr-defined]
+
+    async def test_heading_only_passes(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        result = await _call_update_doc(
+            mock_ctx, home_page_content_html="<h1>Title</h1>", dry_run=True
+        )
+        assert result.dry_run is True  # type: ignore[attr-defined]
