@@ -1,7 +1,7 @@
 """Direct unit tests for shared tool helpers.
 
-The bulk of `_helpers.py` is exercised transitively through `test_read.py`
-and `test_write.py` against `mock_client` fixtures. This module adds
+The bulk of `_shared/helpers.py` is exercised transitively through the per-tool
+tests against `mock_client` fixtures. This module adds
 focused tests for helpers whose contract is worth pinning directly —
 currently `extract_custom_fields` (read-side) and `merge_custom_fields`
 (write-side), whose allowlist semantics drive how custom Polarion fields
@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 
 from mcp_server_polarion.models import JsonValue
-from mcp_server_polarion.tools._helpers import (
+from mcp_server_polarion.tools._shared.helpers import (
     STANDARD_DOCUMENT_ATTRIBUTES,
     STANDARD_WORK_ITEM_ATTRIBUTES,
     extract_custom_fields,

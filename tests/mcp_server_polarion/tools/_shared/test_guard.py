@@ -1,9 +1,9 @@
-"""Tests for ``tools/_guard.py``.
+"""Tests for ``tools/_shared/guard.py``.
 
 Covers the ``fetch_enum_option_ids`` GET + parse path, the fail-closed
 behaviour on Polarion error (the write is blocked, not skipped), and the
 four write-time guards. The TTL caches the guards read from live in
-``tools/_cache.py`` and are exercised in ``test_cache.py``.
+``tools/_shared/cache.py`` and are exercised in ``test_cache.py``.
 """
 
 from __future__ import annotations
@@ -19,12 +19,12 @@ from mcp_server_polarion.core.exceptions import (
     PolarionNotFoundError,
 )
 from mcp_server_polarion.models import WorkItemLinkSpec
-from mcp_server_polarion.tools import _cache as cache_mod
-from mcp_server_polarion.tools._cache import (
+from mcp_server_polarion.tools._shared import cache as cache_mod
+from mcp_server_polarion.tools._shared.cache import (
     record_document_custom_field_keys,
     record_work_item_custom_field_keys,
 )
-from mcp_server_polarion.tools._guard import (
+from mcp_server_polarion.tools._shared.guard import (
     fetch_enum_option_ids,
     fetch_project_enum_option_ids,
     guard_document_custom_field_keys,
@@ -119,7 +119,7 @@ class TestFetchEnumOptionIds:
         import logging  # noqa: PLC0415 -- fixture-local import is intentional
 
         monkeypatch.setattr(logging.getLogger("mcp_server_polarion"), "propagate", True)
-        caplog.set_level("WARNING", logger="mcp_server_polarion._guard")
+        caplog.set_level("WARNING", logger="mcp_server_polarion.tools._shared.guard")
         mock_client.get.side_effect = PolarionError("backend down")
 
         with pytest.raises(RuntimeError, match="Refusing the write"):
@@ -150,7 +150,7 @@ class TestFetchEnumOptionIds:
         import logging  # noqa: PLC0415 -- fixture-local import is intentional
 
         monkeypatch.setattr(logging.getLogger("mcp_server_polarion"), "propagate", True)
-        caplog.set_level("WARNING", logger="mcp_server_polarion._guard")
+        caplog.set_level("WARNING", logger="mcp_server_polarion.tools._shared.guard")
         mock_client.get.side_effect = PolarionNotFoundError(
             "no such endpoint", status_code=404
         )

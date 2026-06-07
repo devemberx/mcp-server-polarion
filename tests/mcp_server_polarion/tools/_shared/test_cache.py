@@ -1,4 +1,4 @@
-"""Tests for ``tools/_cache.py``.
+"""Tests for ``tools/_shared/cache.py``.
 
 Covers the ``TTLCache`` primitive (hit / miss / overwrite / lazy expiry /
 invalidate / clear) and the typed get / store / record wrappers the tool
@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from mcp_server_polarion.tools import _cache as cache_mod
-from mcp_server_polarion.tools._cache import (
+from mcp_server_polarion.tools._shared import cache as cache_mod
+from mcp_server_polarion.tools._shared.cache import (
     TTLCache,
     get_cached_documents,
     get_cached_enum_options,
