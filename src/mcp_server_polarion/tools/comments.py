@@ -44,14 +44,11 @@ def _build_document_comments_payload(
     space_id: str,
     document_name: str,
 ) -> dict[str, JsonValue]:
-    """Build the JSON:API request body for POST .../documents/{d}/comments.
+    """Build the JSON:API POST body for .../documents/{d}/comments.
 
-    Builds one resource object per spec. Only attaches ``resolved`` when
-    explicitly set (None = omit). ``author`` and ``parentComment``
-    relationships are omitted when None. ``parent_comment_id`` is
-    composed into the full path form ``proj/space/doc/commentId``
-    required by the Polarion API, so callers pass the short ID from
-    ``list_document_comments``.
+    One resource per spec. ``resolved`` / ``author`` / ``parentComment``
+    omitted when None. ``parent_comment_id`` (short) expanded to the full
+    ``proj/space/doc/commentId`` path the API requires.
     """
     items: list[JsonValue] = []
     for spec in specs:
@@ -91,12 +88,10 @@ def _build_document_comment_update_payload(
     comment_id: str,
     resolved: bool,
 ) -> dict[str, JsonValue]:
-    """Build the JSON:API PATCH body for one document comment.
+    """Build the single-resource JSON:API PATCH body for one document comment.
 
-    Produces a single-resource ``{"data": {...}}`` object (NOT a list — that
-    is the POST/create shape). The ``id`` field is the full 4-segment path
-    ``{project_id}/{space_id}/{document_name}/{comment_id}`` required by the
-    Polarion PATCH endpoint. Only ``resolved`` is patchable per the API.
+    ``{"data": {...}}`` (not a list). ``id`` is the full 4-segment path
+    ``{project}/{space}/{document}/{comment}``. Only ``resolved`` is patchable.
     """
     full_id = f"{project_id}/{space_id}/{document_name}/{comment_id}"
     return {
@@ -127,29 +122,9 @@ async def list_document_comments(  # noqa: PLR0913
 ) -> PaginatedResult[DocumentComment]:
     """List comments attached to a Polarion document.
 
-    Comments come back as a flat page; reconstruct threads client-side via
-    ``parent_comment_id`` (set on replies) and ``child_comment_ids`` (top-level
-    comments have ``parent_comment_id`` of ``None``). ``text`` is verbatim, with
-    ``text_format`` ``'text/html'`` or ``'text/plain'``; HTML is NOT sanitized
-    (round-trips losslessly) — treat as untrusted input if rendering.
-
-    Args:
-        ctx: MCP tool context (injected automatically).
-        project_id: Polarion project ID.
-        space_id: Space ID (use '_default' for the default space).
-        document_name: Document name within the space.
-        page_size: Items per page (1-100, default 100).
-        page_number: 1-based page number (default 1).
-
-    Returns:
-        PaginatedResult of ``DocumentComment`` items with ``id``,
-        ``created``, ``resolved``, ``text``, ``text_format``, ``author_id``,
-        ``parent_comment_id``, and ``child_comment_ids``.
-
-    Raises:
-        ValueError: Project, space, or document not found.
-        PermissionError: Token lacks permission.
-        RuntimeError: Other Polarion API errors.
+    Flat page; reconstruct threads via ``parent_comment_id`` (None = top-level)
+    and ``child_comment_ids``. ``text`` is verbatim; HTML is NOT sanitized —
+    treat as untrusted when rendering.
     """
     client = get_client(ctx)
     path = (
@@ -239,41 +214,11 @@ async def create_document_comments(  # noqa: PLR0913
 ) -> DocumentCommentsCreateResult:
     """Create one or more comments on a Polarion document in a single request.
 
-    All ``comments`` post together; Polarion returns 201 with the new IDs.
-
-    Thread model: ``parent_comment_id=None`` is a top-level comment; to reply,
-    set it to the short ID from ``list_document_comments`` (e.g. ``'c42'``) and
-    the tool composes the required 4-segment path ``proj/space/doc/c42``.
-    ``text_format`` ``'text/plain'`` (default) stores verbatim; ``'text/html'``
-    is sent as-is (no sanitization). Omit ``resolved`` to default to False, or
-    pass True for a pre-resolved comment; omit ``author_id`` to use the token's
-    user. NOT idempotent — retrying creates duplicates.
-
-    Args:
-        ctx: MCP tool context (injected automatically).
-        project_id: Polarion project ID.
-        space_id: Space ID (use '_default' for the default space).
-        document_name: Document name within ``space_id``.
-        comments: One or more ``DocumentCommentSpec`` objects, each with
-            ``text``, ``text_format``, ``resolved``, ``author_id``, and
-            ``parent_comment_id``.
-        dry_run: When True, build and return the payload preview without
-            calling Polarion.
-
-    Returns:
-        ``DocumentCommentsCreateResult`` with:
-
-        - ``created`` — True on success; False on dry-run.
-        - ``dry_run`` — mirrors the input flag.
-        - ``comment_ids`` — short IDs (last path segment) of the created
-          comments in Polarion's return order; empty on dry-run.
-        - ``payload_preview`` — JSON:API body sent (or that would be
-          sent); populated on dry-run, None after a real operation.
-
-    Raises:
-        ValueError: Project, space, or document not found.
-        PermissionError: Token lacks permission to create comments.
-        RuntimeError: Other Polarion API errors.
+    All post together (201 with new IDs). Reply by setting
+    ``parent_comment_id`` to a short ID from ``list_document_comments`` (None =
+    top-level). ``text_format`` ``'text/html'`` sent as-is (no sanitization);
+    omit ``author_id`` to use the token's user. NOT idempotent — retry
+    duplicates.
     """
     payload = _build_document_comments_payload(
         specs=comments,
@@ -372,40 +317,10 @@ async def update_document_comment(  # noqa: PLR0913
 ) -> DocumentCommentUpdateResult:
     """Resolve or re-open a single document comment.
 
-    PATCHes ``{"resolved": <bool>}`` — the only patchable attribute. Use
-    ``list_document_comments`` to find the short comment ID (last segment of the
-    4-part path).
-
-    Root comments only: Polarion accepts this PATCH only on top-level comments
-    (``parent_comment_id is None``); on a reply it returns HTTP 400 ("Resolved
-    field can be set only for root comments") → ``RuntimeError``, so filter
-    first. Resolving the root marks the whole thread resolved. Idempotent.
-
-    Args:
-        ctx: MCP tool context (injected automatically).
-        project_id: Polarion project ID.
-        space_id: Space ID (use '_default' for the default space).
-        document_name: Document name within ``space_id``.
-        comment_id: Short comment ID (e.g. 'c42') from
-            ``list_document_comments``.
-        resolved: ``True`` to mark resolved; ``False`` to re-open.
-        dry_run: When True, build and return the payload without
-            calling Polarion.
-
-    Returns:
-        ``DocumentCommentUpdateResult`` with:
-
-        - ``updated`` — True on success; False on dry-run.
-        - ``dry_run`` — mirrors the input flag.
-        - ``comment_id`` — the short ID patched; None on dry-run.
-        - ``resolved`` — the value sent (or that would be sent).
-        - ``payload_preview`` — JSON:API body; populated on dry-run,
-          None after a real operation.
-
-    Raises:
-        ValueError: Project, space, document, or comment not found.
-        PermissionError: Token lacks permission to update the comment.
-        RuntimeError: Other Polarion API errors.
+    PATCHes ``{"resolved": <bool>}`` (only patchable attr). Root comments only:
+    a reply 400s ("Resolved field can be set only for root comments") →
+    ``RuntimeError``, so filter first. Resolving the root resolves the thread.
+    Idempotent.
     """
     payload = _build_document_comment_update_payload(
         project_id=project_id,

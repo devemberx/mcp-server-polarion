@@ -76,11 +76,8 @@ def _build_create_links_payload(
 ) -> dict[str, JsonValue]:
     """Build the JSON:API body for bulk create-link POST.
 
-    Each spec produces one ``{"type": "linkedworkitems", "attributes": ...,
-    "relationships": ...}`` resource; all are sent in a single ``data``
-    array. ``revision`` is skipped when unset so Polarion does not
-    interpret an empty string as a clear-default. ``target_project_id``
-    defaults to the source's project per spec when None.
+    One ``linkedworkitems`` resource per spec in a single ``data`` array.
+    ``revision`` skipped when unset; ``target_project_id`` defaults to source.
     """
     data: list[JsonValue] = []
     for spec in links:
@@ -115,13 +112,10 @@ def _build_delete_links_payload(
     source_work_item_id: str,
     links: list[WorkItemLinkRef],
 ) -> tuple[list[str], dict[str, JsonValue]]:
-    """Build the composite ids and JSON:API body for bulk delete-link DELETE.
+    """Build composite ids + JSON:API body for bulk delete-link DELETE.
 
-    Polarion identifies each link by its five-segment composite id
-    ``<srcProj>/<srcWI>/<role>/<tgtProj>/<tgtWI>``. We construct each id
-    from the validated structured ref so the LLM never sees the raw
-    composite form. Returns the id list (echoed in the result) and the
-    JSON:API body to send.
+    Each link's 5-segment id ``<srcProj>/<srcWI>/<role>/<tgtProj>/<tgtWI>`` is
+    built from the structured ref. Returns (id list, body).
     """
     link_ids: list[str] = []
     data: list[JsonValue] = []
@@ -148,15 +142,9 @@ def _build_update_link_payload(
 ) -> tuple[str, str, dict[str, JsonValue]]:
     """Build the composite id, request path, and JSON:API body for one PATCH.
 
-    Unlike POST/DELETE (server-side bulk on ``.../linkedworkitems``), PATCH
-    is per-link on ``.../linkedworkitems/{role}/{tgtProj}/{tgtWI}`` with a
-    single-resource ``{"data": {...}}`` body. ``suspect`` / ``revision``
-    are only attached when explicitly set so JSON:API omit-preserve takes
-    effect on the server side.
-
-    Returning the request path here (instead of re-deriving it in the
-    caller) keeps the composite id and the path string locked to the same
-    ``tgt_proj`` resolution so the two cannot drift.
+    Per-link on ``.../linkedworkitems/{role}/{tgtProj}/{tgtWI}`` with a
+    single-resource body. ``suspect`` / ``revision`` attached only when set
+    (omit-preserve). Path returned here so id and path share one ``tgt_proj``.
     """
     tgt_proj = (
         spec.target_project_id
@@ -194,28 +182,11 @@ def _parse_work_item_links(
     *,
     direction: Literal["forward", "back"],
 ) -> list[WorkItemLink]:
-    """Parse linked work items from a JSON:API response.
+    """Parse linked work items from a JSON:API response into ``WorkItemLink``s.
 
-    Uses ``attributes.role`` for the link role, ``attributes.suspect``
-    for the suspect flag, and resolves the target work item title from
-    the ``included`` array (populated via ``include=workItem``).
-
-    The raw ID has the format::
-
-        {projectId}/{sourceWiId}/{role}/{targetProjectId}/{targetWiId}
-
-    e.g. ``MCP_Test_Project/MCPT-9/parent/MCP_Test_Project/MCPT-1``
-
-    The target work item ID is extracted from
-    ``relationships.workItem.data.id``.
-
-    Args:
-        response: Decoded JSON:API response from the linked items
-            endpoint.
-        direction: Link direction ('forward' or 'back').
-
-    Returns:
-        List of parsed ``WorkItemLink`` instances.
+    Role/suspect come from ``attributes``; target title/type/status resolve
+    from the ``included`` array (``include=workItem``). The target id is taken
+    from ``relationships.workItem.data.id``, never by parsing the composite id.
     """
     work_item_map = build_included_work_item_map(response)
 
@@ -402,32 +373,10 @@ async def list_work_item_links(  # noqa: PLR0913
 ) -> PaginatedResult[WorkItemLink]:
     """List a work item's outgoing or incoming links.
 
-    One call returns one direction; call twice (``forward`` then ``back``) for
-    both sides of the traceability graph. Forward links use ``/linkedworkitems``
-    and expose the originating ``role`` (e.g. ``parent``, ``relates_to``,
-    ``verifies``). Back links fall back to a ``linkedWorkItems:`` Lucene query
-    that does not surface the role on this server, so ``role`` is ``None`` for
-    every back item — recover it by calling forward on the source. The
-    ``suspect`` flag (forward only) marks links whose target changed since last
-    review.
-
-    Args:
-        ctx: MCP tool context (injected automatically).
-        project_id: Polarion project ID.
-        work_item_id: Work Item ID (e.g. 'MCPT-001').
-        direction: 'forward' (outgoing) or 'back' (incoming). Default 'forward'.
-        page_size: Items per page (1-100, default 100).
-        page_number: 1-based page number (default 1).
-
-    Returns:
-        PaginatedResult of ``WorkItemLink`` items with ``id``, ``title``,
-        ``role``, ``direction``, ``suspect``, ``type``, ``status``,
-        ``space_id``, and ``document_name``.
-
-    Raises:
-        ValueError: Work item or project not found.
-        PermissionError: Token lacks permission.
-        RuntimeError: Other Polarion API errors.
+    One direction per call. Forward exposes ``role`` (``parent``, ``verifies``,
+    …) and ``suspect``. Back falls back to a ``linkedWorkItems:`` Lucene query
+    that drops the role, so back ``role`` is ``None`` — recover via forward on
+    the source.
     """
     client = get_client(ctx)
 
@@ -478,62 +427,19 @@ async def create_work_item_links(
 ) -> WorkItemLinksCreateResult:
     """Create one or more outgoing links (1-50) from a single source work item.
 
-    All links share the source (``project_id`` / ``work_item_id``) and post as
-    one atomic bulk JSON:API request. Per spec, ``target_project_id`` defaults
-    to ``project_id`` (set it only for cross-project links); ``revision`` pins
-    the link to a revision (else HEAD); ``suspect`` marks it for re-review
-    (usually False). Orientation matches
-    ``list_work_item_links(direction="forward")`` on the source.
+    All share the source and post atomically. Per spec ``target_project_id``
+    defaults to source; ``revision`` pins (else HEAD); ``suspect`` marks
+    re-review. Guards both role (``workitem-link-role``) and target existence
+    before POST (on dry_run too) — unguarded they store as ghost/dangling links.
 
-    Polarion validates neither role nor target, so the tool guards both before
-    the POST (on ``dry_run=True`` too): each ``role`` is checked against the
-    project's ``workitem-link-role`` enumeration (``ValueError`` listing the
-    valid ids on a miss), and each target's existence is verified (a missing
-    target would otherwise store as a silent dangling link with empty
-    title/type/status -- ``ValueError`` on a miss).
-
-    Returned ``link_ids`` are five-segment composites
-    ``<srcProj>/<srcWI>/<role>/<tgtProj>/<tgtWI>`` in input order -- the path
-    ids for later ``delete_work_item_links``. The POST is atomic: any Polarion
-    rejection (e.g. a duplicate (role, target) pair -> HTTP 409) rolls back the
-    whole batch, so a 4xx means nothing committed -- re-query
-    ``list_work_item_links(direction="forward")`` before retrying. The tool also
-    raises if a 2xx returns an id count differing from the number submitted.
+    ``link_ids`` are 5-segment composites in input order (delete path ids). POST
+    is atomic: a 4xx (e.g. duplicate (role,target) → 409) rolls back the batch —
+    re-query before retry. Raises on an id-count mismatch.
 
     Phantom-success footgun: when the source is in a document,
-    ``move_work_item_to_document`` already auto-created one outgoing link (role
-    is project-config-dependent). Posting a NEW link with the SAME role returns
-    201 and echoes the ``link_id`` but is NOT persisted -- the auto-link stays
-    the only forward link, and there is no client-side error. After creating on
-    an in-document source, verify with
-    ``list_work_item_links(direction="forward")`` on the source and
-    ``(direction="back")`` on the target; if missing, detach via
-    ``move_work_item_from_document``, create the link, then re-attach with
-    ``move_work_item_to_document``.
-
-    Args:
-        ctx: MCP tool context (injected automatically).
-        project_id: Source work item's project ID.
-        work_item_id: Source work item ID.
-        links: One or more ``WorkItemLinkSpec`` (role + target + optional
-            target_project_id / suspect / revision).
-        dry_run: When True, return payload preview only.
-
-    Returns:
-        WorkItemLinksCreateResult with ``created``, ``dry_run``,
-        ``link_ids`` (composite five-segment ids in input order; empty
-        on dry-run), and ``payload_preview`` (populated on dry-run;
-        None on real create).
-
-    Raises:
-        ValueError: Source project or work item not found, a target work
-            item / target project that does not exist, or a ``role`` not in
-            the project's ``workitem-link-role`` enumeration.
-        PermissionError: Token lacks permission.
-        RuntimeError: Other Polarion API errors (including duplicate link),
-            an unreachable target- or role-validation request, or a
-            returned-id count that does not match the number of links
-            submitted.
+    ``move_work_item_to_document`` already auto-created one link. A NEW same-role
+    link returns 201 but is NOT persisted. Verify forward (source) + back
+    (target); if missing, detach → create → re-attach.
     """
     payload = _build_create_links_payload(
         source_project_id=project_id,
@@ -617,48 +523,14 @@ async def delete_work_item_links(
 ) -> WorkItemLinksDeleteResult:
     """Delete one or more outgoing links (1-50) from a single source work item.
 
-    Mirrors ``create_work_item_links``: same source coordinates, structured refs
-    per target. Only **outgoing** ("forward") links are removed — delete a back
-    link by calling this tool on the other work item. External hyperlinks live
-    on ``hyperlinks`` (managed via ``update_work_item``).
+    Mirrors ``create_work_item_links``. Only **outgoing** links removed (delete a
+    back link on the other work item). Identify refs from a prior create or from
+    ``list_work_item_links(direction="forward")``.
 
-    Identify links from a prior ``create_work_item_links`` (reuse the specs,
-    dropping ``suspect`` / ``revision`` — delete needs only role + target) or
-    from ``list_work_item_links(direction="forward")`` (each item's ``role`` +
-    ``id`` form a ref; ``target_project_id`` defaults to ``project_id``).
-
-    Polarion's delete is idempotent and silent — it removes matching refs,
-    ignores the rest, and returns 204 either way, so a stale ref looks like a
-    real delete. To make that visible the tool first reads the source's existing
-    outgoing links (one paginated GET) and splits the request into
-    ``deleted_link_ids`` (matched) and ``not_found_link_ids`` (no-ops); a no-op
-    is reported, never raised, so re-deleting stays idempotent. The pre-read is
-    fail-closed — an unreachable backend raises ``RuntimeError`` before any
-    delete, so the split is always trustworthy when the call returns.
-
-    Args:
-        ctx: MCP tool context (injected automatically).
-        project_id: Source work item's project ID.
-        work_item_id: Source work item ID.
-        links: One or more ``WorkItemLinkRef`` (role + target + optional
-            target_project_id).
-        dry_run: When True, return payload preview only. The pre-read still
-            runs, so the preview's matched/no-op split is accurate.
-
-    Returns:
-        WorkItemLinksDeleteResult with ``deleted``, ``dry_run``,
-        ``link_ids`` (every requested composite id, in input order),
-        ``deleted_link_ids`` (refs that matched an existing link),
-        ``not_found_link_ids`` (refs that matched nothing), and
-        ``payload_preview`` (populated on dry-run; None on real delete).
-
-    Raises:
-        ValueError: Source work item itself not found.
-        PermissionError: Token lacks permission.
-        RuntimeError: An unreachable pre-read or other Polarion API error
-            (e.g. 400 on a malformed composite id -- but this tool
-            constructs valid ids from structured refs, so 400 should be
-            unreachable).
+    Polarion's delete is idempotent and silent (204 even for stale refs). To make
+    no-ops visible the tool pre-reads existing links and splits into
+    ``deleted_link_ids`` / ``not_found_link_ids`` (no-op reported, never raised).
+    Pre-read is fail-closed (``RuntimeError`` before any delete).
     """
     link_ids, payload = _build_delete_links_payload(
         source_project_id=project_id,
@@ -753,36 +625,10 @@ async def update_work_item_link(  # noqa: PLR0913
 ) -> WorkItemLinkUpdateResult:
     """Update ``suspect`` / ``revision`` on one existing outgoing work item link.
 
-    Use to clear a ``suspect`` flag after sign-off or pin a link to a revision.
-    Identify the link first with ``list_work_item_links(direction="forward")``
-    (its ``role`` + target id address one link). ``suspect`` / ``revision`` are
-    tri-state: an explicit value updates that attribute, ``None`` (default)
-    leaves it unchanged — at least one must be set (an all-``None`` PATCH 400s).
-    One link per call: the PATCH endpoint has no bulk equivalent. A typo in
-    ``role`` returns 404 (no link exists under that role).
-
-    Args:
-        ctx: MCP tool context (injected automatically).
-        project_id: Source work item's project ID.
-        work_item_id: Source work item ID.
-        role: Link role id of the existing link (e.g. ``'relates_to'``).
-        target_work_item_id: Target work item ID.
-        target_project_id: Target's project; defaults to ``project_id``.
-        suspect: New suspect flag; None leaves it unchanged.
-        revision: New revision pin; None leaves it unchanged.
-        dry_run: When True, return payload preview only.
-
-    Returns:
-        WorkItemLinkUpdateResult with ``updated`` (True on success),
-        ``dry_run``, ``link_id`` (composite 5-segment id computed from
-        inputs), and ``payload_preview`` (PATCH body on dry-run; None
-        after a real call).
-
-    Raises:
-        ValueError: Both ``suspect`` and ``revision`` are None, or the
-            link was not found (HTTP 404).
-        PermissionError: Token lacks permission.
-        RuntimeError: Polarion returned an unexpected HTTP error.
+    Identify the link via ``list_work_item_links(direction="forward")`` (role +
+    target address one link). ``suspect`` / ``revision`` tri-state: a value
+    updates, ``None`` leaves unchanged — at least one required (all-``None``
+    400s). One link per call (no bulk PATCH). A ``role`` typo 404s.
     """
     if suspect is None and revision is None:
         raise ValueError(

@@ -72,8 +72,7 @@ class TestBuildMoveToDocumentPayload:
         assert payload["previousPart"] == "MyProj/Design/Folder/Sub Doc/workitem_MCPT-2"
 
     def test_payload_omits_position_keys_when_both_none(self) -> None:
-        # Per Polarion REST API, omitting both previousPart and nextPart
-        # appends the work item at the end of the target document.
+        # Omitting both position keys appends at the end of the target document.
         payload = _build_move_to_document_payload(
             project_id="MyProj",
             target_space_id="S",
@@ -246,8 +245,7 @@ class TestMoveWorkItemToDocumentHappyPath:
     async def test_path_url_encodes_special_chars_in_project_id(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # Defensive: ensure encode_path_segment is applied to project_id
-        # path segment.
+        # project_id is run through encode_path_segment.
         mock_client.post.return_value = {}
 
         await move_work_item_to_document(
@@ -459,9 +457,7 @@ class TestMoveWorkItemFromDocumentErrorMapping:
     async def test_400_already_detached_raises_runtime_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # Calling moveFromDocument on a work item that is already
-        # free-floating returns HTTP 400. Per the standard mapping,
-        # 400 → PolarionError → RuntimeError at the tool layer.
+        # Detaching an already free-floating item 400s → RuntimeError.
         mock_client.post.side_effect = PolarionError(
             "Work item is not in a Document", status_code=400
         )

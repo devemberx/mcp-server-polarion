@@ -1,13 +1,7 @@
-"""Shared helpers for MCP tool implementations.
+"""Internal shared helpers for the ``tools`` package (not public API).
 
-Internal module used by the domain tool modules. The helpers defined here
-are for internal use within the ``tools`` package and are **not** part of
-the public package API.
-
-Body fields (``description``, ``homePageContent``) are passed through as
-raw Polarion HTML on the get/update round-trip path — Markdown conversion
-is reserved for synthesis paths (``read_document``, embedded work item bodies
-inside ``read_document_parts``) and lives in ``tools.documents``.
+Body fields pass through as raw HTML on the get/update round-trip; Markdown
+conversion is reserved for synthesis paths in ``tools.documents``.
 """
 
 from __future__ import annotations
@@ -29,10 +23,8 @@ from mcp_server_polarion.models import (
     WorkItemSummary,
 )
 
-# Caps how many items a single bulk write may carry. Polarion allows no
-# concurrent requests and throttles at ~3 req/s, so an unbounded batch is a
-# rate-limit and payload-size hazard; 50 bounds one request without forcing
-# callers to paginate typical work. Shared by every bulk write tool.
+# Bulk-write cap. Polarion throttles ~3 req/s with no concurrency, so an
+# unbounded batch is a rate-limit/payload hazard; 50 bounds one request.
 MAX_BULK_ITEMS: Final[int] = 50
 
 
@@ -53,26 +45,22 @@ class WorkItemSummaryKwargs(TypedDict):
 # Polarion enforces a hard cap of 100 server-side.
 DEFAULT_PAGE_SIZE: Final[int] = 100
 
-# Sparse fieldsets. Detail/document fetches use ``@all`` because this server
-# inlines custom fields under ``attributes`` and drops narrower
-# ``customFields.*`` tokens; ``WORK_ITEM_PART_FIELDS`` stays tight (parts
-# surface no embedded customs).
+# Sparse fieldsets. Detail/document fetches use ``@all`` (this server inlines
+# customs under ``attributes`` and drops ``customFields.*`` tokens);
+# ``WORK_ITEM_PART_FIELDS`` stays tight (parts surface no customs).
 WORK_ITEM_LIST_FIELDS: Final[str] = "title,type,status,priority,updated,module,assignee"
 WORK_ITEM_DETAIL_FIELDS: Final[str] = "@all"
 WORK_ITEM_PART_FIELDS: Final[str] = "title,type,status,description,outlineNumber"
 DOCUMENT_DETAIL_FIELDS: Final[str] = "@all"
-# Sparse fieldset filters relationships as well as attributes, so author /
-# parentComment / childComments must be named explicitly to remain in the
-# response. Document comments expose no project-defined custom fields, so
-# `@all` is not needed here.
+# Sparse fieldset filters relationships too, so author / parentComment /
+# childComments must be named explicitly. Comments have no customs, so no `@all`.
 DOCUMENT_COMMENT_LIST_FIELDS: Final[str] = (
     "created,resolved,text,author,parentComment,childComments"
 )
 
-# Standard attribute allowlist (Polarion REST OpenAPI schema). Anything in a
-# response's ``attributes`` outside this set is treated as a custom field, so a
-# future Polarion release adding standard attributes misclassifies them until
-# this set is updated.
+# Standard attribute allowlist (Polarion REST OpenAPI schema). Anything in
+# ``attributes`` outside this set is treated as a custom field, so a new
+# standard attribute is misclassified until added here.
 STANDARD_WORK_ITEM_ATTRIBUTES: Final[frozenset[str]] = frozenset(
     {
         "id",
@@ -97,9 +85,8 @@ STANDARD_WORK_ITEM_ATTRIBUTES: Final[frozenset[str]] = frozenset(
     }
 )
 
-# Canonical standard document attribute names per the Polarion REST
-# OpenAPI schema. Mirrors ``STANDARD_WORK_ITEM_ATTRIBUTES`` for the document
-# resource type.
+# Standard document attributes (Polarion REST OpenAPI schema); document-side
+# mirror of ``STANDARD_WORK_ITEM_ATTRIBUTES``.
 STANDARD_DOCUMENT_ATTRIBUTES: Final[frozenset[str]] = frozenset(
     {
         "id",
@@ -125,14 +112,7 @@ STANDARD_DOCUMENT_ATTRIBUTES: Final[frozenset[str]] = frozenset(
 
 
 def get_client(ctx: Context) -> PolarionClient:
-    """Extract ``PolarionClient`` from the lifespan context.
-
-    Args:
-        ctx: FastMCP tool context.
-
-    Returns:
-        The active ``PolarionClient`` instance.
-    """
+    """Extract the active ``PolarionClient`` from the lifespan context."""
     lifespan_ctx = ctx.lifespan_context
     if "polarion_client" not in lifespan_ctx:  # pragma: no cover
         msg = "polarion_client is missing from lifespan_context"
@@ -156,14 +136,7 @@ def safe_str(value: object) -> str:
 
 
 def extract_total_count(response: dict[str, object]) -> int:
-    """Extract ``meta.totalCount`` from a JSON:API response.
-
-    Args:
-        response: Decoded JSON:API response.
-
-    Returns:
-        The total count, or 0 if the field is missing.
-    """
+    """Return ``meta.totalCount`` from a JSON:API response, or 0 if missing."""
     meta = response.get("meta")
     if isinstance(meta, dict):
         total = meta.get("totalCount", 0)
@@ -173,14 +146,7 @@ def extract_total_count(response: dict[str, object]) -> int:
 
 
 def has_links_next(response: dict[str, object]) -> bool:
-    """Check whether the JSON:API response contains a ``links.next`` key.
-
-    Args:
-        response: Decoded JSON:API response.
-
-    Returns:
-        ``True`` if the server indicates a next page exists.
-    """
+    """Return whether the JSON:API response carries a ``links.next`` key."""
     links = response.get("links")
     if isinstance(links, dict):
         return "next" in links
@@ -220,35 +186,21 @@ def compute_has_more(
 
 
 def encode_path_segment(segment: str) -> str:
-    """URL-encode a single path segment (e.g. document name with spaces).
-
-    Args:
-        segment: Raw path segment string.
-
-    Returns:
-        URL-encoded segment safe for use in URL paths.
-    """
+    """URL-encode a single path segment (e.g. a document name with spaces)."""
     return quote(segment, safe="")
 
 
-# Polarion work item IDs are project-prefix + hyphen + digits (e.g. ``MCPT-001``);
-# the broader pattern below also accepts underscores so this stays a thin guard,
-# not a format validator. Anything outside the set is rejected when the id is
-# substituted into a Lucene query string (``linkedWorkItems:<id>``).
+# Thin guard, not a format validator: accepts ``[A-Za-z0-9_-]`` (covers
+# ``MCPT-001``-style ids) before substituting into a Lucene ``linkedWorkItems:``.
 _WORK_ITEM_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def validate_work_item_id_for_lucene(work_item_id: str) -> None:
     """Reject work item IDs that would break a Lucene ``field:<id>`` clause.
 
-    Polarion's Lucene parser treats ``+ - && || ! ( ) { } [ ] ^ " ~ * ? : \\ /``
-    and whitespace as operators. Embedding an unescaped ``work_item_id`` into
-    ``linkedWorkItems:<id>`` would let an adversarial value reshape the query.
-    Polarion IDs never contain those characters, so a hard reject is safer
-    than escape arithmetic.
-
-    Raises:
-        ValueError: ``work_item_id`` contains characters outside ``[A-Za-z0-9_-]``.
+    Lucene treats many punctuation chars as operators; an unescaped id in
+    ``linkedWorkItems:<id>`` could reshape the query. Polarion ids never use
+    those, so hard-reject anything outside ``[A-Za-z0-9_-]`` (``ValueError``).
     """
     if not _WORK_ITEM_ID_PATTERN.match(work_item_id):
         msg = (
@@ -261,14 +213,7 @@ def validate_work_item_id_for_lucene(work_item_id: str) -> None:
 def build_included_work_item_map(
     response: dict[str, object],
 ) -> dict[str, dict[str, object]]:
-    """Build a lookup dict of included work items from a JSON:API response.
-
-    Args:
-        response: Decoded JSON:API response with an ``included`` array.
-
-    Returns:
-        Mapping from full work-item ID to the included resource dict.
-    """
+    """Map full work-item ID to its included resource dict from a response."""
     work_item_map: dict[str, dict[str, object]] = {}
     included = response.get("included", [])
     if isinstance(included, list):
@@ -282,15 +227,7 @@ def extract_relationship_id(
     relationships: dict[str, object],
     rel_name: str,
 ) -> str:
-    """Extract the ``data.id`` of a named relationship.
-
-    Args:
-        relationships: The ``relationships`` dict of a JSON:API resource.
-        rel_name: Relationship key (e.g. ``'nextPart'``).
-
-    Returns:
-        The related resource ID, or ``""`` if absent.
-    """
+    """Return a named relationship's ``data.id``, or ``""`` if absent."""
     rel = relationships.get(rel_name, {})
     if isinstance(rel, dict):
         inner = rel.get("data")
@@ -303,16 +240,7 @@ def extract_relationship_ids(
     relationships: dict[str, object],
     rel_name: str,
 ) -> list[str]:
-    """Extract the ``data[].id`` list of a to-many relationship.
-
-    Args:
-        relationships: The ``relationships`` dict of a JSON:API resource.
-        rel_name: Relationship key (e.g. ``'assignee'``).
-
-    Returns:
-        List of related resource IDs in declaration order. Empty list
-        when the relationship is absent or its data array is empty.
-    """
+    """Return a to-many relationship's ``data[].id`` list (declaration order)."""
     rel = relationships.get(rel_name, {})
     if not isinstance(rel, dict):
         return []
@@ -329,12 +257,9 @@ def extract_relationship_ids(
 
 
 def split_module_id(module_full_id: str) -> tuple[str, str]:
-    """Split a module relationship ID into (space_id, document_name).
+    """Split a module ID ``{proj}/{space}/{doc}`` into (space_id, document_name).
 
-    The Polarion module ID has the format
-    ``{projectId}/{spaceId}/{documentName}`` where ``documentName`` may
-    itself contain ``/`` segments. Returns ``("", "")`` when the ID does
-    not have at least three segments.
+    ``doc`` may contain ``/``. Returns ``("", "")`` if under three segments.
     """
     if not module_full_id:
         return ("", "")
@@ -359,18 +284,10 @@ def extract_short_id(full_id: str) -> str:
 def build_work_item_summary_kwargs(
     item: dict[str, object],
 ) -> WorkItemSummaryKwargs:
-    """Extract ``WorkItemSummary`` kwargs from a single JSON:API resource.
+    """Extract ``WorkItemSummary`` kwargs from a JSON:API resource.
 
-    Centralises the attribute + relationship parsing used by both list
-    and detail endpoints so that ``WorkItemDetail`` stays a strict
+    Shared by list and detail endpoints so ``WorkItemDetail`` stays a strict
     superset of ``WorkItemSummary``.
-
-    Args:
-        item: A single JSON:API resource object (``data`` element).
-
-    Returns:
-        Dict suitable for ``WorkItemSummary(**kwargs)`` /
-        ``WorkItemDetail(**kwargs, description=..., project_id=...)``.
     """
     attributes = item.get("attributes", {})
     if not isinstance(attributes, dict):
@@ -405,21 +322,10 @@ def extract_custom_fields(
 ) -> dict[str, object]:
     """Return the inline custom-field subset of a JSON:API attributes dict.
 
-    This Polarion server inlines project-defined custom fields as
-    top-level keys inside ``attributes`` (e.g. ``attributes.riskLevel``,
-    ``attributes.effortHours``) — there is no ``customFields``
-    container, and the ``customFields.@all`` / ``@custom`` sparse-fieldset
-    tokens are silently ignored. Callers fetch with ``fields[...]=@all``
-    so every populated attribute comes back, then pass the resulting
-    ``attributes`` dict here together with the standard-attribute
-    allowlist for the resource type (``STANDARD_WORK_ITEM_ATTRIBUTES`` or
-    ``STANDARD_DOCUMENT_ATTRIBUTES``). Anything not in the allowlist is
-    reported as a custom field.
-
-    Values are returned verbatim — primitives (str / int / float / bool /
-    list) and rich-text dicts of the form
-    ``{"type": "text/html", "value": "<...>"}`` both pass through so the
-    shape round-trips back to Polarion unchanged on a future PATCH.
+    This server inlines customs as top-level ``attributes`` keys (no
+    ``customFields`` container). Anything outside *standard* is a custom field,
+    returned verbatim (primitives or ``{type,value}`` rich-text) so it
+    round-trips unchanged.
     """
     return {k: v for k, v in attributes.items() if k not in standard}
 
@@ -429,46 +335,15 @@ def merge_custom_fields(
     customs: dict[str, object] | None,
     standard: frozenset[str],
 ) -> None:
-    """Merge caller-supplied custom-field key/values into a JSON:API attributes dict.
+    """Merge caller custom-field key/values into *attributes* in place.
 
-    Write-side counterpart of ``extract_custom_fields``. Polarion accepts
-    custom field values inlined at the top level of ``attributes`` (the
-    same shape it returns on read), so this helper drops each entry of
-    ``customs`` directly into ``attributes`` in place — keeping the
-    "mutate-in-place" style of the surrounding ``_build_*_payload``
-    helpers.
+    Write-side counterpart of ``extract_custom_fields`` (customs inline at the
+    top level). A key in *standard* raises ``ValueError`` (would shadow a tool
+    parameter). ``None`` / ``{}`` are no-ops; individual ``None`` values
+    skipped, other falsy values sent verbatim.
 
-    Validation:
-    - Any key in ``customs`` that also appears in ``standard`` raises
-      ``ValueError`` — colliding with a Polarion-defined standard
-      attribute would silently overwrite (or be overwritten by) an
-      explicit standard tool parameter. Callers should rename the field
-      or use the matching standard parameter.
-    - ``None`` and ``{}`` whole-dict inputs are no-ops.
-    - Individual ``None`` values inside the dict are skipped, matching
-      the rest of the codebase's "skip None/empty" convention. Falsy
-      non-``None`` values (``""``, ``0``, ``False``, ``[]``) are sent
-      through verbatim because they may be meaningful custom-field
-      values. Polarion may interpret some of those as "clear"; the tool
-      layer does not expose an explicit clearing path.
-
-    Aliasing: values are stored under ``attributes`` by reference — no
-    defensive copy. Callers must NOT mutate the ``customs`` dict (or any
-    nested value such as a ``{type, value}`` rich-text dict) between
-    handing it to this helper and the eventual ``client.post`` /
-    ``client.patch`` serialisation, or the on-wire payload will see the
-    later mutation.
-
-    Args:
-        attributes: The JSON:API ``attributes`` dict under construction.
-            Mutated in place.
-        customs: Custom-field key/value pairs supplied by the caller, or
-            ``None`` to skip.
-        standard: The standard-attribute allowlist for the resource type
-            (``STANDARD_WORK_ITEM_ATTRIBUTES`` or ``STANDARD_DOCUMENT_ATTRIBUTES``).
-
-    Raises:
-        ValueError: When any key in ``customs`` is also in ``standard``.
+    Aliasing: stored by reference, no copy — callers must NOT mutate *customs*
+    (or nested ``{type,value}`` dicts) before serialisation.
     """
     if not customs:
         return
@@ -488,12 +363,7 @@ def merge_custom_fields(
 
 
 def parse_hyperlinks(value: object) -> list[Hyperlink]:
-    """Parse the ``attributes.hyperlinks`` field into ``Hyperlink`` models.
-
-    Polarion returns hyperlinks as a list of dicts with ``role``,
-    ``title``, and ``uri`` keys. Entries without a usable ``uri`` are
-    skipped to keep the response signal clean for the LLM.
-    """
+    """Parse ``attributes.hyperlinks`` into ``Hyperlink`` models (no-uri skipped)."""
     if not isinstance(value, list):
         return []
     links: list[Hyperlink] = []
@@ -519,29 +389,12 @@ def parse_work_item_detail(
     project_id: str,
     fallback_id: str = "",
 ) -> WorkItemDetail:
-    """Parse a single JSON:API work-item resource into a ``WorkItemDetail``.
+    """Parse a JSON:API work-item resource into a ``WorkItemDetail``.
 
-    Shared by ``get_work_item`` and ``update_work_item`` (which issues a
-    follow-up GET after the PATCH succeeds). Expects the resource to
-    have been fetched with ``fields[workitems]=WORK_ITEM_DETAIL_FIELDS`` and
-    ``include=assignee`` so that ``relationships.assignee.data`` is
-    populated.
-
-    The description value is passed through as raw Polarion HTML into
-    ``WorkItemDetail.description_html`` — no Markdown conversion, no
-    sanitization. This preserves Polarion-specific spans / data
-    attributes so the same string round-trips back through
-    ``update_work_item(description_html=...)`` unchanged.
-
-    Args:
-        item: A single JSON:API resource object (the ``data`` element).
-        project_id: Project that contains this work item.
-        fallback_id: Used as ``WorkItemDetail.id`` when ``item.id`` is
-            missing. Pass the caller-supplied work-item ID.
-
-    Returns:
-        A fully-populated ``WorkItemDetail`` model with
-        ``description_html`` carrying the raw HTML payload.
+    Shared by ``get_work_item`` / ``update_work_item``. Expects fetch with
+    ``WORK_ITEM_DETAIL_FIELDS`` + ``include=assignee``. Description passes
+    through as raw HTML (no convert/sanitize) so it round-trips unchanged.
+    ``fallback_id`` is used as ``id`` when ``item.id`` is missing.
     """
     attributes = item.get("attributes", {})
     if not isinstance(attributes, dict):
@@ -576,9 +429,7 @@ def parse_work_item_detail(
 def summary_to_back_link(summary: WorkItemSummary) -> WorkItemLink:
     """Lift a ``linkedWorkItems:`` query result to a back-direction link.
 
-    The ``linkedWorkItems:`` query exposes no role or suspect flag, so
-    both come back as ``role=None`` (unknown, not absent) and
-    ``suspect=False``.
+    The query exposes no role/suspect, so ``role=None`` and ``suspect=False``.
     """
     return WorkItemLink(
         id=summary.id,
@@ -596,14 +447,7 @@ def summary_to_back_link(summary: WorkItemSummary) -> WorkItemLink:
 def parse_work_item_summaries(
     data: object,
 ) -> list[WorkItemSummary]:
-    """Parse a JSON:API ``data`` array into ``WorkItemSummary`` models.
-
-    Args:
-        data: The ``data`` field from a JSON:API response.
-
-    Returns:
-        List of parsed ``WorkItemSummary`` instances.
-    """
+    """Parse a JSON:API ``data`` array into ``WorkItemSummary`` models."""
     items: list[WorkItemSummary] = []
     if not isinstance(data, list):
         return items
@@ -616,15 +460,7 @@ def parse_work_item_summaries(
 
 
 def build_document_comment(item: dict[str, object]) -> DocumentComment:
-    """Build a ``DocumentComment`` from a single JSON:API resource.
-
-    Args:
-        item: A single ``document_comments`` resource (``data`` element).
-
-    Returns:
-        Parsed ``DocumentComment`` with relationship IDs reduced to their
-        short form (project prefix stripped).
-    """
+    """Build a ``DocumentComment`` from a JSON:API resource (short relationship IDs)."""
     attributes_raw = item.get("attributes")
     attributes: dict[str, object] = (
         attributes_raw if isinstance(attributes_raw, dict) else {}
