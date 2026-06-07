@@ -147,8 +147,7 @@ class TestHtmlToMarkdown:
         result = html_to_markdown(html)
         assert "Before" in result
         assert "After" in result
-        # Lock the exact emitted form: src is preserved on a bare ![](src) since
-        # the external img carries no alt or title to promote.
+        # No alt/title to promote, so src stays in a bare ![](src).
         assert "![](https://example.com/pic.jpg)" in result
 
     def test_nested_formatting(self) -> None:
@@ -317,15 +316,14 @@ class TestHtmlToMarkdownMergedCells:
 
     def test_table_pathological_span_product_bounded(self) -> None:
         """colspan*rowspan is clamped to keep worst-case allocation bounded."""
-        # 1000*1000 per-attr clamps would materialise 1M clones without the
-        # product clamp; _MAX_CELLS_PER_MERGE bounds it so the call returns.
+        # Without the product clamp, 1000*1000 spans would materialise 1M clones.
         html = (
             '<table><tbody><tr><td colspan="1000" rowspan="1000">M</td>'
             "<td>Z</td></tr></tbody></table>"
         )
         result = html_to_markdown(html)
         rows = self._table_rows(result)
-        # Sanity: call returned (would OOM/hang without clamp), first cell is M.
+        # Returned at all (no OOM/hang) and first cell is M.
         assert rows, result
         assert rows[0][0] == "M"
 
