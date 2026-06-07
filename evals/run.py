@@ -14,8 +14,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# Allow `python evals/run.py` in addition to `python -m evals.run` by putting
-# the repo root on the path before the package-relative imports below.
+# Put repo root on the path so `python evals/run.py` works alongside `-m`.
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -59,8 +58,7 @@ def _evaluate_once(
     task_output = run_case(case)
     output = task_output.get("output")
     if isinstance(output, str) and output.startswith(AGENT_ERROR_PREFIX):
-        # The agent crashed (e.g. missing API key, provider outage) before it
-        # could act; an empty/partial trajectory must not read as "clean".
+        # Agent crashed before acting; a partial trajectory must not read clean.
         return False, f"agent run failed: {output}"
     data: EvaluationData[Any, Any] = EvaluationData(
         input=case.input,

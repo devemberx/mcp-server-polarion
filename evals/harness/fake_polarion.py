@@ -55,9 +55,8 @@ class _WorkItem:
     severity: str = "should_have"
     module: bool = False
     outline_number: str = ""
-    # Project-defined custom field id → value. Keys MUST be outside
-    # ``STANDARD_WORK_ITEM_ATTRIBUTES`` so they don't shadow real attributes
-    # when merged into the resource's attributes dict.
+    # Keys MUST stay outside ``STANDARD_WORK_ITEM_ATTRIBUTES`` so the merge
+    # into the resource attributes dict doesn't shadow real attributes.
     custom_fields: dict[str, str] = field(default_factory=dict)
 
 
@@ -247,7 +246,6 @@ class FakePolarion:
                 },
             )
 
-        # Enum options: /projects/{p}/{workitems|documents}/fields/{f}/actions/...
         enum = re.search(
             r"/(workitems|documents)/fields/([^/]+)/actions/getAvailableOptions$",
             path,
@@ -257,7 +255,6 @@ class FakePolarion:
                 200, json=self._enum_response(enum.group(1), enum.group(2))
             )
 
-        # Single work item: /projects/{p}/workitems/{wi}
         single_wi = re.search(r"/workitems/([^/]+)$", path)
         if single_wi and "/fields/" not in path:
             wi = _WORK_ITEMS.get(single_wi.group(1))
@@ -265,11 +262,11 @@ class FakePolarion:
                 return httpx.Response(404, json={"errors": [{"status": "404"}]})
             return httpx.Response(200, json={"data": self._work_item_resource(wi)})
 
-        # Linked work items: always empty (no traceability seeded).
+        # Always empty: no traceability seeded.
         if path.endswith("/linkedworkitems"):
             return httpx.Response(200, json={"data": [], "meta": {"totalCount": 0}})
 
-        # Work item list / discovery: /projects/{p}/workitems
+        # Work item list / discovery (query=type:heading narrows to headings).
         if path.endswith("/workitems"):
             query = params.get("query", "")
             if query == "type:heading":
@@ -281,21 +278,18 @@ class FakePolarion:
                 200, json={"data": data, "meta": {"totalCount": len(data)}}
             )
 
-        # Document parts: empty (cases don't depend on part structure).
+        # Empty: no case depends on part structure.
         if path.endswith("/parts"):
             return httpx.Response(200, json={"data": [], "meta": {"totalCount": 0}})
 
-        # Document comments.
         if path.endswith("/comments"):
             data = self._comment_resources()
             return httpx.Response(
                 200, json={"data": data, "meta": {"totalCount": len(data)}}
             )
 
-        # Single document: /projects/{p}/spaces/{s}/documents/{d}.
-        # Match exactly on FakeDoc — a broad "/documents/" in path would
-        # claim every name as existing, hiding bugs in cases that probe
-        # alternate names against list_documents.
+        # Exact match on FakeDoc: a broad "/documents/" would claim every name
+        # as existing, masking bugs in cases probing alternate names.
         if path.endswith(f"/spaces/{SPACE}/documents/{DOC}"):
             return httpx.Response(200, json={"data": self._document_resource()})
 
@@ -310,8 +304,8 @@ class FakePolarion:
                 body = None
         self.mutations.append({"method": request.method, "path": path, "json": body})
 
-        # Resource-creating POSTs must echo an id (tool layer requires it).
-        # Action POSTs (/actions/...) and PATCH / DELETE fall through to 204.
+        # Resource-creating POSTs must echo an id (tool layer requires it);
+        # action POSTs and PATCH / DELETE fall through to 204.
         if request.method == "POST":
             if path.endswith("/workitems"):
                 return httpx.Response(

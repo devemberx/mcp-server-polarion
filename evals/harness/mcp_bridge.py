@@ -1,17 +1,13 @@
 """Bridge the in-memory FastMCP server to Strands agent tools.
 
-Strands' native MCP client speaks over a transport (stdio / HTTP), which
-would run the server in a separate process where respx cannot intercept its
-httpx traffic. To keep everything in one process — so the fake Polarion
-mock applies — we instead read the *real* tool specs (name, description,
-JSON Schema) from the in-memory ``fastmcp.Client`` and wrap each as a
-``PythonAgentTool`` that forwards the call back through that client.
+Strands' native MCP client runs the server in a separate process, out of
+respx's reach. To keep one process (so the fake Polarion mock applies), read
+the real tool specs from the in-memory ``fastmcp.Client`` and wrap each as a
+``PythonAgentTool`` forwarding back through that client.
 
-Every forwarded call is recorded by ``TrajectoryRecorder`` together with
-its parsed result, giving the deterministic Tier-1 evaluators not just the
-(name, args) sequence but also what each call returned — required for
-checks that verify the agent honoured a discovery response (e.g.,
-``check_get_before_update`` rejecting updates with no matching prior get).
+``TrajectoryRecorder`` records each forwarded call with its parsed result, so
+checks see not just (name, args) but what each call returned -- needed e.g. by
+``check_get_before_update``.
 """
 
 from __future__ import annotations
@@ -30,11 +26,9 @@ from strands.types.tools import ToolResult, ToolSpec, ToolUse
 class TrajectoryRecorder:
     """Append-only log of (name, args, result) tuples in call order.
 
-    ``result`` is the parsed structured payload when the tool returned one
-    (a dict from a Pydantic model), or the raw text otherwise, or ``None``
-    for empty/error responses. Strengthened checks read this to verify the
-    agent used a value that was actually surfaced by a prior discovery
-    call rather than ghosting an unvalidated id.
+    ``result`` is the parsed structured payload (dict from a Pydantic model),
+    raw text, or ``None`` for empty/error responses -- lets checks verify the
+    agent used a value surfaced by a prior call, not a ghosted id.
     """
 
     calls: list[dict[str, Any]] = field(default_factory=list)
@@ -48,12 +42,10 @@ class TrajectoryRecorder:
 
 
 def _result_payload(result: Any) -> object:
-    """Parse a fastmcp call result into a JSON-shaped object for the trajectory.
+    """Parse a fastmcp call result into a JSON-shaped trajectory object.
 
-    Returns the typed ``structured_content`` when present (the tool's
-    Pydantic-model output), otherwise tries to JSON-parse the flattened
-    text content, falling back to the raw string. ``None`` for empty
-    responses.
+    Prefers typed ``structured_content``; else JSON-parses the flattened text,
+    falling back to the raw string; ``None`` for empty responses.
     """
     structured = getattr(result, "structured_content", None)
     if structured is not None:

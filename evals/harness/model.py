@@ -6,10 +6,9 @@ the ``EVAL_MODEL`` env var, no code change:
     EVAL_MODEL=openai/gpt-4o-mini            # default, CI (needs OPENAI_API_KEY)
     EVAL_MODEL=ollama/qwen2.5-coder:7b       # local (set EVAL_MODEL_BASE_URL)
 
-``temperature`` is pinned to 0.0 to minimise run-to-run flakiness so the
-zero-tolerance gate stays stable. ``EVAL_NUM_RETRIES`` / ``EVAL_LLM_TIMEOUT``
-forward to LiteLLM so transient 429/RateLimitError from cloud providers gets
-absorbed by exponential backoff rather than failing the case.
+``temperature`` is pinned to 0.0 to keep the zero-tolerance gate stable.
+``EVAL_NUM_RETRIES`` / ``EVAL_LLM_TIMEOUT`` forward to LiteLLM so transient
+cloud 429/RateLimitError gets absorbed by backoff, not failing the case.
 """
 
 from __future__ import annotations
@@ -22,10 +21,10 @@ DEFAULT_MODEL = "openai/gpt-4o-mini"
 
 
 def resolve_model_id() -> str:
-    """Return the model id the agent will use — the single source of truth.
+    """Return the agent's model id -- single source of truth.
 
-    Both ``build_model`` and the gate's report read this, so the recorded
-    model always matches the one actually driven.
+    ``build_model`` and the gate report both read this, so the recorded model
+    always matches the one driven.
     """
     return os.environ.get("EVAL_MODEL", DEFAULT_MODEL)
 
