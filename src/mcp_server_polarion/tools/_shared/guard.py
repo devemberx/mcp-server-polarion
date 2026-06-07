@@ -12,8 +12,8 @@ carrying an enum-valued argument or custom-field keys, fetch the project's
 actual options and raise if the supplied id/key is not among them.
 
 Validated option ids and observed custom-field keys are memoised in
-:mod:`mcp_server_polarion.tools._cache`; this module holds only the fetch and
-check logic.
+:mod:`mcp_server_polarion.tools._shared.cache`; this module holds only the
+fetch and check logic.
 
 Fail-closed. If a validation request errors after the client's 429/5xx
 backoff, the guard raises rather than letting the write through: a ghost
@@ -41,7 +41,7 @@ from mcp_server_polarion.core.exceptions import (
     PolarionNotFoundError,
 )
 from mcp_server_polarion.models import WorkItemLinkSpec
-from mcp_server_polarion.tools._cache import (
+from mcp_server_polarion.tools._shared.cache import (
     Resource,
     get_cached_enum_options,
     get_cached_project_enum,
@@ -52,7 +52,7 @@ from mcp_server_polarion.tools._cache import (
     store_cached_enum_options,
     store_cached_project_enum,
 )
-from mcp_server_polarion.tools._helpers import (
+from mcp_server_polarion.tools._shared.helpers import (
     DOCUMENT_DETAIL_FIELDS,
     STANDARD_DOCUMENT_ATTRIBUTES,
     STANDARD_WORK_ITEM_ATTRIBUTES,
@@ -62,7 +62,7 @@ from mcp_server_polarion.tools._helpers import (
     safe_str,
 )
 
-logger = logging.getLogger("mcp_server_polarion._guard")
+logger = logging.getLogger("mcp_server_polarion.tools._shared.guard")
 
 _GUARD_PAGE_SIZE: int = 100
 
