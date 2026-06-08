@@ -2393,6 +2393,28 @@ class TestUpdateDocumentValidation:
             )
         mock_client.patch.assert_not_called()
 
+    async def test_custom_fields_unresolvable_type_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Doc exists but carries no type attr: cannot key the schema guard, so the
+        # write is refused rather than validated against an empty "" schema.
+        mock_client.get.return_value = {"data": {"attributes": {"title": "D"}}}
+        with pytest.raises(RuntimeError, match="no resolvable type"):
+            await update_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="S",
+                document_name="D",
+                title=None,
+                status=None,
+                type=None,
+                home_page_content_html=None,
+                custom_fields={"documentVersion": "0.2"},
+                workflow_action=None,
+                dry_run=True,
+            )
+        mock_client.patch.assert_not_called()
+
     async def test_workflow_action_with_status_passes(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:

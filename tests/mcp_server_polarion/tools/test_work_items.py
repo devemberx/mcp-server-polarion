@@ -1751,6 +1751,37 @@ class TestEnumGuardUpdateWorkItem:
         assert result.dry_run is True  # type: ignore[attr-defined]
         mock_client.patch.assert_not_called()
 
+    async def test_custom_fields_scoped_to_change_type_to(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        # change_type_to retypes the item in the same PATCH, so custom_fields are
+        # validated against the NEW type's schema, not the current ("task").
+        # GETs: prefetch, type options (~ axis for change_type_to), custom sample.
+        mock_client.get.side_effect = [
+            _make_get_response(),
+            _enum_get_response(["requirement"]),
+            _wi_sample_response({"release_train_id": "RT-1"}),
+        ]
+        result = await _call_update(
+            mock_ctx,
+            change_type_to="requirement",
+            custom_fields={"release_train_id": "RT-42"},
+            dry_run=True,
+        )
+        assert result.dry_run is True  # type: ignore[attr-defined]
+        sample_calls = [
+            c
+            for c in mock_client.get.call_args_list
+            if "SQL:" in str(c.kwargs.get("params", {}).get("query", ""))
+        ]
+        assert sample_calls, "guard must sample the type schema via SQL"
+        query = sample_calls[0].kwargs["params"]["query"]
+        assert "c_type = 'requirement'" in query
+        assert "c_type = 'task'" not in query
+
     async def test_unlisted_resolution_raises_after_prefetch(
         self,
         mock_ctx: MagicMock,

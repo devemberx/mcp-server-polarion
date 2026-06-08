@@ -294,8 +294,9 @@ async def _fetch_work_item_type_custom_keys(
     """Sample existing items of a type and return their unioned custom-field keys.
 
     MIN-per-key SQL (complete, one request); on SQL rejection, degrades to a
-    bounded Lucene ``type:<type>`` sample (incomplete on sparse types), where
-    ``deep`` pages a fresh slice for the bypass-retry. Result cached even if empty.
+    bounded Lucene ``type:<type>`` sample that can false-reject a real key on
+    sparse types — ``deep`` pages a fresh slice for the bypass-retry (no-op on
+    the SQL path, which is always complete). Result cached even if empty.
     Fail-closed: auth → ``PermissionError``, unreachable → ``RuntimeError``.
     """
     path = f"/projects/{encode_path_segment(project_id)}/workitems"

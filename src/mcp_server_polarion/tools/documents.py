@@ -833,7 +833,13 @@ async def _resolve_document_type(
         ) from exc
     data = response.get("data", {})
     attrs = data.get("attributes", {}) if isinstance(data, dict) else {}
-    return safe_str(attrs.get("type", "")) if isinstance(attrs, dict) else ""
+    doc_type = safe_str(attrs.get("type", "")) if isinstance(attrs, dict) else ""
+    if not doc_type:
+        raise RuntimeError(
+            f"Document '{space_id}/{document_name}' in project '{project_id}' has no "
+            f"resolvable type; cannot validate custom_fields. Pass `type` explicitly."
+        )
+    return doc_type
 
 
 @mcp.tool(

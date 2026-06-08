@@ -574,11 +574,13 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
             priority=priority,
             resolution=resolution,
         )
+        # change_type_to retypes the item in the same PATCH, so custom_fields
+        # belong to the new type's schema; validate against it, not the current.
         if custom_fields:
             await guard_work_item_custom_field_keys(
                 client,
                 project_id,
-                work_item_type,
+                change_type_to or work_item_type,
                 custom_fields,
             )
 
