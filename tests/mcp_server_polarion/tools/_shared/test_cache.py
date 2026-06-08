@@ -1,9 +1,9 @@
 """Tests for ``tools/_shared/cache.py``.
 
 Covers the ``TTLCache`` primitive (hit / miss / overwrite / lazy expiry /
-invalidate / clear) and the typed get / store / record wrappers the tool
-layer reaches the caches through. TTL expiry is driven by patching the
-module-level ``_now`` clock seam.
+invalidate / clear) and the typed get / store wrappers the tool layer reaches
+the caches through. TTL expiry is driven by patching the module-level ``_now``
+clock seam.
 """
 
 from __future__ import annotations
@@ -16,14 +16,16 @@ from mcp_server_polarion.tools._shared.cache import (
     get_cached_documents,
     get_cached_enum_options,
     get_cached_project_enum,
-    get_document_custom_keys,
+    get_document_type_custom_keys,
     get_work_item_custom_keys,
+    invalidate_document_type_custom_keys,
     invalidate_documents_cache,
-    record_document_custom_field_keys,
-    record_work_item_custom_field_keys,
+    invalidate_work_item_custom_keys,
     store_cached_documents,
     store_cached_enum_options,
     store_cached_project_enum,
+    store_document_type_custom_keys,
+    store_work_item_custom_keys,
 )
 
 
@@ -34,7 +36,7 @@ def _reset_caches() -> None:
     cache_mod._enum_option_cache.clear()
     cache_mod._project_enum_cache.clear()
     cache_mod._work_item_custom_key_cache.clear()
-    cache_mod._document_custom_key_cache.clear()
+    cache_mod._document_type_custom_key_cache.clear()
 
 
 @pytest.fixture
@@ -200,58 +202,74 @@ class TestProjectEnumCache:
         assert get_cached_project_enum("P", "hyperlink-role") is None
 
 
-class TestWorkItemCustomKeyRecord:
-    """``record_work_item_custom_field_keys`` union semantics + reads."""
+class TestWorkItemCustomKeys:
+    """``store/get/invalidate_work_item_custom_keys`` — the type's key schema."""
 
-    def test_record_then_get(self) -> None:
-        record_work_item_custom_field_keys("P", "task", ["risk"])
+    def test_store_then_get(self) -> None:
+        store_work_item_custom_keys("P", "task", frozenset({"a", "b"}))
 
-        assert get_work_item_custom_keys("P", "task") == frozenset({"risk"})
+        assert get_work_item_custom_keys("P", "task") == frozenset({"a", "b"})
 
-    def test_record_merges_across_calls(self) -> None:
-        record_work_item_custom_field_keys("P", "task", ["k1"])
-        record_work_item_custom_field_keys("P", "task", ["k2", "k1"])
+    def test_store_replaces_verbatim_not_union(self) -> None:
+        store_work_item_custom_keys("P", "task", frozenset({"a", "b"}))
+        store_work_item_custom_keys("P", "task", frozenset({"c"}))
 
-        assert get_work_item_custom_keys("P", "task") == frozenset({"k1", "k2"})
+        assert get_work_item_custom_keys("P", "task") == frozenset({"c"})
 
-    def test_record_filters_non_string_and_empty(self) -> None:
-        record_work_item_custom_field_keys("P", "task", ["k1", "", "k2"])
+    def test_keyed_by_type(self) -> None:
+        store_work_item_custom_keys("P", "task", frozenset({"a"}))
 
-        assert get_work_item_custom_keys("P", "task") == frozenset({"k1", "k2"})
-
-    def test_empty_keys_still_records_the_type_as_observed(self) -> None:
-        record_work_item_custom_field_keys("P", "task", [])
-
-        assert get_work_item_custom_keys("P", "task") == frozenset()
+        assert get_work_item_custom_keys("P", "requirement") is None
+        assert get_work_item_custom_keys("Q", "task") is None
 
     def test_miss_returns_none(self) -> None:
-        assert get_work_item_custom_keys("P", "never_seen") is None
+        assert get_work_item_custom_keys("P", "never_sampled") is None
+
+    def test_invalidate(self) -> None:
+        store_work_item_custom_keys("P", "task", frozenset({"a"}))
+        invalidate_work_item_custom_keys("P", "task")
+
+        assert get_work_item_custom_keys("P", "task") is None
 
     def test_expiry(self, clock: list[float]) -> None:
-        record_work_item_custom_field_keys("P", "task", ["k1"])
+        store_work_item_custom_keys("P", "task", frozenset({"a"}))
 
         clock[0] += cache_mod._GUARD_TTL_SECONDS + 1.0
         assert get_work_item_custom_keys("P", "task") is None
 
 
-class TestDocumentCustomKeyRecord:
-    """``record_document_custom_field_keys`` keyed by (project, space, doc)."""
+class TestDocumentTypeCustomKeys:
+    """``store/get/invalidate_document_type_custom_keys`` keyed by (project, type)."""
 
-    def test_record_then_get(self) -> None:
-        record_document_custom_field_keys("P", "_default", "Doc", ["doc_risk"])
-
-        assert get_document_custom_keys("P", "_default", "Doc") == (
-            frozenset({"doc_risk"})
+    def test_store_then_get(self) -> None:
+        store_document_type_custom_keys(
+            "P", "softwareReqSpecification", frozenset({"v"})
         )
 
-    def test_keyed_by_space_and_document(self) -> None:
-        record_document_custom_field_keys("P", "_default", "Doc", ["doc_risk"])
+        assert get_document_type_custom_keys("P", "softwareReqSpecification") == (
+            frozenset({"v"})
+        )
 
-        assert get_document_custom_keys("P", "other_space", "Doc") is None
-        assert get_document_custom_keys("P", "_default", "Other") is None
+    def test_store_replaces_verbatim_not_union(self) -> None:
+        store_document_type_custom_keys("P", "generic", frozenset({"a", "b"}))
+        store_document_type_custom_keys("P", "generic", frozenset({"c"}))
 
-    def test_record_merges_across_calls(self) -> None:
-        record_document_custom_field_keys("P", "_default", "Doc", ["a"])
-        record_document_custom_field_keys("P", "_default", "Doc", ["b"])
+        assert get_document_type_custom_keys("P", "generic") == frozenset({"c"})
 
-        assert get_document_custom_keys("P", "_default", "Doc") == frozenset({"a", "b"})
+    def test_keyed_by_type(self) -> None:
+        store_document_type_custom_keys("P", "generic", frozenset({"a"}))
+
+        assert get_document_type_custom_keys("P", "systemReqSpecification") is None
+        assert get_document_type_custom_keys("Q", "generic") is None
+
+    def test_invalidate(self) -> None:
+        store_document_type_custom_keys("P", "generic", frozenset({"a"}))
+        invalidate_document_type_custom_keys("P", "generic")
+
+        assert get_document_type_custom_keys("P", "generic") is None
+
+    def test_expiry(self, clock: list[float]) -> None:
+        store_document_type_custom_keys("P", "generic", frozenset({"a"}))
+
+        clock[0] += cache_mod._GUARD_TTL_SECONDS + 1.0
+        assert get_document_type_custom_keys("P", "generic") is None
