@@ -127,6 +127,20 @@ def _enum_get_response(ids: list[str]) -> dict[str, object]:
     }
 
 
+def _wi_sample_response(*custom_dicts: dict[str, object]) -> dict[str, object]:
+    """Shape a MIN-per-key list reply: representative items with inline customs."""
+    return {
+        "data": [
+            {
+                "type": "workitems",
+                "id": f"MyProj/MCPT-{i}",
+                "attributes": {"title": "t", "type": "task", **customs},
+            }
+            for i, customs in enumerate(custom_dicts)
+        ]
+    }
+
+
 async def _call_create_wi(mock_ctx: MagicMock, **overrides: object) -> object:
     """Invoke ``create_work_items`` with a single-spec default batch.
 
@@ -175,7 +189,7 @@ def reset_enum_guard_caches() -> None:
     _cache_mod._enum_option_cache.clear()
     _cache_mod._project_enum_cache.clear()
     _cache_mod._work_item_custom_key_cache.clear()
-    _cache_mod._document_custom_key_cache.clear()
+    _cache_mod._document_type_custom_key_cache.clear()
 
 
 class TestBuildWorkItemResource:
@@ -1035,7 +1049,10 @@ class TestUpdateWorkItemValidation:
     async def test_custom_fields_alone_satisfies_at_least_one_check(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # custom_fields counts as a body field; prefetch primes the guard cache.
+        # custom_fields counts as a body field.
+        _cache_mod.store_work_item_custom_keys(
+            "MyProj", "task", frozenset({"riskLevel"})
+        )
         mock_client.get.return_value = _make_get_response(
             custom_fields={"riskLevel": "high"}
         )
@@ -1296,6 +1313,9 @@ class TestUpdateWorkItemHappyPath:
         # Customs ride top-level in attributes; a customFields container is dropped.
         mock_client.patch.return_value = {}
         rich = {"type": "text/html", "value": "<p>note</p>"}
+        _cache_mod.store_work_item_custom_keys(
+            "MyProj", "task", frozenset({"riskLevel", "reviewerNote"})
+        )
         mock_client.get.return_value = _make_get_response(
             custom_fields={"riskLevel": "high", "reviewerNote": rich}
         )
@@ -1318,6 +1338,9 @@ class TestUpdateWorkItemHappyPath:
     ) -> None:
         # changes mirrors what was sent so callers can confirm intent.
         mock_client.patch.return_value = {}
+        _cache_mod.store_work_item_custom_keys(
+            "MyProj", "task", frozenset({"riskLevel"})
+        )
         mock_client.get.return_value = _make_get_response(
             custom_fields={"riskLevel": "low"}
         )
@@ -1336,6 +1359,9 @@ class TestUpdateWorkItemHappyPath:
     ) -> None:
         # Post-call mutation of the caller's dict must not bleed into changes.
         mock_client.patch.return_value = {}
+        _cache_mod.store_work_item_custom_keys(
+            "MyProj", "task", frozenset({"reviewerNote", "riskLevel"})
+        )
         mock_client.get.return_value = _make_get_response(
             custom_fields={"reviewerNote": "x", "riskLevel": "low"}
         )
@@ -1360,7 +1386,10 @@ class TestUpdateWorkItemHappyPath:
     async def test_dry_run_preview_includes_custom_fields(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # Dry-run echoes merged standard+custom attrs; prefetch primes the guard.
+        # Dry-run echoes merged standard+custom attrs.
+        _cache_mod.store_work_item_custom_keys(
+            "MyProj", "task", frozenset({"riskLevel"})
+        )
         mock_client.get.return_value = _make_get_response(
             custom_fields={"riskLevel": "high"}
         )
@@ -1388,6 +1417,9 @@ class TestUpdateWorkItemHappyPath:
             "reviewerNote": {"type": "text/html", "value": "<p>x</p>"},
         }
         mock_client.patch.return_value = {}
+        _cache_mod.store_work_item_custom_keys(
+            "MyProj", "task", frozenset({"riskLevel", "effortHours", "reviewerNote"})
+        )
         mock_client.get.return_value = _make_get_response(custom_fields=read_customs)
 
         result = await _call_update(mock_ctx, custom_fields=read_customs)
@@ -1609,25 +1641,57 @@ class TestEnumGuardCreateWorkItem:
             await _call_create_wi(mock_ctx, type="unknown", dry_run=True)
         mock_client.post.assert_not_called()
 
-    async def test_custom_fields_on_create_logs_warning_but_proceeds(
+    async def test_custom_fields_on_create_pass_when_in_type_sample(
         self,
         mock_ctx: MagicMock,
         mock_client: AsyncMock,
         reset_enum_guard_caches: None,
-        caplog: pytest.LogCaptureFixture,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        # Create can't schema-validate custom keys, so it warns instead of failing.
-        # Propagation re-enabled (see test_guard.py's block-write-and-logs test).
-        import logging  # noqa: PLC0415 -- fixture-local import is intentional
-
-        monkeypatch.setattr(logging.getLogger("mcp_server_polarion"), "propagate", True)
-        mock_client.get.return_value = _enum_get_response(["task"])
+        # GETs: type options, then the MIN-per-key type sample.
+        mock_client.get.side_effect = [
+            _enum_get_response(["task"]),
+            _wi_sample_response({"risk_score": 1}),
+        ]
         mock_client.post.return_value = {"data": [{"id": "MyProj/MCPT-1"}]}
-        caplog.set_level("WARNING", logger="mcp_server_polarion.tools.write")
 
-        await _call_create_wi(mock_ctx, custom_fields={"risk_score": 5})
-        assert any("cannot be schema-validated" in r.message for r in caplog.records)
+        result = await _call_create_wi(mock_ctx, custom_fields={"risk_score": 5})
+
+        assert result.created is True  # type: ignore[attr-defined]
+        mock_client.post.assert_awaited_once()
+
+    async def test_custom_fields_on_create_reject_ghost_key(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        # Sample knows only risk_score; the ghost key is rejected after a retry.
+        mock_client.get.side_effect = [
+            _enum_get_response(["task"]),
+            _wi_sample_response({"risk_score": 1}),
+            _wi_sample_response({"risk_score": 1}),
+        ]
+
+        with pytest.raises(ValueError, match="newGhostField"):
+            await _call_create_wi(mock_ctx, custom_fields={"newGhostField": "x"})
+        mock_client.post.assert_not_called()
+
+    async def test_custom_fields_on_create_fail_closed_on_empty_sample(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        # No item of this type populates any custom field -> can't infer schema.
+        mock_client.get.side_effect = [
+            _enum_get_response(["task"]),
+            {"data": []},
+            {"data": []},
+        ]
+
+        with pytest.raises(RuntimeError, match="Refusing the write"):
+            await _call_create_wi(mock_ctx, custom_fields={"risk_score": 5})
+        mock_client.post.assert_not_called()
 
 
 class TestEnumGuardUpdateWorkItem:
@@ -1654,15 +1718,37 @@ class TestEnumGuardUpdateWorkItem:
         mock_client: AsyncMock,
         reset_enum_guard_caches: None,
     ) -> None:
-        # Unknown key absent from the pre-fetched customs, so the guard rejects.
-        mock_client.get.return_value = _make_get_response(
-            custom_fields={"risk_score": 5}
-        )
+        # GETs: prefetch (for type), then the type sample (+ bypass-retry sample).
+        # The sample knows only risk_score, so release_train_id is rejected.
+        mock_client.get.side_effect = [
+            _make_get_response(),
+            _wi_sample_response({"risk_score": 5}),
+            _wi_sample_response({"risk_score": 5}),
+        ]
         with pytest.raises(ValueError, match="release_train_id"):
             await _call_update(
                 mock_ctx,
                 custom_fields={"release_train_id": "RT-42"},
             )
+        mock_client.patch.assert_not_called()
+
+    async def test_type_key_unset_on_item_passes_via_sample(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        # Regression: a custom key valid for the type but unset on THIS item was
+        # falsely rejected by the old single-item prime. The type sample knows it.
+        mock_client.get.side_effect = [
+            _make_get_response(),  # prefetch: no customs on the edited item
+            _wi_sample_response({"release_train_id": "RT-1"}),  # type sample knows it
+        ]
+        result = await _call_update(
+            mock_ctx, custom_fields={"release_train_id": "RT-42"}, dry_run=True
+        )
+
+        assert result.dry_run is True  # type: ignore[attr-defined]
         mock_client.patch.assert_not_called()
 
     async def test_unlisted_resolution_raises_after_prefetch(

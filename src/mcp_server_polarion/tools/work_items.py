@@ -31,9 +31,6 @@ from mcp_server_polarion.models import (
     WorkItemUpdateResult,
 )
 from mcp_server_polarion.server import mcp
-from mcp_server_polarion.tools._shared.cache import (
-    record_work_item_custom_field_keys,
-)
 from mcp_server_polarion.tools._shared.guard import (
     guard_hyperlink_roles,
     guard_work_item_custom_field_keys,
@@ -258,9 +255,10 @@ async def create_work_items(
 
     Confirm every enum value (``type`` / ``status`` / ``severity`` / custom
     enums) via ``list_work_item_enum_options`` first — unverified ids persist as
-    ghosts that never match Lucene. ``custom_fields`` keys are unvalidated;
-    take them from an existing item of the same ``type`` via ``get_work_item``.
-    ``hyperlinks[].role`` validated against ``hyperlink-role`` before write.
+    ghosts that never match Lucene. ``custom_fields`` keys are validated against
+    the type's existing schema; a key no item of that ``type`` uses is rejected,
+    and a type with no populated customs blocks the write (nothing to validate
+    against). ``hyperlinks[].role`` validated against ``hyperlink-role``.
 
     Atomic: guards + conversion + build run before the POST; one bad item rejects
     the whole batch (nothing created). Raises if the returned id count differs
@@ -287,20 +285,10 @@ async def create_work_items(
         project_id,
         [h.role for spec in items for h in (spec.hyperlinks or [])],
     )
-    for index, spec in enumerate(items):
+    for spec in items:
         if spec.custom_fields:
-            # Create can't hard-guard keys (no config endpoint, no prior item) —
-            # warn instead.
-            logger.warning(
-                "create_work_items[%d].custom_fields cannot be schema-validated "
-                "(no project-config endpoint for custom-field keys); "
-                "ensure keys come from an existing work item of this type via "
-                "get_work_item to avoid ghost attributes. "
-                "project=%s type=%s keys=%s",
-                index,
-                project_id,
-                spec.type,
-                sorted(spec.custom_fields),
+            await guard_work_item_custom_field_keys(
+                client, project_id, spec.type, spec.custom_fields
             )
 
     descriptions_html = [
@@ -571,12 +559,6 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
                 fallback_id=work_item_id,
             )
             work_item_type = current_detail.type
-            if work_item_type:
-                record_work_item_custom_field_keys(
-                    project_id,
-                    work_item_type,
-                    current_detail.custom_fields.keys(),
-                )
 
         # Scope status/severity/resolution/priority by the target type
         # (change_type_to if set). Guard checks ``type`` first, so an invalid
@@ -592,13 +574,10 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
             priority=priority,
             resolution=resolution,
         )
-        # Fail-closed: pass whatever type we have (possibly "") so the guard's
-        # own priming GET validates keys rather than skipping the check.
         if custom_fields:
             await guard_work_item_custom_field_keys(
                 client,
                 project_id,
-                work_item_id,
                 work_item_type,
                 custom_fields,
             )
@@ -900,14 +879,8 @@ async def get_work_item(
         project_id=project_id,
         fallback_id=work_item_id,
     )
-    # Prime the guard cache so update_work_item.custom_fields can validate keys.
-    if detail.type:
-        record_work_item_custom_field_keys(
-            project_id, detail.type, detail.custom_fields.keys()
-        )
     if not include_description_html:
-        # Body always travels over the wire; blank it to honour the
-        # include_description_html=False contract.
+        # Body always travels over the wire; blank it per the False contract.
         detail = detail.model_copy(update={"description_html": ""})
     return detail
 

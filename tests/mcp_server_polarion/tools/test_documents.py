@@ -164,7 +164,7 @@ def reset_enum_guard_caches() -> None:
     _cache_mod._enum_option_cache.clear()
     _cache_mod._project_enum_cache.clear()
     _cache_mod._work_item_custom_key_cache.clear()
-    _cache_mod._document_custom_key_cache.clear()
+    _cache_mod._document_type_custom_key_cache.clear()
 
 
 class TestListDocuments:
@@ -2415,10 +2415,13 @@ class TestUpdateDocumentValidation:
     async def test_custom_fields_alone_satisfies_at_least_one_check(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # custom_fields counts as a body field; priming GET shows the guard the key.
+        # custom_fields counts as a body field; the type sample knows the key.
         mock_client.get.return_value = {
-            "data": {"attributes": {"title": "D", "documentVersion": "0.1"}}
+            "data": {"attributes": {"title": "D", "type": "generic"}}
         }
+        _cache_mod.store_document_type_custom_keys(
+            "MyProj", "generic", frozenset({"documentVersion"})
+        )
         result = await update_document(
             mock_ctx,
             project_id="MyProj",
@@ -2439,8 +2442,11 @@ class TestUpdateDocumentValidation:
     ) -> None:
         # workflow_action + custom_fields-only satisfies the body-field check.
         mock_client.get.return_value = {
-            "data": {"attributes": {"title": "D", "documentVersion": "0.1"}}
+            "data": {"attributes": {"title": "D", "type": "generic"}}
         }
+        _cache_mod.store_document_type_custom_keys(
+            "MyProj", "generic", frozenset({"documentVersion"})
+        )
         result = await update_document(
             mock_ctx,
             project_id="MyProj",
@@ -3564,6 +3570,78 @@ class TestEnumGuardCreateDocument:
             )
         mock_client.post.assert_not_called()
 
+    async def test_custom_fields_pass_when_in_type_sample(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        # GETs: type options, then the project-wide document sample.
+        dtype = "systemRequirementSpecification"
+        mock_client.get.side_effect = [
+            _enum_get_response([dtype]),
+            {
+                "data": [
+                    {"type": "documents", "attributes": {"type": dtype, "version": "1"}}
+                ]
+            },
+        ]
+        mock_client.post.return_value = {
+            "data": [{"type": "documents", "id": "MyProj/_default/NewSpec"}]
+        }
+
+        result = await _call_create_doc(
+            mock_ctx, module_name="NewSpec", type=dtype, custom_fields={"version": "2"}
+        )
+
+        assert result.created is True  # type: ignore[attr-defined]
+        mock_client.post.assert_awaited_once()
+
+    async def test_custom_fields_reject_ghost_key(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        dtype = "systemRequirementSpecification"
+        sample = {
+            "data": [
+                {"type": "documents", "attributes": {"type": dtype, "version": "1"}}
+            ]
+        }
+        mock_client.get.side_effect = [_enum_get_response([dtype]), sample, sample]
+
+        with pytest.raises(ValueError, match="ghostField"):
+            await _call_create_doc(
+                mock_ctx,
+                module_name="NewSpec",
+                type=dtype,
+                custom_fields={"ghostField": "x"},
+            )
+        mock_client.post.assert_not_called()
+
+    async def test_custom_fields_fail_closed_on_empty_sample(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        dtype = "systemRequirementSpecification"
+        mock_client.get.side_effect = [
+            _enum_get_response([dtype]),
+            {"data": []},
+            {"data": []},
+        ]
+
+        with pytest.raises(RuntimeError, match="Refusing the write"):
+            await _call_create_doc(
+                mock_ctx,
+                module_name="NewSpec",
+                type=dtype,
+                custom_fields={"version": "2"},
+            )
+        mock_client.post.assert_not_called()
+
 
 class TestEnumGuardUpdateDocument:
     """Integration: ``update_document`` rejects ghost type / status."""
@@ -3586,10 +3664,15 @@ class TestEnumGuardUpdateDocument:
         mock_client: AsyncMock,
         reset_enum_guard_caches: None,
     ) -> None:
-        # Cache miss primes via one read; the unknown key is absent, so it rejects.
-        mock_client.get.return_value = {
-            "data": {"attributes": {"title": "x", "doc_risk": 3}}
+        # GETs: resolve the doc's type, then the type sample (+ bypass-retry).
+        # The sample knows only doc_risk, so ghost_key is rejected.
+        type_resp = {"data": {"attributes": {"title": "x", "type": "generic"}}}
+        sample = {
+            "data": [
+                {"type": "documents", "attributes": {"type": "generic", "doc_risk": 3}}
+            ]
         }
+        mock_client.get.side_effect = [type_resp, sample, sample]
 
         with pytest.raises(ValueError, match="ghost_key"):
             await _call_update_doc(mock_ctx, custom_fields={"ghost_key": 1})
@@ -3601,9 +3684,13 @@ class TestEnumGuardUpdateDocument:
         mock_client: AsyncMock,
         reset_enum_guard_caches: None,
     ) -> None:
+        # Resolve the doc's type; the cached type schema knows doc_risk.
         mock_client.get.return_value = {
-            "data": {"attributes": {"title": "x", "doc_risk": 3}}
+            "data": {"attributes": {"title": "x", "type": "generic"}}
         }
+        _cache_mod.store_document_type_custom_keys(
+            "MyProj", "generic", frozenset({"doc_risk"})
+        )
 
         result = await _call_update_doc(
             mock_ctx, custom_fields={"doc_risk": 9}, dry_run=True

@@ -33,7 +33,6 @@ from mcp_server_polarion.server import mcp
 from mcp_server_polarion.tools._shared.cache import (
     get_cached_documents,
     invalidate_documents_cache,
-    record_document_custom_field_keys,
     store_cached_documents,
 )
 from mcp_server_polarion.tools._shared.guard import (
@@ -596,10 +595,6 @@ async def get_document(
         content_html=content_html,
         custom_fields=extract_custom_fields(attributes, STANDARD_DOCUMENT_ATTRIBUTES),
     )
-    # Prime the guard cache so update_document.custom_fields can validate keys.
-    record_document_custom_field_keys(
-        project_id, space_id, document_name, detail.custom_fields.keys()
-    )
     return detail
 
 
@@ -807,6 +802,40 @@ async def read_document(  # noqa: PLR0913
     )
 
 
+async def _resolve_document_type(
+    client: PolarionClient,
+    project_id: str,
+    space_id: str,
+    document_name: str,
+) -> str:
+    """Resolve the ``type`` axis the custom-field guard keys on. Runs on dry_run
+    too, so the preview raises the same not-found / auth errors as the real write.
+    """
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/spaces/{encode_path_segment(space_id)}"
+        f"/documents/{encode_path_segment(document_name)}"
+    )
+    try:
+        response = await client.get(path, params={"fields[documents]": "type"})
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Document '{document_name}' not found in space '{space_id}' of project "
+            f"'{project_id}'. Use `list_documents` to verify the space ID and name."
+        ) from exc
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot read document -- check your POLARION_TOKEN permissions."
+        ) from exc
+    except PolarionError as exc:
+        raise RuntimeError(
+            f"Failed to read document type for guard: {exc.message}"
+        ) from exc
+    data = response.get("data", {})
+    attrs = data.get("attributes", {}) if isinstance(data, dict) else {}
+    return safe_str(attrs.get("type", "")) if isinstance(attrs, dict) else ""
+
+
 @mcp.tool(
     tags={"write"},
     timeout=60.0,
@@ -958,15 +987,15 @@ async def update_document(  # noqa: PLR0913
         home_page_content_html=home_page_content_html,
         custom_fields=custom_fields,
     )
-    # Hard guard: reject custom-field keys unseen on a prior get_document
-    # (priming GET on miss) — unknown keys persist as silent ghosts.
-    await guard_document_custom_field_keys(
-        client,
-        project_id,
-        space_id,
-        document_name,
-        custom_fields or {},
-    )
+    # Unknown custom-field keys persist as silent ghosts; validate against the
+    # type's schema. A type change keys on the new type, else the current one.
+    if custom_fields:
+        effective_type = type or await _resolve_document_type(
+            client, project_id, space_id, document_name
+        )
+        await guard_document_custom_field_keys(
+            client, project_id, effective_type, custom_fields
+        )
 
     if dry_run:
         return DocumentUpdateResult(
@@ -1095,17 +1124,7 @@ async def create_document(  # noqa: PLR0913
         status=status,
     )
     if custom_fields:
-        # Create can't hard-guard keys (no config endpoint, no prior get) —
-        # warn instead.
-        logger.warning(
-            "create_document.custom_fields cannot be schema-validated "
-            "(no project-config endpoint for custom-field keys); ensure keys "
-            "come from a sibling document via get_document to avoid ghost "
-            "attributes. project=%s module=%s keys=%s",
-            project_id,
-            module_name,
-            sorted(custom_fields),
-        )
+        await guard_document_custom_field_keys(client, project_id, type, custom_fields)
 
     home_page_content_html = (
         stamp_block_ids(sanitize_html(markdown_to_html(home_page_content)))
