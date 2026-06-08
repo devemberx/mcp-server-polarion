@@ -111,11 +111,8 @@ class TestFetchEnumOptionIds:
         caplog: pytest.LogCaptureFixture,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        # ``setup_logging`` sets ``propagate=False`` on the package logger so
-        # MCP JSON-RPC over stdout never gets contaminated. caplog hooks the
-        # root logger, so once another test ran setup_logging, child warnings
-        # never reach caplog. Re-enable propagation locally for order
-        # independence.
+        # setup_logging sets propagate=False, so caplog misses package logs;
+        # re-enable propagation locally for order independence.
         import logging  # noqa: PLC0415 -- fixture-local import is intentional
 
         monkeypatch.setattr(logging.getLogger("mcp_server_polarion"), "propagate", True)
@@ -145,8 +142,7 @@ class TestFetchEnumOptionIds:
         caplog: pytest.LogCaptureFixture,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        # A 404 means getAvailableOptions is unsupported on this instance, so
-        # the guard defers (empty set) rather than block every enum write.
+        # 404 = options endpoint unsupported, so the guard defers (empty set).
         import logging  # noqa: PLC0415 -- fixture-local import is intentional
 
         monkeypatch.setattr(logging.getLogger("mcp_server_polarion"), "propagate", True)
@@ -163,8 +159,7 @@ class TestFetchEnumOptionIds:
         assert any("404" in r.message for r in caplog.records)
 
     async def test_not_found_result_is_cached(self, mock_client: AsyncMock) -> None:
-        # The deferred (empty) result is cached so a missing endpoint is not
-        # re-probed on every write within the TTL.
+        # Deferred result is cached; a missing endpoint isn't re-probed in the TTL.
         mock_client.get.side_effect = PolarionNotFoundError("nope", status_code=404)
 
         await fetch_enum_option_ids(mock_client, "P", "workitems", "severity", "task")
@@ -175,8 +170,7 @@ class TestFetchEnumOptionIds:
     async def test_guard_defers_when_options_unsupported(
         self, mock_client: AsyncMock
     ) -> None:
-        # End-to-end: a 404 on the options endpoint must NOT raise from the
-        # higher-level guard -- the enum-bearing write is allowed through.
+        # A 404 on the options endpoint lets the enum write through, no raise.
         mock_client.get.side_effect = PolarionNotFoundError("nope", status_code=404)
 
         await guard_work_item_enums(

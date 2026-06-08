@@ -1,18 +1,10 @@
 """Pure trajectory checks for Tier-1 forbidden behaviours.
 
-Each check takes the agent's tool-call trajectory -- a list of
-``{"name": str, "args": dict}`` in call order -- plus optional params, and
-returns ``(passed, reason)``. No LLM, no I/O: a check is a function of the
-trajectory alone, so the same input always yields the same verdict.
-
-Silent-corruption modes that the mcp-server tool layer now guards
-deterministically (ghost enum ids, ghost custom-field keys, out-of-range
-priority, anchorless body blocks) live in ``mcp_server_polarion.tools._guard``
-and ``utils.html`` and are covered by
-``tests/mcp_server_polarion/tools/test_guard.py`` and
-``tests/mcp_server_polarion/utils/test_html.py``; checks here target the
-LLM-behavioural rules
-that cannot be guarded server-side.
+Each check is a function of the trajectory alone (a list of
+``{"name": str, "args": dict}`` in call order, plus optional params) returning
+``(passed, reason)`` -- no LLM, no I/O, so identical input yields identical
+verdict. Scope is LLM-behavioural rules unreachable by the server-side guards
+in ``tools._guard`` / ``utils.html`` (covered by their own unit tests).
 """
 
 from __future__ import annotations
@@ -96,12 +88,11 @@ def check_get_before_update(
 ) -> CheckResult:
     """Every ``update_*`` must be preceded by a matching ``get_*``.
 
-    Generic over both work-item and document update paths. Polarion writes
-    REPLACE lists (``hyperlinks``, ``assignee_ids``) and accept partial
-    PATCHes silently -- without a prior read the agent has no view of
-    current state, so clobbers and ghost-custom-key writes both become
-    possible. The rule is observable purely from the trajectory: a
-    ``get_*`` on the matching identifier tuple must appear earlier.
+    Covers both work-item and document paths. Polarion writes REPLACE lists
+    (``hyperlinks``, ``assignee_ids``) and accept partial PATCHes silently, so
+    without a prior read clobbers and ghost-custom-key writes become possible.
+    Observable from the trajectory: a ``get_*`` on the matching identifier
+    tuple must appear earlier.
     """
     for i, call in enumerate(trajectory):
         name = call.get("name", "")

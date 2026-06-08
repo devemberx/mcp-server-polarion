@@ -1,15 +1,9 @@
 """In-process TTL caches shared across tool implementations.
 
-Tools repeatedly resolve the same near-static project facts within a single
-session -- the documents in a project, the valid option ids for an enum
-field, the custom-field keys observed on a work item or document. Re-fetching
-each on every call would burn the server's tight request budget (<=3 req/s,
-no client-side concurrency), so each is memoised behind a short-lived cache.
-
-This module owns all cache state. Tool logic (request shaping, JSON:API
-extraction, write guards) lives elsewhere and reaches the caches only through
-the typed get / store / record wrappers below, keeping cache lifetime and
-key shape in one place.
+Near-static project facts (documents, enum option ids, observed custom-field
+keys) are memoised to spare the server's tight budget (<=3 req/s, no
+concurrency). This module owns all cache state; tool logic reaches it only
+through the typed get / store / record wrappers below.
 """
 
 from __future__ import annotations
@@ -34,10 +28,8 @@ class _Entry[V]:
 class TTLCache[K, V]:
     """Hashable-keyed cache whose entries expire ``ttl_seconds`` after a set.
 
-    Single-process and single-threaded (the server issues no concurrent
-    requests). Expiry is lazy -- a key is dropped only when next accessed past
-    its deadline -- so a bounded key space never accumulates dead entries
-    beyond that bound.
+    Single-threaded; lazy expiry (a key is dropped only when next accessed past
+    its deadline), so a bounded key space never grows past that bound.
     """
 
     def __init__(self, ttl_seconds: float) -> None:
@@ -65,14 +57,12 @@ class TTLCache[K, V]:
 
 Resource = Literal["workitems", "documents"]
 
-# Enum options and custom-field schema are near-static project config. The TTL
-# is bounded by ghost-safety, not freshness: a stale entry keeps accepting an
-# option an admin removed mid-session until expiry, so 60s caps that window.
+# Bounded by ghost-safety: a stale entry keeps accepting an admin-removed
+# option until expiry, so 60s caps that window.
 _GUARD_TTL_SECONDS: Final[float] = 60.0
 
-# The document listing is mutable: a freshly created document must surface
-# within ~1 minute, and ``create_document`` invalidates the entry on write.
-# Same ceiling, different reason -- freshness rather than ghost-safety.
+# Bounded by freshness: a new document must surface within ~1 min
+# (``create_document`` also invalidates on write).
 _DOCUMENT_LIST_TTL_SECONDS: Final[float] = 60.0
 
 # project_id -> tuple of (space_id, document_name) pairs.
@@ -83,9 +73,8 @@ _document_list_cache: TTLCache[str, tuple[tuple[str, str], ...]] = TTLCache(
 _enum_option_cache: TTLCache[tuple[str, Resource, str, str], frozenset[str]] = TTLCache(
     _GUARD_TTL_SECONDS
 )
-# (project, enum_name) -> valid option ids for a project-level enumeration
-# (link role, hyperlink role). Keyed without a type axis: these enums are
-# project config, not scoped by work-item type the way status/severity are.
+# (project, enum_name) -> option ids for a project-level enum (link/hyperlink
+# role). No type axis: these are project config, not type-scoped.
 _project_enum_cache: TTLCache[tuple[str, str], frozenset[str]] = TTLCache(
     _GUARD_TTL_SECONDS
 )

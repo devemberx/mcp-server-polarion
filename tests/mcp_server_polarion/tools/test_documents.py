@@ -379,8 +379,7 @@ class TestListDocuments:
                 }
             }
 
-        # Page 2 is partial (50 < 100), and totalCount is omitted →
-        # compute_has_more's heuristic must stop the scan.
+        # Partial page 2 (50 < 100) with no totalCount stops the scan.
         page_data = {
             1: [_make_item("DocA")] * 100,
             2: [_make_item("DocB")] * 50,
@@ -555,8 +554,7 @@ class TestListDocuments:
             call_args[0][1] if len(call_args[0]) > 1 else {},
         )
         assert params["query"] == "type:heading"
-        # sort=module was dropped — server-side sort cost > client-side dedup
-        # (benchmarked: ~4x slower on cold server cache, equal warm).
+        # No sort=module: server-side sort costs more than client-side dedup.
         assert "sort" not in params
 
     async def test_not_found_raises_value_error(
@@ -821,11 +819,11 @@ class TestGetDocument:
             "data": {
                 "id": "proj1/_default/SRS",
                 "attributes": {
-                    # Standard attributes — present but excluded from custom_fields.
+                    # Standard attrs: excluded from custom_fields.
                     "title": "SRS",
                     "type": "req_specification",
                     "status": "approved",
-                    # Inline custom attributes — top-level keys.
+                    # Inline customs: top-level keys.
                     "summary": rich_value,
                     "documentVersion": "1.0",
                     "reviewerName": "alice",
@@ -1628,8 +1626,7 @@ class TestReadDocumentParts:
 class TestReadDocument:
     """Tests for the ``read_document`` tool."""
 
-    # -- end-to-end wiring (exercises read_document_parts via client.get) --
-
+    # End-to-end wiring: exercises read_document_parts via client.get.
     async def test_end_to_end_renders_document(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
@@ -1735,8 +1732,7 @@ class TestReadDocument:
         assert result.page_size == 100
         assert result.has_more is False
 
-        # Heading rendered at level 1, then workitem with bold lead-in
-        # plus its description, then prose. Empty paragraph is skipped.
+        # Heading, work item lead-in + description, prose; empty paragraph skipped.
         assert result.content == (
             "# Introduction\n"
             "\n"
@@ -1803,8 +1799,7 @@ class TestReadDocument:
                 page_number=1,
             )
 
-    # -- render-rule tests (isolated via monkeypatched read_document_parts) --
-
+    # Render-rule tests: isolated via monkeypatched read_document_parts.
     async def test_workitem_with_description_renders_lead_in_plus_body(
         self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -2230,8 +2225,7 @@ class TestBuildUpdateDocumentPayload:
     """Tests for the private ``_build_update_document_payload`` helper."""
 
     def test_only_set_fields_appear_in_attributes(self) -> None:
-        # Skip-None semantics: omitted fields are not serialized so
-        # JSON:API omit-preserve takes effect server-side.
+        # None fields stay unserialized so JSON:API omit-preserve applies.
         payload = _build_update_document_payload(
             project_id="MyProj",
             space_id="Requirements",
@@ -2270,10 +2264,7 @@ class TestBuildUpdateDocumentPayload:
         }
 
     def test_no_attributes_when_all_fields_are_none(self) -> None:
-        # Helper produces a body with no ``attributes`` key when every
-        # field is None. The tool layer rejects this case before
-        # reaching the helper, but a future direct caller should not
-        # silently emit an empty PATCH body.
+        # All-None yields no attributes key; the tool rejects this upstream.
         payload = _build_update_document_payload(
             project_id="MyProj",
             space_id="S",
@@ -2288,8 +2279,7 @@ class TestBuildUpdateDocumentPayload:
         assert data["id"] == "MyProj/S/D"
 
     def test_homepagecontent_omitted_when_not_passed(self) -> None:
-        # JSON:API omit-preserve: body stays untouched when the caller
-        # does not pass ``home_page_content_html``.
+        # Omitting home_page_content_html leaves the body untouched.
         payload = _build_update_document_payload(
             project_id="MyProj",
             space_id="S",
@@ -2425,8 +2415,7 @@ class TestUpdateDocumentValidation:
     async def test_custom_fields_alone_satisfies_at_least_one_check(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # custom_fields counts as a body field on update_document too. The
-        # priming GET lets the custom-field guard see ``documentVersion``.
+        # custom_fields counts as a body field; priming GET shows the guard the key.
         mock_client.get.return_value = {
             "data": {"attributes": {"title": "D", "documentVersion": "0.1"}}
         }
@@ -2448,8 +2437,7 @@ class TestUpdateDocumentValidation:
     async def test_workflow_action_with_custom_fields_passes(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # workflow_action paired with custom_fields-only should also
-        # satisfy the body-field check.
+        # workflow_action + custom_fields-only satisfies the body-field check.
         mock_client.get.return_value = {
             "data": {"attributes": {"title": "D", "documentVersion": "0.1"}}
         }
@@ -2471,12 +2459,10 @@ class TestUpdateDocumentValidation:
     async def test_workflow_action_with_home_page_content_html_passes(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """workflow_action paired with home_page_content_html only is OK.
+        """workflow_action + home_page_content_html-only is OK.
 
-        Polarion rejects empty PATCH bodies, so workflow_action MUST come
-        with at least one attribute. home_page_content_html is one such
-        attribute — this guard prevents the body-field check from
-        regressing to "title/status/type/custom_fields only".
+        home_page_content_html counts as the required attribute, so the
+        body-field check must not regress to title/status/type/customs only.
         """
         result = await update_document(
             mock_ctx,
@@ -2492,7 +2478,7 @@ class TestUpdateDocumentValidation:
             dry_run=True,
         )
         assert result.dry_run is True
-        # Sanity: payload includes both the body and the workflow query param.
+        # Payload carries both the body and the workflow query param.
         assert result.payload_preview is not None
         item = cast(dict[str, object], result.payload_preview["data"])
         attributes = cast(dict[str, object], item["attributes"])
@@ -2780,9 +2766,7 @@ class TestUpdateDocumentHappyPath:
     async def test_explicit_empty_title_is_serialized(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # ``title=""`` differs from ``title=None``: the empty string
-        # passes the at-least-one check and IS sent in attributes,
-        # clearing the title server-side.
+        # title="" (unlike None) is sent in attributes, clearing it server-side.
         mock_client.patch.return_value = {}
 
         await update_document(
@@ -2828,8 +2812,7 @@ class TestUpdateDocumentHappyPath:
     async def test_workflow_action_url_encoded_when_special(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # urlencode is responsible for escaping action IDs that contain
-        # whitespace or other reserved chars; this locks the contract.
+        # Action IDs with reserved chars must be URL-encoded.
         mock_client.patch.return_value = {}
 
         await update_document(
@@ -2848,8 +2831,7 @@ class TestUpdateDocumentHappyPath:
 
         args, _ = mock_client.patch.call_args
         path = args[0]
-        # Space in action ID -> "+" or "%20"; both are valid URL
-        # encodings and Polarion accepts either.
+        # Space encodes to "+" or "%20"; Polarion accepts either.
         assert "workflowAction=needs+review" in path or (
             "workflowAction=needs%20review" in path
         )
@@ -3604,8 +3586,7 @@ class TestEnumGuardUpdateDocument:
         mock_client: AsyncMock,
         reset_enum_guard_caches: None,
     ) -> None:
-        # Cache miss → guard does one inline get_document-shaped read; the
-        # unknown key is absent from the document's customs, so it rejects.
+        # Cache miss primes via one read; the unknown key is absent, so it rejects.
         mock_client.get.return_value = {
             "data": {"attributes": {"title": "x", "doc_risk": 3}}
         }

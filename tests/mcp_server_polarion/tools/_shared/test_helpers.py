@@ -50,14 +50,12 @@ class TestExtractCustomFields:
         assert extract_custom_fields({}, STANDARD_WORK_ITEM_ATTRIBUTES) == {}
 
     def test_preserves_rich_text_value_verbatim(self) -> None:
-        # Rich-text Polarion fields arrive as {type, value} dicts; the
-        # helper must NOT convert them to Markdown, so they round-trip
-        # back to Polarion unchanged on a future PATCH.
+        # Rich-text {type, value} dicts stay verbatim to round-trip on PATCH.
         rich = {"type": "text/html", "value": "<p>x</p>"}
         attributes: dict[str, object] = {"title": "T", "reviewerNote": rich}
         result = extract_custom_fields(attributes, STANDARD_WORK_ITEM_ATTRIBUTES)
         assert result == {"reviewerNote": rich}
-        # Same object identity — no defensive copy.
+        # Same object identity, no defensive copy.
         assert result["reviewerNote"] is rich
 
     def test_preserves_heterogeneous_value_types(self) -> None:
@@ -80,9 +78,7 @@ class TestExtractCustomFields:
         }
 
     def test_document_allowlist_filters_document_attrs(self) -> None:
-        # Verifies the same helper works for documents with the
-        # document-specific allowlist; document-only standard keys
-        # (e.g. homePageContent, moduleFolder) must be filtered out.
+        # Document allowlist filters document-only keys (homePageContent, moduleFolder).
         attributes: dict[str, object] = {
             "title": "Doc",
             "type": "req_specification",
@@ -99,10 +95,8 @@ class TestExtractCustomFields:
         }
 
     def test_allowlist_swap_changes_classification(self) -> None:
-        # A key that is standard for one resource type may be custom on
-        # another. ``autoSuspect`` is a standard document attribute but
-        # NOT a standard work item attribute — so swapping the allowlist flips
-        # how it's classified.
+        # autoSuspect is standard for documents but custom for work items;
+        # swapping the allowlist flips its classification.
         attributes: dict[str, object] = {"autoSuspect": False}
         assert extract_custom_fields(attributes, STANDARD_DOCUMENT_ATTRIBUTES) == {}
         assert extract_custom_fields(attributes, STANDARD_WORK_ITEM_ATTRIBUTES) == {
@@ -141,9 +135,7 @@ class TestMergeCustomFields:
         assert attributes == {"title": "T"}
 
     def test_skips_none_values_inside_dict(self) -> None:
-        # ``None`` values are skipped (clearing is not supported in
-        # this phase); falsy non-``None`` values pass through verbatim
-        # because they may be meaningful custom-field values.
+        # None values skip (no clearing); other falsy values pass through.
         attributes: dict[str, JsonValue] = {}
         merge_custom_fields(
             attributes,
@@ -165,8 +157,7 @@ class TestMergeCustomFields:
         assert "skip_me" not in attributes
 
     def test_rich_text_dict_passes_through_identity(self) -> None:
-        # The {type, value} dict must round-trip unchanged — same
-        # object identity, no defensive copy.
+        # {type, value} dict round-trips by identity, no defensive copy.
         rich = {"type": "text/html", "value": "<p>x</p>"}
         attributes: dict[str, JsonValue] = {}
         merge_custom_fields(
@@ -177,9 +168,7 @@ class TestMergeCustomFields:
         assert attributes["reviewerNote"] is rich
 
     def test_collision_with_standard_attr_raises(self) -> None:
-        # Keys that overlap with the standard allowlist would silently
-        # overwrite an explicit standard parameter; raise at the tool
-        # boundary so the caller gets an actionable message.
+        # A custom key overlapping the allowlist would shadow a standard param.
         with pytest.raises(ValueError, match="custom_fields keys collide"):
             merge_custom_fields(
                 {},
@@ -188,8 +177,7 @@ class TestMergeCustomFields:
             )
 
     def test_collision_message_lists_offending_keys_sorted(self) -> None:
-        # Multiple collisions are reported together in deterministic
-        # order to make the diagnostic predictable.
+        # Collisions reported sorted for a predictable message.
         with pytest.raises(ValueError) as exc_info:
             merge_custom_fields(
                 {},
@@ -199,9 +187,7 @@ class TestMergeCustomFields:
         assert "['status', 'title']" in str(exc_info.value)
 
     def test_document_allowlist_recognises_document_collisions(self) -> None:
-        # ``moduleFolder`` is a standard document attribute but NOT a
-        # standard work item attribute — same key, different verdicts depending
-        # on the allowlist passed.
+        # moduleFolder is standard for documents but custom for work items.
         merge_custom_fields(
             {}, {"moduleFolder": "Design"}, STANDARD_WORK_ITEM_ATTRIBUTES
         )  # OK for work items
@@ -213,8 +199,7 @@ class TestMergeCustomFields:
             )
 
     def test_returns_none_mutates_in_place(self) -> None:
-        # Style contract: helper mutates ``attributes`` and returns
-        # nothing, matching the rest of the ``_build_*_payload`` style.
+        # Mutates attributes in place and returns None, like _build_*_payload.
         attributes: dict[str, JsonValue] = {}
         result = merge_custom_fields(
             attributes, {"riskLevel": "high"}, STANDARD_WORK_ITEM_ATTRIBUTES

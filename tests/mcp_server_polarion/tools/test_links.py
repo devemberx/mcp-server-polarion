@@ -144,9 +144,7 @@ class TestListWorkItemLinks:
     async def test_forward_signals_has_more_when_total_exceeds_page(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # Simulate page 1 of a 5-item set with page_size=2 — server returns
-        # the first 2 items, meta.totalCount reports the full collection
-        # size, and has_more should be True (2 * 1 < 5).
+        # Page 1 of 5 items at page_size=2: has_more True since 2 * 1 < 5.
         mock_client.get.return_value = {
             "data": [
                 {
@@ -684,8 +682,7 @@ class TestCreateWorkItemLinksRoleGuard:
     async def test_target_guard_runs_before_role_guard(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # Missing target AND unknown role: the target guard runs first, so its
-        # error surfaces and the role enumeration is never fetched.
+        # Target guard runs first, so its error surfaces before role enumeration.
         def fake_get(
             path: str, *, params: dict[str, object] | None = None, **_: object
         ) -> dict[str, object]:

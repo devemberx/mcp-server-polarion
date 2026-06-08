@@ -45,22 +45,8 @@ async def list_projects(
 ) -> PaginatedResult[ProjectSummary]:
     """List Polarion projects the authenticated user can access.
 
-    Use this to discover project IDs for other tools. Lucene allows trailing
-    wildcards (``name:ILCU*``) but rejects leading ones (``*foo*``, HTTP 400).
-
-    Args:
-        ctx: MCP tool context (injected automatically).
-        query: Optional Lucene filter; omit to return all accessible projects.
-        page_size: Items per page (1-100, default 100).
-        page_number: 1-based page number (default 1).
-
-    Returns:
-        PaginatedResult of ``ProjectSummary`` items with ``id``, ``name``,
-        and ``active`` (False = archived; defaults to True if absent).
-
-    Raises:
-        PermissionError: Auth token invalid or lacks permission.
-        RuntimeError: Other Polarion API errors.
+    Discover project IDs for other tools. Lucene allows trailing wildcards
+    (``name:ILCU*``) but rejects leading ones (``*foo*``, HTTP 400).
     """
     client = get_client(ctx)
     params: dict[str, str | int] = {

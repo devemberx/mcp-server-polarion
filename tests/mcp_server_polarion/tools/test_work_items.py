@@ -53,12 +53,10 @@ def _project_enum_get_response(enum_name: str, ids: list[str]) -> dict[str, obje
 async def _call_update(
     mock_ctx: MagicMock, **overrides: object
 ) -> WorkItemUpdateResult:
-    """Call ``update_work_item`` with safe defaults.
+    """Call update_work_item with all params explicit.
 
-    The tool's ``Field(...)`` defaults stay as ``FieldInfo`` objects when
-    invoked outside FastMCP, so every parameter must be passed
-    explicitly. This helper supplies plain Python defaults; tests
-    override only the parameters they care about.
+    Field(...) defaults stay FieldInfo objects outside FastMCP, so every
+    param must be passed; tests override only what they care about.
     """
     defaults: dict[str, object] = {
         "project_id": "MyProj",
@@ -109,10 +107,7 @@ def _make_get_response(
     if description_html:
         attributes["description"] = {"type": "text/html", "value": description_html}
     if custom_fields:
-        # Inline alongside standard attrs (Polarion's JSON:API shape — no
-        # ``customFields`` container). The ``update_work_item`` pre-fetch
-        # guard parses these as custom keys, priming the cache so a
-        # follow-up update with the same keys is accepted.
+        # Inline (no customFields container); primes the pre-fetch guard cache.
         attributes.update(custom_fields)
     return {
         "data": {
@@ -196,7 +191,6 @@ class TestBuildWorkItemResource:
             "type": "workitems",
             "attributes": {"title": "My work item", "type": "task"},
         }
-        # No relationships key, no description, no other attributes.
         assert "relationships" not in item
         attributes = cast(dict[str, object], item["attributes"])
         assert set(attributes.keys()) == {"title", "type"}
@@ -216,7 +210,6 @@ class TestBuildWorkItemResource:
         )
 
         attributes = cast(dict[str, object], item["attributes"])
-        # Only title + type — nothing else slipped through.
         assert set(attributes.keys()) == {"title", "type"}
         assert "relationships" not in item
 
@@ -309,13 +302,11 @@ class TestBuildWorkItemResource:
         attributes = cast(dict[str, object], item["attributes"])
         assert attributes["riskLevel"] == "high"
         assert attributes["effortHours"] == 12.0
-        # Customs land flat under attributes, NOT inside a `customFields`
-        # container — Polarion silently drops the latter shape.
+        # Customs land flat; Polarion drops a customFields container.
         assert "customFields" not in attributes
 
     def test_custom_fields_collision_with_standard_attr_raises(self) -> None:
-        # ``title`` is a Polarion-defined standard attribute; collision
-        # would silently shadow the explicit ``title`` param. Reject.
+        # A custom key matching a standard attr would silently shadow it.
         with pytest.raises(ValueError, match="custom_fields keys collide"):
             _build_work_item_resource(
                 spec=WorkItemCreateSpec(
@@ -325,10 +316,7 @@ class TestBuildWorkItemResource:
             )
 
     def test_custom_fields_skips_none_values_inside_dict(self) -> None:
-        # The merge helper already has direct coverage for skip-None;
-        # this test pins that the item builder honours the same semantics —
-        # a ``None`` value inside the dict MUST NOT land under
-        # ``attributes``, while falsy non-``None`` values (e.g. 0) pass.
+        # None custom values drop; falsy non-None (e.g. 0) pass through.
         item = _build_work_item_resource(
             spec=WorkItemCreateSpec(
                 title="t",
@@ -374,7 +362,7 @@ class TestBuildCreateWorkItemsPayload:
         assert "description" not in second
 
     def test_mismatched_lengths_raise(self) -> None:
-        # ``zip(strict=True)`` guards the spec/html pairing invariant.
+        # zip(strict=True) guards the spec/html pairing.
         with pytest.raises(ValueError):
             _build_create_work_items_payload(
                 specs=[WorkItemCreateSpec(title="a", type="task")],
@@ -430,7 +418,7 @@ class TestCreateWorkItemsDryRun:
         assert result.created is False
         assert result.work_item_ids == []
         assert result.payload_preview is not None
-        # payload_preview is a plain dict (no Pydantic objects leaked).
+        # Plain dict, no Pydantic objects leaked.
         assert isinstance(result.payload_preview, dict)
         item = cast(list[dict[str, object]], result.payload_preview["data"])[0]
         attributes = cast(dict[str, object], item["attributes"])
@@ -592,21 +580,17 @@ class TestCreateWorkItemsHappyPath:
         _, kwargs = mock_client.post.call_args
         desc = kwargs["json"]["data"][0]["attributes"]["description"]
         assert desc["type"] == "text/html"
-        # Markdown was rendered to HTML by markdown_to_html.
         assert "<strong>bold</strong>" in desc["value"]
-        # Safe https link survives both markdown-it and sanitize_html.
+        # Safe https link survives sanitize.
         assert 'href="https://example.com"' in desc["value"]
 
     async def test_description_strips_dangerous_link_schemes(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Verify no anchor with a javascript: href is ever sent.
+        """No javascript: anchor reaches the payload.
 
-        markdown-it-py already rejects javascript: in link URLs (it
-        leaves the literal source text unrendered), and sanitize_html
-        strips javascript: hrefs as a defense-in-depth second layer.
-        Either way, the sent payload must not contain a usable XSS
-        anchor.
+        markdown-it leaves it unrendered; sanitize_html strips it as a
+        second layer.
         """
         mock_client.post.return_value = {
             "data": [{"type": "workitems", "id": "MyProj/MCPT-1"}]
@@ -625,8 +609,7 @@ class TestCreateWorkItemsHappyPath:
 
         _, kwargs = mock_client.post.call_args
         desc_html = kwargs["json"]["data"][0]["attributes"]["description"]["value"]
-        # No dangerous href attribute — neither markdown-it nor
-        # sanitize_html should let one through.
+        # No usable javascript: href in either quote style.
         assert 'href="javascript:' not in desc_html
         assert "href='javascript:" not in desc_html
 
@@ -965,8 +948,7 @@ class TestBuildUpdateWorkItemPayload:
         assert attributes == {"riskLevel": "low", "reviewerNote": rich}
 
     def test_custom_fields_alone_keeps_attributes_dict(self) -> None:
-        # Without any standard fields, custom_fields alone should still
-        # produce an ``attributes`` block (otherwise PATCH 400s).
+        # custom_fields alone must still emit an attributes block, else PATCH 400s.
         payload = _build_update_work_item_payload(
             project_id="MyProj",
             work_item_id="MCPT-1",
@@ -1042,9 +1024,8 @@ class TestUpdateWorkItemValidation:
             description_html="",
             dry_run=True,
         )
-        # changes summary excludes the empty description_html.
+        # Empty description_html drops from both changes and the wire payload.
         assert result.changes == {"title": "new title"}
-        # Wire payload has only the title — no description key at all.
         assert result.payload_preview is not None
         item = cast(dict[str, object], result.payload_preview["data"])
         attributes = cast(dict[str, object], item["attributes"])
@@ -1054,9 +1035,7 @@ class TestUpdateWorkItemValidation:
     async def test_custom_fields_alone_satisfies_at_least_one_check(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # custom_fields counts as a body field — neither title nor any
-        # other standard param is required when customs are present. The
-        # prefetch primes the custom-key cache so the guard accepts the key.
+        # custom_fields counts as a body field; prefetch primes the guard cache.
         mock_client.get.return_value = _make_get_response(
             custom_fields={"riskLevel": "high"}
         )
@@ -1071,8 +1050,7 @@ class TestUpdateWorkItemValidation:
     async def test_collision_raises_value_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # Tool-layer collision detection prevents an explicit standard
-        # parameter from being shadowed by a same-named custom key.
+        # A custom key matching a standard param would shadow it.
         with pytest.raises(ValueError, match="custom_fields keys collide"):
             await _call_update(
                 mock_ctx,
@@ -1085,9 +1063,7 @@ class TestUpdateWorkItemValidation:
     async def test_workflow_action_alone_raises_value_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # Polarion rejects PATCH bodies with no attributes/relationships,
-        # so workflow_action / change_type_to must be paired with at
-        # least one body field. Catch this at the tool layer.
+        # Polarion 400s on attribute-less PATCH, so an action needs a body field.
         with pytest.raises(ValueError, match="at least one body field"):
             await _call_update(mock_ctx, workflow_action="close")
         mock_client.patch.assert_not_called()
@@ -1103,8 +1079,7 @@ class TestUpdateWorkItemValidation:
     async def test_workflow_action_alone_dry_run_also_rejected(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # Dry-run is rejected too — the payload that *would* be sent is
-        # invalid, so previewing it gives no useful signal.
+        # Dry-run is rejected too: the would-be payload is invalid.
         with pytest.raises(ValueError, match="at least one body field"):
             await _call_update(mock_ctx, workflow_action="close", dry_run=True)
 
@@ -1178,9 +1153,7 @@ class TestUpdateWorkItemDryRun:
     async def test_changes_uses_python_typed_values_not_json_api_shape(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # description_html in `changes` is the raw HTML the caller passed;
-        # the JSON:API ``{type,value}`` wrapping happens only in the wire
-        # payload preview.
+        # changes holds raw caller values; {type,value} wrapping is preview-only.
         result = await _call_update(
             mock_ctx,
             description_html="<p>bold</p>",
@@ -1192,8 +1165,7 @@ class TestUpdateWorkItemDryRun:
             "description_html": "<p>bold</p>",
             "assignee_ids": ["alice"],
         }
-        # The wire-shaped preview wraps the same raw HTML — VERBATIM, no
-        # sanitization or Markdown conversion in between.
+        # Preview wraps the same HTML verbatim, no sanitize/convert.
         assert result.payload_preview is not None
         item = cast(dict[str, object], result.payload_preview["data"])
         attributes = cast(dict[str, object], item["attributes"])
@@ -1224,14 +1196,11 @@ class TestUpdateWorkItemHappyPath:
     async def test_current_description_html_blanked_by_default(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Default (False) → ``current.description_html`` is ``""``.
+        """Default (False) blanks current.description_html.
 
-        The follow-up GET still returns the body over the wire (Polarion
-        @all is the only sparse-fieldset that surfaces customs), but the
-        tool layer blanks it so a metadata-only update does not blow up
-        LLM context. Caller opts in with
-        ``include_current_description_html=True`` when verifying a body
-        edit.
+        GET still returns the body (the @all fieldset is needed for
+        customs), but the tool blanks it to spare LLM context unless the
+        caller opts in via include_current_description_html=True.
         """
         mock_client.patch.return_value = {}
         mock_client.get.return_value = _make_get_response(
@@ -1298,17 +1267,13 @@ class TestUpdateWorkItemHappyPath:
         assert args == ("/projects/MyProj/workitems/MCPT-1",)
         params = kwargs["params"]
         assert params["include"] == "assignee"
-        # WORK_ITEM_DETAIL_FIELDS is the bare ``@all`` token so inline custom
-        # fields surface on ``current.custom_fields``; this assertion
-        # pins that semantics (changing it would silently drop customs).
+        # Bare @all so inline customs surface; narrowing would drop them.
         assert params["fields[workitems]"] == "@all"
 
     async def test_current_carries_custom_fields_from_post_patch_get(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # Polarion inlines customs as top-level attributes; the post-PATCH GET
-        # reuses ``parse_work_item_detail``, so populated customs (riskLevel,
-        # effortHours) must land on ``result.current.custom_fields`` automatically.
+        # Inlined customs from the post-PATCH GET surface on current.custom_fields.
         mock_client.patch.return_value = {}
         get_response = _make_get_response(title="after")
         data = cast(dict[str, object], get_response["data"])
@@ -1328,9 +1293,7 @@ class TestUpdateWorkItemHappyPath:
     async def test_custom_fields_inlined_into_patch_body(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # The PATCH body must carry customs at the top of ``attributes``
-        # (NOT nested under a ``customFields`` container — Polarion drops
-        # that). Pin the wire shape here.
+        # Customs ride top-level in attributes; a customFields container is dropped.
         mock_client.patch.return_value = {}
         rich = {"type": "text/html", "value": "<p>note</p>"}
         mock_client.get.return_value = _make_get_response(
@@ -1353,8 +1316,7 @@ class TestUpdateWorkItemHappyPath:
     async def test_changes_summary_records_custom_fields(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # ``WorkItemUpdateResult.changes`` should reflect what was sent
-        # so callers can confirm the intent client-side.
+        # changes mirrors what was sent so callers can confirm intent.
         mock_client.patch.return_value = {}
         mock_client.get.return_value = _make_get_response(
             custom_fields={"riskLevel": "low"}
@@ -1372,8 +1334,7 @@ class TestUpdateWorkItemHappyPath:
     async def test_changes_custom_fields_is_independent_of_input(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # Mutating the caller's dict (or its nested rich-text dict) after the
-        # call must not bleed into the returned ``changes`` snapshot.
+        # Post-call mutation of the caller's dict must not bleed into changes.
         mock_client.patch.return_value = {}
         mock_client.get.return_value = _make_get_response(
             custom_fields={"reviewerNote": "x", "riskLevel": "low"}
@@ -1399,9 +1360,7 @@ class TestUpdateWorkItemHappyPath:
     async def test_dry_run_preview_includes_custom_fields(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # Dry-run should echo the merged attributes (standard + custom)
-        # so the LLM can verify the wire shape before committing. The
-        # prefetch primes the custom-key cache so the guard accepts the key.
+        # Dry-run echoes merged standard+custom attrs; prefetch primes the guard.
         mock_client.get.return_value = _make_get_response(
             custom_fields={"riskLevel": "high"}
         )
@@ -1422,11 +1381,7 @@ class TestUpdateWorkItemHappyPath:
     async def test_round_trip_read_response_can_be_written_back(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # The dict shape that flows out of WorkItemDetail.custom_fields
-        # on read must be acceptable as the custom_fields argument on
-        # write — without copying or transformation. This is the
-        # critical end-to-end ergonomic that justifies symmetric shapes
-        # on both sides.
+        # Read custom_fields must write back unchanged: symmetric read/write shapes.
         read_customs: dict[str, object] = {
             "riskLevel": "high",
             "effortHours": 8.0,
@@ -1439,17 +1394,14 @@ class TestUpdateWorkItemHappyPath:
 
         _, kwargs = mock_client.patch.call_args
         attributes = kwargs["json"]["data"]["attributes"]
-        # Every key from the read response landed inline under attributes.
         for key, value in read_customs.items():
             assert attributes[key] == value
-        # Tool layer didn't accept it then re-emit a different shape.
         assert result.updated is True
 
     async def test_workflow_action_appended_as_query_param(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # workflow_action must be paired with a body field (see
-        # TestUpdateWorkItemValidation). Pair it with a title here.
+        # workflow_action needs a paired body field, so add a title.
         mock_client.patch.return_value = {}
         mock_client.get.return_value = _make_get_response()
 
@@ -1457,8 +1409,7 @@ class TestUpdateWorkItemHappyPath:
 
         patch_path = mock_client.patch.call_args.args[0]
         assert patch_path == "/projects/MyProj/workitems/MCPT-1?workflowAction=close"
-        # Follow-up GET uses the base path (no query) so we always read
-        # the canonical detail view.
+        # Follow-up GET drops the query to read the canonical detail.
         get_path = mock_client.get.call_args.args[0]
         assert get_path == "/projects/MyProj/workitems/MCPT-1"
 
@@ -1578,14 +1529,11 @@ class TestUpdateWorkItemFieldValidation:
         assert self._adapter_for("work_item_id").validate_python("MCPT-1") == "MCPT-1"
 
     def test_description_html_rejects_overlong_input(self) -> None:
-        """``max_length=MAX_BODY_HTML_LEN`` defends against runaway HTML.
+        """max_length=MAX_BODY_HTML_LEN caps runaway HTML.
 
-        At the JSON Schema layer, FastMCP rejects bodies above the cap
-        before the tool ever sees them. Re-prove the constraint here so
-        a future docstring rewrite cannot silently drop ``max_length``.
+        Re-proven here so a docstring rewrite cannot silently drop it.
         """
         adapter = self._adapter_for("description_html")
-        # Well-formed payload below the cap is accepted unchanged.
         assert adapter.validate_python("<p>ok</p>") == "<p>ok</p>"
         # 2 MiB + 1 char is rejected.
         with pytest.raises(ValidationError):
@@ -1601,7 +1549,7 @@ class TestEnumGuardCreateWorkItem:
         mock_client: AsyncMock,
         reset_enum_guard_caches: None,
     ) -> None:
-        # ``task`` makes the prior type-axis check pass; severity then trips.
+        # task passes the type-axis check; severity then trips.
         mock_client.get.return_value = _enum_get_response(
             ["task", "must_have", "should_have"]
         )
@@ -1616,8 +1564,7 @@ class TestEnumGuardCreateWorkItem:
         mock_client: AsyncMock,
         reset_enum_guard_caches: None,
     ) -> None:
-        # The guard loop runs per item before any POST, so a ghost severity
-        # on the SECOND item must reject the whole batch with nothing sent.
+        # Per-item guard runs before any POST, so a bad later item aborts the batch.
         mock_client.get.return_value = _enum_get_response(
             ["task", "must_have", "should_have"]
         )
@@ -1640,9 +1587,7 @@ class TestEnumGuardCreateWorkItem:
         mock_client: AsyncMock,
         reset_enum_guard_caches: None,
     ) -> None:
-        # Single response shape works for any number of guard probes plus
-        # the final create — the guard ignores ``data`` keys it does not
-        # expect (no ``id`` field on the create response is fine).
+        # One response shape serves every guard probe plus the create.
         mock_client.get.return_value = _enum_get_response(
             ["task", "must_have", "open", "50.0"]
         )
@@ -1672,10 +1617,8 @@ class TestEnumGuardCreateWorkItem:
         caplog: pytest.LogCaptureFixture,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        # No schema for project custom-field keys → guard cannot validate
-        # on create; surface the gap as a warning rather than a hard fail.
-        # See test_polarion_error_blocks_write_and_logs in test_guard.py
-        # for why we re-enable propagation here.
+        # Create can't schema-validate custom keys, so it warns instead of failing.
+        # Propagation re-enabled (see test_guard.py's block-write-and-logs test).
         import logging  # noqa: PLC0415 -- fixture-local import is intentional
 
         monkeypatch.setattr(logging.getLogger("mcp_server_polarion"), "propagate", True)
@@ -1696,8 +1639,7 @@ class TestEnumGuardUpdateWorkItem:
         mock_client: AsyncMock,
         reset_enum_guard_caches: None,
     ) -> None:
-        # First GET call (pre-fetch): the work item itself.
-        # Second GET call (guard): the priority options.
+        # GETs: work-item pre-fetch, then priority options.
         mock_client.get.side_effect = [
             _make_get_response(),
             _enum_get_response(["90.0", "50.0", "10.0"]),
@@ -1712,8 +1654,7 @@ class TestEnumGuardUpdateWorkItem:
         mock_client: AsyncMock,
         reset_enum_guard_caches: None,
     ) -> None:
-        # Pre-fetch surfaces the existing customs; the unknown key does not
-        # appear there so the guard rejects.
+        # Unknown key absent from the pre-fetched customs, so the guard rejects.
         mock_client.get.return_value = _make_get_response(
             custom_fields={"risk_score": 5}
         )
@@ -1730,8 +1671,7 @@ class TestEnumGuardUpdateWorkItem:
         mock_client: AsyncMock,
         reset_enum_guard_caches: None,
     ) -> None:
-        # ``resolution`` is a ghost-prone enum like type/status/severity;
-        # an unlisted id must be rejected, not written verbatim.
+        # resolution is ghost-prone; an unlisted id must be rejected.
         mock_client.get.side_effect = [
             _make_get_response(),
             _enum_get_response(["done", "wontfix", "duplicate"]),
@@ -1746,11 +1686,8 @@ class TestEnumGuardUpdateWorkItem:
         mock_client: AsyncMock,
         reset_enum_guard_caches: None,
     ) -> None:
-        # Pre-fetch returns a ``task``; ``change_type_to='requirement'``
-        # means status must be validated against the target type's options,
-        # so the guard's status lookup must use ``type='requirement'``.
-        # GETs in order: work-item pre-fetch, type options (``~`` axis),
-        # status options (target-type axis).
+        # change_type_to scopes the status lookup to the target type.
+        # GETs: work-item pre-fetch, type options (~ axis), status options (target).
         mock_client.get.side_effect = [
             _make_get_response(),
             _enum_get_response(["requirement"]),
@@ -2355,14 +2292,11 @@ class TestGetWorkItem:
     async def test_include_description_html_false_blanks_field(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """include_description_html=False → description_html blanked.
+        """include_description_html=False blanks description_html.
 
-        ``@all`` is the only sparse-fieldset that surfaces custom fields,
-        so the body still travels over the wire; the tool layer is
-        responsible for stripping it from the response to save LLM
-        context tokens. The default at the FastMCP layer is False; here
-        we pass it explicitly because direct-call tests bypass the
-        FastMCP Field default unwrap.
+        The body still travels over the wire (@all is needed for customs);
+        the tool strips it to save LLM context. Passed explicitly since
+        direct-call tests bypass the FastMCP Field default.
         """
         mock_client.get.return_value = {
             "data": {
@@ -2393,9 +2327,9 @@ class TestGetWorkItem:
     async def test_polarion_specific_markup_round_trips(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Polarion-specific spans / data-* attributes must survive on read.
+        """Polarion spans / data-* attributes survive on read.
 
-        Core round-trip guarantee for update_work_item(description_html=).
+        Round-trip guarantee for update_work_item(description_html=).
         """
         raw = (
             '<p>Refs <span class="polarion-rte-link" '
@@ -2524,12 +2458,12 @@ class TestGetWorkItem:
             "data": {
                 "id": "proj1/MCPT-999",
                 "attributes": {
-                    # Standard attributes — present but excluded from custom_fields.
+                    # Standard attrs: excluded from custom_fields.
                     "title": "work item with customs",
                     "type": "softwarerequirement",
                     "status": "approved",
                     "priority": "50.0",
-                    # Inline custom attributes — top-level keys, not nested.
+                    # Inline customs: top-level, not nested.
                     "riskLevel": "high",
                     "category": "user",
                     "effortHours": 12.0,
@@ -2544,8 +2478,7 @@ class TestGetWorkItem:
             work_item_id="MCPT-999",
         )
 
-        # Raw passthrough: rich-text values stay as the original
-        # {type, value} dict — they are NOT converted to Markdown.
+        # Raw passthrough: rich-text dicts not converted to Markdown.
         assert result.custom_fields == {
             "riskLevel": "high",
             "category": "user",
@@ -2791,8 +2724,7 @@ class TestReadWorkItem:
         assert result.resolution == "fixed"
         assert len(result.hyperlinks) == 1
         assert result.hyperlinks[0].uri == "https://example.com/spec"
-        # Custom fields stay raw — rich-text dicts are NOT converted to Markdown
-        # because the same dict shape round-trips through update_work_item.
+        # Customs stay raw so the dict round-trips through update_work_item.
         assert result.custom_fields == {
             "riskLevel": "high",
             "reviewerNote": rich_value,

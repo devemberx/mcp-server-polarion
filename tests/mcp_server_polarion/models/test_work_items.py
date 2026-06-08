@@ -103,8 +103,7 @@ class TestWorkItemDetail:
         assert detail.description_html == ""
 
     def test_description_defaults_to_empty(self):
-        # The HTML field defaults to "" so callers can omit it on the
-        # ``include_description_html=False`` (blank) path.
+        # Defaults to "" for the include_description_html=False path.
         detail = WorkItemDetail(
             id="MCPT-003",
             title="No desc",
@@ -151,9 +150,7 @@ class TestWorkItemDetail:
         assert detail.custom_fields == {}
 
     def test_custom_fields_round_trip_heterogeneous_values(self):
-        # Custom-field values are intentionally `object`-typed: primitives
-        # and rich-text `{type: text/html, value: ...}` dicts must both
-        # survive a serialization round-trip unchanged.
+        # object-typed customs: primitives and rich-text dicts both round-trip.
         rich = {"type": "text/html", "value": "<p>note</p>"}
         detail = WorkItemDetail(
             id="MCPT-999",

@@ -11,17 +11,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class PolarionConfig(BaseSettings):
-    """Environment-based configuration for the Polarion MCP server.
-
-    Attributes:
-        polarion_url: Base URL of the Polarion instance root (without the
-            '/polarion' context path).  Trailing slashes are accepted and
-            will be stripped automatically.
-        polarion_token: Personal access token for Bearer authentication.
-        polarion_verify_ssl: Whether to verify TLS certificates.  Default
-            ``True``.  Set ``False`` only for trusted internal instances
-            using self-signed certificates.
-    """
+    """Environment-based configuration for the Polarion MCP server."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -30,9 +20,8 @@ class PolarionConfig(BaseSettings):
 
     polarion_url: str = Field(
         description=(
-            "Base URL of the Polarion instance root (e.g. 'https://example.com'), "
-            "without the '/polarion' application context path. Trailing slashes "
-            "are accepted and will be stripped automatically."
+            "Polarion instance root URL (e.g. 'https://example.com'), without the "
+            "'/polarion' context path; trailing slashes stripped."
         ),
     )
     polarion_token: str = Field(
@@ -41,8 +30,7 @@ class PolarionConfig(BaseSettings):
     polarion_verify_ssl: bool = Field(
         default=True,
         description=(
-            "Verify TLS certificates for HTTPS connections. Set to False only "
-            "for trusted internal Polarion instances using self-signed certificates."
+            "Verify TLS certs; False only for trusted self-signed internal instances."
         ),
     )
 

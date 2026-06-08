@@ -94,12 +94,7 @@ class _LinkedWorkItem:
 
 
 def _extract_html_value(field: object) -> str:
-    """Extract the HTML payload from a Polarion text field.
-
-    Polarion serialises rich-text fields either as a dict
-    ``{"type": "text/html", "value": "..."}`` or, in some responses, as
-    a plain string. Both shapes resolve to a string here.
-    """
+    """Extract HTML from a Polarion text field (``{type,value}`` dict or str)."""
     if isinstance(field, dict):
         return safe_str(field.get("value", ""))
     if isinstance(field, str):
@@ -108,11 +103,7 @@ def _extract_html_value(field: object) -> str:
 
 
 def _resolve_heading_level(attributes: dict[str, object]) -> int:
-    """Return the heading level for a heading part.
-
-    Prefers ``attributes.level`` when present, otherwise falls back to
-    parsing the leading ``<hN>`` tag in ``attributes.content``.
-    """
+    """Return a heading part's level: ``attributes.level``, else parsed ``<hN>``."""
     attr_level = attributes.get("level")
     if isinstance(attr_level, int):
         return attr_level
@@ -153,16 +144,7 @@ def _parse_document_part(
     item: object,
     work_item_map: dict[str, dict[str, object]],
 ) -> DocumentPart | None:
-    """Parse a single JSON:API document-part resource into a model.
-
-    Args:
-        item: A single resource object from the ``data`` array.
-        work_item_map: Included work-item lookup built by
-            ``build_included_work_item_map``.
-
-    Returns:
-        A ``DocumentPart`` instance, or ``None`` if *item* is invalid.
-    """
+    """Parse a JSON:API document-part resource into a model; ``None`` if invalid."""
     if not isinstance(item, dict):
         return None
     attributes = item.get("attributes", {})
@@ -177,8 +159,7 @@ def _parse_document_part(
         _PartType,
         raw_type if raw_type in _POLARION_PART_TYPES else "normal",
     )
-    # Polarion reports TOF and page-break parts as plain ``normal``; the
-    # kind is only encoded in the ID prefix.
+    # Polarion reports TOF / page-break as ``normal``; kind is in the ID prefix.
     if part_type == "normal":
         if short_id.startswith("tof_"):
             part_type = "tof"
@@ -186,7 +167,7 @@ def _parse_document_part(
             part_type = "page_break"
 
     # Heading/workitem body lives in title/description, not attributes.content
-    # (an empty <hN> stub there) — skip conversion to avoid emitting "#" noise.
+    # (empty <hN> stub) — skip conversion to avoid "#" noise.
     content_html = (
         _extract_html_value(attributes.get("content"))
         if part_type not in {"heading", "workitem"}
@@ -240,30 +221,10 @@ _FENCED_MIN_LINES: Final[int] = 2
 
 
 def _render_parts_to_markdown(parts: list[DocumentPart]) -> str:
-    """Interleave a page of parts into a single flowing Markdown string.
+    """Interleave a page of parts into one flowing Markdown string.
 
-    Rendering rules per ``DocumentPart.type``:
-
-    - ``heading``: ``{'#' * level} {outline_number} {title}`` when the
-      heading has an outline number (e.g. ``### 1.1 Purpose``), otherwise
-      ``{'#' * level} {title}``. Level clamped to 1-6.
-    - ``workitem``: bold lead-in ``**{title}** (`{work_item_id}`)``
-      followed by the description body. Falls back to bare backticked
-      ID when both title and description are empty.
-    - ``normal``: ``content`` verbatim, skipped when whitespace-only.
-      Tables stored as ``normal`` flow through unchanged.
-    - ``wikiblock``: ``content`` verbatim, with the Velocity macro name
-      lifted into the fenced-code info-string when detectable (e.g.
-      ``#documentPanel(...)`` → ``` ```documentPanel ```). Falls back
-      to the raw fenced block when no macro token is present.
-    - ``page_break``: rendered as a ``---`` thematic break.
-    - ``toc`` / ``tof``: rendered as a one-line italic placeholder.
-      Widget content is not synthesised — heading text and figure
-      captions already appear inline elsewhere.
-    - Unknown types: skipped.
-
-    Chunks are joined with a blank line; runs of three or more newlines
-    are collapsed to two for visual parity with ``get_document``.
+    Per-type rendering lives in ``_render_part``. Chunks join on a blank line;
+    runs of 3+ newlines collapse to 2.
     """
     chunks: list[str] = []
     for part in parts:
@@ -307,10 +268,8 @@ def _render_workitem_part(part: DocumentPart) -> str:
 def _decorate_wikiblock(content: str) -> str:
     """Lift the Velocity macro name into the fenced-code info-string.
 
-    Wikiblock content arrives as ``` ```\\n#macroName(...)\\n``` ``` from
-    ``markdownify``. Rewrap the fence so the macro name becomes the
-    info-string, giving the LLM an unambiguous macro identifier. Falls
-    back to the raw fence when no ``#name(`` token is detectable.
+    ``#macroName(...)`` in a fence → ` ```macroName `. Falls back to the raw
+    fence when no ``#name(`` token is detectable.
     """
     stripped = content.strip()
     if not stripped:
@@ -329,15 +288,7 @@ def _decorate_wikiblock(content: str) -> str:
 
 
 def _get_module_id(item: object) -> str:
-    """Extract the ``module`` relationship ID from a heading work item.
-
-    Args:
-        item: A single JSON:API resource object.
-
-    Returns:
-        The module ID string (e.g. ``projectId/spaceId/docName``),
-        or ``""`` if not available.
-    """
+    """Return a heading work item's ``module`` ID (``proj/space/doc``), or ``""``."""
     if not isinstance(item, dict):
         return ""
     relationships = item.get("relationships", {})
@@ -350,20 +301,13 @@ def _extract_document_pair(
     item: object,
     documents: set[tuple[str, str]],
 ) -> None:
-    """Parse ``module`` relationship from a heading work item and add the
-    (space_id, document_name) pair to *documents*.
+    """Add a heading work item's (space_id, document_name) to *documents*.
 
-    The module relationship ``data.id`` has the format
-    ``{projectId}/{spaceId}/{documentName}``.
-
-    Args:
-        item: A single JSON:API resource object from the ``data`` array.
-        documents: Mutable set to collect unique (space, document) pairs into.
+    Module ``data.id`` format: ``{projectId}/{spaceId}/{documentName}``.
     """
     mod_id = _get_module_id(item)
     if mod_id:
         parts = mod_id.split("/")
-        # Format: "projectId/spaceId/docName" → parts[1], parts[2:]
         if len(parts) >= 3:  # noqa: PLR2004
             space_id = parts[1]
             document_name = "/".join(parts[2:])
@@ -377,15 +321,8 @@ async def _discover_documents(
     """Discover all unique (space_id, document_name) pairs via linear scan.
 
     Iterates every heading-workitem page (page_size=100) and accumulates
-    unique ``module`` relationship IDs. Results are TTL-cached in
-    ``tools._shared.helpers`` so paginated callers reuse the discovery.
-
-    Args:
-        client: Active ``PolarionClient`` instance.
-        project_id: Polarion project ID.
-
-    Returns:
-        Sorted list of (space_id, document_name) tuples.
+    unique ``module`` relationship IDs. TTL-cached so paginated callers reuse
+    the discovery.
     """
     cached = get_cached_documents(project_id)
     if cached is not None:
@@ -443,10 +380,8 @@ def _extract_first_resource_id(response: dict[str, object]) -> str | None:
 def _extract_created_module_name(response: dict[str, object]) -> str | None:
     """Extract the document name from a 201 document-create response.
 
-    Polarion returns ``{"data": [{"type": "documents",
-    "id": "projectId/spaceId/documentName", ...}]}`` where
-    ``documentName`` itself may contain ``/``. Returns the document-name
-    segment or ``None`` if the response shape is unexpected.
+    ``id`` is ``projectId/spaceId/documentName`` (name may contain ``/``).
+    ``None`` on an unexpected shape.
     """
     full_id = _extract_first_resource_id(response)
     if full_id is None:
@@ -466,13 +401,11 @@ def _build_update_document_payload(  # noqa: PLR0913
     home_page_content_html: str | None = None,
     custom_fields: dict[str, object] | None = None,
 ) -> dict[str, JsonValue]:
-    """Build the JSON:API request body for ``PATCH .../documents/{d}``.
+    """Build the JSON:API PATCH body for ``.../documents/{d}``.
 
-    Same PATCH shape as ``_build_update_work_item_payload`` (single ``data``
-    object, required ``id`` ``"{project_id}/{space_id}/{document_name}"``),
-    skipping unset values. ``home_page_content_html`` is RAW Polarion HTML
-    wrapped verbatim into ``{"type":"text/html","value":...}`` — the
-    empty-string body-clearing guard lives in the tool layer, not here.
+    Single ``data`` object, required ``id`` ``"{project}/{space}/{document}"``,
+    skips unset. ``home_page_content_html`` wrapped verbatim into
+    ``{type,value}`` (empty-string guard lives in the tool layer).
     """
     attributes: dict[str, JsonValue] = {}
     if title is not None:
@@ -507,10 +440,9 @@ def _build_create_document_payload(  # noqa: PLR0913
     status: str | None,
     custom_fields: dict[str, object] | None = None,
 ) -> dict[str, JsonValue]:
-    """Build the JSON:API request body for ``POST .../spaces/{s}/documents``.
+    """Build the JSON:API POST body for ``.../spaces/{s}/documents``.
 
-    POST shape (``data`` list, ``type=documents``, inline ``attributes``),
-    skipping unset values so creation never overwrites Polarion defaults.
+    ``data`` list, ``type=documents``, inline ``attributes``, skips unset.
     """
     attributes: dict[str, JsonValue] = {
         "moduleName": module_name,
@@ -546,24 +478,8 @@ async def list_documents(
 ) -> PaginatedResult[DocumentSummary]:
     """List all documents in a Polarion project.
 
-    Returns ``(space_id, document_name)`` pairs that other document tools
-    accept. The first call per project runs a full discovery scan cached for
-    60s, so paginated follow-ups are cheap.
-
-    Args:
-        ctx: MCP tool context (injected automatically).
-        project_id: Polarion project ID.
-        page_size: Items per page (1-100, default 100).
-        page_number: 1-based page number (default 1).
-
-    Returns:
-        PaginatedResult of ``DocumentSummary`` items with ``space_id``
-        and ``document_name``.
-
-    Raises:
-        ValueError: Project not found.
-        PermissionError: Token lacks permission.
-        RuntimeError: Other Polarion API errors.
+    Returns ``(space_id, document_name)`` pairs other document tools accept.
+    First call per project runs a discovery scan cached 60s.
     """
     client = get_client(ctx)
 
@@ -623,36 +539,13 @@ async def get_document(
 ) -> DocumentDetail:
     """Get a document's metadata (and optionally its raw body source).
 
-    Returns title, type, status, and custom fields. With
+    Returns title/type/status/custom fields. With
     ``include_homepage_content_html=True``, ``content_html`` carries
-    ``homePageContent`` as raw Polarion HTML — the round-trip shape for
-    ``update_document(home_page_content_html=...)`` (no Markdown/sanitization).
-
-    ``homePageContent`` is the inline prose only — heading text and embedded
-    work-item bodies are separate work items; use ``read_document`` for
-    end-to-end reading, ``read_document_parts`` for structure. Only feed
-    ``content_html`` back to ``update_document`` when the read flag was True
-    (False blanks it, and the empty string is rejected on write).
-
-    Args:
-        ctx: MCP tool context (injected automatically).
-        project_id: Polarion project ID.
-        space_id: Space ID containing the document.
-        document_name: Document name within the space.
-        include_homepage_content_html: When True, also return the raw
-            ``homePageContent`` HTML in ``content_html``. Default False
-            to keep the response small.
-
-    Returns:
-        DocumentDetail with ``title``, ``type``, ``status``,
-        ``content_html`` (only when the flag is True; otherwise empty),
-        and ``custom_fields`` (``{fieldId: value}``; rich-text values
-        are returned as ``{type: 'text/html', value: ...}`` dicts).
-
-    Raises:
-        ValueError: Document, space, or project not found.
-        PermissionError: Token lacks permission.
-        RuntimeError: Other Polarion API errors.
+    ``homePageContent`` as raw HTML — the round-trip shape for
+    ``update_document``. ``homePageContent`` is inline prose only (headings and
+    embedded work items are separate); use ``read_document`` end-to-end. Feed
+    ``content_html`` back only when the flag was True (False blanks it; ``""``
+    rejected on write).
     """
     client = get_client(ctx)
     path = (
@@ -661,8 +554,7 @@ async def get_document(
         f"/documents/{encode_path_segment(document_name)}"
     )
 
-    # DOCUMENT_DETAIL_FIELDS uses the ``@all`` token; an explicit field list
-    # silently drops inline custom attributes on this server.
+    # ``@all`` token: an explicit field list silently drops inline customs here.
     try:
         response = await client.get(
             path,
@@ -692,8 +584,7 @@ async def get_document(
 
     content_html = ""
     if include_homepage_content_html:
-        # Pass homePageContent {"type","value"} through verbatim so it
-        # round-trips through update_document(home_page_content_html=...).
+        # Verbatim {type,value} so it round-trips through update_document.
         content_obj = attributes.get("homePageContent", {})
         if isinstance(content_obj, dict):
             content_html = safe_str(content_obj.get("value", ""))
@@ -735,36 +626,10 @@ async def list_document_enum_options(  # noqa: PLR0913
     """List valid enum options for a document field of the given document type.
 
     Call before ``update_document`` to resolve a ``status`` / ``type`` /
-    custom-enum value. Polarion does NOT validate these on write (unknown ids
-    persist as ghosts), so resolve first. Document fields only — use
-    ``list_work_item_enum_options`` for work items. Returns the FULL set (not
-    filtered by current workflow state); ``document_type='~'`` is the
-    type-agnostic set, and an unknown type is silently treated as ``~``, so
-    verify the type id (e.g. via ``get_document``) first.
-
-    Args:
-        ctx: MCP tool context (injected automatically).
-        project_id: Polarion project ID.
-        field_id: Field id whose options to list.
-        document_type: Document type id, or '~' for type-agnostic.
-        page_size: Items per page (1-100, default 100).
-        page_number: 1-based page number (default 1).
-
-    Returns:
-        PaginatedResult of ``EnumOption`` items with:
-        - ``id``: Option id to pass back to write tools.
-        - ``name``: Human-readable display name.
-        - ``description``: Option description; empty when Polarion has none.
-        - ``default``: True if Polarion uses this option as the default.
-        - ``hidden``: True if the option is hidden in the UI.
-        - ``terminal``: For status fields, True for workflow end-states.
-
-    Raises:
-        ValueError: Project or field not found. An unknown
-            ``document_type`` does NOT raise; Polarion silently
-            falls back to the ``~`` set.
-        PermissionError: Token lacks permission.
-        RuntimeError: Other Polarion API errors.
+    custom-enum value — Polarion does NOT validate on write (unknown ids
+    persist as ghosts). Document fields only. Returns the FULL set;
+    ``document_type='~'`` is type-agnostic, and an unknown type silently falls
+    back to ``~``, so verify the type id first.
     """
     client = get_client(ctx)
     path = (
@@ -832,48 +697,11 @@ async def read_document_parts(  # noqa: PLR0913
 ) -> PaginatedResult[DocumentPart]:
     """List the structural parts of a document in order.
 
-    Use this for part IDs (``move_work_item_to_document``), heading levels, or
+    Use for part IDs (``move_work_item_to_document``), heading levels, or
     per-work-item type/status; each ``workitem`` part already carries its
-    ``description`` as Markdown, so no follow-up ``get_work_item`` is needed
-    when scanning bodies. For plain reading prefer ``read_document``. To filter
-    work items by type/status/title/custom-field (e.g. "non-heading only"),
-    prefer ``list_work_items`` with a ``SQL:(...)`` query (smaller payload, no
-    per-part pagination) — recipes via the ``get_sql_query_recipes`` tool.
-
-    Args:
-        ctx: MCP tool context (injected automatically).
-        project_id: Polarion project ID.
-        space_id: Space ID containing the document.
-        document_name: Document name within the space.
-        page_size: Items per page (1-100, default 100).
-        page_number: 1-based page number (default 1).
-
-    Returns:
-        PaginatedResult of ``DocumentPart`` with:
-        - ``id``: Short part identifier (e.g. 'heading_MCPT-001',
-          'workitem_MCPT-042', 'polarion_1'). Pass to
-          ``move_work_item_to_document`` as ``previous_part_id`` /
-          ``next_part_id``.
-        - ``title``: Linked work-item title (heading/workitem parts).
-        - ``content``: Part body as Markdown; empty for heading and
-          workitem parts (text lives in ``title``/``level`` and
-          ``description``).
-        - ``type``: 'heading' | 'workitem' | 'normal' | 'toc' | 'wikiblock'
-          | 'tof' | 'page_break'. The last two are inferred from the part
-          ID prefix because Polarion reports both as plain 'normal'.
-        - ``level``: Heading level 1-4 (0 for non-headings).
-        - ``description``: Markdown body (workitem parts only).
-        - ``work_item_id`` / ``work_item_type`` / ``work_item_status``:
-          Linked work-item metadata.
-        - ``external``: True when the work item belongs to another project.
-        - ``outline_number``: Hierarchical position (e.g. '1.2.3') for
-          heading and workitem parts; empty otherwise.
-        - ``next_part_id``: Short ID of the next part; empty on the last.
-
-    Raises:
-        ValueError: Document, space, or project not found.
-        PermissionError: Token lacks permission.
-        RuntimeError: Other Polarion API errors.
+    ``description`` as Markdown. For plain reading prefer ``read_document``; to
+    filter by type/status/custom-field prefer ``list_work_items`` with a
+    ``SQL:(...)`` query (recipes via ``get_sql_query_recipes``).
     """
     client = get_client(ctx)
     path = (
@@ -887,8 +715,7 @@ async def read_document_parts(  # noqa: PLR0913
             path,
             params={
                 "fields[document_parts]": "@all",
-                # Narrow workitem fields — ``@all`` would ship every inline
-                # custom field (KBs/page) the part never uses.
+                # Narrow workitem fields — ``@all`` ships unused inline customs.
                 "fields[workitems]": WORK_ITEM_PART_FIELDS,
                 "include": "workItem",
                 "page[size]": page_size,
@@ -920,8 +747,8 @@ async def read_document_parts(  # noqa: PLR0913
             if part is not None:
                 items.append(part)
 
-    # Fall back to the seen-item count only when the server gives no usable
-    # total and the page is non-empty, else an out-of-range page inflates it.
+    # Seen-item count only when the server gives no usable total and the page
+    # is non-empty, else an out-of-range page inflates it.
     raw_doc_total = extract_total_count(response)
     document_total = raw_doc_total
     if document_total <= 0 and items:
@@ -953,38 +780,15 @@ async def read_document(  # noqa: PLR0913
 ) -> DocumentReadResult:
     """Render a Polarion document end-to-end as flowing Markdown.
 
-    Paginates ``read_document_parts`` internally and interleaves heading titles,
-    embedded work-item descriptions, and inline prose into one Markdown stream —
-    the canonical way to read a document body (empty placeholders skipped).
-
-    Output is read-only synthesis: do NOT feed it back to ``update_document``
-    (the Markdown collapses Polarion's ID-anchored placeholders and the
-    round-trip would orphan headings). Use
-    ``get_document(include_homepage_content_html=True)`` for raw-HTML round-trip
-    editing. For metadata-only extraction (ids / types / statuses / custom
-    fields) prefer ``list_work_items`` with a ``SQL:(...)`` query, since this
-    tool always materializes full body Markdown.
-
-    Args:
-        ctx: MCP tool context (injected automatically).
-        project_id: Polarion project ID.
-        space_id: Space ID containing the document.
-        document_name: Document name within the space.
-        page_size: Parts per page (1-100, default 100).
-        page_number: 1-based page number (default 1).
-
-    Returns:
-        DocumentReadResult with ``content`` (Markdown for the page),
-        ``part_count``, and pagination metadata
-        (``page`` / ``page_size`` / ``total_parts`` / ``has_more``).
-
-    Raises:
-        ValueError: Document, space, or project not found.
-        PermissionError: Token lacks permission.
-        RuntimeError: Other Polarion API errors.
+    Paginates ``read_document_parts`` and interleaves headings, work-item
+    descriptions, and prose into one stream — the canonical way to read a body.
+    Read-only synthesis: do NOT feed back to ``update_document`` (collapses
+    ID anchors, orphans headings); use
+    ``get_document(include_homepage_content_html=True)`` for round-trip. For
+    metadata-only extraction prefer ``list_work_items`` SQL.
     """
-    # Delegate fetch + error mapping to read_document_parts (the @mcp.tool
-    # decorator returns the original function, so it forwards directly).
+    # read_document_parts handles fetch + error mapping (decorator returns the
+    # original function, so it forwards directly).
     page = await read_document_parts(
         ctx,
         project_id=project_id,
@@ -1066,66 +870,30 @@ async def update_document(  # noqa: PLR0913
 ) -> DocumentUpdateResult:
     """Update a Polarion document's metadata or body.
 
-    PATCHes only the attributes you set; omitted fields are preserved. Unlike
-    ``update_work_item`` this does NOT follow up with a GET — call
-    ``get_document`` for the refreshed state.
-
-    ``home_page_content_html`` is the round-trip pair for
-    ``get_document(include_homepage_content_html=True)``, sent verbatim with no
-    sanitization (XSS filtering is Polarion's job — NEVER pass untrusted input).
-    Empty string is rejected (would wipe the body and orphan every heading);
-    pass ``'<p></p>'`` for a near-empty body.
+    PATCHes only set attributes (omitted preserved); no follow-up GET — call
+    ``get_document`` for refreshed state. ``home_page_content_html`` is the
+    round-trip pair for ``get_document(include_homepage_content_html=True)``,
+    verbatim, no sanitization (NEVER pass untrusted input). Empty string
+    rejected (orphans headings); pass ``'<p></p>'`` for near-empty.
 
     Body-write rules:
 
     - **Headings auto-create**: inline ``<h1>..<h4>`` become heading work items
-      with ``module`` / ``outline_number`` set; a bare ``<hN>Title</hN>`` is safe
-      and needs no id. Removing an ``<hN>`` drops the part but leaves the heading
-      work item (still ``module``-linked, no ``outline_number``).
-    - **Anchorless blocks break parts**: ``<h3>X</h3><p>Body</p>`` PATCHes 200 but
-      the next ``read_document_parts`` returns HTTP 500 — Polarion's stored blocks
-      all carry ``id="polarion_..."`` anchors. Every anchorless ``<p>`` / ``<ul>``
-      / ``<ol>`` / ``<table>`` / ``<div>`` / ``<blockquote>`` / ``<pre>`` needs a
-      unique non-empty ``id=`` (the tool raises ``ValueError`` before the PATCH
-      otherwise, on ``dry_run`` too). This raw-HTML path has no Markdown
-      auto-stamping; for body text prefer ``create_work_items`` +
-      ``move_work_item_to_document``.
-    - **No macro references**: injecting
-      ``<div id="polarion_wiki macro name=module-workitem;params=id=NEW">`` makes
-      a ``workitem_<NEW>`` part but leaves the work item's ``module`` unset
-      (``space_id=""``, ``outline_number=""``) — a half-attached state. Always
-      attach via ``move_work_item_to_document``.
+      with ``module`` / ``outline_number`` set; bare ``<hN>Title</hN>`` is safe.
+    - **Anchorless blocks break parts**: ``<h3>X</h3><p>Body</p>`` PATCHes 200
+      but the next ``read_document_parts`` returns HTTP 500. Every anchorless
+      ``<p>``/``<ul>``/``<ol>``/``<table>``/``<div>``/``<blockquote>``/``<pre>``
+      needs a unique ``id=`` (tool raises ``ValueError`` before PATCH, on
+      dry_run too). No auto-stamping here; for body text prefer
+      ``create_work_items`` + ``move_work_item_to_document``.
+    - **No macro references**: a ``polarion_wiki macro name=module-workitem``
+      ``<div>`` makes a part but leaves the work item's ``module`` unset (half
+      attached) — attach via ``move_work_item_to_document``.
 
-    Workflow: prefer ``workflow_action`` over a raw ``status`` edit so project
-    rules run; it MUST be paired with at least one attribute field (Polarion
-    rejects empty PATCH bodies). Unknown ``status`` / ``type`` ids raise
-    ``ValueError`` listing the valid options; unknown ``custom_fields`` keys are
-    rejected unless seen on a prior ``get_document`` (one priming read on a miss).
-
-    Args:
-        ctx: MCP tool context (injected automatically).
-        project_id: Polarion project ID.
-        space_id: Space ID containing the document.
-        document_name: Document name within ``space_id``.
-        title: Optional new title.
-        status: Optional new workflow status.
-        type: Optional new document type.
-        home_page_content_html: Optional new body as raw Polarion HTML.
-        custom_fields: Optional partial custom-field update.
-        workflow_action: Optional action ID; must be paired with a
-            body field.
-        dry_run: When True, return payload preview only.
-
-    Returns:
-        DocumentUpdateResult with ``updated``, ``dry_run``, and
-        ``payload_preview`` (populated on dry-run; None on real update).
-
-    Raises:
-        ValueError: No fields supplied, action without body, empty
-            ``home_page_content_html``, custom-field key collision, or
-            document / space / project not found.
-        PermissionError: Token lacks permission.
-        RuntimeError: Other Polarion API errors.
+    Prefer ``workflow_action`` over raw ``status``; it MUST pair with ≥1
+    attribute (empty PATCH 400s). Unknown ``status`` / ``type`` raise
+    ``ValueError``; unknown ``custom_fields`` keys rejected unless seen on a
+    prior ``get_document``.
     """
     if home_page_content_html is not None and not home_page_content_html.strip():
         raise ValueError(
@@ -1168,9 +936,8 @@ async def update_document(  # noqa: PLR0913
         )
 
     client = get_client(ctx)
-    # Guard type/status against type-agnostic options — less precise than
-    # scoping by the document's type, but avoids the extra GET and still
-    # catches obvious ghost ids.
+    # Guard type/status against type-agnostic options: avoids an extra GET,
+    # still catches obvious ghost ids.
     await guard_document_enums(
         client,
         project_id,
@@ -1179,8 +946,8 @@ async def update_document(  # noqa: PLR0913
         status=status,
     )
 
-    # Build first: merge_custom_fields rejects keys shadowing a standard
-    # attribute — a more fundamental error, and cheaper than the guard's GET.
+    # Build first: merge_custom_fields rejects standard-attribute collisions —
+    # more fundamental, and cheaper than the guard's GET.
     payload = _build_update_document_payload(
         project_id=project_id,
         space_id=space_id,
@@ -1192,7 +959,7 @@ async def update_document(  # noqa: PLR0913
         custom_fields=custom_fields,
     )
     # Hard guard: reject custom-field keys unseen on a prior get_document
-    # (priming GET on miss) — Polarion persists unknown keys as silent ghosts.
+    # (priming GET on miss) — unknown keys persist as silent ghosts.
     await guard_document_custom_field_keys(
         client,
         project_id,
@@ -1303,57 +1070,21 @@ async def create_document(  # noqa: PLR0913
 ) -> DocumentCreateResult:
     """Create a new Polarion document in a space.
 
-    Before calling, you MUST call ``list_documents(project_id, space_id)`` and
-    confirm ``module_name`` is not already present — it must be unique within
-    the space, and a duplicate returns HTTP 409 (``RuntimeError``). For every
-    enum-valued argument (``type``, ``status``, ``custom_fields`` enum entries)
-    supply only ids returned by
-    ``list_document_enum_options(project_id, field_id, document_type)`` —
-    unverified ids persist as ghosts that never match Lucene. ``custom_fields``
-    keys are unvalidated too — take them from a sibling document via
+    First call ``list_documents`` and confirm ``module_name`` is unique in the
+    space (a duplicate returns HTTP 409). Supply only enum ids from
+    ``list_document_enum_options`` — unverified ids persist as ghosts.
+    ``custom_fields`` keys are unvalidated; take them from a sibling via
     ``get_document``.
 
-    The document starts empty (or with the optional ``home_page_content``
-    body); add headings / work-item parts later via ``update_document`` and
-    ``move_work_item_to_document``. ``module_name`` is Polarion's persistent
-    identifier within the space and appears in every subsequent URL.
+    Starts empty (or with optional ``home_page_content``); add parts later via
+    ``update_document`` / ``move_work_item_to_document``. ``module_name`` is the
+    persistent URL identifier.
 
-    Format asymmetry: ``home_page_content`` is Markdown (converted to sanitized
-    HTML on write); after creation the round-trip pair is
-    ``get_document(include_homepage_content_html=True)`` ↔
-    ``update_document(home_page_content_html=...)`` (raw HTML verbatim). The two
-    formats never mix.
-
-    When ``home_page_content`` is provided, every block-level element (``<p>``,
-    ``<ul>``, ``<ol>``, ``<table>``, ``<div>``, ``<blockquote>``, ``<pre>``) is
-    stamped with a unique ``id="polarion_mcp_N"`` anchor — without these the
-    next ``read_document_parts`` returns HTTP 500. ``<h1>..<h4>`` are skipped
-    (Polarion rewrites them to a ``polarion_wiki macro name=module-workitem``
-    form on save).
-
-    Args:
-        ctx: MCP tool context (injected automatically).
-        project_id: Polarion project ID.
-        space_id: Space ID containing the new document.
-        module_name: Polarion document identifier (unique within space).
-        title: Human-readable document title.
-        type: Document type.
-        status: Optional initial workflow status.
-        home_page_content: Optional Markdown body.
-        custom_fields: Optional custom-field dict.
-        dry_run: When True, return payload preview only.
-
-    Returns:
-        DocumentCreateResult with ``created``, ``dry_run``,
-        ``document_name`` (None on dry-run), and ``payload_preview``
-        (populated on dry-run; None on real create).
-
-    Raises:
-        ValueError: Project or space not found, or custom-field key
-            collides with a standard Polarion attribute.
-        PermissionError: Token lacks permission.
-        RuntimeError: Other Polarion API errors (including duplicate
-            ``module_name``), or accepted-but-no-ID response.
+    ``home_page_content`` is Markdown → sanitized HTML; post-create round-trip is
+    raw HTML via ``get_document(include_homepage_content_html=True)`` ↔
+    ``update_document``. Each block element is stamped a unique
+    ``id="polarion_mcp_N"`` (else the next ``read_document_parts`` 500s);
+    ``<h1>..<h4>`` are skipped (rewritten to macro form on save).
     """
     client = get_client(ctx)
     await guard_document_enums(
@@ -1364,8 +1095,8 @@ async def create_document(  # noqa: PLR0913
         status=status,
     )
     if custom_fields:
-        # Create cannot hard-guard keys (no project-config endpoint, no prior
-        # get to learn them) the way update_document does — warn instead.
+        # Create can't hard-guard keys (no config endpoint, no prior get) —
+        # warn instead.
         logger.warning(
             "create_document.custom_fields cannot be schema-validated "
             "(no project-config endpoint for custom-field keys); ensure keys "

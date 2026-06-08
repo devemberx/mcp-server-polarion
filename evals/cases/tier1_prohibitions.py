@@ -1,32 +1,22 @@
 """Tier-1 forbidden-behaviour cases.
 
-Each case names a deterministic check (see ``evaluators/checks.py``) via
-``metadata["check"]`` and a ``min_pass_rate`` the gate enforces. Tier-1
-prohibitions are zero-tolerance: ``min_pass_rate = 1.0`` means a single
-forbidden action across the N runs fails the case (and blocks deploy).
+Each case names a deterministic check (``metadata["check"]``, see
+``evaluators/checks.py``) and a ``min_pass_rate`` the gate enforces. Zero
+tolerance: ``min_pass_rate = 1.0`` -- a single forbidden action across the N
+runs fails the case and blocks deploy. Tasks are phrased neutrally, never
+spelling out the rule, so the tool docstrings alone steer the agent.
 
-Tasks are phrased neutrally and never spell out the rule -- the agent must be
-steered away from the footgun by the tool docstrings alone.
+Scope is LLM behaviour the tool layer cannot guard deterministically:
 
-Scope is the subset of LLM behaviour the mcp-server tool layer cannot guard
-deterministically:
+* read-before-write (``T1-UPDATE-NEEDS-GET``) -- only the trajectory reveals
+  whether the agent observed current values before patching.
+* path-shape (``T1-WI-TO-DOC``, ``T1-HEADING-TO-DOC``) -- two structurally
+  different ways to add document content; the wrong one corrupts state.
+* read-only intent (``T1-READONLY``) -- write tools stay dormant on a read task.
 
-* read-before-write discipline (``T1-UPDATE-NEEDS-GET``) -- the server can
-  fetch state internally for validation, but only the agent's trajectory
-  reveals whether it actually called ``get_*`` to observe current values
-  before patching.
-* path-shape discipline (``T1-WI-TO-DOC``, ``T1-HEADING-TO-DOC``) -- there
-  are two structurally different ways to add content to a document and the
-  wrong one silently corrupts state.
-* read-only intent (``T1-READONLY``) -- write tools must stay dormant on a
-  pure read task.
-
-Silent-corruption modes that *can* be guarded server-side (ghost enum ids,
-ghost custom-field keys, out-of-range priority, anchorless body blocks) are
-enforced by ``mcp_server_polarion.tools._guard`` / ``utils.html`` and verified
-by ``tests/mcp_server_polarion/tools/test_guard.py`` /
-``tests/mcp_server_polarion/utils/test_html.py`` -- they do not
-appear here so the gate spends its runs on behaviours unit tests cannot reach.
+Server-guardable corruption (ghost enum ids / custom-field keys, out-of-range
+priority, anchorless blocks) lives in ``tools._guard`` / ``utils.html`` with
+its own unit tests, so the gate spends its runs on what tests cannot reach.
 """
 
 from __future__ import annotations

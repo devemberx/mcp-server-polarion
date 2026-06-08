@@ -1,32 +1,17 @@
 """Server-side write guards that prevent silent corruption on Polarion writes.
 
-Polarion accepts unknown enum ids (``type`` / ``status`` / ``severity`` /
-``priority`` / ``resolution`` on work items; ``type`` / ``status`` on
-documents) and unknown
-custom-field keys verbatim -- HTTP 200, the value persists, but the field
-never appears in Polarion's UI, in Lucene, or in reports, and is never
-reported as an error. Docstring-level rules ("call ``list_*_enum_options``
-first") are unreliable: multi-model eval runs show LLMs ignore them. This
-module turns each rule into a deterministic precondition -- before any write
-carrying an enum-valued argument or custom-field keys, fetch the project's
-actual options and raise if the supplied id/key is not among them.
+Polarion accepts unknown enum ids and custom-field keys verbatim (HTTP 200) —
+they persist but never appear in the UI, Lucene, or reports, with no error.
+Docstring rules are unreliable (evals show LLMs ignore them), so each rule
+becomes a deterministic precondition: before a write, fetch the real options
+and raise if the supplied id/key is absent. Option ids and observed keys are
+memoised in :mod:`...tools._shared.cache`; this module holds fetch + check.
 
-Validated option ids and observed custom-field keys are memoised in
-:mod:`mcp_server_polarion.tools._shared.cache`; this module holds only the
-fetch and check logic.
-
-Fail-closed. If a validation request errors after the client's 429/5xx
-backoff, the guard raises rather than letting the write through: a ghost
-write is invisible in Polarion and unrecoverable, so an unverifiable write is
-refused rather than risked. An auth failure raises ``PermissionError`` (the
-token's problem, matching the tool layer); any other unreachable-backend
-error raises ``RuntimeError``. Two lenient cases defer to
-Polarion instead of blocking: a *successful* empty option set (a field with no
-configured options), and a 404 from ``getAvailableOptions`` (the endpoint or
-field is unsupported on this instance, so there is nothing to validate
-against). A 404 cannot mask a ghost -- a genuinely wrong project/field path
-makes the subsequent write fail loudly. This keeps a single unsupported
-endpoint from blocking every enum-bearing write on an instance that lacks it.
+Fail-closed: a validation request that errors after backoff blocks the write
+(a ghost write is invisible and unrecoverable) — auth → ``PermissionError``,
+else → ``RuntimeError``. Two lenient cases defer to Polarion: a *successful*
+empty option set, and a 404 (endpoint/field unsupported — a wrong path makes
+the subsequent write fail loudly anyway).
 """
 
 from __future__ import annotations
@@ -89,9 +74,8 @@ def _unreachable_write_block(
 def _unauthorized_write_block(what: str, project_id: str) -> PermissionError:
     """Build the fail-closed error raised when validation is unauthorized.
 
-    Mirrors the tool layer's ``PolarionAuthError -> PermissionError`` mapping:
-    the write is still refused, but the cause is a token-scope problem the
-    caller can fix rather than an unreachable backend to retry.
+    Mirrors the tool layer's ``PolarionAuthError -> PermissionError``: a
+    token-scope problem the caller can fix, not a backend to retry.
     """
     logger.warning(
         "guard blocking write: not authorized to validate %s for project=%s",
@@ -114,8 +98,7 @@ async def fetch_enum_option_ids(
 ) -> frozenset[str]:
     """Return the valid option ids for ``(project, resource, field, type)``.
 
-    Cached for the guard TTL. Fail-closed per the module contract: a reachable
-    error raises, a 404 defers (empty set, endpoint/field unsupported here).
+    Cached. Fail-closed: a reachable error raises, a 404 defers (empty set).
     """
     cached = get_cached_enum_options(project_id, resource, field_id, type_id)
     if cached is not None:
@@ -134,9 +117,8 @@ async def fetch_enum_option_ids(
     try:
         response = await client.get(path, params=params)
     except PolarionNotFoundError:
-        # Endpoint/field unsupported on this instance: cache an empty set so
-        # _check_enum defers and we do not re-probe a missing endpoint on
-        # every write within the TTL.
+        # Endpoint/field unsupported: cache an empty set so _check_enum defers
+        # and we don't re-probe a missing endpoint every write within the TTL.
         logger.warning(
             "getAvailableOptions returned 404 for field=%s (resource=%s, "
             "project=%s); skipping enum validation for this field -- the "
@@ -179,10 +161,8 @@ async def _check_enum(  # noqa: PLR0913
     option_ids = await fetch_enum_option_ids(
         client, project_id, resource, field_id, type_id
     )
-    # An empty set is a successful "no options configured" response (a
-    # deprecated field, or a type axis with none), not the unreachable failure
-    # that already raised above. Defer to Polarion rather than risk a false
-    # positive on a legitimately optionless field.
+    # Empty set = successful "no options configured" (not the unreachable
+    # failure, which already raised). Defer rather than false-positive.
     if not option_ids or value in option_ids:
         return
     raise ValueError(
@@ -207,15 +187,10 @@ async def guard_work_item_enums(  # noqa: PLR0913
 ) -> None:
     """Validate every supplied work-item enum arg against ``getAvailableOptions``.
 
-    ``work_item_type`` is the type axis Polarion scopes
-    status/severity/resolution/priority by. Pass ``'~'`` for type-agnostic
-    lookups (used when validating ``type`` itself or when the caller does not
-    have a type in hand). ``type`` is always checked first so an invalid
-    ``type`` raises before it could be used as the scoping axis. On cache hit
-    the guard adds zero round trips; on miss, one GET per (field, type) pair.
-
-    Raises ``ValueError`` listing the valid options on an unknown id, or
-    ``RuntimeError`` if Polarion is unreachable (fail-closed).
+    ``work_item_type`` scopes status/severity/resolution/priority (``'~'`` =
+    type-agnostic). ``type`` is checked first so an invalid type raises before
+    being reused as the scoping axis. One GET per (field, type) on a miss.
+    Raises ``ValueError`` (unknown id) or ``RuntimeError`` (unreachable).
     """
     if type is not None and type != "":
         await _check_enum(client, project_id, "workitems", "type", "~", type)
@@ -292,10 +267,8 @@ async def guard_work_item_custom_field_keys(
 ) -> None:
     """Reject ``update_work_item.custom_fields`` keys never seen on a get.
 
-    Looks up the per-type observed-keys cache; on miss, does one inline
-    ``get_work_item``-shaped GET to populate, then validates. Unknown keys
-    raise ``ValueError``; an unreachable priming GET raises ``RuntimeError``
-    (fail-closed).
+    Per-type observed-keys cache; on miss, one priming GET then validate.
+    Unknown keys → ``ValueError``; unreachable GET → ``RuntimeError``.
     """
     if not custom_fields:
         return
@@ -336,9 +309,8 @@ async def guard_document_custom_field_keys(
 ) -> None:
     """Reject ``update_document.custom_fields`` keys never seen on a get.
 
-    Mirrors :func:`guard_work_item_custom_field_keys` but keys the cache by
-    ``(project, space, document)``; on miss, does one inline
-    ``get_document``-shaped GET to populate, then validates.
+    Like :func:`guard_work_item_custom_field_keys`, keyed by
+    ``(project, space, document)``; on miss, one priming GET then validate.
     """
     if not custom_fields:
         return
@@ -378,10 +350,8 @@ async def _existing_target_ids(
 ) -> frozenset[str]:
     """Return which *target_ids* exist in *project_id*, via ``id:(...)`` queries.
 
-    Chunked at ``_GUARD_PAGE_SIZE``: a single ``id:(...)`` query is bounded by
-    ``page[size]``, so more targets than that need successive queries. A 404
-    means the project does not exist; the caller treats every target there as
-    missing.
+    Chunked at ``_GUARD_PAGE_SIZE`` (one query bounded by ``page[size]``). A 404
+    means the project is missing; caller treats every target as missing.
     """
     ordered = sorted(target_ids)
     found: set[str] = set()
@@ -410,15 +380,10 @@ async def guard_work_item_link_targets(
 ) -> None:
     """Reject links whose target work item does not exist.
 
-    Polarion creates a dangling link (HTTP 201) to a nonexistent target -- the
-    target shows empty title/type/status in ``list_work_item_links`` and there
-    is no error to detect it. Groups requested targets by project, runs one
-    ``id:(...)`` query per project (chunked at 100), and raises ``ValueError``
-    listing any target that was not returned.
-
-    Fail-closed: an unreachable backend raises ``RuntimeError``; a 404 (the
-    target project does not exist) raises ``ValueError`` since every target
-    there would be dangling.
+    A nonexistent target stores as a silent dangling link (HTTP 201, empty
+    title/type/status). Groups targets by project, one ``id:(...)`` query each,
+    raises ``ValueError`` listing any missing. Fail-closed: unreachable →
+    ``RuntimeError``; 404 (project missing) → ``ValueError``.
     """
     by_project: dict[str, set[str]] = {}
     for spec in links:
@@ -456,14 +421,10 @@ async def fetch_project_enum_option_ids(
 ) -> frozenset[str]:
     """Return the valid option ids for a project-level enumeration.
 
-    Used for enums Polarion does not expose through ``getAvailableOptions``
-    (link role, hyperlink role). Reads the single-enumeration resource
-    ``/projects/{p}/enumerations/~/{enum}/~`` -- far lighter than the bulk
-    ``getProjectEnumerations`` listing. Unlike ``getAvailableOptions`` (a list
-    ``data``), this single-resource response returns ``data`` as a dict whose
-    options live at ``data.attributes.options[].id``.
-
-    Cached for the guard TTL; same fail-closed contract as
+    For enums not in ``getAvailableOptions`` (link/hyperlink role). Reads
+    ``/projects/{p}/enumerations/~/{enum}/~``; unlike ``getAvailableOptions``
+    (list ``data``), here ``data`` is a dict with options at
+    ``data.attributes.options[].id``. Cached; fail-closed like
     :func:`fetch_enum_option_ids`.
     """
     cached = get_cached_project_enum(project_id, enum_name)
@@ -523,8 +484,7 @@ async def _check_project_enum_roles(  # noqa: PLR0913
         return
 
     option_ids = await fetch_project_enum_option_ids(client, project_id, enum_name)
-    # An empty set is the lenient "no options / enum unsupported here" case
-    # that already deferred above, not the unreachable failure that raised.
+    # Empty set = lenient "no options / enum unsupported" (already deferred).
     if not option_ids:
         return
 
@@ -545,11 +505,8 @@ async def guard_work_item_link_roles(
 ) -> None:
     """Reject ``create_work_item_links`` roles not in ``workitem-link-role``.
 
-    Polarion stores an unknown link role verbatim (HTTP 201) and it never
-    matches Lucene -- a ghost link with no error to detect it. Validates every
-    requested role against the project's ``workitem-link-role`` enumeration and
-    raises ``ValueError`` listing the valid ids on a miss; fail-closed
-    (``RuntimeError``) if the enumeration cannot be reached.
+    An unknown role stores verbatim (HTTP 201) as a ghost link. Validates each
+    role, raises ``ValueError`` (valid ids) on a miss; fail-closed otherwise.
     """
     await _check_project_enum_roles(
         client,
@@ -571,11 +528,9 @@ async def guard_hyperlink_roles(
 ) -> None:
     """Reject hyperlink roles not in the project's ``hyperlink-role`` enum.
 
-    ``Hyperlink.role`` on ``create_work_items`` / ``update_work_item`` accepts
-    only configured ids (typically ``ref_int`` / ``ref_ext``); an unknown role
-    persists as a silent ghost on the work item. Validates against the
-    ``hyperlink-role`` enumeration and raises ``ValueError`` on a miss;
-    fail-closed if it cannot be reached.
+    ``Hyperlink.role`` accepts only configured ids (typically ``ref_int`` /
+    ``ref_ext``); an unknown role persists as a silent ghost. Raises
+    ``ValueError`` on a miss; fail-closed if unreachable.
     """
     await _check_project_enum_roles(
         client,
@@ -596,11 +551,9 @@ async def _existing_forward_link_ids(
 ) -> frozenset[str]:
     """Return the composite ids of every outgoing link on the source work item.
 
-    Pages ``/workitems/{wi}/linkedworkitems`` requesting only ``id`` until a
-    short page. Each ``data[].id`` is already the five-segment composite
-    ``<srcProj>/<srcWI>/<role>/<tgtProj>/<tgtWI>`` that the delete payload
-    reconstructs, so the result can be set-membership-tested directly. A
-    ``PolarionNotFoundError`` propagates -- the source work item is missing.
+    Pages ``/linkedworkitems`` (id only) until a short page. Each ``data[].id``
+    is the 5-segment composite the delete payload reconstructs, so it is
+    set-membership-testable directly. ``PolarionNotFoundError`` propagates.
     """
     path = (
         f"/projects/{encode_path_segment(project_id)}"
@@ -637,17 +590,10 @@ async def partition_delete_links(
 ) -> tuple[list[str], list[str]]:
     """Split requested delete refs into ``(matched, not_found)`` against reality.
 
-    Pre-reads the source work item's existing outgoing links and partitions
-    *link_ids* (preserving input order) into refs that matched an existing
-    link and refs that matched nothing. Polarion deletes the former and
-    silently ignores the latter, so this is the only way to surface the
-    no-ops the 204 hides; the caller reports both and still deletes (a no-op
-    delete is non-destructive, so it is never raised).
-
-    Fail-closed: a missing source work item raises ``ValueError``; an auth
-    failure raises ``PermissionError``; any other unreachable-backend error
-    raises ``RuntimeError`` -- the split must be trustworthy before a delete
-    is reported.
+    Pre-reads existing outgoing links and partitions *link_ids* (input order)
+    into matched / unmatched — the only way to surface the no-ops the 204 hides
+    (no-op is non-destructive, never raised). Fail-closed: missing source →
+    ``ValueError``, auth → ``PermissionError``, else → ``RuntimeError``.
     """
     try:
         existing = await _existing_forward_link_ids(client, project_id, work_item_id)
