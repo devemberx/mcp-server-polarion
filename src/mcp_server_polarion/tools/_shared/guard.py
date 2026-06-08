@@ -30,12 +30,14 @@ from mcp_server_polarion.tools._shared.cache import (
     Resource,
     get_cached_enum_options,
     get_cached_project_enum,
-    get_document_custom_keys,
+    get_document_type_custom_keys,
     get_work_item_custom_keys,
-    record_document_custom_field_keys,
-    record_work_item_custom_field_keys,
+    invalidate_document_type_custom_keys,
+    invalidate_work_item_custom_keys,
     store_cached_enum_options,
     store_cached_project_enum,
+    store_document_type_custom_keys,
+    store_work_item_custom_keys,
 )
 from mcp_server_polarion.tools._shared.helpers import (
     DOCUMENT_DETAIL_FIELDS,
@@ -50,12 +52,13 @@ from mcp_server_polarion.tools._shared.helpers import (
 logger = logging.getLogger("mcp_server_polarion.tools._shared.guard")
 
 _GUARD_PAGE_SIZE: int = 100
+# Lucene-fallback only; primary MIN-per-key SQL pages at _GUARD_PAGE_SIZE.
+_TYPE_SAMPLE_SIZE: int = 10
 
 
 def _unreachable_write_block(
     what: str, project_id: str, exc: PolarionError
 ) -> RuntimeError:
-    """Build the fail-closed error raised when validation cannot reach Polarion."""
     logger.warning(
         "guard blocking write: could not validate %s for project=%s (%s)",
         what,
@@ -72,9 +75,7 @@ def _unreachable_write_block(
 
 
 def _unauthorized_write_block(what: str, project_id: str) -> PermissionError:
-    """Build the fail-closed error raised when validation is unauthorized.
-
-    Mirrors the tool layer's ``PolarionAuthError -> PermissionError``: a
+    """Mirror the tool layer's ``PolarionAuthError -> PermissionError``: a
     token-scope problem the caller can fix, not a backend to retry.
     """
     logger.warning(
@@ -229,18 +230,6 @@ async def guard_document_enums(
         )
 
 
-def _custom_keys_from_attributes(
-    response: dict[str, object], allowlist: frozenset[str]
-) -> frozenset[str]:
-    data = response.get("data", {})
-    attrs: dict[str, object] = {}
-    if isinstance(data, dict):
-        raw_attrs = data.get("attributes")
-        if isinstance(raw_attrs, dict):
-            attrs = raw_attrs
-    return frozenset(k for k in attrs if isinstance(k, str) and k not in allowlist)
-
-
 def _reject_unknown_custom_keys(
     custom_fields: dict[str, object],
     known: frozenset[str],
@@ -258,30 +247,82 @@ def _reject_unknown_custom_keys(
         )
 
 
-async def guard_work_item_custom_field_keys(
+def _custom_keys_from_data_list(
+    response: dict[str, object], allowlist: frozenset[str]
+) -> frozenset[str]:
+    keys: set[str] = set()
+    data = response.get("data", [])
+    if isinstance(data, list):
+        for entry in data:
+            if not isinstance(entry, dict):
+                continue
+            attrs = entry.get("attributes")
+            if isinstance(attrs, dict):
+                keys.update(
+                    k for k in attrs if isinstance(k, str) and k not in allowlist
+                )
+    return frozenset(keys)
+
+
+def _min_per_key_sql(project_id: str, type_id: str) -> str:
+    """MIN-per-key ``SQL:(...)`` for a type's complete key schema.
+
+    ``GROUP BY cf.c_name`` + ``MIN`` = one item per distinct key, so the union
+    catches single-item keys a fixed-N sample misses. Groups on indexed
+    ``c_name`` — far lighter than per-item ``COUNT(...) OVER ()``.
+    """
+    # No bind params in REST SQL; escape ids by doubling ``'`` (as list_work_items).
+    project = project_id.replace("'", "''")
+    type_value = type_id.replace("'", "''")
+    return (
+        "SQL:(SELECT wi.c_uri FROM workitem wi WHERE wi.c_uri IN ("  # noqa: S608
+        "SELECT MIN(cf.fk_uri_workitem) FROM cf_workitem cf "
+        "INNER JOIN workitem w2 ON w2.c_uri = cf.fk_uri_workitem "
+        "INNER JOIN project p ON w2.fk_uri_project = p.c_uri "
+        f"WHERE p.c_id = '{project}' AND w2.c_type = '{type_value}' "
+        "GROUP BY cf.c_name))"
+    )
+
+
+async def _fetch_work_item_type_custom_keys(
     client: PolarionClient,
     project_id: str,
-    work_item_id: str,
-    work_item_type: str,
-    custom_fields: dict[str, object],
-) -> None:
-    """Reject ``update_work_item.custom_fields`` keys never seen on a get.
+    type_id: str,
+    *,
+    deep: bool = False,
+) -> frozenset[str]:
+    """Sample existing items of a type and return their unioned custom-field keys.
 
-    Per-type observed-keys cache; on miss, one priming GET then validate.
-    Unknown keys → ``ValueError``; unreachable GET → ``RuntimeError``.
+    MIN-per-key SQL (complete, one request); on SQL rejection, degrades to a
+    bounded Lucene ``type:<type>`` sample (incomplete on sparse types), where
+    ``deep`` pages a fresh slice for the bypass-retry. Result cached even if empty.
+    Fail-closed: auth → ``PermissionError``, unreachable → ``RuntimeError``.
     """
-    if not custom_fields:
-        return
-
-    known = get_work_item_custom_keys(project_id, work_item_type)
-    if known is None:
-        path = (
-            f"/projects/{encode_path_segment(project_id)}"
-            f"/workitems/{encode_path_segment(work_item_id)}"
+    path = f"/projects/{encode_path_segment(project_id)}/workitems"
+    detail_fields = {"fields[workitems]": WORK_ITEM_DETAIL_FIELDS}
+    try:
+        response = await client.get(
+            path,
+            params={
+                "query": _min_per_key_sql(project_id, type_id),
+                **detail_fields,
+                "page[size]": _GUARD_PAGE_SIZE,
+                "page[number]": 1,
+            },
         )
+    except PolarionAuthError as exc:
+        raise _unauthorized_write_block("custom_fields keys", project_id) from exc
+    except PolarionError:
+        # SQL unsupported/rejected: degrade to a bounded Lucene type sample.
         try:
             response = await client.get(
-                path, params={"fields[workitems]": WORK_ITEM_DETAIL_FIELDS}
+                path,
+                params={
+                    "query": f"type:{type_id}",
+                    **detail_fields,
+                    "page[size]": _TYPE_SAMPLE_SIZE,
+                    "page[number]": 2 if deep else 1,
+                },
             )
         except PolarionAuthError as exc:
             raise _unauthorized_write_block("custom_fields keys", project_id) from exc
@@ -289,57 +330,168 @@ async def guard_work_item_custom_field_keys(
             raise _unreachable_write_block(
                 "custom_fields keys", project_id, exc
             ) from exc
-        known = _custom_keys_from_attributes(response, STANDARD_WORK_ITEM_ATTRIBUTES)
-        record_work_item_custom_field_keys(project_id, work_item_type, known)
+
+    keys = _custom_keys_from_data_list(response, STANDARD_WORK_ITEM_ATTRIBUTES)
+    store_work_item_custom_keys(project_id, type_id, keys)
+    return keys
+
+
+async def guard_work_item_custom_field_keys(
+    client: PolarionClient,
+    project_id: str,
+    work_item_type: str,
+    custom_fields: dict[str, object],
+) -> None:
+    """Reject ``custom_fields`` keys absent from the type's real schema.
+
+    The type schema (cached per ``(project, type)`` from the MIN-per-key sample)
+    is the sole source of truth. A still-unknown key forces one fresh re-fetch
+    (admin-added field or sparse-fallback miss) before rejecting → ``ValueError``.
+    Empty schema fails closed (``RuntimeError``): a ghost write is invisible and
+    unrecoverable. Unreachable validation → ``RuntimeError``.
+    """
+    if not custom_fields:
+        return
+
+    schema = get_work_item_custom_keys(project_id, work_item_type)
+    if schema is None:
+        schema = await _fetch_work_item_type_custom_keys(
+            client, project_id, work_item_type
+        )
+
+    if all(key in schema for key in custom_fields):
+        return
+
+    # Key looks unknown: refetch fresh before rejecting (admin-added or fallback miss).
+    invalidate_work_item_custom_keys(project_id, work_item_type)
+    schema = await _fetch_work_item_type_custom_keys(
+        client, project_id, work_item_type, deep=True
+    )
+
+    if not schema:
+        raise RuntimeError(
+            f"Cannot verify custom_fields for work_item_type '{work_item_type}' in "
+            f"project '{project_id}': no existing item of this type has any custom "
+            f"field populated, so its schema can't be inferred. Refusing the write "
+            f"-- unknown keys persist as silent ghosts invisible to Polarion's UI "
+            f"and Lucene. Save one item of this type with its custom fields filled "
+            f"(web UI, template, or a key you are certain of), then retry."
+        )
 
     _reject_unknown_custom_keys(
         custom_fields,
-        known,
+        schema,
         scope=f"work_item_type '{work_item_type}'",
-        discovery_tool="get_work_item",
+        discovery_tool="sample of existing items",
     )
+
+
+async def _fetch_document_type_custom_keys(
+    client: PolarionClient,
+    project_id: str,
+    document_type: str,
+) -> frozenset[str]:
+    """Sample the project's documents and return *document_type*'s key schema.
+
+    One project-wide ``GET /projects/{p}/documents?fields[documents]=@all`` (paged)
+    returns every document's type + inline customs — no SQL (the ``module`` table
+    is unreachable via REST query). Customs are unioned per type and every type's
+    schema is stored, so a later write of any type hits the cache. The target type
+    is stored even when empty so a no-customs type fails closed without re-probing.
+    Fail-closed: auth → ``PermissionError``, unreachable → ``RuntimeError``.
+    """
+    path = f"/projects/{encode_path_segment(project_id)}/documents"
+    by_type: dict[str, set[str]] = {}
+    page_number = 1
+    while True:
+        try:
+            response = await client.get(
+                path,
+                params={
+                    "fields[documents]": DOCUMENT_DETAIL_FIELDS,
+                    "page[size]": _GUARD_PAGE_SIZE,
+                    "page[number]": page_number,
+                },
+            )
+        except PolarionAuthError as exc:
+            raise _unauthorized_write_block("custom_fields keys", project_id) from exc
+        except PolarionError as exc:
+            raise _unreachable_write_block(
+                "custom_fields keys", project_id, exc
+            ) from exc
+        data = response.get("data", [])
+        if not isinstance(data, list):
+            break
+        for entry in data:
+            if not isinstance(entry, dict):
+                continue
+            attrs = entry.get("attributes")
+            if not isinstance(attrs, dict):
+                continue
+            dtype = attrs.get("type")
+            if not isinstance(dtype, str) or not dtype:
+                continue
+            keys = by_type.setdefault(dtype, set())
+            keys.update(
+                k
+                for k in attrs
+                if isinstance(k, str) and k not in STANDARD_DOCUMENT_ATTRIBUTES
+            )
+        if len(data) < _GUARD_PAGE_SIZE:
+            break
+        page_number += 1
+
+    by_type.setdefault(document_type, set())
+    for dtype, keys in by_type.items():
+        store_document_type_custom_keys(project_id, dtype, frozenset(keys))
+    return frozenset(by_type[document_type])
 
 
 async def guard_document_custom_field_keys(
     client: PolarionClient,
     project_id: str,
-    space_id: str,
-    document_name: str,
+    document_type: str,
     custom_fields: dict[str, object],
 ) -> None:
-    """Reject ``update_document.custom_fields`` keys never seen on a get.
+    """Reject ``custom_fields`` keys absent from the document type's real schema.
 
-    Like :func:`guard_work_item_custom_field_keys`, keyed by
-    ``(project, space, document)``; on miss, one priming GET then validate.
+    Mirrors :func:`guard_work_item_custom_field_keys` on the document-type axis:
+    the schema (cached per ``(project, document_type)`` from the project-wide
+    ``/documents`` sample) is the sole source of truth. A still-unknown key forces
+    one fresh re-fetch (admin-added field) before rejecting → ``ValueError``. A
+    type whose documents populate no custom field yields an empty schema and fails
+    closed (``RuntimeError``). Unreachable validation → ``RuntimeError``.
     """
     if not custom_fields:
         return
 
-    known = get_document_custom_keys(project_id, space_id, document_name)
-    if known is None:
-        path = (
-            f"/projects/{encode_path_segment(project_id)}"
-            f"/spaces/{encode_path_segment(space_id)}"
-            f"/documents/{encode_path_segment(document_name)}"
+    schema = get_document_type_custom_keys(project_id, document_type)
+    if schema is None:
+        schema = await _fetch_document_type_custom_keys(
+            client, project_id, document_type
         )
-        try:
-            response = await client.get(
-                path, params={"fields[documents]": DOCUMENT_DETAIL_FIELDS}
-            )
-        except PolarionAuthError as exc:
-            raise _unauthorized_write_block("custom_fields keys", project_id) from exc
-        except PolarionError as exc:
-            raise _unreachable_write_block(
-                "custom_fields keys", project_id, exc
-            ) from exc
-        known = _custom_keys_from_attributes(response, STANDARD_DOCUMENT_ATTRIBUTES)
-        record_document_custom_field_keys(project_id, space_id, document_name, known)
+
+    if all(key in schema for key in custom_fields):
+        return
+
+    invalidate_document_type_custom_keys(project_id, document_type)
+    schema = await _fetch_document_type_custom_keys(client, project_id, document_type)
+
+    if not schema:
+        raise RuntimeError(
+            f"Cannot verify custom_fields for document type '{document_type}' in "
+            f"project '{project_id}': no existing document of this type has any "
+            f"custom field populated, so its schema can't be inferred. Refusing the "
+            f"write -- unknown keys persist as silent ghosts invisible to Polarion's "
+            f"UI and Lucene. Save one document of this type with its custom fields "
+            f"filled, then retry."
+        )
 
     _reject_unknown_custom_keys(
         custom_fields,
-        known,
-        scope=f"document '{space_id}/{document_name}'",
-        discovery_tool="get_document",
+        schema,
+        scope=f"document type '{document_type}'",
+        discovery_tool="sample of existing documents",
     )
 
 

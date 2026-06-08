@@ -19,7 +19,7 @@ def _clear_guard_caches() -> None:
     _cache_mod._enum_option_cache.clear()
     _cache_mod._project_enum_cache.clear()
     _cache_mod._work_item_custom_key_cache.clear()
-    _cache_mod._document_custom_key_cache.clear()
+    _cache_mod._document_type_custom_key_cache.clear()
 
 
 @pytest.fixture(autouse=True)
