@@ -445,8 +445,8 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
 
     ``hyperlinks`` / ``assignee_ids`` REPLACE (full list, not delta); each
     hyperlink ``role`` validated against ``hyperlink-role`` (before PATCH, on
-    dry_run too). ``custom_fields`` partial; unknown keys rejected unless seen
-    on a prior ``get_work_item`` (priming read on miss).
+    dry_run too). ``custom_fields`` partial; a key absent from the type's
+    sampled schema is rejected (a type with no populated customs blocks it).
 
     ``module`` NOT exposed — use ``move_work_item_to_document`` /
     ``move_work_item_from_document``. Prefer ``workflow_action`` over raw

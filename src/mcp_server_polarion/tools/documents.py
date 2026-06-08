@@ -921,8 +921,8 @@ async def update_document(  # noqa: PLR0913
 
     Prefer ``workflow_action`` over raw ``status``; it MUST pair with ≥1
     attribute (empty PATCH 400s). Unknown ``status`` / ``type`` raise
-    ``ValueError``; unknown ``custom_fields`` keys rejected unless seen on a
-    prior ``get_document``.
+    ``ValueError``; a ``custom_fields`` key absent from the document type's
+    sampled schema is rejected (a type with no populated customs blocks it).
     """
     if home_page_content_html is not None and not home_page_content_html.strip():
         raise ValueError(
@@ -1102,8 +1102,8 @@ async def create_document(  # noqa: PLR0913
     First call ``list_documents`` and confirm ``module_name`` is unique in the
     space (a duplicate returns HTTP 409). Supply only enum ids from
     ``list_document_enum_options`` — unverified ids persist as ghosts.
-    ``custom_fields`` keys are unvalidated; take them from a sibling via
-    ``get_document``.
+    ``custom_fields`` keys are validated against the document type's existing
+    schema; a key no document of that ``type`` uses is rejected.
 
     Starts empty (or with optional ``home_page_content``); add parts later via
     ``update_document`` / ``move_work_item_to_document``. ``module_name`` is the
