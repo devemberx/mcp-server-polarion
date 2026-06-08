@@ -35,7 +35,8 @@ Excludes Recycle Bin and Referenced Work Items, matching
     AND item.FK_URI_MODULE = doc.C_URI)
 
 The trailing ``item.FK_URI_MODULE = doc.C_URI`` predicate excludes Referenced
-Work Items and Recycle Bin entries; drop it to include them. Common tweaks:
+Work Items; drop it to include them. Recycle Bin entries stay out either way
+(they are absent from ``REL_MODULE_WORKITEM``). Common tweaks:
 exclude headings with ``AND item.C_TYPE != 'heading'``, filter type with
 ``AND item.C_TYPE IN ('requirement','testcase')``, or substring-match the
 title with ``AND LOWER(item.C_TITLE) LIKE '%foo%'``.
@@ -43,12 +44,19 @@ title with ``AND LOWER(item.C_TITLE) LIKE '%foo%'``.
 ## Recipe 2 — custom-field value search (``=`` or ``LIKE``)
 
     SQL:(SELECT item.* FROM POLARION.WORKITEM item
+    INNER JOIN POLARION.PROJECT proj ON item.FK_URI_PROJECT = proj.C_URI
     INNER JOIN POLARION.CF_WORKITEM cf ON cf.FK_URI_WORKITEM = item.C_URI
-    WHERE cf.C_NAME = '<field>'
-    AND cf.C_STRING_VALUE LIKE '%<value>%')
+    WHERE proj.C_ID = '<project>' AND cf.C_NAME = '<field>'
+    AND cf.C_STRING_VALUE = '<value>')
 
-Use ``c_boolean_value`` / ``c_durationtime_value`` (etc.) for non-string
-customs. Rich-text customs are CLOB-stored — read them via ``get_work_item``.
+``=`` is exact match; swap the last line for ``C_STRING_VALUE LIKE '%<value>%'``
+to substring-match — different queries, pick by need. Keep the ``proj.C_ID``
+filter either way: without it the scan runs DB-wide across every project before
+the endpoint narrows to one. This matters most for a leading-wildcard
+``LIKE '%v%'`` (no index → full ``CF_WORKITEM`` scan); use ``LIKE 'v%'``
+(trailing only) when the prefix is known. Use ``c_boolean_value`` /
+``c_durationtime_value`` (etc.) for non-string customs. Rich-text customs are
+CLOB-stored — read them via ``get_work_item``.
 
 ## Recipe 3 — back-traceability (items whose role link points to a target)
 
@@ -59,9 +67,7 @@ customs. Rich-text customs are CLOB-stored — read them via ``get_work_item``.
         ON target.C_URI = link.FK_URI_WORKITEM
     WHERE target.C_ID = '<target-id>' AND link.C_ROLE = '<role>')
 
-``fk_uri_p_workitem`` is the source (role-holder), ``fk_uri_workitem`` the
-target. Unlike ``list_work_item_links(direction='back')`` this preserves
-``c_role``.
+Unlike ``list_work_item_links(direction='back')`` this preserves ``c_role``.
 
 ## Recipe 4 — forward-traceability (items linked from a source)
 
