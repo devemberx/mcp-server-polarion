@@ -692,11 +692,11 @@ async def read_document_parts(  # noqa: PLR0913
 ) -> PaginatedResult[DocumentPart]:
     """List the structural parts of a document in order.
 
-    Use for part IDs (``move_work_item_to_document``), heading levels, or
-    per-work-item type/status; each ``workitem`` part already carries its
-    ``description`` as Markdown. For plain reading prefer ``read_document``; to
-    filter by type/status/custom-field prefer ``list_work_items`` with a
-    ``SQL:(...)`` query (recipes via ``get_sql_query_recipes``).
+    Use to map a document's structure — part IDs
+    (``move_work_item_to_document``), heading levels, body content; each
+    ``workitem`` part carries its ``description`` as Markdown. For plain
+    reading prefer ``read_document``. To list a document's work items use
+    ``list_work_items`` instead.
     """
     client = get_client(ctx)
     path = (

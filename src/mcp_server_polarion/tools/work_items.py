@@ -771,8 +771,9 @@ async def list_work_items(
     **SQL prefix.** A ``query`` starting with ``SQL:(`` runs native SQL for
     patterns Lucene can't express. Escape ``'`` as ``''`` (no bind params).
     ``C_DESCRIPTION LIKE`` does NOT match; ``LIKE`` is rejected inside
-    ``EXISTS`` — keep it top-level via ``INNER JOIN``. For module/custom-field/
-    traceability queries you MUST adapt a recipe from ``get_sql_query_recipes``.
+    ``EXISTS`` — keep it top-level via ``INNER JOIN``. Before writing any SQL
+    call ``get_sql_query_recipes`` and adapt a recipe — it holds the common
+    patterns (document scope, custom-field, traceability); do not hand-write.
     """
     client = get_client(ctx)
     params: dict[str, str | int] = {
