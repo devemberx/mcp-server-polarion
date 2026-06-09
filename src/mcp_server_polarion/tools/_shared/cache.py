@@ -1,15 +1,14 @@
 """In-process TTL caches shared across tool implementations.
 
-Near-static project facts (documents, enum option ids, observed custom-field
-keys) are memoised to spare the server's tight budget (<=3 req/s, no
+Near-static project facts (documents, enum option ids, custom-field key
+schemas) are memoised to spare the server's tight budget (<=3 req/s, no
 concurrency). This module owns all cache state; tool logic reaches it only
-through the typed get / store / record wrappers below.
+through the typed get / store wrappers below.
 """
 
 from __future__ import annotations
 
 import time
-from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Final, Literal
 
@@ -65,8 +64,8 @@ _GUARD_TTL_SECONDS: Final[float] = 60.0
 # (``create_document`` also invalidates on write).
 _DOCUMENT_LIST_TTL_SECONDS: Final[float] = 60.0
 
-# project_id -> tuple of (space_id, document_name) pairs.
-_document_list_cache: TTLCache[str, tuple[tuple[str, str], ...]] = TTLCache(
+# project_id -> tuple of (space_id, document_name, document_type) triples.
+_document_list_cache: TTLCache[str, tuple[tuple[str, str, str], ...]] = TTLCache(
     _DOCUMENT_LIST_TTL_SECONDS
 )
 # (project, resource, field, type) -> valid option ids.
@@ -78,17 +77,20 @@ _enum_option_cache: TTLCache[tuple[str, Resource, str, str], frozenset[str]] = T
 _project_enum_cache: TTLCache[tuple[str, str], frozenset[str]] = TTLCache(
     _GUARD_TTL_SECONDS
 )
-# (project, work_item_type) -> custom-field keys seen on get_work_item.
+# (project, work_item_type) -> the type's full custom-field key schema (MIN-per-key
+# sample). Sole source of truth for work-item custom-field validation.
 _work_item_custom_key_cache: TTLCache[tuple[str, str], frozenset[str]] = TTLCache(
     _GUARD_TTL_SECONDS
 )
-# (project, space, document) -> custom-field keys seen on get_document.
-_document_custom_key_cache: TTLCache[tuple[str, str, str], frozenset[str]] = TTLCache(
+# (project, document_type) -> the type's complete custom-field key schema, from
+# the project-wide /documents sample. Mirrors the work-item cache; the single
+# source of truth for document custom-field validation.
+_document_type_custom_key_cache: TTLCache[tuple[str, str], frozenset[str]] = TTLCache(
     _GUARD_TTL_SECONDS
 )
 
 
-def get_cached_documents(project_id: str) -> list[tuple[str, str]] | None:
+def get_cached_documents(project_id: str) -> list[tuple[str, str, str]] | None:
     """Return the cached document list for *project_id* or ``None``."""
     cached = _document_list_cache.get(project_id)
     return list(cached) if cached is not None else None
@@ -96,7 +98,7 @@ def get_cached_documents(project_id: str) -> list[tuple[str, str]] | None:
 
 def store_cached_documents(
     project_id: str,
-    documents: list[tuple[str, str]],
+    documents: list[tuple[str, str, str]],
 ) -> None:
     """Cache *documents* for *project_id* for ``_DOCUMENT_LIST_TTL_SECONDS``."""
     _document_list_cache.set(project_id, tuple(documents))
@@ -145,61 +147,52 @@ def store_cached_project_enum(
     _project_enum_cache.set((project_id, enum_name), option_ids)
 
 
-def _record_custom_keys[KT: tuple[str, ...]](
-    cache: TTLCache[KT, frozenset[str]],
-    key: KT,
-    keys: Iterable[str],
-) -> None:
-    """Union *keys* (filtered to non-empty strings) into the cached set at *key*."""
-    new_keys = frozenset(k for k in keys if isinstance(k, str) and k)
-    cache.set(key, (cache.get(key) or frozenset()) | new_keys)
-
-
 def get_work_item_custom_keys(
     project_id: str,
     work_item_type: str,
 ) -> frozenset[str] | None:
-    """Return keys seen on this ``(project, work_item_type)``, or ``None``."""
+    """Return the cached complete key schema for ``(project, type)``, or ``None``."""
     return _work_item_custom_key_cache.get((project_id, work_item_type))
 
 
-def record_work_item_custom_field_keys(
+def store_work_item_custom_keys(
     project_id: str,
     work_item_type: str,
-    keys: Iterable[str],
+    keys: frozenset[str],
 ) -> None:
-    """Merge *keys* into the per-``(project, work_item_type)`` observed set.
-
-    Called from ``get_work_item`` so a later ``update_work_item`` can validate
-    ``custom_fields`` against ids the caller has actually seen. Empty *keys*
-    still records the type as observed, so no inline fetch is needed later.
+    """Replace any prior set: each sample is the full key set, so an admin
+    removal shrinks the schema once the entry expires.
     """
-    _record_custom_keys(_work_item_custom_key_cache, (project_id, work_item_type), keys)
+    _work_item_custom_key_cache.set((project_id, work_item_type), keys)
 
 
-def get_document_custom_keys(
+def invalidate_work_item_custom_keys(project_id: str, work_item_type: str) -> None:
+    """Drop the cached schema for ``(project, type)`` (used by the bypass-retry)."""
+    _work_item_custom_key_cache.invalidate((project_id, work_item_type))
+
+
+def get_document_type_custom_keys(
     project_id: str,
-    space_id: str,
-    document_name: str,
+    document_type: str,
 ) -> frozenset[str] | None:
-    """Return keys seen on this ``(project, space, document)``, or ``None``."""
-    return _document_custom_key_cache.get((project_id, space_id, document_name))
+    """Return the cached key schema for ``(project, document_type)``, or ``None``."""
+    return _document_type_custom_key_cache.get((project_id, document_type))
 
 
-def record_document_custom_field_keys(
+def store_document_type_custom_keys(
     project_id: str,
-    space_id: str,
-    document_name: str,
-    keys: Iterable[str],
+    document_type: str,
+    keys: frozenset[str],
 ) -> None:
-    """Merge *keys* into the per-``(project, space, document)`` observed set.
-
-    Called from ``get_document`` so a later ``update_document`` can validate
-    ``custom_fields`` against ids the caller has actually seen.
+    """Replace any prior set: each sample is the full key set, so an admin
+    removal shrinks the schema once the entry expires.
     """
-    _record_custom_keys(
-        _document_custom_key_cache, (project_id, space_id, document_name), keys
-    )
+    _document_type_custom_key_cache.set((project_id, document_type), keys)
+
+
+def invalidate_document_type_custom_keys(project_id: str, document_type: str) -> None:
+    """Drop the cached schema for ``(project, document_type)`` (bypass-retry)."""
+    _document_type_custom_key_cache.invalidate((project_id, document_type))
 
 
 __all__ = [
@@ -208,12 +201,14 @@ __all__ = [
     "get_cached_documents",
     "get_cached_enum_options",
     "get_cached_project_enum",
-    "get_document_custom_keys",
+    "get_document_type_custom_keys",
     "get_work_item_custom_keys",
+    "invalidate_document_type_custom_keys",
     "invalidate_documents_cache",
-    "record_document_custom_field_keys",
-    "record_work_item_custom_field_keys",
+    "invalidate_work_item_custom_keys",
     "store_cached_documents",
     "store_cached_enum_options",
     "store_cached_project_enum",
+    "store_document_type_custom_keys",
+    "store_work_item_custom_keys",
 ]

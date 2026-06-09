@@ -21,10 +21,11 @@ from mcp_server_polarion.core.exceptions import (
 from mcp_server_polarion.models import WorkItemLinkSpec
 from mcp_server_polarion.tools._shared import cache as cache_mod
 from mcp_server_polarion.tools._shared.cache import (
-    record_document_custom_field_keys,
-    record_work_item_custom_field_keys,
+    store_document_type_custom_keys,
+    store_work_item_custom_keys,
 )
 from mcp_server_polarion.tools._shared.guard import (
+    _GUARD_PAGE_SIZE,
     fetch_enum_option_ids,
     fetch_project_enum_option_ids,
     guard_document_custom_field_keys,
@@ -44,7 +45,7 @@ def _reset_caches() -> None:
     cache_mod._enum_option_cache.clear()
     cache_mod._project_enum_cache.clear()
     cache_mod._work_item_custom_key_cache.clear()
-    cache_mod._document_custom_key_cache.clear()
+    cache_mod._document_type_custom_key_cache.clear()
 
 
 @pytest.fixture
@@ -309,195 +310,283 @@ class TestGuardDocumentEnums:
         assert "productRequirementSpecification" in str(exc.value)
 
 
-class TestRecordWorkItemCustomKeys:
-    """``record_work_item_custom_field_keys`` plus the cache read it feeds."""
-
-    def test_record_merges_across_calls(self) -> None:
-        record_work_item_custom_field_keys("P", "task", ["k1"])
-        record_work_item_custom_field_keys("P", "task", ["k2", "k1"])
-
-        assert cache_mod._work_item_custom_key_cache.get(("P", "task")) == frozenset(
-            {"k1", "k2"}
-        )
-
-    def test_record_filters_non_string_and_empty(self) -> None:
-        record_work_item_custom_field_keys("P", "task", ["k1", "", "k2"])
-
-        assert cache_mod._work_item_custom_key_cache.get(("P", "task")) == frozenset(
-            {"k1", "k2"}
-        )
-
-    def test_cache_expiry(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        clock = [1000.0]
-        monkeypatch.setattr(cache_mod, "_now", lambda: clock[0])
-        record_work_item_custom_field_keys("P", "task", ["k1"])
-
-        clock[0] += 61.0
-        assert cache_mod._work_item_custom_key_cache.get(("P", "task")) is None
+def _wi_list(*attrs: dict[str, object]) -> dict[str, object]:
+    """JSON:API list response of work items with the given ``attributes`` dicts."""
+    return {
+        "data": [
+            {"type": "workitems", "id": f"MCPT-{i}", "attributes": a}
+            for i, a in enumerate(attrs)
+        ]
+    }
 
 
 class TestGuardWorkItemCustomFieldKeys:
-    """Validation of ``update_work_item.custom_fields`` keys."""
+    """Validation of ``custom_fields`` keys via the MIN-per-key type sample."""
 
     async def test_no_custom_fields_short_circuits(
         self, mock_client: AsyncMock
     ) -> None:
-        await guard_work_item_custom_field_keys(mock_client, "P", "MCPT-1", "task", {})
+        await guard_work_item_custom_field_keys(mock_client, "P", "task", {})
 
         mock_client.get.assert_not_awaited()
 
-    async def test_known_key_passes_without_inline_get(
+    async def test_cached_schema_passes_without_sample(
         self, mock_client: AsyncMock
     ) -> None:
-        record_work_item_custom_field_keys("P", "task", ["risk_score"])
+        store_work_item_custom_keys("P", "task", frozenset({"risk_score"}))
 
         await guard_work_item_custom_field_keys(
-            mock_client, "P", "MCPT-1", "task", {"risk_score": 5}
+            mock_client, "P", "task", {"risk_score": 5}
         )
 
         mock_client.get.assert_not_awaited()
 
-    async def test_unknown_key_raises_with_known_set(
+    async def test_sql_sample_primes_schema_and_passes(
         self, mock_client: AsyncMock
     ) -> None:
-        record_work_item_custom_field_keys("P", "task", ["risk_score"])
+        mock_client.get.return_value = _wi_list(
+            {"title": "a", "type": "task", "risk_score": 5},
+            {"title": "b", "type": "task", "release_train_id": "RT-1"},
+        )
+
+        await guard_work_item_custom_field_keys(
+            mock_client, "P", "task", {"risk_score": 9, "release_train_id": "RT-9"}
+        )
+
+        mock_client.get.assert_awaited_once()
+        # Primary path issues the MIN-per-key SQL with @all, not a per-item GET.
+        params = mock_client.get.await_args.kwargs["params"]
+        assert params["query"].startswith("SQL:(SELECT")
+        assert "GROUP BY cf.c_name" in params["query"]
+        assert params["fields[workitems]"] == "@all"
+        assert cache_mod._work_item_custom_key_cache.get(("P", "task")) == frozenset(
+            {"risk_score", "release_train_id"}
+        )
+
+    async def test_paginates_beyond_first_page_of_keys(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # A type with >100 distinct keys spans pages; the union must span them too,
+        # else a key on page 2+ would be false-rejected.
+        page1 = _wi_list(
+            *(
+                {"title": "x", "type": "task", f"k{i}": 1}
+                for i in range(_GUARD_PAGE_SIZE)
+            )
+        )
+        page2 = _wi_list({"title": "y", "type": "task", "late_key": 9})
+        mock_client.get.side_effect = [page1, page2]
+
+        await guard_work_item_custom_field_keys(
+            mock_client, "P", "task", {"late_key": 9}
+        )
+
+        # Full page 1 (==100) forces page 2; short page 2 stops the loop.
+        assert mock_client.get.await_count == 2
+        schema = cache_mod._work_item_custom_key_cache.get(("P", "task"))
+        assert schema is not None
+        assert "late_key" in schema
+        assert "k0" in schema
+        assert len(schema) == _GUARD_PAGE_SIZE + 1
+
+    async def test_unknown_key_against_fresh_sample_rejects_without_retry(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # Cold cache: the sample is already current, so an unknown key is rejected
+        # straight away -- no redundant second fetch.
+        mock_client.get.return_value = _wi_list(
+            {"title": "a", "type": "task", "risk_score": 5}
+        )
 
         with pytest.raises(ValueError) as exc:
             await guard_work_item_custom_field_keys(
-                mock_client, "P", "MCPT-1", "task", {"release_train_id": "RT-42"}
+                mock_client, "P", "task", {"release_train_id": "RT-42"}
             )
 
         msg = str(exc.value)
         assert "release_train_id" in msg
         assert "risk_score" in msg
+        mock_client.get.assert_awaited_once()
 
-    async def test_cache_miss_fetches_inline_and_primes_cache(
+    async def test_empty_sample_fails_closed(self, mock_client: AsyncMock) -> None:
+        mock_client.get.return_value = {"data": []}
+
+        with pytest.raises(RuntimeError, match="Refusing the write"):
+            await guard_work_item_custom_field_keys(
+                mock_client, "P", "task", {"risk_score": 5}
+            )
+
+    async def test_sql_rejection_fails_closed(self, mock_client: AsyncMock) -> None:
+        # No Lucene fallback: a rejected SQL sample blocks the write rather than
+        # validating against an incomplete schema.
+        mock_client.get.side_effect = PolarionError("SQL not supported")
+
+        with pytest.raises(RuntimeError, match="Refusing the write"):
+            await guard_work_item_custom_field_keys(
+                mock_client, "P", "task", {"risk_score": 9}
+            )
+
+        mock_client.get.assert_awaited_once()
+
+    async def test_cached_schema_unknown_key_refetches_then_passes(
         self, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = {
-            "data": {
-                "attributes": {
-                    "title": "x",
-                    "type": "task",
-                    "status": "open",
-                    "risk_score": 5,  # custom (not in STANDARD_WORK_ITEM_ATTRIBUTES)
-                }
-            }
-        }
+        # A key unknown against a *cached* (possibly stale) schema triggers one
+        # fresh re-fetch; the admin-added field now present, the write passes.
+        store_work_item_custom_keys("P", "task", frozenset({"risk_score"}))
+        mock_client.get.return_value = _wi_list(
+            {"title": "a", "type": "task", "risk_score": 5},
+            {"title": "b", "type": "task", "release_train_id": "RT-1"},
+        )
 
         await guard_work_item_custom_field_keys(
-            mock_client, "P", "MCPT-1", "task", {"risk_score": 5}
+            mock_client, "P", "task", {"release_train_id": "RT-9"}
         )
 
         mock_client.get.assert_awaited_once()
-        assert cache_mod._work_item_custom_key_cache.get(("P", "task")) == frozenset(
-            {"risk_score"}
-        )
 
-    async def test_cache_miss_inline_fetch_then_unknown_key_raises(
-        self, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": {"attributes": {"title": "x", "risk_score": 5}}
-        }
-
-        with pytest.raises(ValueError) as exc:
-            await guard_work_item_custom_field_keys(
-                mock_client, "P", "MCPT-1", "task", {"release_train_id": "RT-42"}
-            )
-
-        assert "release_train_id" in str(exc.value)
-
-    async def test_priming_get_error_blocks_write(self, mock_client: AsyncMock) -> None:
+    async def test_sample_error_blocks_write(self, mock_client: AsyncMock) -> None:
+        # The SQL sample fails -> fail-closed.
         mock_client.get.side_effect = PolarionError("backend down")
 
         with pytest.raises(RuntimeError, match="Refusing the write"):
             await guard_work_item_custom_field_keys(
-                mock_client, "P", "MCPT-1", "task", {"release_train_id": "RT-42"}
+                mock_client, "P", "task", {"release_train_id": "RT-42"}
             )
 
-    async def test_priming_get_auth_error_raises_permission_error(
+    async def test_sample_auth_error_raises_permission_error(
         self, mock_client: AsyncMock
     ) -> None:
         mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
 
         with pytest.raises(PermissionError, match="lacks permission"):
             await guard_work_item_custom_field_keys(
-                mock_client, "P", "MCPT-1", "task", {"release_train_id": "RT-42"}
+                mock_client, "P", "task", {"release_train_id": "RT-42"}
             )
 
 
+def _docs_list(*docs: tuple[str, dict[str, object]]) -> dict[str, object]:
+    """Heading + ``include=module`` sample: one module per document in ``included``.
+
+    ``data`` rows are bare heading placeholders that only drive pagination; the
+    document type + customs ride in the ``included`` module resources.
+    """
+    return {
+        "data": [{"type": "workitems"} for _ in docs],
+        "included": [
+            {
+                "type": "documents",
+                "id": f"P/_default/D{i}",
+                "attributes": {"title": "t", "type": dtype, **customs},
+            }
+            for i, (dtype, customs) in enumerate(docs)
+        ],
+        "meta": {"totalCount": len(docs)},
+    }
+
+
 class TestGuardDocumentCustomFieldKeys:
-    """Validation of ``update_document.custom_fields`` keys."""
+    """Validation of ``custom_fields`` keys via the project-wide document sample."""
 
     async def test_no_custom_fields_short_circuits(
         self, mock_client: AsyncMock
     ) -> None:
-        await guard_document_custom_field_keys(mock_client, "P", "_default", "Doc", {})
+        await guard_document_custom_field_keys(mock_client, "P", "generic", {})
 
         mock_client.get.assert_not_awaited()
 
-    async def test_known_recorded_key_passes_without_inline_get(
+    async def test_cached_schema_passes_without_sample(
         self, mock_client: AsyncMock
     ) -> None:
-        record_document_custom_field_keys("P", "_default", "Doc", ["doc_risk"])
+        store_document_type_custom_keys("P", "generic", frozenset({"doc_risk"}))
 
         await guard_document_custom_field_keys(
-            mock_client, "P", "_default", "Doc", {"doc_risk": 3}
+            mock_client, "P", "generic", {"doc_risk": 3}
         )
 
         mock_client.get.assert_not_awaited()
 
-    async def test_cache_miss_fetches_inline_and_primes_cache(
+    async def test_sample_primes_schema_and_passes(
         self, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = {
-            "data": {"attributes": {"title": "x", "type": "generic", "doc_risk": 3}}
-        }
+        # Customs are grouped per type across the whole project in one GET.
+        mock_client.get.return_value = _docs_list(
+            ("generic", {"doc_risk": 3}),
+            ("generic", {"owner": "x"}),
+            ("systemReqSpecification", {"version": "1.0"}),
+        )
 
         await guard_document_custom_field_keys(
-            mock_client, "P", "_default", "Doc", {"doc_risk": 3}
+            mock_client, "P", "generic", {"doc_risk": 9, "owner": "y"}
         )
 
         mock_client.get.assert_awaited_once()
+        params = mock_client.get.call_args.kwargs["params"]
         path = mock_client.get.call_args.args[0]
-        assert path == "/projects/P/spaces/_default/documents/Doc"
-        assert cache_mod._document_custom_key_cache.get(
-            ("P", "_default", "Doc")
-        ) == frozenset({"doc_risk"})
+        assert path == "/projects/P/workitems"
+        # Heading-discovery SQL + include=module surfaces each doc's type+customs.
+        assert params["query"].startswith("SQL:(")
+        assert params["include"] == "module"
+        assert params["fields[documents]"] == "@all"
+        # Every type's schema is stored from the one fetch.
+        assert cache_mod._document_type_custom_key_cache.get(
+            ("P", "systemReqSpecification")
+        ) == frozenset({"version"})
 
-    async def test_unknown_key_raises_with_known_set(
+    async def test_unknown_key_against_fresh_sample_rejects_without_retry(
         self, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = {
-            "data": {"attributes": {"title": "x", "doc_risk": 3}}
-        }
+        mock_client.get.return_value = _docs_list(("generic", {"doc_risk": 3}))
 
         with pytest.raises(ValueError) as exc:
             await guard_document_custom_field_keys(
-                mock_client, "P", "_default", "Doc", {"ghost_key": 1}
+                mock_client, "P", "generic", {"ghost_key": 1}
             )
 
         msg = str(exc.value)
         assert "ghost_key" in msg
         assert "doc_risk" in msg
+        mock_client.get.assert_awaited_once()
 
-    async def test_priming_get_error_blocks_write(self, mock_client: AsyncMock) -> None:
+    async def test_cached_schema_unknown_key_refetches_then_passes(
+        self, mock_client: AsyncMock
+    ) -> None:
+        store_document_type_custom_keys("P", "generic", frozenset({"doc_risk"}))
+        mock_client.get.return_value = _docs_list(
+            ("generic", {"doc_risk": 3, "new_field": 1})
+        )
+
+        await guard_document_custom_field_keys(
+            mock_client, "P", "generic", {"new_field": 1}
+        )
+
+        mock_client.get.assert_awaited_once()
+
+    async def test_empty_sample_fails_closed(self, mock_client: AsyncMock) -> None:
+        # No document of this type has any custom -> schema empty -> block.
+        mock_client.get.return_value = _docs_list(("systemReqSpecification", {"v": 1}))
+
+        with pytest.raises(RuntimeError, match="Refusing the write"):
+            await guard_document_custom_field_keys(
+                mock_client, "P", "generic", {"doc_risk": 3}
+            )
+
+    async def test_sample_error_blocks_write(self, mock_client: AsyncMock) -> None:
         mock_client.get.side_effect = PolarionError("backend down")
 
         with pytest.raises(RuntimeError, match="Refusing the write"):
             await guard_document_custom_field_keys(
-                mock_client, "P", "_default", "Doc", {"ghost_key": 1}
+                mock_client, "P", "generic", {"ghost_key": 1}
             )
 
-    async def test_priming_get_auth_error_raises_permission_error(
+    async def test_sample_auth_error_raises_permission_error(
         self, mock_client: AsyncMock
     ) -> None:
         mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
 
         with pytest.raises(PermissionError, match="lacks permission"):
             await guard_document_custom_field_keys(
-                mock_client, "P", "_default", "Doc", {"ghost_key": 1}
+                mock_client, "P", "generic", {"ghost_key": 1}
             )
 
 

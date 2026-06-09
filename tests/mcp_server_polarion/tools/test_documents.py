@@ -164,7 +164,33 @@ def reset_enum_guard_caches() -> None:
     _cache_mod._enum_option_cache.clear()
     _cache_mod._project_enum_cache.clear()
     _cache_mod._work_item_custom_key_cache.clear()
-    _cache_mod._document_custom_key_cache.clear()
+    _cache_mod._document_type_custom_key_cache.clear()
+
+
+def _module_resource(full_id: str, doc_type: str = "generic") -> dict:
+    """An ``included`` document resource as returned by ``include=module``."""
+    return {"type": "documents", "id": full_id, "attributes": {"type": doc_type}}
+
+
+def _discovery_response(
+    included: list[dict],
+    *,
+    total: int | None = None,
+    data_count: int | None = None,
+) -> dict:
+    """Build a discovery page: ``data`` drives pagination, ``included`` the docs.
+
+    Discovery reads documents from ``included``; ``data`` (one heading per doc)
+    only feeds the page-walk loop, so its rows are bare placeholders.
+    """
+    rows = data_count if data_count is not None else len(included)
+    response: dict = {
+        "data": [{"type": "workitems"} for _ in range(rows)],
+        "included": included,
+    }
+    if total is not None:
+        response["meta"] = {"totalCount": total}
+    return response
 
 
 class TestListDocuments:
@@ -184,44 +210,15 @@ class TestListDocuments:
     async def test_extracts_documents_from_modules(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        items = [
-            {
-                "relationships": {
-                    "module": {
-                        "data": {"type": "documents", "id": "proj1/_default/Doc1"}
-                    }
-                }
-            },
-            {
-                "relationships": {
-                    "module": {
-                        "data": {"type": "documents", "id": "proj1/_default/Doc2"}
-                    }
-                }
-            },
-            {
-                "relationships": {
-                    "module": {"data": {"type": "documents", "id": "proj1/Design/SRS"}}
-                }
-            },
-            {
-                "relationships": {
-                    "module": {"data": {"type": "documents", "id": "proj1/Design/SDD"}}
-                }
-            },
-            {
-                "relationships": {
-                    "module": {
-                        "data": {"type": "documents", "id": "proj1/Testing/TestPlan"}
-                    }
-                }
-            },
+        included = [
+            _module_resource("proj1/_default/Doc1", "generic"),
+            _module_resource("proj1/_default/Doc2", "generic"),
+            _module_resource("proj1/Design/SRS", "req_specification"),
+            _module_resource("proj1/Design/SDD", "generic"),
+            _module_resource("proj1/Testing/TestPlan", "testspecification"),
         ]
         # Single page — totalCount ≤ page_size, so no binary search.
-        mock_client.get.return_value = {
-            "data": items,
-            "meta": {"totalCount": 5},
-        }
+        mock_client.get.return_value = _discovery_response(included, total=5)
 
         result = await list_documents(
             mock_ctx,
@@ -232,37 +229,18 @@ class TestListDocuments:
 
         assert isinstance(result, PaginatedResult)
         assert result.total_count == 5
-        space_doc_pairs = [(d.space_id, d.document_name) for d in result.items]
-        assert ("_default", "Doc1") in space_doc_pairs
-        assert ("_default", "Doc2") in space_doc_pairs
-        assert ("Design", "SDD") in space_doc_pairs
-        assert ("Design", "SRS") in space_doc_pairs
-        assert ("Testing", "TestPlan") in space_doc_pairs
+        triples = [(d.space_id, d.document_name, d.type) for d in result.items]
+        assert ("_default", "Doc1", "generic") in triples
+        assert ("_default", "Doc2", "generic") in triples
+        assert ("Design", "SDD", "generic") in triples
+        assert ("Design", "SRS", "req_specification") in triples
+        assert ("Testing", "TestPlan", "testspecification") in triples
 
     async def test_deduplicates_documents(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        items = [
-            {
-                "relationships": {
-                    "module": {"data": {"type": "documents", "id": "proj1/Space1/DocA"}}
-                }
-            },
-            {
-                "relationships": {
-                    "module": {"data": {"type": "documents", "id": "proj1/Space1/DocA"}}
-                }
-            },
-            {
-                "relationships": {
-                    "module": {"data": {"type": "documents", "id": "proj1/Space1/DocA"}}
-                }
-            },
-        ]
-        mock_client.get.return_value = {
-            "data": items,
-            "meta": {"totalCount": 3},
-        }
+        included = [_module_resource("proj1/Space1/DocA", "generic")] * 3
+        mock_client.get.return_value = _discovery_response(included, total=3)
 
         result = await list_documents(
             mock_ctx,
@@ -274,24 +252,13 @@ class TestListDocuments:
         assert result.total_count == 1
         assert result.items[0].space_id == "Space1"
         assert result.items[0].document_name == "DocA"
+        assert result.items[0].type == "generic"
 
     async def test_pagination_slicing(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        items = [
-            {
-                "relationships": {
-                    "module": {
-                        "data": {"type": "documents", "id": f"proj1/Space{i}/Doc"}
-                    }
-                }
-            }
-            for i in range(5)
-        ]
-        mock_client.get.return_value = {
-            "data": items,
-            "meta": {"totalCount": 5},
-        }
+        included = [_module_resource(f"proj1/Space{i}/Doc") for i in range(5)]
+        mock_client.get.return_value = _discovery_response(included, total=5)
 
         result = await list_documents(
             mock_ctx,
@@ -307,15 +274,15 @@ class TestListDocuments:
     async def test_empty_modules(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        items = [
-            {"relationships": {"module": {"data": None}}},
-            {"relationships": {}},
-            {"relationships": {"module": {}}},
+        # Malformed/under-segmented module ids yield no documents.
+        included = [
+            {"type": "documents", "id": None},
+            {"type": "documents"},
+            {"type": "documents", "id": "proj1/onlytwo"},
         ]
-        mock_client.get.return_value = {
-            "data": items,
-            "meta": {"totalCount": 3},
-        }
+        mock_client.get.return_value = _discovery_response(
+            included, total=3, data_count=3
+        )
 
         result = await list_documents(
             mock_ctx,
@@ -330,27 +297,16 @@ class TestListDocuments:
     async def test_linear_scan_walks_all_pages(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Linear scan visits every heading page exactly once."""
-
-        def _make_item(document: str) -> dict:
-            return {
-                "relationships": {
-                    "module": {"data": {"type": "documents", "id": f"p/S/{document}"}}
-                }
-            }
-
-        page_data = {
-            1: [_make_item("DocA")] * 100,
-            2: [_make_item("DocA")] * 50 + [_make_item("DocB")] * 50,
-            3: [_make_item("DocB")] * 30,
+        """Discovery walks every document page exactly once."""
+        page = {
+            1: ([_module_resource("p/S/DocA")], 100),
+            2: ([_module_resource("p/S/DocA"), _module_resource("p/S/DocB")], 100),
+            3: ([_module_resource("p/S/DocB")], 30),
         }
 
         async def _mock_get(_path, *, params=None):
-            page_num = params["page[number]"]
-            return {
-                "data": page_data.get(page_num, []),
-                "meta": {"totalCount": 230},
-            }
+            included, rows = page[params["page[number]"]]
+            return _discovery_response(included, total=230, data_count=rows)
 
         mock_client.get.side_effect = _mock_get
 
@@ -371,23 +327,15 @@ class TestListDocuments:
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         """A short final page (without totalCount/links.next) ends the loop."""
-
-        def _make_item(document: str) -> dict:
-            return {
-                "relationships": {
-                    "module": {"data": {"type": "documents", "id": f"p/S/{document}"}}
-                }
-            }
-
         # Partial page 2 (50 < 100) with no totalCount stops the scan.
-        page_data = {
-            1: [_make_item("DocA")] * 100,
-            2: [_make_item("DocB")] * 50,
+        page = {
+            1: ([_module_resource("p/S/DocA")], 100),
+            2: ([_module_resource("p/S/DocB")], 50),
         }
 
         async def _mock_get(_path, *, params=None):
-            page_num = params["page[number]"]
-            return {"data": page_data.get(page_num, [])}
+            included, rows = page[params["page[number]"]]
+            return _discovery_response(included, data_count=rows)
 
         mock_client.get.side_effect = _mock_get
 
@@ -405,24 +353,15 @@ class TestListDocuments:
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         """Multiple documents on a single page → one API call."""
-
-        def _make_item(document: str) -> dict:
-            return {
-                "relationships": {
-                    "module": {"data": {"type": "documents", "id": f"p/S/{document}"}}
-                }
-            }
-
-        items = (
-            [_make_item("Alpha")] * 25
-            + [_make_item("Bravo")] * 25
-            + [_make_item("Charlie")] * 25
-            + [_make_item("Delta")] * 25
+        included = [
+            _module_resource("p/S/Alpha"),
+            _module_resource("p/S/Bravo"),
+            _module_resource("p/S/Charlie"),
+            _module_resource("p/S/Delta"),
+        ]
+        mock_client.get.return_value = _discovery_response(
+            included, total=100, data_count=100
         )
-        mock_client.get.return_value = {
-            "data": items,
-            "meta": {"totalCount": 100},
-        }
 
         result = await list_documents(
             mock_ctx,
@@ -440,18 +379,9 @@ class TestListDocuments:
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         """A second call with the same project_id is served from cache."""
-        mock_client.get.return_value = {
-            "data": [
-                {
-                    "relationships": {
-                        "module": {
-                            "data": {"type": "documents", "id": "proj1/_default/Doc1"}
-                        }
-                    }
-                },
-            ],
-            "meta": {"totalCount": 1},
-        }
+        mock_client.get.return_value = _discovery_response(
+            [_module_resource("proj1/_default/Doc1")], total=1
+        )
 
         first = await list_documents(
             mock_ctx, project_id="proj1", page_size=100, page_number=1
@@ -463,8 +393,8 @@ class TestListDocuments:
         )
 
         assert mock_client.get.call_count == calls_after_first
-        assert [(d.space_id, d.document_name) for d in first.items] == [
-            (d.space_id, d.document_name) for d in second.items
+        assert [(d.space_id, d.document_name, d.type) for d in first.items] == [
+            (d.space_id, d.document_name, d.type) for d in second.items
         ]
 
     async def test_cache_isolated_per_project(
@@ -474,21 +404,9 @@ class TestListDocuments:
 
         async def _mock_get(_path, *, params=None):
             # Return a distinct document per call so cross-project sharing shows up.
-            return {
-                "data": [
-                    {
-                        "relationships": {
-                            "module": {
-                                "data": {
-                                    "type": "documents",
-                                    "id": f"x/S/Doc{mock_client.get.call_count}",
-                                }
-                            }
-                        }
-                    },
-                ],
-                "meta": {"totalCount": 1},
-            }
+            return _discovery_response(
+                [_module_resource(f"x/S/Doc{mock_client.get.call_count}")], total=1
+            )
 
         mock_client.get.side_effect = _mock_get
 
@@ -504,18 +422,9 @@ class TestListDocuments:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """After TTL elapses, the next call re-fetches from the API."""
-        mock_client.get.return_value = {
-            "data": [
-                {
-                    "relationships": {
-                        "module": {
-                            "data": {"type": "documents", "id": "proj1/_default/Doc1"}
-                        }
-                    }
-                },
-            ],
-            "meta": {"totalCount": 1},
-        }
+        mock_client.get.return_value = _discovery_response(
+            [_module_resource("proj1/_default/Doc1")], total=1
+        )
 
         fake_now = [1000.0]
 
@@ -553,7 +462,17 @@ class TestListDocuments:
             "params",
             call_args[0][1] if len(call_args[0]) > 1 else {},
         )
-        assert params["query"] == "type:heading"
+        query = params["query"]
+        # SQL GROUP BY collapses every heading to one row per document.
+        assert query.startswith("SQL:(")
+        assert "GROUP BY mod.c_uri" in query
+        assert "wi.c_type = 'heading'" in query
+        # Recycle-bin exclusion mirrors the Lucene type:heading default.
+        assert "wi.c_deleted IS NOT TRUE" in query
+        assert "p.c_id = 'proj1'" in query
+        # include=module pulls each document's type into the included array.
+        assert params["include"] == "module"
+        assert params["fields[documents]"] == "type"
         # No sort=module: server-side sort costs more than client-side dedup.
         assert "sort" not in params
 
@@ -2393,6 +2312,28 @@ class TestUpdateDocumentValidation:
             )
         mock_client.patch.assert_not_called()
 
+    async def test_custom_fields_unresolvable_type_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Doc exists but carries no type attr: cannot key the schema guard, so the
+        # write is refused rather than validated against an empty "" schema.
+        mock_client.get.return_value = {"data": {"attributes": {"title": "D"}}}
+        with pytest.raises(RuntimeError, match="no resolvable type"):
+            await update_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="S",
+                document_name="D",
+                title=None,
+                status=None,
+                type=None,
+                home_page_content_html=None,
+                custom_fields={"documentVersion": "0.2"},
+                workflow_action=None,
+                dry_run=True,
+            )
+        mock_client.patch.assert_not_called()
+
     async def test_workflow_action_with_status_passes(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
@@ -2415,10 +2356,13 @@ class TestUpdateDocumentValidation:
     async def test_custom_fields_alone_satisfies_at_least_one_check(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # custom_fields counts as a body field; priming GET shows the guard the key.
+        # custom_fields counts as a body field; the type sample knows the key.
         mock_client.get.return_value = {
-            "data": {"attributes": {"title": "D", "documentVersion": "0.1"}}
+            "data": {"attributes": {"title": "D", "type": "generic"}}
         }
+        _cache_mod.store_document_type_custom_keys(
+            "MyProj", "generic", frozenset({"documentVersion"})
+        )
         result = await update_document(
             mock_ctx,
             project_id="MyProj",
@@ -2439,8 +2383,11 @@ class TestUpdateDocumentValidation:
     ) -> None:
         # workflow_action + custom_fields-only satisfies the body-field check.
         mock_client.get.return_value = {
-            "data": {"attributes": {"title": "D", "documentVersion": "0.1"}}
+            "data": {"attributes": {"title": "D", "type": "generic"}}
         }
+        _cache_mod.store_document_type_custom_keys(
+            "MyProj", "generic", frozenset({"documentVersion"})
+        )
         result = await update_document(
             mock_ctx,
             project_id="MyProj",
@@ -3564,6 +3511,80 @@ class TestEnumGuardCreateDocument:
             )
         mock_client.post.assert_not_called()
 
+    async def test_custom_fields_pass_when_in_type_sample(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        # GETs: type options, then the heading + include=module sample.
+        dtype = "systemRequirementSpecification"
+        mock_client.get.side_effect = [
+            _enum_get_response([dtype]),
+            {
+                "data": [{"type": "workitems"}],
+                "included": [
+                    {"type": "documents", "attributes": {"type": dtype, "version": "1"}}
+                ],
+            },
+        ]
+        mock_client.post.return_value = {
+            "data": [{"type": "documents", "id": "MyProj/_default/NewSpec"}]
+        }
+
+        result = await _call_create_doc(
+            mock_ctx, module_name="NewSpec", type=dtype, custom_fields={"version": "2"}
+        )
+
+        assert result.created is True  # type: ignore[attr-defined]
+        mock_client.post.assert_awaited_once()
+
+    async def test_custom_fields_reject_ghost_key(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        dtype = "systemRequirementSpecification"
+        sample = {
+            "data": [{"type": "workitems"}],
+            "included": [
+                {"type": "documents", "attributes": {"type": dtype, "version": "1"}}
+            ],
+        }
+        mock_client.get.side_effect = [_enum_get_response([dtype]), sample, sample]
+
+        with pytest.raises(ValueError, match="ghostField"):
+            await _call_create_doc(
+                mock_ctx,
+                module_name="NewSpec",
+                type=dtype,
+                custom_fields={"ghostField": "x"},
+            )
+        mock_client.post.assert_not_called()
+
+    async def test_custom_fields_fail_closed_on_empty_sample(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        dtype = "systemRequirementSpecification"
+        mock_client.get.side_effect = [
+            _enum_get_response([dtype]),
+            {"data": []},
+            {"data": []},
+        ]
+
+        with pytest.raises(RuntimeError, match="Refusing the write"):
+            await _call_create_doc(
+                mock_ctx,
+                module_name="NewSpec",
+                type=dtype,
+                custom_fields={"version": "2"},
+            )
+        mock_client.post.assert_not_called()
+
 
 class TestEnumGuardUpdateDocument:
     """Integration: ``update_document`` rejects ghost type / status."""
@@ -3586,10 +3607,16 @@ class TestEnumGuardUpdateDocument:
         mock_client: AsyncMock,
         reset_enum_guard_caches: None,
     ) -> None:
-        # Cache miss primes via one read; the unknown key is absent, so it rejects.
-        mock_client.get.return_value = {
-            "data": {"attributes": {"title": "x", "doc_risk": 3}}
+        # GETs: resolve the doc's type, then the type sample (+ bypass-retry).
+        # The sample knows only doc_risk, so ghost_key is rejected.
+        type_resp = {"data": {"attributes": {"title": "x", "type": "generic"}}}
+        sample = {
+            "data": [{"type": "workitems"}],
+            "included": [
+                {"type": "documents", "attributes": {"type": "generic", "doc_risk": 3}}
+            ],
         }
+        mock_client.get.side_effect = [type_resp, sample, sample]
 
         with pytest.raises(ValueError, match="ghost_key"):
             await _call_update_doc(mock_ctx, custom_fields={"ghost_key": 1})
@@ -3601,9 +3628,13 @@ class TestEnumGuardUpdateDocument:
         mock_client: AsyncMock,
         reset_enum_guard_caches: None,
     ) -> None:
+        # Resolve the doc's type; the cached type schema knows doc_risk.
         mock_client.get.return_value = {
-            "data": {"attributes": {"title": "x", "doc_risk": 3}}
+            "data": {"attributes": {"title": "x", "type": "generic"}}
         }
+        _cache_mod.store_document_type_custom_keys(
+            "MyProj", "generic", frozenset({"doc_risk"})
+        )
 
         result = await _call_update_doc(
             mock_ctx, custom_fields={"doc_risk": 9}, dry_run=True

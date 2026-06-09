@@ -33,7 +33,6 @@ from mcp_server_polarion.server import mcp
 from mcp_server_polarion.tools._shared.cache import (
     get_cached_documents,
     invalidate_documents_cache,
-    record_document_custom_field_keys,
     store_cached_documents,
 )
 from mcp_server_polarion.tools._shared.guard import (
@@ -57,6 +56,7 @@ from mcp_server_polarion.tools._shared.helpers import (
     safe_str,
     split_module_id,
 )
+from mcp_server_polarion.tools._shared.sql import one_heading_per_document_sql
 from mcp_server_polarion.utils import (
     first_anchorless_block,
     html_to_markdown,
@@ -287,42 +287,38 @@ def _decorate_wikiblock(content: str) -> str:
     return f"```{macro}\n{body}\n```"
 
 
-def _get_module_id(item: object) -> str:
-    """Return a heading work item's ``module`` ID (``proj/space/doc``), or ``""``."""
-    if not isinstance(item, dict):
-        return ""
-    relationships = item.get("relationships", {})
-    if not isinstance(relationships, dict):
-        return ""
-    return extract_relationship_id(relationships, "module")
-
-
-def _extract_document_pair(
-    item: object,
-    documents: set[tuple[str, str]],
+def _extract_document_from_module(
+    resource: object,
+    documents: dict[tuple[str, str], str],
 ) -> None:
-    """Add a heading work item's (space_id, document_name) to *documents*.
+    """Record an included ``module`` resource as (space_id, document_name) -> type.
 
-    Module ``data.id`` format: ``{projectId}/{spaceId}/{documentName}``.
+    Module ``id`` format: ``{projectId}/{spaceId}/{documentName}``. The Polarion
+    document type rides in ``attributes.type``, present because discovery requests
+    ``include=module`` -- a plain ``module`` relationship carries only the resource
+    identifier, not the type.
     """
-    mod_id = _get_module_id(item)
-    if mod_id:
-        parts = mod_id.split("/")
-        if len(parts) >= 3:  # noqa: PLR2004
-            space_id = parts[1]
-            document_name = "/".join(parts[2:])
-            documents.add((space_id, document_name))
+    if not isinstance(resource, dict) or resource.get("type") != "documents":
+        return
+    space_id, document_name = split_module_id(safe_str(resource.get("id", "")))
+    if not space_id or not document_name:
+        return
+    attrs = resource.get("attributes")
+    doc_type = safe_str(attrs.get("type", "")) if isinstance(attrs, dict) else ""
+    documents[(space_id, document_name)] = doc_type
 
 
 async def _discover_documents(
     client: PolarionClient,
     project_id: str,
-) -> list[tuple[str, str]]:
-    """Discover all unique (space_id, document_name) pairs via linear scan.
+) -> list[tuple[str, str, str]]:
+    """Discover all (space_id, document_name, type) triples in *project_id*.
 
-    Iterates every heading-workitem page (page_size=100) and accumulates
-    unique ``module`` relationship IDs. TTL-cached so paginated callers reuse
-    the discovery.
+    One ``GROUP BY mod.c_uri`` SQL query collapses every heading work item to a
+    single representative per document, so each response page is one page of
+    *documents*, not headings -- far fewer round-trips than a per-heading scan.
+    ``include=module`` pulls each document's ``type`` into the ``included`` array
+    at no extra request. TTL-cached so paginated callers reuse the discovery.
     """
     cached = get_cached_documents(project_id)
     if cached is not None:
@@ -330,11 +326,13 @@ async def _discover_documents(
 
     base_params: dict[str, str | int] = {
         "fields[workitems]": "module",
-        "query": "type:heading",
+        "include": "module",
+        "fields[documents]": "type",
+        "query": one_heading_per_document_sql(project_id),
         "page[size]": DEFAULT_PAGE_SIZE,
     }
 
-    documents: set[tuple[str, str]] = set()
+    documents: dict[tuple[str, str], str] = {}
     page_number = 1
 
     while True:
@@ -346,8 +344,10 @@ async def _discover_documents(
         if not isinstance(data, list) or not data:
             break
 
-        for item in data:
-            _extract_document_pair(item, documents)
+        included = response.get("included", [])
+        if isinstance(included, list):
+            for resource in included:
+                _extract_document_from_module(resource, documents)
 
         raw_total = extract_total_count(response)
         if not compute_has_more(
@@ -356,7 +356,9 @@ async def _discover_documents(
             break
         page_number += 1
 
-    sorted_docs = sorted(documents)
+    sorted_docs = sorted(
+        (space, name, dtype) for (space, name), dtype in documents.items()
+    )
     store_cached_documents(project_id, sorted_docs)
     return sorted_docs
 
@@ -478,8 +480,9 @@ async def list_documents(
 ) -> PaginatedResult[DocumentSummary]:
     """List all documents in a Polarion project.
 
-    Returns ``(space_id, document_name)`` pairs other document tools accept.
-    First call per project runs a discovery scan cached 60s.
+    Returns ``space_id`` + ``document_name`` (other document tools accept these)
+    plus the document ``type``. First call per project runs a discovery scan
+    cached 60s.
     """
     client = get_client(ctx)
 
@@ -505,7 +508,9 @@ async def list_documents(
     end = start + page_size
     page_slice = documents[start:end]
 
-    items = [DocumentSummary(space_id=s, document_name=d) for s, d in page_slice]
+    items = [
+        DocumentSummary(space_id=s, document_name=d, type=t) for s, d, t in page_slice
+    ]
 
     return PaginatedResult[DocumentSummary](
         items=items,
@@ -595,10 +600,6 @@ async def get_document(
         status=safe_str(attributes.get("status", "")),
         content_html=content_html,
         custom_fields=extract_custom_fields(attributes, STANDARD_DOCUMENT_ATTRIBUTES),
-    )
-    # Prime the guard cache so update_document.custom_fields can validate keys.
-    record_document_custom_field_keys(
-        project_id, space_id, document_name, detail.custom_fields.keys()
     )
     return detail
 
@@ -697,11 +698,11 @@ async def read_document_parts(  # noqa: PLR0913
 ) -> PaginatedResult[DocumentPart]:
     """List the structural parts of a document in order.
 
-    Use for part IDs (``move_work_item_to_document``), heading levels, or
-    per-work-item type/status; each ``workitem`` part already carries its
-    ``description`` as Markdown. For plain reading prefer ``read_document``; to
-    filter by type/status/custom-field prefer ``list_work_items`` with a
-    ``SQL:(...)`` query (recipes via ``get_sql_query_recipes``).
+    Use to map a document's structure — part IDs
+    (``move_work_item_to_document``), heading levels, body content; each
+    ``workitem`` part carries its ``description`` as Markdown. For plain
+    reading prefer ``read_document``. To list a document's work items use
+    ``list_work_items`` instead.
     """
     client = get_client(ctx)
     path = (
@@ -807,6 +808,46 @@ async def read_document(  # noqa: PLR0913
     )
 
 
+async def _resolve_document_type(
+    client: PolarionClient,
+    project_id: str,
+    space_id: str,
+    document_name: str,
+) -> str:
+    """Resolve the ``type`` axis the custom-field guard keys on. Runs on dry_run
+    too, so the preview raises the same not-found / auth errors as the real write.
+    """
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/spaces/{encode_path_segment(space_id)}"
+        f"/documents/{encode_path_segment(document_name)}"
+    )
+    try:
+        response = await client.get(path, params={"fields[documents]": "type"})
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Document '{document_name}' not found in space '{space_id}' of project "
+            f"'{project_id}'. Use `list_documents` to verify the space ID and name."
+        ) from exc
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot read document -- check your POLARION_TOKEN permissions."
+        ) from exc
+    except PolarionError as exc:
+        raise RuntimeError(
+            f"Failed to read document type for guard: {exc.message}"
+        ) from exc
+    data = response.get("data", {})
+    attrs = data.get("attributes", {}) if isinstance(data, dict) else {}
+    doc_type = safe_str(attrs.get("type", "")) if isinstance(attrs, dict) else ""
+    if not doc_type:
+        raise RuntimeError(
+            f"Document '{space_id}/{document_name}' in project '{project_id}' has no "
+            f"resolvable type; cannot validate custom_fields. Pass `type` explicitly."
+        )
+    return doc_type
+
+
 @mcp.tool(
     tags={"write"},
     timeout=60.0,
@@ -892,8 +933,8 @@ async def update_document(  # noqa: PLR0913
 
     Prefer ``workflow_action`` over raw ``status``; it MUST pair with ≥1
     attribute (empty PATCH 400s). Unknown ``status`` / ``type`` raise
-    ``ValueError``; unknown ``custom_fields`` keys rejected unless seen on a
-    prior ``get_document``.
+    ``ValueError``; a ``custom_fields`` key absent from the document type's
+    sampled schema is rejected (a type with no populated customs blocks it).
     """
     if home_page_content_html is not None and not home_page_content_html.strip():
         raise ValueError(
@@ -958,15 +999,15 @@ async def update_document(  # noqa: PLR0913
         home_page_content_html=home_page_content_html,
         custom_fields=custom_fields,
     )
-    # Hard guard: reject custom-field keys unseen on a prior get_document
-    # (priming GET on miss) — unknown keys persist as silent ghosts.
-    await guard_document_custom_field_keys(
-        client,
-        project_id,
-        space_id,
-        document_name,
-        custom_fields or {},
-    )
+    # Unknown custom-field keys persist as silent ghosts; validate against the
+    # type's schema. A type change keys on the new type, else the current one.
+    if custom_fields:
+        effective_type = type or await _resolve_document_type(
+            client, project_id, space_id, document_name
+        )
+        await guard_document_custom_field_keys(
+            client, project_id, effective_type, custom_fields
+        )
 
     if dry_run:
         return DocumentUpdateResult(
@@ -1073,8 +1114,8 @@ async def create_document(  # noqa: PLR0913
     First call ``list_documents`` and confirm ``module_name`` is unique in the
     space (a duplicate returns HTTP 409). Supply only enum ids from
     ``list_document_enum_options`` — unverified ids persist as ghosts.
-    ``custom_fields`` keys are unvalidated; take them from a sibling via
-    ``get_document``.
+    ``custom_fields`` keys are validated against the document type's existing
+    schema; a key no document of that ``type`` uses is rejected.
 
     Starts empty (or with optional ``home_page_content``); add parts later via
     ``update_document`` / ``move_work_item_to_document``. ``module_name`` is the
@@ -1095,17 +1136,7 @@ async def create_document(  # noqa: PLR0913
         status=status,
     )
     if custom_fields:
-        # Create can't hard-guard keys (no config endpoint, no prior get) —
-        # warn instead.
-        logger.warning(
-            "create_document.custom_fields cannot be schema-validated "
-            "(no project-config endpoint for custom-field keys); ensure keys "
-            "come from a sibling document via get_document to avoid ghost "
-            "attributes. project=%s module=%s keys=%s",
-            project_id,
-            module_name,
-            sorted(custom_fields),
-        )
+        await guard_document_custom_field_keys(client, project_id, type, custom_fields)
 
     home_page_content_html = (
         stamp_block_ids(sanitize_html(markdown_to_html(home_page_content)))

@@ -13,6 +13,7 @@ class DocumentSummary(BaseModel):
 
     space_id: str
     document_name: str
+    type: str = ""
 
 
 class DocumentDetail(BaseModel):
