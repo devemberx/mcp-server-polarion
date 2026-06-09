@@ -37,7 +37,10 @@ def _reset_guard_caches() -> None:
 def mock_client() -> AsyncMock:
     """Return a mock PolarionClient with async methods."""
     client = AsyncMock(spec=PolarionClient)
-    client.get = AsyncMock()
+    # Default to an empty dict: an unstubbed GET (e.g. an enum-options probe a
+    # test doesn't care about) then defers cleanly instead of returning a nested
+    # AsyncMock whose ``.get`` leaks an unawaited coroutine.
+    client.get = AsyncMock(return_value={})
     client.post = AsyncMock()
     client.patch = AsyncMock()
     client.delete = AsyncMock()

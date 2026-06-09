@@ -323,15 +323,16 @@ async def guard_work_item_custom_field_keys(
     """Reject ``custom_fields`` keys absent from the type's real schema.
 
     The type schema (cached per ``(project, type)`` from the MIN-per-key sample)
-    is the sole source of truth. A still-unknown key forces one fresh re-fetch
-    (admin-added field) before rejecting → ``ValueError``. Empty schema fails
-    closed (``RuntimeError``): a ghost write is invisible and unrecoverable.
+    is the sole source of truth. A key unknown against a *cached* schema forces
+    one fresh re-fetch (admin-added field) before rejecting → ``ValueError``.
+    Empty schema fails closed (``RuntimeError``): a ghost write is unrecoverable.
     Unreachable validation (incl. SQL rejection) → ``RuntimeError``.
     """
     if not custom_fields:
         return
 
     schema = get_work_item_custom_keys(project_id, work_item_type)
+    fetched_fresh = schema is None
     if schema is None:
         schema = await _fetch_work_item_type_custom_keys(
             client, project_id, work_item_type
@@ -340,9 +341,13 @@ async def guard_work_item_custom_field_keys(
     if all(key in schema for key in custom_fields):
         return
 
-    # Key looks unknown: refetch fresh before rejecting (admin-added field).
-    invalidate_work_item_custom_keys(project_id, work_item_type)
-    schema = await _fetch_work_item_type_custom_keys(client, project_id, work_item_type)
+    # An unknown key against a cached schema may be an admin-added field; refetch
+    # once before rejecting. A just-fetched schema is already current, so skip.
+    if not fetched_fresh:
+        invalidate_work_item_custom_keys(project_id, work_item_type)
+        schema = await _fetch_work_item_type_custom_keys(
+            client, project_id, work_item_type
+        )
 
     if not schema:
         raise RuntimeError(
@@ -441,15 +446,16 @@ async def guard_document_custom_field_keys(
 
     Mirrors :func:`guard_work_item_custom_field_keys` on the document-type axis:
     the schema (cached per ``(project, document_type)`` from the heading +
-    ``include=module`` sample) is the sole source of truth. A still-unknown key forces
-    one fresh re-fetch (admin-added field) before rejecting → ``ValueError``. A
-    type whose documents populate no custom field yields an empty schema and fails
-    closed (``RuntimeError``). Unreachable validation → ``RuntimeError``.
+    ``include=module`` sample) is the sole source of truth. A key unknown against
+    a *cached* schema forces one fresh re-fetch (admin-added field) before
+    rejecting → ``ValueError``. A type whose documents populate no custom field
+    yields an empty schema and fails closed (``RuntimeError``).
     """
     if not custom_fields:
         return
 
     schema = get_document_type_custom_keys(project_id, document_type)
+    fetched_fresh = schema is None
     if schema is None:
         schema = await _fetch_document_type_custom_keys(
             client, project_id, document_type
@@ -458,8 +464,13 @@ async def guard_document_custom_field_keys(
     if all(key in schema for key in custom_fields):
         return
 
-    invalidate_document_type_custom_keys(project_id, document_type)
-    schema = await _fetch_document_type_custom_keys(client, project_id, document_type)
+    # An unknown key against a cached schema may be an admin-added field; refetch
+    # once before rejecting. A just-fetched schema is already current, so skip.
+    if not fetched_fresh:
+        invalidate_document_type_custom_keys(project_id, document_type)
+        schema = await _fetch_document_type_custom_keys(
+            client, project_id, document_type
+        )
 
     if not schema:
         raise RuntimeError(

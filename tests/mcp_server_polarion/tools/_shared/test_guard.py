@@ -389,7 +389,11 @@ class TestGuardWorkItemCustomFieldKeys:
         assert "k0" in schema
         assert len(schema) == _GUARD_PAGE_SIZE + 1
 
-    async def test_unknown_key_raises_after_retry(self, mock_client: AsyncMock) -> None:
+    async def test_unknown_key_against_fresh_sample_rejects_without_retry(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # Cold cache: the sample is already current, so an unknown key is rejected
+        # straight away -- no redundant second fetch.
         mock_client.get.return_value = _wi_list(
             {"title": "a", "type": "task", "risk_score": 5}
         )
@@ -402,8 +406,7 @@ class TestGuardWorkItemCustomFieldKeys:
         msg = str(exc.value)
         assert "release_train_id" in msg
         assert "risk_score" in msg
-        # Initial sample + one fresh bypass-retry before rejecting.
-        assert mock_client.get.await_count == 2
+        mock_client.get.assert_awaited_once()
 
     async def test_empty_sample_fails_closed(self, mock_client: AsyncMock) -> None:
         mock_client.get.return_value = {"data": []}
@@ -425,22 +428,22 @@ class TestGuardWorkItemCustomFieldKeys:
 
         mock_client.get.assert_awaited_once()
 
-    async def test_bypass_retry_finds_newly_present_key(
+    async def test_cached_schema_unknown_key_refetches_then_passes(
         self, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.side_effect = [
-            _wi_list({"title": "a", "type": "task", "risk_score": 5}),
-            _wi_list(
-                {"title": "a", "type": "task", "risk_score": 5},
-                {"title": "b", "type": "task", "release_train_id": "RT-1"},
-            ),
-        ]
+        # A key unknown against a *cached* (possibly stale) schema triggers one
+        # fresh re-fetch; the admin-added field now present, the write passes.
+        store_work_item_custom_keys("P", "task", frozenset({"risk_score"}))
+        mock_client.get.return_value = _wi_list(
+            {"title": "a", "type": "task", "risk_score": 5},
+            {"title": "b", "type": "task", "release_train_id": "RT-1"},
+        )
 
         await guard_work_item_custom_field_keys(
             mock_client, "P", "task", {"release_train_id": "RT-9"}
         )
 
-        assert mock_client.get.await_count == 2
+        mock_client.get.assert_awaited_once()
 
     async def test_sample_error_blocks_write(self, mock_client: AsyncMock) -> None:
         # The SQL sample fails -> fail-closed.
@@ -530,7 +533,9 @@ class TestGuardDocumentCustomFieldKeys:
             ("P", "systemReqSpecification")
         ) == frozenset({"version"})
 
-    async def test_unknown_key_raises_after_retry(self, mock_client: AsyncMock) -> None:
+    async def test_unknown_key_against_fresh_sample_rejects_without_retry(
+        self, mock_client: AsyncMock
+    ) -> None:
         mock_client.get.return_value = _docs_list(("generic", {"doc_risk": 3}))
 
         with pytest.raises(ValueError) as exc:
@@ -541,7 +546,21 @@ class TestGuardDocumentCustomFieldKeys:
         msg = str(exc.value)
         assert "ghost_key" in msg
         assert "doc_risk" in msg
-        assert mock_client.get.await_count == 2
+        mock_client.get.assert_awaited_once()
+
+    async def test_cached_schema_unknown_key_refetches_then_passes(
+        self, mock_client: AsyncMock
+    ) -> None:
+        store_document_type_custom_keys("P", "generic", frozenset({"doc_risk"}))
+        mock_client.get.return_value = _docs_list(
+            ("generic", {"doc_risk": 3, "new_field": 1})
+        )
+
+        await guard_document_custom_field_keys(
+            mock_client, "P", "generic", {"new_field": 1}
+        )
+
+        mock_client.get.assert_awaited_once()
 
     async def test_empty_sample_fails_closed(self, mock_client: AsyncMock) -> None:
         # No document of this type has any custom -> schema empty -> block.
