@@ -25,6 +25,7 @@ from mcp_server_polarion.tools._shared.cache import (
     store_work_item_custom_keys,
 )
 from mcp_server_polarion.tools._shared.guard import (
+    _GUARD_PAGE_SIZE,
     fetch_enum_option_ids,
     fetch_project_enum_option_ids,
     guard_document_custom_field_keys,
@@ -362,6 +363,32 @@ class TestGuardWorkItemCustomFieldKeys:
             {"risk_score", "release_train_id"}
         )
 
+    async def test_paginates_beyond_first_page_of_keys(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # A type with >100 distinct keys spans pages; the union must span them too,
+        # else a key on page 2+ would be false-rejected.
+        page1 = _wi_list(
+            *(
+                {"title": "x", "type": "task", f"k{i}": 1}
+                for i in range(_GUARD_PAGE_SIZE)
+            )
+        )
+        page2 = _wi_list({"title": "y", "type": "task", "late_key": 9})
+        mock_client.get.side_effect = [page1, page2]
+
+        await guard_work_item_custom_field_keys(
+            mock_client, "P", "task", {"late_key": 9}
+        )
+
+        # Full page 1 (==100) forces page 2; short page 2 stops the loop.
+        assert mock_client.get.await_count == 2
+        schema = cache_mod._work_item_custom_key_cache.get(("P", "task"))
+        assert schema is not None
+        assert "late_key" in schema
+        assert "k0" in schema
+        assert len(schema) == _GUARD_PAGE_SIZE + 1
+
     async def test_unknown_key_raises_after_retry(self, mock_client: AsyncMock) -> None:
         mock_client.get.return_value = _wi_list(
             {"title": "a", "type": "task", "risk_score": 5}
@@ -386,22 +413,17 @@ class TestGuardWorkItemCustomFieldKeys:
                 mock_client, "P", "task", {"risk_score": 5}
             )
 
-    async def test_lucene_fallback_on_sql_rejection(
-        self, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.side_effect = [
-            PolarionError("SQL not supported"),
-            _wi_list({"title": "a", "type": "task", "risk_score": 5}),
-        ]
+    async def test_sql_rejection_fails_closed(self, mock_client: AsyncMock) -> None:
+        # No Lucene fallback: a rejected SQL sample blocks the write rather than
+        # validating against an incomplete schema.
+        mock_client.get.side_effect = PolarionError("SQL not supported")
 
-        await guard_work_item_custom_field_keys(
-            mock_client, "P", "task", {"risk_score": 9}
-        )
+        with pytest.raises(RuntimeError, match="Refusing the write"):
+            await guard_work_item_custom_field_keys(
+                mock_client, "P", "task", {"risk_score": 9}
+            )
 
-        assert mock_client.get.await_count == 2
-        fallback_params = mock_client.get.await_args_list[1].kwargs["params"]
-        assert fallback_params["query"] == "type:task"
-        assert fallback_params["fields[workitems]"] == "@all"
+        mock_client.get.assert_awaited_once()
 
     async def test_bypass_retry_finds_newly_present_key(
         self, mock_client: AsyncMock
@@ -421,7 +443,7 @@ class TestGuardWorkItemCustomFieldKeys:
         assert mock_client.get.await_count == 2
 
     async def test_sample_error_blocks_write(self, mock_client: AsyncMock) -> None:
-        # Both the SQL primary and the Lucene fallback fail -> fail-closed.
+        # The SQL sample fails -> fail-closed.
         mock_client.get.side_effect = PolarionError("backend down")
 
         with pytest.raises(RuntimeError, match="Refusing the write"):
@@ -441,16 +463,22 @@ class TestGuardWorkItemCustomFieldKeys:
 
 
 def _docs_list(*docs: tuple[str, dict[str, object]]) -> dict[str, object]:
-    """Project-wide /documents response: one (type, customs) pair per document."""
+    """Heading + ``include=module`` sample: one module per document in ``included``.
+
+    ``data`` rows are bare heading placeholders that only drive pagination; the
+    document type + customs ride in the ``included`` module resources.
+    """
     return {
-        "data": [
+        "data": [{"type": "workitems"} for _ in docs],
+        "included": [
             {
                 "type": "documents",
                 "id": f"P/_default/D{i}",
                 "attributes": {"title": "t", "type": dtype, **customs},
             }
             for i, (dtype, customs) in enumerate(docs)
-        ]
+        ],
+        "meta": {"totalCount": len(docs)},
     }
 
 
@@ -492,7 +520,10 @@ class TestGuardDocumentCustomFieldKeys:
         mock_client.get.assert_awaited_once()
         params = mock_client.get.call_args.kwargs["params"]
         path = mock_client.get.call_args.args[0]
-        assert path == "/projects/P/documents"
+        assert path == "/projects/P/workitems"
+        # Heading-discovery SQL + include=module surfaces each doc's type+customs.
+        assert params["query"].startswith("SQL:(")
+        assert params["include"] == "module"
         assert params["fields[documents]"] == "@all"
         # Every type's schema is stored from the one fetch.
         assert cache_mod._document_type_custom_key_cache.get(
