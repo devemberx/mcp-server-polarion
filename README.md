@@ -131,6 +131,7 @@ claude mcp add mcp-server-polarion \
 | `list_projects` | List accessible projects |
 | `list_documents` | List documents in a project |
 | `list_work_items` | Search work items with Lucene or SQL queries |
+| `get_sql_query_recipes` | Fetch copy-paste SQL recipes for
 | `get_document` | Get document metadata, optionally with the raw body HTML |
 | `read_document` | Render a document end-to-end as Markdown |
 | `read_document_parts` | List a document's structural parts with embedded work item metadata |
@@ -161,27 +162,69 @@ All list tools support pagination via `page_size` (1–100) and `page_number` pa
 
 ## Example Prompts
 
+<details>
+<summary><b>Discovery & search</b></summary>
+
+> "List the projects I can access, then show the documents in project MCPT with their types."
+
 > "List the documents in space 'Specifications' of project MCPT."
+
+> "Find every approved requirement in project MCPT whose title starts with 'Auth' and show me their owning document."
+
+> "Search project MCPT for work items where the custom field 'verification_method' is 'Test' — grab the SQL recipes first if you need a join."
+
+> "Find all work items in the SRS module of project MCPT that were changed in the last sprint."
+
+</details>
+
+<details>
+<summary><b>Reading & summarizing</b></summary>
 
 > "Read the SRS document of project MCPT and summarize each open requirement."
 
-> "Find every approved requirement in project MCPT whose title starts with 'Auth' and show me their owning document."
+> "Show me the structural outline of the SRS document — headings and the work items under each."
+
+> "Read work item MCPT-042 as Markdown and explain what it asks for."
 
 > "Show the outgoing and incoming links for MCPT-042 and flag any child task that is still open."
 
 > "Which requirements in the SRS document have no 'verifies' back link from a test case?"
 
-> "List the valid status values for a defect in project MCPT, then move MCPT-077 to 'in_review'."
+> "List the open comment threads on the SRS document and who started each."
+
+</details>
+
+<details>
+<summary><b>Creating & editing</b></summary>
 
 > "Create a task in project MCPT titled 'Refactor authentication module' and link it to MCPT-042 as 'relates_to'."
 
+> "Create three test-case work items in project MCPT from this checklist and link each one to MCPT-042 as 'verifies'."
+
 > "Add a new requirement under section 3.2 of the SRS document with the body I just drafted."
+
+> "Update the description of MCPT-042 with the revised text I'll paste, keeping the existing formatting."
+
+> "Add a comment on the SRS document asking the owner to clarify section 4, then reply to thread T-12 marking it resolved."
+
+</details>
+
+<details>
+<summary><b>Workflow & reorganization</b></summary>
+
+> "List the valid status values for a defect in project MCPT, then move MCPT-077 to 'in_review'."
+
+> "Bump MCPT-042's priority to 90, set severity to 'major', and approve the workflow."
+
+> "Change MCPT-201 from a task to a requirement and re-apply its previous status."
 
 > "Move MCPT-201 into the SRS document right after MCPT-150."
 
 > "Detach MCPT-077 from its document so I can rework it as a standalone task."
 
-> "Bump MCPT-042's priority to 90, set severity to 'major', and approve the workflow."
+> "Mark the 'blocks' link from MCPT-042 to MCPT-099 as suspect, then delete the stale 'relates_to' link to MCPT-010."
+
+</details>
 
 ## License
 
