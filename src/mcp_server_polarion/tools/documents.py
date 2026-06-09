@@ -56,6 +56,7 @@ from mcp_server_polarion.tools._shared.helpers import (
     safe_str,
     split_module_id,
 )
+from mcp_server_polarion.tools._shared.sql import one_heading_per_document_sql
 from mcp_server_polarion.utils import (
     first_anchorless_block,
     html_to_markdown,
@@ -286,42 +287,38 @@ def _decorate_wikiblock(content: str) -> str:
     return f"```{macro}\n{body}\n```"
 
 
-def _get_module_id(item: object) -> str:
-    """Return a heading work item's ``module`` ID (``proj/space/doc``), or ``""``."""
-    if not isinstance(item, dict):
-        return ""
-    relationships = item.get("relationships", {})
-    if not isinstance(relationships, dict):
-        return ""
-    return extract_relationship_id(relationships, "module")
-
-
-def _extract_document_pair(
-    item: object,
-    documents: set[tuple[str, str]],
+def _extract_document_from_module(
+    resource: object,
+    documents: dict[tuple[str, str], str],
 ) -> None:
-    """Add a heading work item's (space_id, document_name) to *documents*.
+    """Record an included ``module`` resource as (space_id, document_name) -> type.
 
-    Module ``data.id`` format: ``{projectId}/{spaceId}/{documentName}``.
+    Module ``id`` format: ``{projectId}/{spaceId}/{documentName}``. The Polarion
+    document type rides in ``attributes.type``, present because discovery requests
+    ``include=module`` -- a plain ``module`` relationship carries only the resource
+    identifier, not the type.
     """
-    mod_id = _get_module_id(item)
-    if mod_id:
-        parts = mod_id.split("/")
-        if len(parts) >= 3:  # noqa: PLR2004
-            space_id = parts[1]
-            document_name = "/".join(parts[2:])
-            documents.add((space_id, document_name))
+    if not isinstance(resource, dict) or resource.get("type") != "documents":
+        return
+    space_id, document_name = split_module_id(safe_str(resource.get("id", "")))
+    if not space_id or not document_name:
+        return
+    attrs = resource.get("attributes")
+    doc_type = safe_str(attrs.get("type", "")) if isinstance(attrs, dict) else ""
+    documents[(space_id, document_name)] = doc_type
 
 
 async def _discover_documents(
     client: PolarionClient,
     project_id: str,
-) -> list[tuple[str, str]]:
-    """Discover all unique (space_id, document_name) pairs via linear scan.
+) -> list[tuple[str, str, str]]:
+    """Discover all (space_id, document_name, type) triples in *project_id*.
 
-    Iterates every heading-workitem page (page_size=100) and accumulates
-    unique ``module`` relationship IDs. TTL-cached so paginated callers reuse
-    the discovery.
+    One ``GROUP BY mod.c_uri`` SQL query collapses every heading work item to a
+    single representative per document, so each response page is one page of
+    *documents*, not headings -- far fewer round-trips than a per-heading scan.
+    ``include=module`` pulls each document's ``type`` into the ``included`` array
+    at no extra request. TTL-cached so paginated callers reuse the discovery.
     """
     cached = get_cached_documents(project_id)
     if cached is not None:
@@ -329,11 +326,13 @@ async def _discover_documents(
 
     base_params: dict[str, str | int] = {
         "fields[workitems]": "module",
-        "query": "type:heading",
+        "include": "module",
+        "fields[documents]": "type",
+        "query": one_heading_per_document_sql(project_id),
         "page[size]": DEFAULT_PAGE_SIZE,
     }
 
-    documents: set[tuple[str, str]] = set()
+    documents: dict[tuple[str, str], str] = {}
     page_number = 1
 
     while True:
@@ -345,8 +344,10 @@ async def _discover_documents(
         if not isinstance(data, list) or not data:
             break
 
-        for item in data:
-            _extract_document_pair(item, documents)
+        included = response.get("included", [])
+        if isinstance(included, list):
+            for resource in included:
+                _extract_document_from_module(resource, documents)
 
         raw_total = extract_total_count(response)
         if not compute_has_more(
@@ -355,7 +356,9 @@ async def _discover_documents(
             break
         page_number += 1
 
-    sorted_docs = sorted(documents)
+    sorted_docs = sorted(
+        (space, name, dtype) for (space, name), dtype in documents.items()
+    )
     store_cached_documents(project_id, sorted_docs)
     return sorted_docs
 
@@ -477,8 +480,9 @@ async def list_documents(
 ) -> PaginatedResult[DocumentSummary]:
     """List all documents in a Polarion project.
 
-    Returns ``(space_id, document_name)`` pairs other document tools accept.
-    First call per project runs a discovery scan cached 60s.
+    Returns ``space_id`` + ``document_name`` (other document tools accept these)
+    plus the document ``type``. First call per project runs a discovery scan
+    cached 60s.
     """
     client = get_client(ctx)
 
@@ -504,7 +508,9 @@ async def list_documents(
     end = start + page_size
     page_slice = documents[start:end]
 
-    items = [DocumentSummary(space_id=s, document_name=d) for s, d in page_slice]
+    items = [
+        DocumentSummary(space_id=s, document_name=d, type=t) for s, d, t in page_slice
+    ]
 
     return PaginatedResult[DocumentSummary](
         items=items,

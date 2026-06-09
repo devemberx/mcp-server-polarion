@@ -64,8 +64,8 @@ _GUARD_TTL_SECONDS: Final[float] = 60.0
 # (``create_document`` also invalidates on write).
 _DOCUMENT_LIST_TTL_SECONDS: Final[float] = 60.0
 
-# project_id -> tuple of (space_id, document_name) pairs.
-_document_list_cache: TTLCache[str, tuple[tuple[str, str], ...]] = TTLCache(
+# project_id -> tuple of (space_id, document_name, document_type) triples.
+_document_list_cache: TTLCache[str, tuple[tuple[str, str, str], ...]] = TTLCache(
     _DOCUMENT_LIST_TTL_SECONDS
 )
 # (project, resource, field, type) -> valid option ids.
@@ -90,7 +90,7 @@ _document_type_custom_key_cache: TTLCache[tuple[str, str], frozenset[str]] = TTL
 )
 
 
-def get_cached_documents(project_id: str) -> list[tuple[str, str]] | None:
+def get_cached_documents(project_id: str) -> list[tuple[str, str, str]] | None:
     """Return the cached document list for *project_id* or ``None``."""
     cached = _document_list_cache.get(project_id)
     return list(cached) if cached is not None else None
@@ -98,7 +98,7 @@ def get_cached_documents(project_id: str) -> list[tuple[str, str]] | None:
 
 def store_cached_documents(
     project_id: str,
-    documents: list[tuple[str, str]],
+    documents: list[tuple[str, str, str]],
 ) -> None:
     """Cache *documents* for *project_id* for ``_DOCUMENT_LIST_TTL_SECONDS``."""
     _document_list_cache.set(project_id, tuple(documents))
