@@ -118,6 +118,19 @@ class TestCheckGetBeforeUpdate:
         assert passed is False
         assert "MCPT-1" in reason
 
+    def test_qualified_and_short_work_item_ids_match(self) -> None:
+        # A project-qualified id in the get and a short id in the update
+        # target the same item; the check must not false-fail.
+        trajectory = [
+            _call("get_work_item", {"project_id": "P", "work_item_id": "P/MCPT-1"}),
+            _call(
+                "update_work_item",
+                {"project_id": "P", "work_item_id": "MCPT-1", "title": "x"},
+            ),
+        ]
+        passed, _ = checks.check_get_before_update(trajectory, {})
+        assert passed is True
+
     def test_get_after_update_does_not_satisfy(self) -> None:
         trajectory = [
             _call(
@@ -174,7 +187,10 @@ class TestCheckResolveRootComment:
     def test_list_then_resolve_root_passes(self) -> None:
         trajectory = [
             _call("list_document_comments", dict(_DOC_ARGS)),
-            _call("update_document_comment", {**_DOC_ARGS, "comment_id": "1"}),
+            _call(
+                "update_document_comment",
+                {**_DOC_ARGS, "comment_id": "1", "resolved": True},
+            ),
         ]
         passed, _ = checks.check_resolve_root_comment(trajectory, self._PARAMS)
         assert passed is True
@@ -182,7 +198,10 @@ class TestCheckResolveRootComment:
     def test_resolving_only_reply_fails(self) -> None:
         trajectory = [
             _call("list_document_comments", dict(_DOC_ARGS)),
-            _call("update_document_comment", {**_DOC_ARGS, "comment_id": "2"}),
+            _call(
+                "update_document_comment",
+                {**_DOC_ARGS, "comment_id": "2", "resolved": True},
+            ),
         ]
         passed, reason = checks.check_resolve_root_comment(trajectory, self._PARAMS)
         assert passed is False
@@ -191,7 +210,10 @@ class TestCheckResolveRootComment:
     def test_full_segment_only_reply_id_still_fails(self) -> None:
         trajectory = [
             _call("list_document_comments", dict(_DOC_ARGS)),
-            _call("update_document_comment", {**_DOC_ARGS, "comment_id": "P/S/D/2"}),
+            _call(
+                "update_document_comment",
+                {**_DOC_ARGS, "comment_id": "P/S/D/2", "resolved": True},
+            ),
         ]
         passed, _ = checks.check_resolve_root_comment(trajectory, self._PARAMS)
         assert passed is False
@@ -201,15 +223,41 @@ class TestCheckResolveRootComment:
         # the root resolve already did the job.
         trajectory = [
             _call("list_document_comments", dict(_DOC_ARGS)),
-            _call("update_document_comment", {**_DOC_ARGS, "comment_id": "1"}),
-            _call("update_document_comment", {**_DOC_ARGS, "comment_id": "2"}),
+            _call(
+                "update_document_comment",
+                {**_DOC_ARGS, "comment_id": "1", "resolved": True},
+            ),
+            _call(
+                "update_document_comment",
+                {**_DOC_ARGS, "comment_id": "2", "resolved": True},
+            ),
         ]
         passed, _ = checks.check_resolve_root_comment(trajectory, self._PARAMS)
         assert passed is True
 
+    def test_reopened_root_does_not_mask_reply_resolve(self) -> None:
+        # resolved=False on the root is not a resolution; the reply attempt
+        # must still be flagged.
+        trajectory = [
+            _call("list_document_comments", dict(_DOC_ARGS)),
+            _call(
+                "update_document_comment",
+                {**_DOC_ARGS, "comment_id": "1", "resolved": False},
+            ),
+            _call(
+                "update_document_comment",
+                {**_DOC_ARGS, "comment_id": "2", "resolved": True},
+            ),
+        ]
+        passed, _ = checks.check_resolve_root_comment(trajectory, self._PARAMS)
+        assert passed is False
+
     def test_resolving_without_prior_list_fails(self) -> None:
         trajectory = [
-            _call("update_document_comment", {**_DOC_ARGS, "comment_id": "1"})
+            _call(
+                "update_document_comment",
+                {**_DOC_ARGS, "comment_id": "1", "resolved": True},
+            )
         ]
         passed, reason = checks.check_resolve_root_comment(trajectory, self._PARAMS)
         assert passed is False
@@ -348,6 +396,28 @@ class TestCheckRoundTripSource:
         assert passed is False
 
         trajectory[0]["args"]["include_description_html"] = True
+        passed, _ = checks.check_round_trip_source(trajectory, {})
+        assert passed is True
+
+    def test_qualified_get_id_satisfies_short_id_write(self) -> None:
+        trajectory = [
+            _call(
+                "get_work_item",
+                {
+                    "project_id": "P",
+                    "work_item_id": "P/MCPT-200",
+                    "include_description_html": True,
+                },
+            ),
+            _call(
+                "update_work_item",
+                {
+                    "project_id": "P",
+                    "work_item_id": "MCPT-200",
+                    "description_html": "<p>x</p>",
+                },
+            ),
+        ]
         passed, _ = checks.check_round_trip_source(trajectory, {})
         assert passed is True
 
@@ -549,3 +619,21 @@ class TestCheckScopedQueryUsesSql:
         ]
         passed, _ = checks.check_scoped_query_uses_sql(trajectory, {})
         assert passed is True
+
+    def test_module_as_plain_text_passes(self) -> None:
+        # "module" as a search term, not a Lucene field name.
+        trajectory = [
+            _call("list_work_items", {"project_id": "P", "query": "title:module*"})
+        ]
+        passed, _ = checks.check_scoped_query_uses_sql(trajectory, {})
+        assert passed is True
+
+    def test_module_subfield_query_fails(self) -> None:
+        trajectory = [
+            _call(
+                "list_work_items",
+                {"project_id": "P", "query": "module.id:FakeDoc"},
+            )
+        ]
+        passed, _ = checks.check_scoped_query_uses_sql(trajectory, {})
+        assert passed is False

@@ -11,6 +11,7 @@ unit tests).
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -122,8 +123,19 @@ _UPDATE_TO_GET: dict[str, tuple[str, tuple[str, ...]]] = {
 
 
 def _target_key(call: dict[str, Any], keys: tuple[str, ...]) -> tuple[object, ...]:
-    args = call.get("args", {}) or {}
-    return tuple(args.get(k) for k in keys)
+    """Identifier tuple for matching two calls on the same target.
+
+    ``work_item_id`` is normalized via ``_short_id`` so a project-qualified id
+    in one call still matches the short form in another. ``document_name`` is
+    left verbatim — document names may legitimately contain ``/``.
+    """
+    args = _args(call)
+    return tuple(
+        _short_id(args[k])
+        if k == "work_item_id" and args.get(k) is not None
+        else args.get(k)
+        for k in keys
+    )
 
 
 def check_get_before_update(
@@ -168,7 +180,8 @@ def check_resolve_root_comment(
     so a stray reply attempt alongside a root resolve is tolerated. The
     silent failure the tool layer cannot catch: resolving ONLY a reply and
     reporting the thread done, or PATCHing an id never observed via
-    ``list_document_comments``. Root ids come from ``params["root_ids"]``.
+    ``list_document_comments``. Only ``resolved=True`` on a root counts as a
+    resolution. Root ids come from ``params["root_ids"]``.
     """
     root_ids = {str(r) for r in params.get("root_ids", [])}
     doc_keys = ("project_id", "space_id", "document_name")
@@ -188,9 +201,11 @@ def check_resolve_root_comment(
                 "updated a comment without a prior list_document_comments on "
                 "the same document -- the comment id was guessed, not observed"
             )
-        comment_id = _short_id(_args(call).get("comment_id", ""))
+        args = _args(call)
+        comment_id = _short_id(args.get("comment_id", ""))
         if comment_id in root_ids:
-            resolved_root = True
+            if args.get("resolved") is True:
+                resolved_root = True
         else:
             resolved_non_root = comment_id
     if resolved_non_root is not None and not resolved_root:
@@ -385,13 +400,15 @@ def check_scoped_query_uses_sql(
     """Module-scoped work item searches must not use a Lucene ``module`` term.
 
     ``module`` is not Lucene-indexed -- only the ``SQL:(...)`` prefix (or
-    ``read_document_parts``) scopes by document.
+    ``read_document_parts``) scopes by document. Matches ``module`` only as a
+    Lucene field name (``module:`` / ``module.id:``), not as plain text.
     """
+    field_re = re.compile(r"\bmodule(?:\.\w+)?\s*:", re.IGNORECASE)
     for call in trajectory:
         if call.get("name") != "list_work_items":
             continue
         query = str(_args(call).get("query") or "")
-        if "module" in query.lower() and not query.lstrip().lower().startswith("sql:"):
+        if field_re.search(query) and not query.lstrip().lower().startswith("sql:"):
             return False, (
                 f"list_work_items used Lucene query '{query}' -- module is not "
                 "indexed; use the SQL:(...) prefix or read_document_parts"
