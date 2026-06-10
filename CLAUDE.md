@@ -86,7 +86,7 @@ Applies to ALL comments/docstrings incl. CLAUDE.md.
 
 Full rules in [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md); enforced by `.githooks/commit-msg` + `.claude/hooks/`.
 
-- Branches: `<type>/<short-kebab-summary>` off `main`. Types: `feature|fix|refactor|docs|chore|ci`.
+- Branches: `<type>/<short-kebab-summary>` off `main`. Types: `feature|fix|refactor|test|docs|chore|ci`.
 - Commits: `type(scope): summary` ≤50 chars, lowercase imperative, no period. Types: `feat|fix|docs|refactor|perf|test|ci|chore`. Scopes: `tool|server|transport|config|deps|utils|model|project|meta|git`. Body: blank line + exactly 2 bullets (motivation, then change), ≤120 chars each.
 - PR template checklist: flip `[ ]`→`[x]`; don't delete unchecked options.
 - Squash merge only; NEVER pass `--subject` to `gh pr merge`.
