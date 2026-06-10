@@ -366,17 +366,16 @@ async def _get_back_link_page(
 async def list_work_item_links(  # noqa: PLR0913
     ctx: Context,
     project_id: str = Field(description="Polarion project ID."),
-    work_item_id: str = Field(description="Work Item ID (e.g. 'MCPT-001')."),
+    work_item_id: str = Field(description="Work item ID (e.g. 'MCPT-001')."),
     direction: Literal["forward", "back"] = "forward",
     page_size: int = Field(default=DEFAULT_PAGE_SIZE, ge=1, le=100),
     page_number: int = Field(default=1, ge=1),
 ) -> PaginatedResult[WorkItemLink]:
-    """List a work item's outgoing or incoming links.
+    """List a work item's links, one direction per call.
 
-    One direction per call. Forward exposes ``role`` (``parent``, ``verifies``,
-    …) and ``suspect``. Back falls back to a ``linkedWorkItems:`` Lucene query
-    that drops the role, so back ``role`` is ``None`` — recover via forward on
-    the source.
+    Forward carries ``role`` (``parent``, ``verifies``, …) and ``suspect``;
+    back is a Lucene fallback that drops ``role`` (always ``None``) — recover
+    it via forward on the source.
     """
     client = get_client(ctx)
 
@@ -413,33 +412,31 @@ async def create_work_item_links(
     project_id: str = Field(min_length=1, description="Source work item's project ID."),
     work_item_id: str = Field(
         min_length=1,
-        description="Source work item ID (the links' outgoing endpoint).",
+        description="Source work item ID.",
     ),
     links: list[WorkItemLinkSpec] = Field(  # noqa: B008
         min_length=1,
         max_length=MAX_BULK_ITEMS,
-        description="One or more links to create under the source work item (1-50).",
+        description="Links to create under the source work item (1-50).",
     ),
     dry_run: bool = Field(
         default=False,
-        description="When True, return payload preview without calling Polarion.",
+        description="Preview payload without writing; guards still query Polarion.",
     ),
 ) -> WorkItemLinksCreateResult:
-    """Create one or more outgoing links (1-50) from a single source work item.
+    """Create 1-50 outgoing links from one source work item, atomically.
 
-    All share the source and post atomically. Per spec ``target_project_id``
-    defaults to source; ``revision`` pins (else HEAD); ``suspect`` marks
-    re-review. Guards both role (``workitem-link-role``) and target existence
-    before POST (on dry_run too) — unguarded they store as ghost/dangling links.
+    Role and target existence are validated before POST (Polarion itself
+    stores ghost roles / dangling targets silently). Per spec:
+    ``target_project_id`` defaults to source, ``revision`` pins (else HEAD),
+    ``suspect`` flags re-review. A 4xx (e.g. duplicate role+target → 409)
+    rolls back the whole batch — re-query ``list_work_item_links`` before
+    retrying. ``link_ids`` are the delete-path ids, input order.
 
-    ``link_ids`` are 5-segment composites in input order (delete path ids). POST
-    is atomic: a 4xx (e.g. duplicate (role,target) → 409) rolls back the batch —
-    re-query before retry. Raises on an id-count mismatch.
-
-    Phantom-success footgun: when the source is in a document,
-    ``move_work_item_to_document`` already auto-created one link. A NEW same-role
-    link returns 201 but is NOT persisted. Verify forward (source) + back
-    (target); if missing, detach → create → re-attach.
+    Phantom success: when the source sits in a document,
+    ``move_work_item_to_document`` already auto-created one heading link; a
+    NEW same-role link 201s but is NOT persisted — verify with
+    ``list_work_item_links``.
     """
     payload = _build_create_links_payload(
         source_project_id=project_id,
@@ -509,28 +506,26 @@ async def delete_work_item_links(
     project_id: str = Field(min_length=1, description="Source work item's project ID."),
     work_item_id: str = Field(
         min_length=1,
-        description="Source work item ID (the links' outgoing endpoint).",
+        description="Source work item ID.",
     ),
     links: list[WorkItemLinkRef] = Field(  # noqa: B008
         min_length=1,
         max_length=MAX_BULK_ITEMS,
-        description="One or more existing outgoing links to delete (1-50).",
+        description="Existing outgoing links to delete (1-50).",
     ),
     dry_run: bool = Field(
         default=False,
-        description="When True, return payload preview without calling Polarion.",
+        description=(
+            "Preview payload without deleting; the pre-read still queries Polarion."
+        ),
     ),
 ) -> WorkItemLinksDeleteResult:
-    """Delete one or more outgoing links (1-50) from a single source work item.
+    """Delete 1-50 outgoing links from one source work item.
 
-    Mirrors ``create_work_item_links``. Only **outgoing** links removed (delete a
-    back link on the other work item). Identify refs from a prior create or from
-    ``list_work_item_links(direction="forward")``.
-
-    Polarion's delete is idempotent and silent (204 even for stale refs). To make
-    no-ops visible the tool pre-reads existing links and splits into
-    ``deleted_link_ids`` / ``not_found_link_ids`` (no-op reported, never raised).
-    Pre-read is fail-closed (``RuntimeError`` before any delete).
+    Outgoing only — delete a back link from its source item. Refs come from
+    ``list_work_item_links(direction="forward")`` or a prior create. Stale
+    refs never raise: a pre-read splits results into ``deleted_link_ids`` /
+    ``not_found_link_ids``.
     """
     link_ids, payload = _build_delete_links_payload(
         source_project_id=project_id,
@@ -599,36 +594,36 @@ async def update_work_item_link(  # noqa: PLR0913
     project_id: str = Field(min_length=1, description="Source work item's project ID."),
     work_item_id: str = Field(
         min_length=1,
-        description="Source work item ID (the link's outgoing endpoint).",
+        description="Source work item ID.",
     ),
-    role: str = Field(min_length=1, description="Link role id of the existing link."),
+    role: str = Field(min_length=1, description="Role id of the existing link."),
     target_work_item_id: str = Field(
         min_length=1,
-        description="Target work item ID (the link's incoming endpoint).",
+        description="Target work item ID.",
     ),
     target_project_id: str | None = Field(
         default=None,
-        description="Target's project; defaults to the source's project.",
+        description="Defaults to the source's project.",
     ),
     suspect: bool | None = Field(
         default=None,
-        description="New suspect flag value; None leaves it unchanged.",
+        description="New suspect flag; ``None`` = unchanged.",
     ),
     revision: str | None = Field(
         default=None,
-        description="New revision pin; None leaves the existing pin unchanged.",
+        description="New revision pin; ``None`` = unchanged.",
     ),
     dry_run: bool = Field(
         default=False,
-        description="When True, return payload preview without calling Polarion.",
+        description="Preview payload without calling Polarion.",
     ),
 ) -> WorkItemLinkUpdateResult:
-    """Update ``suspect`` / ``revision`` on one existing outgoing work item link.
+    """Set ``suspect`` and/or ``revision`` on one existing outgoing link.
 
-    Identify the link via ``list_work_item_links(direction="forward")`` (role +
-    target address one link). ``suspect`` / ``revision`` tri-state: a value
-    updates, ``None`` leaves unchanged — at least one required (all-``None``
-    400s). One link per call (no bulk PATCH). A ``role`` typo 404s.
+    Identify the link via ``list_work_item_links(direction="forward")``
+    (role + target address one link). ``None`` = unchanged; at least one of
+    ``suspect`` / ``revision`` required. One link per call. A ``role`` typo
+    404s.
     """
     if suspect is None and revision is None:
         raise ValueError(

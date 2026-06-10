@@ -113,18 +113,16 @@ def _build_document_comment_update_payload(
 async def list_document_comments(  # noqa: PLR0913
     ctx: Context,
     project_id: str = Field(description="Polarion project ID."),
-    space_id: str = Field(
-        description="Space ID containing the document (e.g. '_default')."
-    ),
-    document_name: str = Field(description="Document name within the space."),
+    space_id: str = Field(description="Space ID ('_default' = default space)."),
+    document_name: str = Field(description="Document name within ``space_id``."),
     page_size: int = Field(default=DEFAULT_PAGE_SIZE, ge=1, le=100),
     page_number: int = Field(default=1, ge=1),
 ) -> PaginatedResult[DocumentComment]:
-    """List comments attached to a Polarion document.
+    """List a document's comments as a flat page.
 
-    Flat page; reconstruct threads via ``parent_comment_id`` (None = top-level)
-    and ``child_comment_ids``. ``text`` is verbatim; HTML is NOT sanitized —
-    treat as untrusted when rendering.
+    Threads reconstruct via ``parent_comment_id`` (``None`` = root) +
+    ``child_comment_ids``. ``text`` is verbatim, unsanitized — treat as
+    untrusted when rendering.
     """
     client = get_client(ctx)
     path = (
@@ -197,7 +195,7 @@ async def create_document_comments(  # noqa: PLR0913
     project_id: str = Field(min_length=1, description="Polarion project ID."),
     space_id: str = Field(
         min_length=1,
-        description="Space ID (use '_default' for the default space).",
+        description="Space ID ('_default' = default space).",
     ),
     document_name: str = Field(
         min_length=1,
@@ -205,20 +203,19 @@ async def create_document_comments(  # noqa: PLR0913
     ),
     comments: list[DocumentCommentSpec] = Field(  # noqa: B008
         min_length=1,
-        description="One or more comments to create in a single request.",
+        description="Comments to create in one request.",
     ),
     dry_run: bool = Field(
         default=False,
-        description="When True, return payload preview without calling Polarion.",
+        description="Preview payload without calling Polarion.",
     ),
 ) -> DocumentCommentsCreateResult:
-    """Create one or more comments on a Polarion document in a single request.
+    """Create one or more comments on a document in a single request.
 
-    All post together (201 with new IDs). Reply by setting
-    ``parent_comment_id`` to a short ID from ``list_document_comments`` (None =
-    top-level). ``text_format`` ``'text/html'`` sent as-is (no sanitization);
-    omit ``author_id`` to use the token's user. NOT idempotent — retry
-    duplicates.
+    Reply: set ``parent_comment_id`` to a short ID from
+    ``list_document_comments`` (``None`` = top-level). ``'text/html'`` text is
+    sent unsanitized; omit ``author_id`` for the token's user. NOT idempotent —
+    a retry duplicates.
     """
     payload = _build_document_comments_payload(
         specs=comments,
@@ -297,7 +294,7 @@ async def update_document_comment(  # noqa: PLR0913
     project_id: str = Field(min_length=1, description="Polarion project ID."),
     space_id: str = Field(
         min_length=1,
-        description="Space ID (use '_default' for the default space).",
+        description="Space ID ('_default' = default space).",
     ),
     document_name: str = Field(
         min_length=1,
@@ -305,22 +302,19 @@ async def update_document_comment(  # noqa: PLR0913
     ),
     comment_id: str = Field(
         min_length=1,
-        description=(
-            "Short comment ID to update (e.g. 'c42' from ``list_document_comments``)."
-        ),
+        description="Short comment ID (e.g. 'c42' from ``list_document_comments``).",
     ),
-    resolved: bool = Field(description="New resolved state for the comment."),
+    resolved: bool = Field(description="New resolved state."),
     dry_run: bool = Field(
         default=False,
-        description="When True, return payload preview without calling Polarion.",
+        description="Preview payload without calling Polarion.",
     ),
 ) -> DocumentCommentUpdateResult:
-    """Resolve or re-open a single document comment.
+    """Resolve or re-open one document comment thread.
 
-    PATCHes ``{"resolved": <bool>}`` (only patchable attr). Root comments only:
-    a reply 400s ("Resolved field can be set only for root comments") →
-    ``RuntimeError``, so filter first. Resolving the root resolves the thread.
-    Idempotent.
+    Root comments only (a reply 400s) — pick a root id
+    (``parent_comment_id=None``) from ``list_document_comments``; resolving
+    the root resolves the whole thread. Idempotent.
     """
     payload = _build_document_comment_update_payload(
         project_id=project_id,

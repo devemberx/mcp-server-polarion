@@ -237,36 +237,23 @@ async def create_work_items(
     items: list[WorkItemCreateSpec] = Field(  # noqa: B008
         min_length=1,
         max_length=MAX_BULK_ITEMS,
-        description=(
-            "One or more work items to create in a single request "
-            "(1-50). Pass a single-element list to create just one."
-        ),
+        description="Work items to create in one request (1-50).",
     ),
     dry_run: bool = Field(
         default=False,
-        description=(
-            "When True, return the payload preview without writing; the enum "
-            "guard still calls Polarion's getAvailableOptions, so that "
-            "endpoint must be reachable."
-        ),
+        description="Preview payload without writing; guards still query Polarion.",
     ),
 ) -> WorkItemsCreateResult:
-    """Create one or more Polarion work items (1-50) in one request, same project.
+    """Create 1-50 work items in one project in a single bulk request.
 
-    Confirm every enum value (``type`` / ``status`` / ``severity`` / custom
-    enums) via ``list_work_item_enum_options`` first — unverified ids persist as
-    ghosts that never match Lucene. ``custom_fields`` keys are validated against
-    the type's existing schema; a key no item of that ``type`` uses is rejected,
-    and a type with no populated customs blocks the write (nothing to validate
-    against). ``hyperlinks[].role`` validated against ``hyperlink-role``.
+    Enum values (``type`` / ``status`` / ``severity`` / custom enums) must come
+    from ``list_work_item_enum_options`` — unverified ids persist as ghosts
+    invisible to Lucene. ``custom_fields`` keys are validated against the
+    type's schema. Atomic: one bad item rejects the whole batch.
 
-    Atomic: guards + conversion + build run before the POST; one bad item rejects
-    the whole batch (nothing created). Raises if the returned id count differs
-    from submitted — re-query ``list_work_items`` first.
-
-    Items are free-floating; place in a document via ``move_work_item_to_document``
-    (direct ``module`` create lands in the recycle bin). ``description`` is
-    Markdown → sanitized HTML; the post-create round-trip is raw HTML via
+    Items are created free-floating; place into a document with
+    ``move_work_item_to_document`` (this tool cannot). ``description`` is
+    Markdown → sanitized HTML; later edits are raw-HTML round-trip via
     ``get_work_item(include_description_html=True)`` ↔ ``update_work_item``.
     """
     client = get_client(ctx)
@@ -355,38 +342,34 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     project_id: str = Field(min_length=1, description="Polarion project ID."),
     work_item_id: str = Field(
         min_length=1,
-        description="Short ID of an EXISTING work item (e.g. 'MCPT-042').",
+        description="Work item ID (e.g. 'MCPT-042').",
     ),
     title: str | None = None,
     description_html: str | None = Field(
         default=None,
         max_length=MAX_BODY_HTML_LEN,
-        description="New raw Polarion HTML body (round-trip shape from get_work_item).",
+        description=(
+            "Raw HTML from ``get_work_item(include_description_html=True)``; "
+            "sent verbatim, unsanitized."
+        ),
     ),
     status: str | None = Field(
         default=None,
-        description=(
-            "New workflow status; prefer ``workflow_action`` for real transitions."
-        ),
+        description="New status; prefer ``workflow_action`` for real transitions.",
     ),
     priority: str | None = Field(
         default=None,
-        description="New priority string (e.g. '50.0').",
+        description="e.g. '50.0'.",
     ),
     severity: str | None = None,
-    due_date: str | None = Field(
-        default=None, description="New due date 'YYYY-MM-DD'."
-    ),
+    due_date: str | None = Field(default=None, description="'YYYY-MM-DD'."),
     initial_estimate: str | None = Field(
         default=None,
-        description="New Polarion duration (e.g. '5 1/2d', '1w 2d').",
+        description="Polarion duration (e.g. '5 1/2d', '1w 2d').",
     ),
     resolution: str | None = Field(
         default=None,
-        description=(
-            "New resolution outcome; "
-            "prefer ``workflow_action`` so workflow rules apply."
-        ),
+        description="Prefer ``workflow_action`` so workflow rules apply.",
     ),
     hyperlinks: list[Hyperlink] | None = Field(  # noqa: B008
         default=None,
@@ -399,62 +382,44 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     custom_fields: dict[str, object] | None = Field(  # noqa: B008
         default=None,
         description=(
-            "Partial custom-field update; "
-            "rich-text values must be ``{'type':'text/html','value':...}``."
+            "Partial update; rich-text values as ``{'type':'text/html','value':...}``."
         ),
     ),
     workflow_action: str | None = Field(
         default=None,
-        description=(
-            "Workflow action ID (e.g. 'close'); "
-            "must be paired with at least one body field."
-        ),
+        description="Workflow action ID (e.g. 'close').",
     ),
     change_type_to: str | None = Field(
         default=None,
-        description=(
-            "Change work-item type; RESETS status; "
-            "must be paired with at least one body field."
-        ),
+        description="New work-item type; RESETS status.",
     ),
     include_current_description_html: bool = Field(
         default=False,
-        description=(
-            "When True, return the post-PATCH raw HTML body in "
-            "``current.description_html``."
-        ),
+        description="Return post-PATCH raw HTML in ``current.description_html``.",
     ),
     dry_run: bool = Field(
         default=False,
-        description=(
-            "When True, return the payload preview without writing; "
-            "enum/custom-field guards still query Polarion, so the work item "
-            "must be readable and the validation endpoint reachable."
-        ),
+        description="Preview payload without writing; guards still query Polarion.",
     ),
 ) -> WorkItemUpdateResult:
-    """Update an existing Polarion work item.
+    """Update fields on an existing work item; ``None``/empty = leave unchanged.
 
-    PATCHes supplied fields, then GETs so ``current`` reflects the change.
-    ``None`` / empty all mean leave unchanged — no clear path.
+    Fetch current state with ``get_work_item`` BEFORE updating. PATCHes then
+    GETs (``current`` reflects the result).
 
-    ``description_html`` is RAW Polarion HTML, verbatim, no sanitization (NEVER
-    pass untrusted input); round-trip with
-    ``get_work_item(include_description_html=True)``. Greenfield: use
-    ``create_work_items`` Markdown — paths never mix.
+    ``description_html`` is raw Polarion HTML, sent verbatim/unsanitized —
+    source it from ``get_work_item(include_description_html=True)``. Greenfield
+    bodies go through ``create_work_items`` Markdown; formats never mix.
 
-    ``hyperlinks`` / ``assignee_ids`` REPLACE (full list, not delta); each
-    hyperlink ``role`` validated against ``hyperlink-role`` (before PATCH, on
-    dry_run too). ``custom_fields`` partial; a key absent from the type's
-    sampled schema is rejected (a type with no populated customs blocks it).
+    ``hyperlinks`` / ``assignee_ids`` REPLACE the stored list: resubmit every
+    existing entry plus the change, or omissions are silently deleted.
+    ``custom_fields`` is partial; keys outside the type's schema are rejected.
 
-    ``module`` NOT exposed — use ``move_work_item_to_document`` /
-    ``move_work_item_from_document``. Prefer ``workflow_action`` over raw
-    ``status``; ``workflow_action`` / ``change_type_to`` MUST pair with ≥1 body
-    field (empty PATCH 400s). Unknown ``status`` / ``severity`` / ``resolution``
-    / ``priority`` / ``change_type_to`` raise ``ValueError`` listing valid
-    options; with ``change_type_to`` set, status/severity/resolution scope to
-    the target type.
+    ``module`` not settable here — use ``move_work_item_to_document`` /
+    ``move_work_item_from_document``. ``workflow_action`` / ``change_type_to``
+    must pair with ≥1 body field (400 otherwise). Unknown enum ids raise
+    ``ValueError`` listing valid options; with ``change_type_to``,
+    status/severity/resolution scope to the target type.
     """
     changes: dict[str, JsonValue] = {}
     if title:
@@ -656,27 +621,21 @@ async def list_work_item_enum_options(  # noqa: PLR0913
     project_id: str = Field(description="Polarion project ID."),
     field_id: str = Field(
         description=(
-            "Field id (e.g. 'status', 'type', 'severity', 'priority',"
-            " or a custom field id)."
+            "e.g. 'status', 'type', 'severity', 'priority', or a custom field id."
         ),
     ),
     work_item_type: str = Field(
-        description=(
-            "Work item type id (e.g. 'task', 'requirement')."
-            " Pass '~' for type-agnostic options."
-        ),
+        description="e.g. 'task', 'requirement'; '~' = type-agnostic.",
     ),
     page_size: int = Field(default=DEFAULT_PAGE_SIZE, ge=1, le=100),
     page_number: int = Field(default=1, ge=1),
 ) -> PaginatedResult[EnumOption]:
-    """List valid enum options for a work item field of the given type.
+    """List valid enum option ids for a work item field of the given type.
 
-    Call before ``create_work_items`` / ``update_work_item`` to resolve a
-    ``type`` / ``status`` / ``severity`` / ``priority`` / custom-enum value —
-    Polarion does NOT validate on write (unknown ids persist as ghosts).
-    Work-item fields only. Returns the FULL set; ``work_item_type='~'`` is
-    type-agnostic, and an unknown type silently falls back to ``~``, so verify
-    the type id first.
+    Call before ``create_work_items`` / ``update_work_item`` — Polarion does
+    NOT validate enum values on write (unknown ids persist as ghosts). An
+    unknown ``work_item_type`` silently falls back to ``~``, so verify the
+    type id first.
     """
     client = get_client(ctx)
     path = (
@@ -736,10 +695,9 @@ async def list_work_item_enum_options(  # noqa: PLR0913
 async def get_sql_query_recipes() -> SqlRecipeGallery:
     """Fetch copy-paste SQL recipes for the ``list_work_items`` ``SQL:(...)`` prefix.
 
-    Call this before writing a module-scoped, custom-field, or traceability
-    SQL query, then adapt a recipe instead of hand-writing joins from memory.
-    Returns the table schema plus parameterised recipes as one Markdown
-    document; loaded on demand so it never occupies always-on context.
+    Call before writing any SQL query (document scope, custom-field,
+    traceability) and adapt a recipe instead of hand-writing joins; includes
+    the table schema.
     """
     return SqlRecipeGallery(recipes=_SQL_QUERY_RECIPES)
 
@@ -762,18 +720,17 @@ async def list_work_items(
     page_size: int = Field(default=DEFAULT_PAGE_SIZE, ge=1, le=100),
     page_number: int = Field(default=1, ge=1),
 ) -> PaginatedResult[WorkItemSummary]:
-    """List and search work items in a Polarion project.
+    """List / search work items in a project.
 
-    Lucene ``query`` (`type:requirement`, `title:SRS*`) or omit for all. Leading
-    wildcards 400. ``module`` and body text are NOT indexed — use the SQL prefix
-    for module scope, ``read_document_parts`` for body.
+    Lucene ``query`` (`type:requirement`, `title:SRS*`; leading wildcards 400)
+    or omit for all. ``module`` and body text are NOT Lucene-indexed — scope by
+    document via ``SQL:(...)`` or ``read_document_parts``, never a Lucene
+    ``module`` term.
 
-    **SQL prefix.** A ``query`` starting with ``SQL:(`` runs native SQL for
-    patterns Lucene can't express. Escape ``'`` as ``''`` (no bind params).
-    ``C_DESCRIPTION LIKE`` does NOT match; ``LIKE`` is rejected inside
-    ``EXISTS`` — keep it top-level via ``INNER JOIN``. Before writing any SQL
-    call ``get_sql_query_recipes`` and adapt a recipe — it holds the common
-    patterns (document scope, custom-field, traceability); do not hand-write.
+    ``SQL:(...)`` runs native SQL. Call ``get_sql_query_recipes`` first and
+    adapt a recipe (document scope, custom-field, traceability); do not
+    hand-write. Escape ``'`` as ``''``; keep ``LIKE`` top-level via ``INNER
+    JOIN`` (rejected inside ``EXISTS``; ``C_DESCRIPTION LIKE`` never matches).
     """
     client = get_client(ctx)
     params: dict[str, str | int] = {
@@ -831,19 +788,17 @@ async def list_work_items(
 async def get_work_item(
     ctx: Context,
     project_id: str = Field(description="Polarion project ID."),
-    work_item_id: str = Field(description="Work Item ID (e.g. 'MCPT-001')."),
+    work_item_id: str = Field(description="Work item ID (e.g. 'MCPT-001')."),
     include_description_html: bool = Field(
         default=False,
-        description=(
-            "When True, fill ``description_html`` with raw HTML for round-trip editing."
-        ),
+        description="Fill ``description_html`` with raw HTML for round-trip editing.",
     ),
 ) -> WorkItemDetail:
-    """Get full details of a single Polarion work item.
+    """Get full details of one work item by ID.
 
-    With ``include_description_html=True``, ``description_html`` carries the raw
-    Polarion HTML body — the round-trip shape for ``update_work_item``. Only
-    feed it back when the flag was True (False blanks it; ``""`` = unchanged).
+    ``include_description_html=True`` fills ``description_html`` with raw
+    HTML — the required source for ``update_work_item(description_html=...)``.
+    Never feed back a blanked (flag=False) body.
     """
     client = get_client(ctx)
     path = (
@@ -896,13 +851,13 @@ async def get_work_item(
 async def read_work_item(
     ctx: Context,
     project_id: str = Field(description="Polarion project ID."),
-    work_item_id: str = Field(description="Work Item ID (e.g. 'MCPT-001')."),
+    work_item_id: str = Field(description="Work item ID (e.g. 'MCPT-001')."),
 ) -> WorkItemRead:
-    """Read a Polarion work item with its body rendered as Markdown.
+    """Read one work item with its body rendered as Markdown.
 
-    Synthesis variant of ``get_work_item``: same metadata plus ``description``
-    as Markdown. Read-only (collapses Polarion spans/anchors) — do NOT feed
-    back to ``update_work_item``; round-trip via the HTML pair instead.
+    ``get_work_item`` plus ``description`` as Markdown. Synthesis output
+    (collapses Polarion anchors) — NEVER feed it to ``update_work_item``;
+    round-trip via the HTML pair instead.
     """
     # Pull raw HTML from get_work_item so conversion needs no second round trip.
     detail = await get_work_item(
