@@ -17,6 +17,9 @@ from evals.harness.fake_polarion import (
     API_PREFIX,
     DOC,
     DOC_HEADING_ID,
+    DOC_INTRO_PARAGRAPH_ID,
+    FLOATING_TASK_HYPERLINK_URI,
+    FLOATING_TASK_ID,
     MODULE_ID,
     POLARION_HOST,
     PROJECT,
@@ -127,6 +130,38 @@ class TestReadRouting:
         )
         assert response.status_code == 404
 
+    def test_document_body_has_anchored_intro_paragraph(self) -> None:
+        response = _get(
+            FakePolarion(), f"/projects/{PROJECT}/spaces/{SPACE}/documents/{DOC}"
+        )
+        body = _json(response)["data"]["attributes"]["homePageContent"]["value"]
+        assert f'id="{DOC_INTRO_PARAGRAPH_ID}"' in body
+
+    def test_floating_task_carries_seed_hyperlink(self) -> None:
+        response = _get(
+            FakePolarion(), f"/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}"
+        )
+        hyperlinks = _json(response)["data"]["attributes"]["hyperlinks"]
+        assert hyperlinks == [{"role": "ref_ext", "uri": FLOATING_TASK_HYPERLINK_URI}]
+
+    def test_project_enum_hyperlink_role_is_dict_shaped(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/enumerations/~/hyperlink-role/~",
+        )
+        assert response.status_code == 200
+        data = _json(response)["data"]
+        assert isinstance(data, dict)
+        ids = [o["id"] for o in data["attributes"]["options"]]
+        assert ids == ["ref_int", "ref_ext"]
+
+    def test_unknown_project_enum_is_404(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/enumerations/~/not-a-real-enum/~",
+        )
+        assert response.status_code == 404
+
 
 class TestWorkItemResource:
     def test_module_relationship_only_for_module_items(self) -> None:
@@ -146,6 +181,18 @@ class TestMutations:
         response = _mutate(fake, "POST", f"/projects/{PROJECT}/workitems", {"data": []})
         assert response.status_code == 201
         assert _json(response)["data"][0]["type"] == "workitems"
+
+    def test_post_workitems_echoes_one_id_per_submitted_entry(self) -> None:
+        fake = FakePolarion()
+        response = _mutate(
+            fake,
+            "POST",
+            f"/projects/{PROJECT}/workitems",
+            {"data": [{"x": 1}, {"x": 2}, {"x": 3}]},
+        )
+        ids = [entry["id"] for entry in _json(response)["data"]]
+        assert len(ids) == 3
+        assert len(set(ids)) == 3
 
     def test_post_documents_echoes_module_id(self) -> None:
         fake = FakePolarion()

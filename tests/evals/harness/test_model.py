@@ -38,6 +38,14 @@ class TestBuildModel:
         model = build_model()
         assert model.get_config()["params"]["temperature"] == 0.0
 
+    def test_parallel_tool_calls_pinned_off(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("EVAL_MODEL_BASE_URL", raising=False)
+        params = build_model().get_config()["params"]
+        assert params["parallel_tool_calls"] is False
+        assert params["drop_params"] is True
+
     def test_retries_and_timeout_from_env(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

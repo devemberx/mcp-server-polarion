@@ -42,6 +42,13 @@ FLOATING_GHOST_ID = "MCPT-202"
 ROOT_COMMENT_ID = "1"
 REPLY_COMMENT_ID = "2"
 
+# Pre-existing hyperlink on the floating task; T1-HYPERLINK-PRESERVE asserts
+# an update keeps it (Polarion REPLACES the whole list).
+FLOATING_TASK_HYPERLINK_URI = "https://specs.example.com/fake-spec"
+
+# Anchored intro paragraph in the doc body; T1-ROUNDTRIP-SOURCE edits it.
+DOC_INTRO_PARAGRAPH_ID = "p-1"
+
 _TS = "2026-01-01T00:00:00.000Z"
 
 
@@ -55,6 +62,7 @@ class _WorkItem:
     severity: str = "should_have"
     module: bool = False
     outline_number: str = ""
+    hyperlinks: list[dict[str, str]] = field(default_factory=list)
     # Keys MUST stay outside ``STANDARD_WORK_ITEM_ATTRIBUTES`` so the merge
     # into the resource attributes dict doesn't shadow real attributes.
     custom_fields: dict[str, str] = field(default_factory=dict)
@@ -69,6 +77,7 @@ _WORK_ITEMS: dict[str, _WorkItem] = {
         FLOATING_TASK_ID,
         "Floating task",
         "task",
+        hyperlinks=[{"role": "ref_ext", "uri": FLOATING_TASK_HYPERLINK_URI}],
         custom_fields={"acceptance_criteria_id": "AC-1"},
     ),
     FLOATING_HEADING_ID: _WorkItem(FLOATING_HEADING_ID, "Floating heading", "heading"),
@@ -119,6 +128,12 @@ _ENUMS: dict[tuple[str, str], list[tuple[str, bool]]] = {
     ],
 }
 
+# Project-level enums (``/enumerations/~/{name}/~``) -- dict-shaped ``data``
+# with ``attributes.options[].id``, unlike getAvailableOptions' list.
+_PROJECT_ENUMS: dict[str, list[str]] = {
+    "hyperlink-role": ["ref_int", "ref_ext"],
+}
+
 
 @dataclass
 class FakePolarion:
@@ -147,7 +162,7 @@ class FakePolarion:
                 "created": _TS,
                 "updated": _TS,
                 "description": {"type": "text/html", "value": ""},
-                "hyperlinks": [],
+                "hyperlinks": list(wi.hyperlinks),
                 **wi.custom_fields,
             },
             "relationships": relationships,
@@ -165,7 +180,10 @@ class FakePolarion:
                 "moduleFolder": SPACE,
                 "homePageContent": {
                     "type": "text/html",
-                    "value": '<h1 id="h-1">Fake Doc</h1>',
+                    "value": (
+                        '<h1 id="h-1">Fake Doc</h1>'
+                        f'<p id="{DOC_INTRO_PARAGRAPH_ID}">Fake intro paragraph.</p>'
+                    ),
                 },
             },
         }
@@ -255,6 +273,23 @@ class FakePolarion:
                 200, json=self._enum_response(enum.group(1), enum.group(2))
             )
 
+        project_enum = re.search(r"/enumerations/~/([^/]+)/~$", path)
+        if project_enum:
+            name = project_enum.group(1)
+            options = _PROJECT_ENUMS.get(name)
+            if options is None:
+                return httpx.Response(404, json={"errors": [{"status": "404"}]})
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "type": "enumerations",
+                        "id": f"~/{name}/~",
+                        "attributes": {"options": [{"id": o} for o in options]},
+                    }
+                },
+            )
+
         single_wi = re.search(r"/workitems/([^/]+)$", path)
         if single_wi and "/fields/" not in path:
             wi = _WORK_ITEMS.get(single_wi.group(1))
@@ -304,14 +339,23 @@ class FakePolarion:
                 body = None
         self.mutations.append({"method": request.method, "path": path, "json": body})
 
-        # Resource-creating POSTs must echo an id (tool layer requires it);
+        # Resource-creating POSTs must echo one id per submitted entry (the
+        # tool layer raises on a count mismatch, so bulk cases need N ids);
         # action POSTs and PATCH / DELETE fall through to 204.
+        submitted = 1
+        if isinstance(body, dict):
+            data = body.get("data")
+            if isinstance(data, list) and data:
+                submitted = len(data)
         if request.method == "POST":
             if path.endswith("/workitems"):
                 return httpx.Response(
                     201,
                     json={
-                        "data": [{"type": "workitems", "id": f"{PROJECT}/MCPT-9001"}]
+                        "data": [
+                            {"type": "workitems", "id": f"{PROJECT}/MCPT-{9001 + i}"}
+                            for i in range(submitted)
+                        ]
                     },
                 )
             if path.endswith("/documents"):
@@ -336,7 +380,11 @@ class FakePolarion:
                     201,
                     json={
                         "data": [
-                            {"type": "linkedworkitems", "id": f"{PROJECT}/MCPT-9001"}
+                            {
+                                "type": "linkedworkitems",
+                                "id": f"{PROJECT}/MCPT-{9001 + i}",
+                            }
+                            for i in range(submitted)
                         ]
                     },
                 )

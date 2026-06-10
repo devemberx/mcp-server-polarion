@@ -1,13 +1,23 @@
-# Pre-deploy evaluation gate (Tier 1)
+# Pre-deploy evaluation gate
 
 Drives an LLM agent through the **real** in-memory MCP server against a
-**mocked** Polarion backend, then deterministically asserts the agent never
-took a destructive or footgun action. Runs as a hard gate ahead of the PyPI
-publish jobs in [`.github/workflows/publish.yml`](../.github/workflows/publish.yml) —
-a single forbidden action blocks the release.
+**mocked** Polarion backend, then deterministically asserts the agent's
+behaviour. Runs as a hard gate ahead of the PyPI publish jobs in
+[`.github/workflows/publish.yml`](../.github/workflows/publish.yml).
 
-Tier 1 needs **no LLM judge**: every verdict is a pure function of the tool-call
-trajectory. The only model cost is the agent under test.
+Two tiers, same harness and evaluator, different tolerance:
+
+- **Tier 1 — prohibitions** ([`cases/tier1_prohibitions.py`](cases/tier1_prohibitions.py)):
+  destructive / corrupting / footgun actions. `min_pass_rate = 1.0` — a single
+  forbidden action across the N runs blocks the release.
+- **Tier 2 — efficiency** ([`cases/tier2_efficiency.py`](cases/tier2_efficiency.py)):
+  the agent succeeds, but must take the short, correct path (one bulk call,
+  direct get by known id, no redundant identical reads, right query
+  mechanism). `min_pass_rate = 0.8` — occasional wasteful runs tolerated,
+  systematic waste blocks.
+
+No tier needs an **LLM judge**: every verdict is a pure function of the
+tool-call trajectory. The only model cost is the agent under test.
 
 ## How it works
 
@@ -42,9 +52,9 @@ uv run python evals/run.py        # equivalent
 uv run python -m evals.run --case T1-READONLY --runs 1
 ```
 
-Each case runs N times; a Tier-1 case passes only at `min_pass_rate` (1.0 —
-zero tolerance). The gate fails (exit 1) if any case falls short. A JSON report
-is written to `evals/reports/tier1-<sha>.json` (gitignored).
+Each case runs N times and passes only at its `min_pass_rate` (Tier 1: 1.0,
+Tier 2: 0.8). The gate fails (exit 1) if any case falls short. A JSON report
+is written to `evals/reports/gate-<sha>-<model>.json` (gitignored).
 
 ## Choosing the model
 
@@ -59,7 +69,9 @@ EVAL_MODEL=ollama_chat/qwen3.5:9b-mlx uv run python -m evals.run
 # (set EVAL_MODEL_BASE_URL if Ollama is not on localhost:11434)
 ```
 
-`temperature` is pinned to 0 to keep the zero-tolerance gate stable.
+`temperature` is pinned to 0 and `parallel_tool_calls` off (gpt-4o-mini can
+emit the same tool call twice in one parallel block) to keep the
+zero-tolerance gate stable.
 
 ## Runaway protection
 
@@ -107,13 +119,17 @@ first tagged release.
 
 1. Add a pure check to `evaluators/checks.py` and register it in `REGISTRY`
    (or reuse an existing one). Keep it a function of the trajectory only.
-2. Add a `Case` to `cases/tier1_prohibitions.py` with
-   `metadata={"check": "<name>", "params": {...}, "min_pass_rate": 1.0}`.
+2. Add a `Case` to `cases/tier1_prohibitions.py` (prohibition,
+   `min_pass_rate: 1.0`) or `cases/tier2_efficiency.py` (efficiency,
+   `min_pass_rate: 0.8`); `run.py` loads both lists.
 3. Phrase the task neutrally — never state the rule, or you test the prompt
    instead of the tool docstrings (the only guard).
 
-Seed entities (project `MCP_Test_Project`, doc `FakeDoc`, free-floating
-`MCPT-200` task carrying `custom_fields={"acceptance_criteria_id": "AC-1"}`,
-`MCPT-201` heading, `MCPT-202` ghost-typed task, comment thread `1`→`2`)
-live in [`harness/fake_polarion.py`](harness/fake_polarion.py). Mirror the
-real server's *structure* there; keep all content synthetic.
+Seed entities (project `MCP_Test_Project`, doc `FakeDoc` with an anchored
+intro paragraph, free-floating `MCPT-200` task carrying
+`custom_fields={"acceptance_criteria_id": "AC-1"}` and one `ref_ext`
+hyperlink, `MCPT-201` heading, `MCPT-202` ghost-typed task, comment thread
+`1`→`2`, project enum `hyperlink-role`) live in
+[`harness/fake_polarion.py`](harness/fake_polarion.py). Mirror the real
+server's *structure* there; keep all content synthetic. Bulk POSTs echo one
+id per submitted entry, so bulk cases exercise the tools' count-match rule.
