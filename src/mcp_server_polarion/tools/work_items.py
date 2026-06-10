@@ -249,7 +249,8 @@ async def create_work_items(
     Enum values (``type`` / ``status`` / ``severity`` / custom enums) must come
     from ``list_work_item_enum_options`` — unverified ids persist as ghosts
     invisible to Lucene. ``custom_fields`` keys are validated against the
-    type's schema. Atomic: one bad item rejects the whole batch.
+    type's schema. Atomic: one bad item rejects the whole batch; an id-count
+    mismatch raises — re-query ``list_work_items`` before retrying.
 
     Items are created free-floating; place into a document with
     ``move_work_item_to_document`` (this tool cannot). ``description`` is
