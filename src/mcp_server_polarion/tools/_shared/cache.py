@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Final, Literal
+from typing import Final, Literal, NamedTuple
 
 
 def _now() -> float:
@@ -56,6 +56,19 @@ class TTLCache[K, V]:
 
 Resource = Literal["workitems", "documents"]
 
+
+class DiscoveredDocument(NamedTuple):
+    """One document found by the ``list_documents`` discovery scan."""
+
+    space_id: str
+    document_name: str
+    type: str = ""
+    status: str = ""
+    updated: str = ""
+    author_name: str = ""
+    updated_by_name: str = ""
+
+
 # Bounded by ghost-safety: a stale entry keeps accepting an admin-removed
 # option until expiry, so 60s caps that window.
 _GUARD_TTL_SECONDS: Final[float] = 60.0
@@ -64,8 +77,8 @@ _GUARD_TTL_SECONDS: Final[float] = 60.0
 # (``create_document`` also invalidates on write).
 _DOCUMENT_LIST_TTL_SECONDS: Final[float] = 60.0
 
-# project_id -> tuple of (space_id, document_name, document_type) triples.
-_document_list_cache: TTLCache[str, tuple[tuple[str, str, str], ...]] = TTLCache(
+# project_id -> discovered documents in display order.
+_document_list_cache: TTLCache[str, tuple[DiscoveredDocument, ...]] = TTLCache(
     _DOCUMENT_LIST_TTL_SECONDS
 )
 # (project, resource, field, type) -> valid option ids.
@@ -90,7 +103,7 @@ _document_type_custom_key_cache: TTLCache[tuple[str, str], frozenset[str]] = TTL
 )
 
 
-def get_cached_documents(project_id: str) -> list[tuple[str, str, str]] | None:
+def get_cached_documents(project_id: str) -> list[DiscoveredDocument] | None:
     """Return the cached document list for *project_id* or ``None``."""
     cached = _document_list_cache.get(project_id)
     return list(cached) if cached is not None else None
@@ -98,7 +111,7 @@ def get_cached_documents(project_id: str) -> list[tuple[str, str, str]] | None:
 
 def store_cached_documents(
     project_id: str,
-    documents: list[tuple[str, str, str]],
+    documents: list[DiscoveredDocument],
 ) -> None:
     """Cache *documents* for *project_id* for ``_DOCUMENT_LIST_TTL_SECONDS``."""
     _document_list_cache.set(project_id, tuple(documents))
@@ -196,6 +209,7 @@ def invalidate_document_type_custom_keys(project_id: str, document_type: str) ->
 
 
 __all__ = [
+    "DiscoveredDocument",
     "Resource",
     "TTLCache",
     "get_cached_documents",

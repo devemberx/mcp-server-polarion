@@ -14,6 +14,10 @@ class DocumentSummary(BaseModel):
     space_id: str
     document_name: str
     type: str = ""
+    status: str = ""
+    updated: str = ""
+    author: str = ""
+    last_updated_by: str = ""
 
 
 class DocumentDetail(BaseModel):
@@ -22,6 +26,9 @@ class DocumentDetail(BaseModel):
     title: str
     type: str = ""
     status: str = ""
+    updated: str = ""
+    author: str = ""
+    last_updated_by: str = ""
     content_html: str = ""
     custom_fields: dict[str, object] = Field(default_factory=dict)
 

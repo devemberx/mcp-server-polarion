@@ -223,6 +223,19 @@ def build_included_work_item_map(
     return work_item_map
 
 
+def build_included_user_name_map(response: dict[str, object]) -> dict[str, str]:
+    """Map user ID to display name from a response's included ``users`` resources."""
+    user_map: dict[str, str] = {}
+    included = response.get("included", [])
+    if isinstance(included, list):
+        for inc in included:
+            if isinstance(inc, dict) and inc.get("type") == "users":
+                attrs = inc.get("attributes", {})
+                name = attrs.get("name", "") if isinstance(attrs, dict) else ""
+                user_map[safe_str(inc.get("id", ""))] = safe_str(name)
+    return user_map
+
+
 def extract_relationship_id(
     relationships: dict[str, object],
     rel_name: str,
@@ -521,6 +534,7 @@ __all__: list[str] = [
     "WORK_ITEM_PART_FIELDS",
     "build_document_comment",
     "build_enum_option",
+    "build_included_user_name_map",
     "build_included_work_item_map",
     "build_work_item_summary_kwargs",
     "compute_has_more",

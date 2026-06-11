@@ -31,6 +31,7 @@ from mcp_server_polarion.models import (
 )
 from mcp_server_polarion.server import mcp
 from mcp_server_polarion.tools._shared.cache import (
+    DiscoveredDocument,
     get_cached_documents,
     invalidate_documents_cache,
     store_cached_documents,
@@ -45,6 +46,7 @@ from mcp_server_polarion.tools._shared.helpers import (
     STANDARD_DOCUMENT_ATTRIBUTES,
     WORK_ITEM_PART_FIELDS,
     build_enum_option,
+    build_included_user_name_map,
     build_included_work_item_map,
     compute_has_more,
     encode_path_segment,
@@ -287,16 +289,31 @@ def _decorate_wikiblock(content: str) -> str:
     return f"```{macro}\n{body}\n```"
 
 
+@dataclass(frozen=True, slots=True)
+class _DocumentMeta:
+    """Document attributes plus unresolved editor user ids from discovery.
+
+    User ids are join keys into the response's included ``users`` resources;
+    they never surface in tool output (display names only).
+    """
+
+    type: str = ""
+    status: str = ""
+    updated: str = ""
+    author_id: str = ""
+    updated_by_id: str = ""
+
+
 def _extract_document_from_module(
     resource: object,
-    documents: dict[tuple[str, str], str],
+    documents: dict[tuple[str, str], _DocumentMeta],
 ) -> None:
-    """Record an included ``module`` resource as (space_id, document_name) -> type.
+    """Record an included ``module`` resource as (space_id, document_name) -> meta.
 
-    Module ``id`` format: ``{projectId}/{spaceId}/{documentName}``. The Polarion
-    document type rides in ``attributes.type``, present because discovery requests
-    ``include=module`` -- a plain ``module`` relationship carries only the resource
-    identifier, not the type.
+    Module ``id`` format: ``{projectId}/{spaceId}/{documentName}``. Attributes and
+    the author/updatedBy relationships are present because discovery names them in
+    ``fields[documents]`` -- a plain ``module`` relationship carries only the
+    resource identifier.
     """
     if not isinstance(resource, dict) or resource.get("type") != "documents":
         return
@@ -304,21 +321,34 @@ def _extract_document_from_module(
     if not space_id or not document_name:
         return
     attrs = resource.get("attributes")
-    doc_type = safe_str(attrs.get("type", "")) if isinstance(attrs, dict) else ""
-    documents[(space_id, document_name)] = doc_type
+    if not isinstance(attrs, dict):
+        attrs = {}
+    relationships = resource.get("relationships")
+    if not isinstance(relationships, dict):
+        relationships = {}
+    documents[(space_id, document_name)] = _DocumentMeta(
+        type=safe_str(attrs.get("type", "")),
+        status=safe_str(attrs.get("status", "")),
+        updated=safe_str(attrs.get("updated", "")),
+        author_id=extract_relationship_id(relationships, "author"),
+        updated_by_id=extract_relationship_id(relationships, "updatedBy"),
+    )
 
 
 async def _discover_documents(
     client: PolarionClient,
     project_id: str,
-) -> list[tuple[str, str, str]]:
-    """Discover all (space_id, document_name, type) triples in *project_id*.
+) -> list[DiscoveredDocument]:
+    """Discover every document in *project_id* with its display metadata.
 
     One ``GROUP BY mod.c_uri`` SQL query collapses every heading work item to a
     single representative per document, so each response page is one page of
     *documents*, not headings -- far fewer round-trips than a per-heading scan.
-    ``include=module`` pulls each document's ``type`` into the ``included`` array
-    at no extra request. TTL-cached so paginated callers reuse the discovery.
+    ``include=module,module.author,module.updatedBy`` pulls each document's
+    attributes plus the editors' user names into ``included`` at no extra
+    request (a dot-path include alone drops the intermediate ``module``
+    resources -- it must be listed explicitly). TTL-cached so paginated callers
+    reuse the discovery.
     """
     cached = get_cached_documents(project_id)
     if cached is not None:
@@ -326,13 +356,15 @@ async def _discover_documents(
 
     base_params: dict[str, str | int] = {
         "fields[workitems]": "module",
-        "include": "module",
-        "fields[documents]": "type",
+        "include": "module,module.author,module.updatedBy",
+        "fields[documents]": "type,status,updated,author,updatedBy",
+        "fields[users]": "name",
         "query": one_heading_per_document_sql(project_id),
         "page[size]": DEFAULT_PAGE_SIZE,
     }
 
-    documents: dict[tuple[str, str], str] = {}
+    documents: dict[tuple[str, str], _DocumentMeta] = {}
+    user_names: dict[str, str] = {}
     page_number = 1
 
     while True:
@@ -348,6 +380,7 @@ async def _discover_documents(
         if isinstance(included, list):
             for resource in included:
                 _extract_document_from_module(resource, documents)
+        user_names.update(build_included_user_name_map(response))
 
         raw_total = extract_total_count(response)
         if not compute_has_more(
@@ -357,7 +390,16 @@ async def _discover_documents(
         page_number += 1
 
     sorted_docs = sorted(
-        (space, name, dtype) for (space, name), dtype in documents.items()
+        DiscoveredDocument(
+            space_id=space,
+            document_name=name,
+            type=meta.type,
+            status=meta.status,
+            updated=meta.updated,
+            author_name=user_names.get(meta.author_id, ""),
+            updated_by_name=user_names.get(meta.updated_by_id, ""),
+        )
+        for (space, name), meta in documents.items()
     )
     store_cached_documents(project_id, sorted_docs)
     return sorted_docs
@@ -481,7 +523,9 @@ async def list_documents(
     """List a project's documents.
 
     Returns ``space_id`` + ``document_name`` (inputs to the other document
-    tools) plus ``type``. Discovery scan cached 60s.
+    tools) plus ``type``, ``status``, ``updated`` timestamp, and the display
+    names of the creator (``author``) and last editor (``last_updated_by``).
+    Discovery scan cached 60s.
     """
     client = get_client(ctx)
 
@@ -508,7 +552,16 @@ async def list_documents(
     page_slice = documents[start:end]
 
     items = [
-        DocumentSummary(space_id=s, document_name=d, type=t) for s, d, t in page_slice
+        DocumentSummary(
+            space_id=doc.space_id,
+            document_name=doc.document_name,
+            type=doc.type,
+            status=doc.status,
+            updated=doc.updated,
+            author=doc.author_name,
+            last_updated_by=doc.updated_by_name,
+        )
+        for doc in page_slice
     ]
 
     return PaginatedResult[DocumentSummary](
@@ -539,7 +592,10 @@ async def get_document(
         description="Fill ``content_html`` with raw HTML for round-trip editing.",
     ),
 ) -> DocumentDetail:
-    """Get a document's metadata: title/type/status/custom fields.
+    """Get a document's metadata: title/type/status/editors/custom fields.
+
+    ``author`` / ``last_updated_by`` are display names (creator and last
+    editor); ``updated`` is the last-modified timestamp.
 
     ``include_homepage_content_html=True`` fills ``content_html`` with raw
     ``homePageContent`` HTML — the required source for
@@ -558,7 +614,11 @@ async def get_document(
     try:
         response = await client.get(
             path,
-            params={"fields[documents]": DOCUMENT_DETAIL_FIELDS},
+            params={
+                "fields[documents]": DOCUMENT_DETAIL_FIELDS,
+                "include": "author,updatedBy",
+                "fields[users]": "name",
+            },
         )
     except PolarionNotFoundError as exc:
         raise ValueError(
@@ -581,6 +641,12 @@ async def get_document(
     attributes = data.get("attributes", {})
     if not isinstance(attributes, dict):
         attributes = {}
+    relationships = data.get("relationships", {})
+    if not isinstance(relationships, dict):
+        relationships = {}
+    # User ids are join keys into the included ``users`` resources; output
+    # carries display names only.
+    user_names = build_included_user_name_map(response)
 
     content_html = ""
     if include_homepage_content_html:
@@ -593,6 +659,11 @@ async def get_document(
         title=safe_str(attributes.get("title", "")),
         type=safe_str(attributes.get("type", "")),
         status=safe_str(attributes.get("status", "")),
+        updated=safe_str(attributes.get("updated", "")),
+        author=user_names.get(extract_relationship_id(relationships, "author"), ""),
+        last_updated_by=user_names.get(
+            extract_relationship_id(relationships, "updatedBy"), ""
+        ),
         content_html=content_html,
         custom_fields=extract_custom_fields(attributes, STANDARD_DOCUMENT_ATTRIBUTES),
     )
