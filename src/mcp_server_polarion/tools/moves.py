@@ -69,14 +69,14 @@ def _build_move_to_document_payload(
 )
 async def move_work_item_to_document(  # noqa: PLR0913
     ctx: Context,
-    project_id: str = Field(description="Project containing the work item."),
+    project_id: str = Field(description="Polarion project ID."),
     work_item_id: str = Field(
         min_length=1,
-        description="Short ID of an EXISTING work item (e.g. 'MCPT-042').",
+        description="Work item ID (e.g. 'MCPT-042').",
     ),
     target_space_id: str = Field(
         min_length=1,
-        description="Target space ID (use '_default' for the default space).",
+        description="Target space ID ('_default' = default space).",
     ),
     target_document_name: str = Field(
         min_length=1,
@@ -84,36 +84,28 @@ async def move_work_item_to_document(  # noqa: PLR0913
     ),
     previous_part_id: str | None = Field(
         default=None,
-        description=(
-            "Insert AFTER this part ID; mutually exclusive with ``next_part_id``. "
-            "Omit both to append at the end of the target document."
-        ),
+        description="Insert AFTER this part ID; exclusive with ``next_part_id``.",
     ),
     next_part_id: str | None = Field(
         default=None,
-        description=(
-            "Insert BEFORE this part ID; mutually exclusive with ``previous_part_id``. "
-            "Omit both to append at the end of the target document."
-        ),
+        description="Insert BEFORE this part ID; exclusive with ``previous_part_id``.",
     ),
     dry_run: bool = Field(
         default=False,
-        description="When True, return payload preview without calling Polarion.",
+        description="Preview payload without calling Polarion.",
     ),
 ) -> WorkItemMoveResult:
-    """Move a work item into a Polarion document at a specific position.
+    """Move an existing work item into a document at a given position.
 
-    ``moveToDocument`` atomically sets ``module`` + ``outline_number`` and
-    inserts a part — the ONLY supported attach path (macro-injection leaves
-    ``module`` unset). Headings rejected (HTTP 400). Already-in-a-document
-    items are moved, not copied; detach via ``move_work_item_from_document``.
+    THE attach path: atomically sets ``module`` and inserts a part. Headings
+    rejected (HTTP 400) — add headings via ``update_document`` ``<hN>``. An
+    item already in a document is moved, not copied.
 
-    AT MOST one of ``previous_part_id`` (AFTER) / ``next_part_id`` (BEFORE);
-    omit both to append. Discover part IDs via ``read_document_parts``.
+    At most one of ``previous_part_id`` (AFTER) / ``next_part_id`` (BEFORE);
+    omit both to append. Part IDs from ``read_document_parts``.
 
-    Side effect: auto-creates one outgoing link to the enclosing heading
-    (project-config role); collides with a same-role ``create_work_item_links``
-    (phantom success). Removed on detach.
+    Auto-creates one link to the enclosing heading; a later same-role
+    ``create_work_item_links`` returns 201 but is NOT persisted.
     """
     if previous_part_id is not None and next_part_id is not None:
         raise ValueError(
@@ -182,25 +174,22 @@ async def move_work_item_to_document(  # noqa: PLR0913
 )
 async def move_work_item_from_document(
     ctx: Context,
-    project_id: str = Field(description="Project containing the work item."),
+    project_id: str = Field(description="Polarion project ID."),
     work_item_id: str = Field(
         min_length=1,
-        description="Short ID of an EXISTING work item (e.g. 'MCPT-042').",
+        description="Work item ID (e.g. 'MCPT-042').",
     ),
     dry_run: bool = Field(
         default=False,
-        description="When True, return payload preview without calling Polarion.",
+        description="Preview payload without calling Polarion.",
     ),
 ) -> WorkItemMoveResult:
-    """Detach a work item from its document, returning it to free-floating state.
+    """Detach a work item from its document — the ONLY detach path.
 
-    Inverse of ``move_work_item_to_document``. ``moveFromDocument`` clears
-    ``module`` and removes the part — the ONLY detach path (PATCH on ``module``
-    rejected). The work item is preserved and re-attachable.
-
-    NOT idempotent: on an already free-floating item returns HTTP 400
-    (``RuntimeError``). Headings CAN be detached (become free-floating with
-    ``space_id=""`` / ``outline_number=""``).
+    NOT idempotent: an already free-floating item returns HTTP 400 — first
+    confirm it is in a document (``get_work_item``: non-empty ``space_id``)
+    and skip the call when already detached. Item preserved, re-attachable
+    via ``move_work_item_to_document``. Headings detachable too.
     """
     if dry_run:
         return WorkItemMoveResult(

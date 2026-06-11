@@ -17,6 +17,7 @@ Format: `<type>/<short-kebab-summary>`
 | `feature/`  | New tool, capability, or user-visible behavior                 | `feature/read-fidelity`       |
 | `fix/`      | Bug fix on existing behavior                                   | `fix/utils-html-attachments`  |
 | `refactor/` | Internal restructuring with no functional change               | `refactor/tools`              |
+| `test/`     | Test-only changes (unit tests, eval cases, fixtures)           | `test/tier2-efficiency-evals` |
 | `docs/`     | Documentation-only changes                                     | `docs/contributing`           |
 | `chore/`    | Dependency bumps, build tooling, repository housekeeping       | `chore/bump-fastmcp`          |
 | `ci/`       | GitHub Actions / workflow / release-pipeline changes           | `ci/cache-uv-deps`            |

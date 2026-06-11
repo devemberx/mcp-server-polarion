@@ -10,6 +10,7 @@
 - [ ] New feature (non-breaking change that adds functionality)
 - [ ] Breaking change (fix or feature that would cause existing functionality to change)
 - [ ] Refactor (no functional changes, code quality improvement)
+- [ ] Test update (adds or corrects tests / eval cases, no production behavior change)
 - [ ] Documentation update
 - [ ] CI / tooling / dependency update
 

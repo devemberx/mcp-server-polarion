@@ -43,10 +43,10 @@ async def list_projects(
     page_size: int = Field(default=DEFAULT_PAGE_SIZE, ge=1, le=100),
     page_number: int = Field(default=1, ge=1),
 ) -> PaginatedResult[ProjectSummary]:
-    """List Polarion projects the authenticated user can access.
+    """List accessible Polarion projects — the source of project IDs.
 
-    Discover project IDs for other tools. Lucene allows trailing wildcards
-    (``name:ILCU*``) but rejects leading ones (``*foo*``, HTTP 400).
+    Lucene ``query`` allows trailing wildcards (``name:ILCU*``); leading ones
+    400.
     """
     client = get_client(ctx)
     params: dict[str, str | int] = {

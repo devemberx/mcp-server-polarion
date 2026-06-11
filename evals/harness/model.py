@@ -6,9 +6,10 @@ the ``EVAL_MODEL`` env var, no code change:
     EVAL_MODEL=openai/gpt-4o-mini            # default, CI (needs OPENAI_API_KEY)
     EVAL_MODEL=ollama/qwen2.5-coder:7b       # local (set EVAL_MODEL_BASE_URL)
 
-``temperature`` is pinned to 0.0 to keep the zero-tolerance gate stable.
-``EVAL_NUM_RETRIES`` / ``EVAL_LLM_TIMEOUT`` forward to LiteLLM so transient
-cloud 429/RateLimitError gets absorbed by backoff, not failing the case.
+``temperature`` is pinned to 0.0 and ``parallel_tool_calls`` to False to keep
+the zero-tolerance gate stable. ``EVAL_NUM_RETRIES`` / ``EVAL_LLM_TIMEOUT``
+forward to LiteLLM so transient cloud 429/RateLimitError gets absorbed by
+backoff, not failing the case.
 """
 
 from __future__ import annotations
@@ -44,6 +45,12 @@ def build_model() -> LiteLLMModel:
         model_id=model_id,
         params={
             "temperature": 0.0,
+            # Some providers emit the same tool call twice in one parallel
+            # block -- nondeterminism no docstring can steer, pinned off like
+            # temperature. drop_params lets backends without the flag
+            # (e.g. Ollama) ignore it.
+            "parallel_tool_calls": False,
+            "drop_params": True,
             "num_retries": max(0, int(os.environ.get("EVAL_NUM_RETRIES", "10"))),
             "timeout": max(1.0, float(os.environ.get("EVAL_LLM_TIMEOUT", "60"))),
         },

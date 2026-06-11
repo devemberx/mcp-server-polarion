@@ -1,9 +1,10 @@
-"""Tier-1 deploy gate entry point.
+"""Eval deploy gate entry point.
 
-Runs every Tier-1 case N times against the mocked-Polarion harness, applies
-the deterministic ``ForbiddenBehaviorEvaluator``, and exits non-zero if any
-case's pass rate falls below its ``min_pass_rate`` (1.0 for prohibitions).
-Wired into ``publish.yml`` ahead of the PyPI publish jobs.
+Runs every case (Tier-1 prohibitions + Tier-2 efficiency) N times against the
+mocked-Polarion harness, applies the deterministic
+``ForbiddenBehaviorEvaluator``, and exits non-zero if any case's pass rate
+falls below its ``min_pass_rate`` (1.0 for Tier-1, 0.8 for Tier-2). Wired into
+``publish.yml`` ahead of the PyPI publish jobs.
 
     uv run python -m evals.run                 # all cases, EVAL_RUNS (default 10)
     uv run python -m evals.run --case T1-READONLY --runs 1
@@ -28,12 +29,15 @@ from typing import Any
 from strands_evals import Case
 from strands_evals.types.evaluation import EvaluationData
 
-from evals.cases.tier1_prohibitions import CASES
+from evals.cases.tier1_prohibitions import CASES as TIER1_CASES
+from evals.cases.tier2_efficiency import CASES as TIER2_CASES
 from evals.evaluators.tier1 import ForbiddenBehaviorEvaluator
 from evals.harness.model import resolve_model_id
 from evals.harness.runner import AGENT_ERROR_PREFIX, run_case
 
 _REPORT_DIR = Path(__file__).parent / "reports"
+
+ALL_CASES = [*TIER1_CASES, *TIER2_CASES]
 
 
 def _git_sha() -> str:
@@ -97,7 +101,7 @@ def _run_case_n_times(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Tier-1 deploy gate")
+    parser = argparse.ArgumentParser(description="Eval deploy gate")
     parser.add_argument("--case", help="run only this case name (e.g. T1-READONLY)")
     parser.add_argument(
         "--runs",
@@ -107,16 +111,16 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    cases = CASES
+    cases = ALL_CASES
     if args.case:
-        cases = [c for c in CASES if c.name == args.case]
+        cases = [c for c in ALL_CASES if c.name == args.case]
         if not cases:
             print(f"no case named '{args.case}'", file=sys.stderr)
             return 2
 
     evaluator = ForbiddenBehaviorEvaluator()
     model = resolve_model_id()
-    print(f"Tier-1 gate · model={model} · runs={args.runs} · cases={len(cases)}\n")
+    print(f"Eval gate · model={model} · runs={args.runs} · cases={len(cases)}\n")
 
     results = [_run_case_n_times(c, args.runs, evaluator) for c in cases]
     gate_passed = all(r["passed"] for r in results)
@@ -130,10 +134,10 @@ def main() -> int:
     }
     _REPORT_DIR.mkdir(exist_ok=True)
     model_slug = re.sub(r"[^A-Za-z0-9]+", "-", model).strip("-")
-    report_path = _REPORT_DIR / f"tier1-{report['git_sha']}-{model_slug}.json"
+    report_path = _REPORT_DIR / f"gate-{report['git_sha']}-{model_slug}.json"
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
 
-    print("\n=== Tier-1 summary ===")
+    print("\n=== Gate summary ===")
     for r in results:
         status = "PASS" if r["passed"] else "FAIL"
         print(
