@@ -78,6 +78,18 @@ class TestTTLCachePrimitive:
         clock[0] += 61.0
         assert cache.get("k") is None
 
+    def test_per_entry_ttl_overrides_cache_default(self, clock: list[float]) -> None:
+        cache: TTLCache[str, int] = TTLCache(60.0)
+        cache.set("long", 1, ttl_seconds=600.0)
+        cache.set("short", 2)
+
+        clock[0] += 61.0  # past default TTL, within the override
+        assert cache.get("long") == 1
+        assert cache.get("short") is None
+
+        clock[0] += 600.0  # past the override too
+        assert cache.get("long") is None
+
     def test_entry_live_at_exactly_below_ttl(self, clock: list[float]) -> None:
         cache: TTLCache[str, int] = TTLCache(60.0)
         cache.set("k", 1)
@@ -177,6 +189,19 @@ class TestEnumOptionCache:
 
         clock[0] += cache_mod._GUARD_TTL_SECONDS + 1.0
         assert get_cached_enum_options("P", "workitems", "severity", "task") is None
+
+    def test_not_found_entries_use_long_ttl(self, clock: list[float]) -> None:
+        store_cached_enum_options(
+            "P", "workitems", "freeText", "task", frozenset(), not_found=True
+        )
+
+        clock[0] += cache_mod._GUARD_TTL_SECONDS + 1.0
+        assert get_cached_enum_options("P", "workitems", "freeText", "task") == (
+            frozenset()
+        )
+
+        clock[0] += cache_mod._ENUM_NOT_FOUND_TTL_SECONDS
+        assert get_cached_enum_options("P", "workitems", "freeText", "task") is None
 
 
 class TestProjectEnumCache:

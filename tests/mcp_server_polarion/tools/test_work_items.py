@@ -1661,10 +1661,12 @@ class TestEnumGuardCreateWorkItem:
         mock_client: AsyncMock,
         reset_enum_guard_caches: None,
     ) -> None:
-        # GETs: type options, then the MIN-per-key type sample.
+        # GETs: type options, the MIN-per-key type sample, then the enum-value
+        # probe for the key (404 = not an enum field, defers).
         mock_client.get.side_effect = [
             _enum_get_response(["task"]),
             _wi_sample_response({"risk_score": 1}),
+            PolarionNotFoundError("not an Enumeration field", status_code=404),
         ]
         mock_client.post.return_value = {"data": [{"id": "MyProj/MCPT-1"}]}
 
@@ -1672,6 +1674,24 @@ class TestEnumGuardCreateWorkItem:
 
         assert result.created is True  # type: ignore[attr-defined]
         mock_client.post.assert_awaited_once()
+
+    async def test_custom_field_enum_value_rejected_on_create(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        # GETs: type options, type sample (knows asil), then the enum-value
+        # probe -- '9' is not among the field's options.
+        mock_client.get.side_effect = [
+            _enum_get_response(["task"]),
+            _wi_sample_response({"asil": "1"}),
+            _enum_get_response(["1", "2", "3", "4"]),
+        ]
+
+        with pytest.raises(ValueError, match=r"'asil'.*'9'"):
+            await _call_create_wi(mock_ctx, custom_fields={"asil": "9"})
+        mock_client.post.assert_not_called()
 
     async def test_custom_fields_on_create_reject_ghost_key(
         self,
@@ -1757,12 +1777,30 @@ class TestEnumGuardUpdateWorkItem:
         mock_client.get.side_effect = [
             _make_get_response(),  # prefetch: no customs on the edited item
             _wi_sample_response({"release_train_id": "RT-1"}),  # type sample knows it
+            PolarionNotFoundError("not an Enumeration field", status_code=404),
         ]
         result = await _call_update(
             mock_ctx, custom_fields={"release_train_id": "RT-42"}, dry_run=True
         )
 
         assert result.dry_run is True  # type: ignore[attr-defined]
+        mock_client.patch.assert_not_called()
+
+    async def test_custom_field_enum_value_rejected_on_update(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        # GETs: prefetch (for type), type sample (knows asil), enum probe.
+        mock_client.get.side_effect = [
+            _make_get_response(),
+            _wi_sample_response({"asil": "1"}),
+            _enum_get_response(["1", "2", "3", "4"]),
+        ]
+
+        with pytest.raises(ValueError, match=r"'asil'.*'9'"):
+            await _call_update(mock_ctx, custom_fields={"asil": "9"})
         mock_client.patch.assert_not_called()
 
     async def test_custom_fields_scoped_to_change_type_to(
@@ -1773,11 +1811,13 @@ class TestEnumGuardUpdateWorkItem:
     ) -> None:
         # change_type_to retypes the item in the same PATCH, so custom_fields are
         # validated against the NEW type's schema, not the current ("task").
-        # GETs: prefetch, type options (~ axis for change_type_to), custom sample.
+        # GETs: prefetch, type options (~ axis for change_type_to), custom
+        # sample, then the enum-value probe for the key (404 = not enum).
         mock_client.get.side_effect = [
             _make_get_response(),
             _enum_get_response(["requirement"]),
             _wi_sample_response({"release_train_id": "RT-1"}),
+            PolarionNotFoundError("not an Enumeration field", status_code=404),
         ]
         result = await _call_update(
             mock_ctx,

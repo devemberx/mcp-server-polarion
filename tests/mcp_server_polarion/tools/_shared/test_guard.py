@@ -26,12 +26,14 @@ from mcp_server_polarion.tools._shared.cache import (
 )
 from mcp_server_polarion.tools._shared.guard import (
     _GUARD_PAGE_SIZE,
+    _check_document_custom_keys,
+    _check_work_item_custom_keys,
     fetch_enum_option_ids,
     fetch_project_enum_option_ids,
-    guard_document_custom_field_keys,
+    guard_document_custom_fields,
     guard_document_enums,
     guard_hyperlink_roles,
-    guard_work_item_custom_field_keys,
+    guard_work_item_custom_fields,
     guard_work_item_enums,
     guard_work_item_link_roles,
     guard_work_item_link_targets,
@@ -326,7 +328,7 @@ class TestGuardWorkItemCustomFieldKeys:
     async def test_no_custom_fields_short_circuits(
         self, mock_client: AsyncMock
     ) -> None:
-        await guard_work_item_custom_field_keys(mock_client, "P", "task", {})
+        await guard_work_item_custom_fields(mock_client, "P", "task", {})
 
         mock_client.get.assert_not_awaited()
 
@@ -335,9 +337,7 @@ class TestGuardWorkItemCustomFieldKeys:
     ) -> None:
         store_work_item_custom_keys("P", "task", frozenset({"risk_score"}))
 
-        await guard_work_item_custom_field_keys(
-            mock_client, "P", "task", {"risk_score": 5}
-        )
+        await _check_work_item_custom_keys(mock_client, "P", "task", {"risk_score": 5})
 
         mock_client.get.assert_not_awaited()
 
@@ -349,7 +349,7 @@ class TestGuardWorkItemCustomFieldKeys:
             {"title": "b", "type": "task", "release_train_id": "RT-1"},
         )
 
-        await guard_work_item_custom_field_keys(
+        await _check_work_item_custom_keys(
             mock_client, "P", "task", {"risk_score": 9, "release_train_id": "RT-9"}
         )
 
@@ -377,9 +377,7 @@ class TestGuardWorkItemCustomFieldKeys:
         page2 = _wi_list({"title": "y", "type": "task", "late_key": 9})
         mock_client.get.side_effect = [page1, page2]
 
-        await guard_work_item_custom_field_keys(
-            mock_client, "P", "task", {"late_key": 9}
-        )
+        await _check_work_item_custom_keys(mock_client, "P", "task", {"late_key": 9})
 
         # Full page 1 (==100) forces page 2; short page 2 stops the loop.
         assert mock_client.get.await_count == 2
@@ -399,7 +397,7 @@ class TestGuardWorkItemCustomFieldKeys:
         )
 
         with pytest.raises(ValueError) as exc:
-            await guard_work_item_custom_field_keys(
+            await _check_work_item_custom_keys(
                 mock_client, "P", "task", {"release_train_id": "RT-42"}
             )
 
@@ -412,7 +410,7 @@ class TestGuardWorkItemCustomFieldKeys:
         mock_client.get.return_value = {"data": []}
 
         with pytest.raises(RuntimeError, match="Refusing the write"):
-            await guard_work_item_custom_field_keys(
+            await _check_work_item_custom_keys(
                 mock_client, "P", "task", {"risk_score": 5}
             )
 
@@ -422,7 +420,7 @@ class TestGuardWorkItemCustomFieldKeys:
         mock_client.get.side_effect = PolarionError("SQL not supported")
 
         with pytest.raises(RuntimeError, match="Refusing the write"):
-            await guard_work_item_custom_field_keys(
+            await _check_work_item_custom_keys(
                 mock_client, "P", "task", {"risk_score": 9}
             )
 
@@ -439,7 +437,7 @@ class TestGuardWorkItemCustomFieldKeys:
             {"title": "b", "type": "task", "release_train_id": "RT-1"},
         )
 
-        await guard_work_item_custom_field_keys(
+        await _check_work_item_custom_keys(
             mock_client, "P", "task", {"release_train_id": "RT-9"}
         )
 
@@ -450,7 +448,7 @@ class TestGuardWorkItemCustomFieldKeys:
         mock_client.get.side_effect = PolarionError("backend down")
 
         with pytest.raises(RuntimeError, match="Refusing the write"):
-            await guard_work_item_custom_field_keys(
+            await _check_work_item_custom_keys(
                 mock_client, "P", "task", {"release_train_id": "RT-42"}
             )
 
@@ -460,7 +458,7 @@ class TestGuardWorkItemCustomFieldKeys:
         mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
 
         with pytest.raises(PermissionError, match="lacks permission"):
-            await guard_work_item_custom_field_keys(
+            await _check_work_item_custom_keys(
                 mock_client, "P", "task", {"release_train_id": "RT-42"}
             )
 
@@ -491,7 +489,7 @@ class TestGuardDocumentCustomFieldKeys:
     async def test_no_custom_fields_short_circuits(
         self, mock_client: AsyncMock
     ) -> None:
-        await guard_document_custom_field_keys(mock_client, "P", "generic", {})
+        await guard_document_custom_fields(mock_client, "P", "generic", {})
 
         mock_client.get.assert_not_awaited()
 
@@ -500,9 +498,7 @@ class TestGuardDocumentCustomFieldKeys:
     ) -> None:
         store_document_type_custom_keys("P", "generic", frozenset({"doc_risk"}))
 
-        await guard_document_custom_field_keys(
-            mock_client, "P", "generic", {"doc_risk": 3}
-        )
+        await _check_document_custom_keys(mock_client, "P", "generic", {"doc_risk": 3})
 
         mock_client.get.assert_not_awaited()
 
@@ -516,7 +512,7 @@ class TestGuardDocumentCustomFieldKeys:
             ("systemReqSpecification", {"version": "1.0"}),
         )
 
-        await guard_document_custom_field_keys(
+        await _check_document_custom_keys(
             mock_client, "P", "generic", {"doc_risk": 9, "owner": "y"}
         )
 
@@ -539,7 +535,7 @@ class TestGuardDocumentCustomFieldKeys:
         mock_client.get.return_value = _docs_list(("generic", {"doc_risk": 3}))
 
         with pytest.raises(ValueError) as exc:
-            await guard_document_custom_field_keys(
+            await _check_document_custom_keys(
                 mock_client, "P", "generic", {"ghost_key": 1}
             )
 
@@ -556,9 +552,7 @@ class TestGuardDocumentCustomFieldKeys:
             ("generic", {"doc_risk": 3, "new_field": 1})
         )
 
-        await guard_document_custom_field_keys(
-            mock_client, "P", "generic", {"new_field": 1}
-        )
+        await _check_document_custom_keys(mock_client, "P", "generic", {"new_field": 1})
 
         mock_client.get.assert_awaited_once()
 
@@ -567,7 +561,7 @@ class TestGuardDocumentCustomFieldKeys:
         mock_client.get.return_value = _docs_list(("systemReqSpecification", {"v": 1}))
 
         with pytest.raises(RuntimeError, match="Refusing the write"):
-            await guard_document_custom_field_keys(
+            await _check_document_custom_keys(
                 mock_client, "P", "generic", {"doc_risk": 3}
             )
 
@@ -575,7 +569,7 @@ class TestGuardDocumentCustomFieldKeys:
         mock_client.get.side_effect = PolarionError("backend down")
 
         with pytest.raises(RuntimeError, match="Refusing the write"):
-            await guard_document_custom_field_keys(
+            await _check_document_custom_keys(
                 mock_client, "P", "generic", {"ghost_key": 1}
             )
 
@@ -585,9 +579,215 @@ class TestGuardDocumentCustomFieldKeys:
         mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
 
         with pytest.raises(PermissionError, match="lacks permission"):
-            await guard_document_custom_field_keys(
+            await _check_document_custom_keys(
                 mock_client, "P", "generic", {"ghost_key": 1}
             )
+
+
+class TestGuardWorkItemCustomFieldEnums:
+    """Enum-value stage of ``guard_work_item_custom_fields``.
+
+    The key stage is covered by ``TestGuardWorkItemCustomFieldKeys``; schemas
+    are primed here so each test exercises only the enum-value checks.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _prime_key_schemas(self, _reset_caches: None) -> None:
+        store_work_item_custom_keys("P", "softwarerequirement", frozenset({"asil"}))
+        store_work_item_custom_keys(
+            "P", "task", frozenset({"a", "asil", "f", "ftti", "other", "platform"})
+        )
+
+    async def test_unknown_key_rejected_before_enum_probe(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # Key stage runs first: a ghost key never reaches getAvailableOptions,
+        # so it cannot plant a long-lived 404 entry in the enum cache.
+        mock_client.get.return_value = _wi_list(
+            {"title": "a", "type": "task", "asil": "1"}
+        )
+
+        with pytest.raises(ValueError, match="ghost_key"):
+            await guard_work_item_custom_fields(
+                mock_client, "P", "task", {"ghost_key": "x"}
+            )
+
+        for call in mock_client.get.call_args_list:
+            assert "getAvailableOptions" not in call.args[0]
+
+    async def test_valid_option_id_passes(self, mock_client: AsyncMock) -> None:
+        mock_client.get.return_value = _enum_response(["1", "2", "3", "4"])
+
+        await guard_work_item_custom_fields(
+            mock_client, "P", "softwarerequirement", {"asil": "4"}
+        )  # must not raise
+
+    async def test_unknown_option_id_raises_with_options(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _enum_response(["1", "2", "3", "4"])
+
+        with pytest.raises(ValueError, match=r"'asil'.*'9'.*\['1', '2', '3', '4'\]"):
+            await guard_work_item_custom_fields(
+                mock_client, "P", "softwarerequirement", {"asil": "9"}
+            )
+
+    async def test_non_enum_field_defers_on_404(self, mock_client: AsyncMock) -> None:
+        # Polarion: "Field 'X' is not an Enumeration field." -- nothing to check.
+        mock_client.get.side_effect = PolarionNotFoundError("not enum", status_code=404)
+
+        await guard_work_item_custom_fields(
+            mock_client, "P", "task", {"ftti": 1000}
+        )  # must not raise
+
+    async def test_non_string_value_on_enum_field_raises(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # Option ids are strings; the int 4 would ghost even though '4' is valid.
+        mock_client.get.return_value = _enum_response(["1", "2", "3", "4"])
+
+        with pytest.raises(ValueError, match="int 4"):
+            await guard_work_item_custom_fields(
+                mock_client, "P", "softwarerequirement", {"asil": 4}
+            )
+
+    async def test_dict_value_on_enum_field_raises(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _enum_response(["1", "2"])
+
+        with pytest.raises(ValueError, match="dict"):
+            await guard_work_item_custom_fields(
+                mock_client, "P", "task", {"asil": {"id": "1"}}
+            )
+
+    async def test_list_of_valid_options_passes(self, mock_client: AsyncMock) -> None:
+        mock_client.get.return_value = _enum_response(["windows", "linux", "osx"])
+
+        await guard_work_item_custom_fields(
+            mock_client, "P", "task", {"platform": ["windows", "linux"]}
+        )  # must not raise
+
+    async def test_list_with_unknown_option_raises(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _enum_response(["windows", "linux"])
+
+        with pytest.raises(ValueError, match="'beos'"):
+            await guard_work_item_custom_fields(
+                mock_client, "P", "task", {"platform": ["windows", "beos"]}
+            )
+
+    async def test_list_with_non_string_element_raises(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _enum_response(["1", "2"])
+
+        with pytest.raises(ValueError, match="int 2"):
+            await guard_work_item_custom_fields(
+                mock_client, "P", "task", {"asil": ["1", 2]}
+            )
+
+    async def test_empty_string_and_none_skip_validation(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # Payload builders drop empties; nothing reaches Polarion to ghost.
+        mock_client.get.return_value = _enum_response(["1", "2"])
+
+        await guard_work_item_custom_fields(
+            mock_client, "P", "task", {"asil": "", "other": None}
+        )  # must not raise
+
+    async def test_options_fetched_once_per_key_within_ttl(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _enum_response(["1", "2"])
+
+        await guard_work_item_custom_fields(mock_client, "P", "task", {"a": "1"})
+        await guard_work_item_custom_fields(mock_client, "P", "task", {"a": "2"})
+
+        assert mock_client.get.await_count == 1
+
+    async def test_not_found_outlives_guard_ttl(
+        self, mock_client: AsyncMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # 404 entries get the long not_found TTL; positive sets keep 60s.
+        mock_client.get.side_effect = PolarionNotFoundError("not enum", status_code=404)
+        clock = [1000.0]
+        monkeypatch.setattr(cache_mod, "_now", lambda: clock[0])
+
+        await guard_work_item_custom_fields(mock_client, "P", "task", {"f": "x"})
+        clock[0] += 61.0  # past _GUARD_TTL_SECONDS, within not_found TTL
+        # The key schema shares the 60s TTL; re-prime so only the enum
+        # cache's expiry is measured.
+        store_work_item_custom_keys("P", "task", frozenset({"f"}))
+        await guard_work_item_custom_fields(mock_client, "P", "task", {"f": "x"})
+        assert mock_client.get.await_count == 1
+
+        clock[0] += 600.0  # past _ENUM_NOT_FOUND_TTL_SECONDS
+        store_work_item_custom_keys("P", "task", frozenset({"f"}))
+        await guard_work_item_custom_fields(mock_client, "P", "task", {"f": "x"})
+        assert mock_client.get.await_count == 2
+
+    async def test_polarion_error_blocks_write(self, mock_client: AsyncMock) -> None:
+        mock_client.get.side_effect = PolarionError("backend down")
+
+        with pytest.raises(RuntimeError, match="Refusing the write"):
+            await guard_work_item_custom_fields(mock_client, "P", "task", {"asil": "1"})
+
+    async def test_auth_error_raises_permission_error(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
+
+        with pytest.raises(PermissionError, match="lacks permission"):
+            await guard_work_item_custom_fields(mock_client, "P", "task", {"asil": "1"})
+
+
+class TestGuardDocumentCustomFieldEnums:
+    """Document-axis mirror; the shared enum core is exercised above."""
+
+    @pytest.fixture(autouse=True)
+    def _prime_key_schemas(self, _reset_caches: None) -> None:
+        store_document_type_custom_keys(
+            "P", "generic", frozenset({"docRisk", "freeText"})
+        )
+
+    async def test_valid_option_id_passes(self, mock_client: AsyncMock) -> None:
+        mock_client.get.return_value = _enum_response(["high", "moderate", "low"])
+
+        await guard_document_custom_fields(
+            mock_client, "P", "generic", {"docRisk": "low"}
+        )  # must not raise
+
+    async def test_unknown_option_id_raises(self, mock_client: AsyncMock) -> None:
+        mock_client.get.return_value = _enum_response(["high", "moderate", "low"])
+
+        with pytest.raises(ValueError, match=r"'docRisk'.*'severe'"):
+            await guard_document_custom_fields(
+                mock_client, "P", "generic", {"docRisk": "severe"}
+            )
+
+    async def test_queries_documents_fields_endpoint(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _enum_response(["high"])
+
+        await guard_document_custom_fields(
+            mock_client, "P", "generic", {"docRisk": "high"}
+        )
+
+        path = mock_client.get.call_args.args[0]
+        expected = "/projects/P/documents/fields/docRisk/actions/getAvailableOptions"
+        assert path == expected
+        assert mock_client.get.call_args.kwargs["params"]["type"] == "generic"
+
+    async def test_non_enum_field_defers_on_404(self, mock_client: AsyncMock) -> None:
+        mock_client.get.side_effect = PolarionNotFoundError("not enum", status_code=404)
+
+        await guard_document_custom_fields(
+            mock_client, "P", "generic", {"freeText": "anything"}
+        )  # must not raise
 
 
 def _workitems_response(project_id: str, short_ids: list[str]) -> dict[str, object]:

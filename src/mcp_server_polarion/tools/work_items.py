@@ -33,7 +33,7 @@ from mcp_server_polarion.models import (
 from mcp_server_polarion.server import mcp
 from mcp_server_polarion.tools._shared.guard import (
     guard_hyperlink_roles,
-    guard_work_item_custom_field_keys,
+    guard_work_item_custom_fields,
     guard_work_item_enums,
 )
 from mcp_server_polarion.tools._shared.helpers import (
@@ -248,8 +248,6 @@ async def create_work_items(
 
     Standard enums (``type``/``status``/``severity``/``priority``) are
     validated — unknown ids raise ``ValueError`` with valid options.
-    Custom-field enum values are NOT — an unresolved id persists as a ghost
-    invisible to Lucene; resolve via ``list_work_item_enum_options`` first.
     ``custom_fields`` keys are validated against the type's schema. Atomic:
     one bad item rejects the whole batch; an id-count mismatch raises —
     re-query ``list_work_items`` before retrying.
@@ -277,7 +275,7 @@ async def create_work_items(
     )
     for spec in items:
         if spec.custom_fields:
-            await guard_work_item_custom_field_keys(
+            await guard_work_item_custom_fields(
                 client, project_id, spec.type, spec.custom_fields
             )
 
@@ -547,7 +545,7 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
         # change_type_to retypes the item in the same PATCH, so custom_fields
         # belong to the new type's schema; validate against it, not the current.
         if custom_fields:
-            await guard_work_item_custom_field_keys(
+            await guard_work_item_custom_fields(
                 client,
                 project_id,
                 change_type_to or work_item_type,
@@ -638,8 +636,7 @@ async def list_work_item_enum_options(  # noqa: PLR0913
     """List valid enum option ids for a work item field of the given type.
 
     Resolve enum ids here before ``create_work_items`` / ``update_work_item``.
-    Standard fields are validated on write — invalid ids raise with this set.
-    Custom-field enum values are NOT — an unresolved id persists as a ghost.
+    Enum fields are validated on write — invalid ids raise with this set.
     An unknown ``work_item_type`` silently falls back to ``~``, so verify the
     type id first.
     """
