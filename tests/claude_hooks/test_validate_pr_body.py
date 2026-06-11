@@ -170,8 +170,9 @@ class TestChangesFormatErrors:
         errs = body.changes_format_errors(text)
         assert any("limit: 120" in e for e in errs)
 
-    def test_absent_section_is_tolerant(self) -> None:
-        assert body.changes_format_errors("## Summary\nno changes section\n") == []
+    def test_absent_section_is_rejected(self) -> None:
+        errs = body.changes_format_errors("## Summary\nno changes section\n")
+        assert any("Changes" in e for e in errs)
 
     def test_section_at_end_of_body(self) -> None:
         # no trailing section header after Changes

@@ -2882,27 +2882,15 @@ class TestUpdateDocumentFieldValidation:
 
 
 class TestUpdateDocumentPitfallDocumentation:
-    """Lock the two body-edit pitfalls into the public docstring so a
-    future slim pass cannot silently delete them.
+    """Lock the macro-div body-edit pitfall into the public docstring so a
+    future slim pass cannot silently delete it.
 
-    The pitfalls were reproduced against the live testdrive server and are
+    The pitfall was reproduced against the live testdrive server and is
     user-facing (MCP hosts on other platforms never load CLAUDE.md), so the
-    warnings must stay inside ``update_document.__doc__``.
+    warning must stay inside ``update_document.__doc__``. The anchorless-block
+    pitfall is gone from the docstring on purpose: the tool now stamps ids
+    automatically, so surfacing it would only distract the LLM.
     """
-
-    def test_docstring_warns_about_anchorless_paragraph_returning_500(self) -> None:
-        """Anchorless <p> appended via update_document breaks read_document_parts."""
-        document = update_document.__doc__ or ""
-        assert "anchorless" in document, (
-            "update_document docstring must mention the anchorless <p> pitfall"
-        )
-        assert "HTTP 500" in document, (
-            "update_document docstring must surface that the next read_document_parts "
-            "call returns HTTP 500 after an anchorless <p> append"
-        )
-        assert "move_work_item_to_document" in document, (
-            "update_document docstring must point callers at the correct attach path"
-        )
 
     def test_docstring_warns_about_macro_div_module_relationship_gap(self) -> None:
         """Macro <div> reference injected via update_document leaves module unset."""
@@ -3204,6 +3192,30 @@ class TestCreateDocumentHappyPath:
         assert '<p id="polarion_mcp_2">' in body_html
         assert "<h1>" in body_html
         assert "<h1 id=" not in body_html
+
+    async def test_defensive_guard_raises_when_stamp_leaves_anchorless(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A stamp_block_ids regression that leaves a block anchorless is
+        caught by the trailing first_anchorless_block guard before POST."""
+        monkeypatch.setattr(_mod, "stamp_block_ids", lambda html: html)
+        with pytest.raises(RuntimeError, match="anchorless block"):
+            await create_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="_default",
+                module_name="MySpec",
+                title="t",
+                type="generic",
+                status=None,
+                home_page_content="plain para",
+                custom_fields=None,
+                dry_run=False,
+            )
+        mock_client.post.assert_not_called()
 
     async def test_home_page_content_strips_dangerous_link_schemes(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -3654,33 +3666,46 @@ class TestEnumGuardUpdateDocument:
         assert result.dry_run is True  # type: ignore[attr-defined]
 
 
+def _doc_body_value(result: object) -> str:
+    """Pull ``homePageContent.value`` out of an update_document dry-run preview."""
+    preview = result.payload_preview  # type: ignore[attr-defined]
+    assert preview is not None
+    data = cast(dict[str, object], preview["data"])
+    attrs = cast(dict[str, object], data["attributes"])
+    body = cast(dict[str, object], attrs["homePageContent"])
+    return cast(str, body["value"])
+
+
 class TestUpdateDocumentAnchorlessGuard:
-    """Integration: ``update_document`` rejects anchorless body blocks."""
+    """Integration: ``update_document`` auto-stamps anchorless body blocks."""
 
-    async def test_anchorless_paragraph_raises(
-        self,
-        mock_ctx: MagicMock,
-        mock_client: AsyncMock,
-        reset_enum_guard_caches: None,
-    ) -> None:
-        with pytest.raises(ValueError, match="anchorless <p>"):
-            await _call_update_doc(
-                mock_ctx, home_page_content_html="<p>Note</p>", dry_run=True
-            )
-        mock_client.patch.assert_not_called()
-
-    async def test_stamped_paragraph_passes(
+    async def test_anchorless_paragraph_is_stamped(
         self,
         mock_ctx: MagicMock,
         mock_client: AsyncMock,
         reset_enum_guard_caches: None,
     ) -> None:
         result = await _call_update_doc(
-            mock_ctx,
-            home_page_content_html='<p id="polarion_mcp_1">Note</p>',
-            dry_run=True,
+            mock_ctx, home_page_content_html="<p>Note</p>", dry_run=True
         )
-        assert result.dry_run is True  # type: ignore[attr-defined]
+        body = _doc_body_value(result)
+        assert "Note" in body
+        assert 'id="polarion_mcp_' in body
+        mock_client.patch.assert_not_called()
+
+    async def test_anchored_body_sent_verbatim(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        """An already-anchored body round-trips byte-for-byte: stamp_block_ids
+        short-circuits before reserializing, so ``&nbsp;`` is not mangled."""
+        raw = '<p id="polarion_mcp_1">Note&nbsp;here</p>'
+        result = await _call_update_doc(
+            mock_ctx, home_page_content_html=raw, dry_run=True
+        )
+        assert _doc_body_value(result) == raw
 
     async def test_heading_only_passes(
         self,
@@ -3692,3 +3717,19 @@ class TestUpdateDocumentAnchorlessGuard:
             mock_ctx, home_page_content_html="<h1>Title</h1>", dry_run=True
         )
         assert result.dry_run is True  # type: ignore[attr-defined]
+
+    async def test_defensive_guard_raises_when_stamp_leaves_anchorless(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """If a future stamp_block_ids regression leaves a block anchorless,
+        the trailing first_anchorless_block guard blocks the PATCH."""
+        monkeypatch.setattr(_mod, "stamp_block_ids", lambda html: html)
+        with pytest.raises(RuntimeError, match="anchorless block"):
+            await _call_update_doc(
+                mock_ctx, home_page_content_html="<p>Note</p>", dry_run=True
+            )
+        mock_client.patch.assert_not_called()

@@ -8,8 +8,8 @@ Rules:
   1. English-only — no non-ASCII characters in the body.
   2. Template checkboxes preserved — every checkbox from PULL_REQUEST_TEMPLATE.md
      must appear (PR create/edit only).
-  3. ## Changes section — exactly two non-empty bullets, each <= 120 chars
-     (PR create/edit only).
+  3. ## Changes section — required, with exactly two non-empty bullets, each
+     <= 120 chars (PR create/edit only).
 
 Exit 0 = allow, exit 2 = block.
 """
@@ -164,7 +164,10 @@ def missing_template_boxes(body: str) -> list[str]:
 def changes_format_errors(body: str) -> list[str]:
     header = CHANGES_HEADER_RE.search(body)
     if header is None:
-        return []
+        return [
+            "Body is missing the required '## Changes' section "
+            "(see .github/PULL_REQUEST_TEMPLATE.md)."
+        ]
     nxt = NEXT_SECTION_RE.search(body, header.end())
     section = body[header.end() : nxt.start()] if nxt else body[header.end() :]
     lines = (ln.rstrip() for ln in section.splitlines())

@@ -393,9 +393,12 @@ def stamp_block_ids(html: str, prefix: str = "polarion_mcp") -> str:
     ids. An anchorless ``<p>`` (or any ``_BLOCK_TAGS_NEEDING_IDS`` tag)
     saves fine but makes the next ``GET .../parts`` return HTTP 500.
     Heading tags (``<h1>..<h6>``) are skipped — Polarion rewrites their ids
-    into the ``module-workitem`` macro on save. Existing non-empty ids are
+    into the ``module-workitem`` macro on save. Existing non-blank ids are
     preserved; generated ids skip values already in the document so the
-    PATCH never trips Polarion's HTTP 400 duplicate-id rule.
+    PATCH never trips Polarion's HTTP 400 duplicate-id rule. Returns the
+    input unchanged (verbatim, not reserialized) when every target block
+    already carries a non-blank id, so an anchored round-trip body is never
+    perturbed.
 
     Args:
         html: HTML string (typically ``sanitize_html`` output).
@@ -416,8 +419,10 @@ def stamp_block_ids(html: str, prefix: str = "polarion_mcp") -> str:
             used_ids.add(existing)
 
     counter = 0
+    stamped = False
     for tag in soup.find_all(list(_BLOCK_TAGS_NEEDING_IDS)):
-        if tag.get("id"):
+        existing = tag.get("id")
+        if isinstance(existing, str) and existing.strip():
             continue
         while f"{prefix}_{counter}" in used_ids:
             counter += 1
@@ -425,20 +430,22 @@ def stamp_block_ids(html: str, prefix: str = "polarion_mcp") -> str:
         tag["id"] = new_id
         used_ids.add(new_id)
         counter += 1
-    return str(soup)
+        stamped = True
+    # Verbatim when nothing changed: str(soup) reserializes the whole string
+    # (e.g. &nbsp; -> \xa0), which would corrupt an already-anchored round-trip body.
+    return str(soup) if stamped else html
 
 
 def first_anchorless_block(html: str) -> str | None:
     """Return the name of the first block lacking a non-empty ``id=``.
 
-    Write-side counterpart to :func:`stamp_block_ids`: rejects anchorless
-    blocks in raw ``update_document`` body HTML before they reach Polarion,
-    since each makes the next ``GET .../parts`` return HTTP 500. Headings
-    are exempt (Polarion rewrites their ids). ``None`` when every
-    ``_BLOCK_TAGS_NEEDING_IDS`` block has an id, or input is empty.
-
-    Stricter than ``stamp_block_ids``'s skip test: a whitespace-only ``id``
-    counts as anchorless here. Erring toward rejection is the safe direction.
+    Defensive counterpart to :func:`stamp_block_ids`: ``create_document`` and
+    ``update_document`` run it after stamping so a stamping regression cannot
+    reach Polarion, where each anchorless block makes the next
+    ``GET .../parts`` return HTTP 500. Headings are exempt (Polarion rewrites
+    their ids). ``None`` when every ``_BLOCK_TAGS_NEEDING_IDS`` block has an
+    id, or input is empty. A whitespace-only ``id`` counts as anchorless,
+    matching ``stamp_block_ids``'s skip test.
     """
     if not html or not html.strip():
         return None

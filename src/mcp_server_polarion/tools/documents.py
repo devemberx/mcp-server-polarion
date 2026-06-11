@@ -871,7 +871,8 @@ async def update_document(  # noqa: PLR0913
         max_length=MAX_BODY_HTML_LEN,
         description=(
             "New body as raw HTML from "
-            "``get_document(include_homepage_content_html=True)``; '' rejected."
+            "``get_document(include_homepage_content_html=True)``; '' rejected; "
+            "anchorless blocks get ``id=`` auto-stamped."
         ),
     ),
     custom_fields: dict[str, object] | None = Field(  # noqa: B008
@@ -893,19 +894,17 @@ async def update_document(  # noqa: PLR0913
 
     PATCHes only the supplied attributes (omitted preserved); no follow-up GET.
     Fetch via ``get_document`` BEFORE updating. ``home_page_content_html`` is
-    sent verbatim/unsanitized — source it from
-    ``get_document(include_homepage_content_html=True)``; empty string rejected
-    (orphans headings), pass ``'<p></p>'`` for near-empty.
+    never sanitized or converted — source it from
+    ``get_document(include_homepage_content_html=True)``. Body blocks lacking
+    an ``id=`` get one auto-stamped; a fully anchored body is sent
+    byte-for-byte. Empty string rejected (orphans headings), pass
+    ``'<p></p>'`` for near-empty.
 
     Body rules:
 
     - Inline ``<h1>..<h4>`` auto-create heading work items — THE way to add a
       heading. For body text or work items use ``create_work_items`` +
       ``move_work_item_to_document``, NOT this tool.
-    - Every anchorless ``<p>``/``<ul>``/``<ol>``/``<table>``/``<div>``/
-      ``<blockquote>``/``<pre>`` block is rejected before PATCH — give each a
-      unique ``id=``. (Unguarded, the PATCH would 200 and the next
-      ``read_document_parts`` would return HTTP 500.)
     - A ``polarion_wiki macro name=module-workitem`` ``<div>`` leaves the work
       item's ``module`` unset — attach via ``move_work_item_to_document``.
 
@@ -922,15 +921,11 @@ async def update_document(  # noqa: PLR0913
             "to leave the body unchanged."
         )
     if home_page_content_html is not None:
-        anchorless = first_anchorless_block(home_page_content_html)
-        if anchorless is not None:
-            raise ValueError(
-                f"home_page_content_html contains an anchorless <{anchorless}> "
-                "block. Every non-heading block (<p>/<ul>/<ol>/<table>/<div>/"
-                "<blockquote>/<pre>) must carry a unique non-empty id= or the "
-                "next read_document_parts returns HTTP 500. Stamp ids "
-                '(e.g. id="polarion_mcp_0") on each such block before updating; '
-                "<h1>..<h6> headings are exempt."
+        home_page_content_html = stamp_block_ids(home_page_content_html)
+        if first_anchorless_block(home_page_content_html) is not None:
+            raise RuntimeError(
+                "stamp_block_ids left an anchorless block; refusing to PATCH "
+                "(next read_document_parts would return HTTP 500)."
             )
 
     has_attrs = (
@@ -1110,6 +1105,10 @@ async def create_document(  # noqa: PLR0913
         if home_page_content
         else ""
     )
+    if home_page_content_html and first_anchorless_block(home_page_content_html):
+        raise RuntimeError(
+            "stamp_block_ids left an anchorless block in new document body."
+        )
 
     payload = _build_create_document_payload(
         module_name=module_name,

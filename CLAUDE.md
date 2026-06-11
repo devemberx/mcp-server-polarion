@@ -61,7 +61,7 @@ Applies to ALL comments/docstrings incl. CLAUDE.md.
 ### Document writes
 
 - Body edits via `homePageContent` PATCH, not `/parts` (those wrappers reject heading-type items). Empty `home_page_content_html` rejected (would orphan headings).
-- Anchorless `<p>`/`<ul>`/`<ol>`/`<table>`/`<div>`/`<blockquote>`/`<pre>` break `/parts` (PATCH 200, next GET 500); each needs unique non-empty `id=`. `create_document` runs `stamp_block_ids`; `update_document` hard-rejects via `first_anchorless_block`. For body text, prefer `create_work_items` + `move_work_item_to_document`.
+- Anchorless `<p>`/`<ul>`/`<ol>`/`<table>`/`<div>`/`<blockquote>`/`<pre>` break `/parts` (PATCH 200, next GET 500); each needs unique non-empty `id=`. Both `create_document` and `update_document` run `stamp_block_ids`. `stamp_block_ids` returns input verbatim when every target block already has a non-blank id (no `str(soup)` reserialize → no `&nbsp;`→`\xa0` drift on an anchored round-trip body), else stamps the gaps; both tools follow with a `first_anchorless_block` defensive guard. For body text, prefer `create_work_items` + `move_work_item_to_document`.
 - `module` cannot be set via PATCH or HTML injection — only `move_work_item_to_document` / `move_work_item_from_document` (atomic action pair). `create_work_item` doesn't expose `module` (would land in recycle bin) — create free-floating, then move. `moveFromDocument` not idempotent (400 if detached). `moveToDocument` auto-creates one link to enclosing heading; later same-role `create_work_item_links` 201s but isn't persisted (phantom success).
 
 ### Work item & comment quirks
