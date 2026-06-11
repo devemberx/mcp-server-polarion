@@ -871,7 +871,8 @@ async def update_document(  # noqa: PLR0913
         max_length=MAX_BODY_HTML_LEN,
         description=(
             "New body as raw HTML from "
-            "``get_document(include_homepage_content_html=True)``; '' rejected."
+            "``get_document(include_homepage_content_html=True)``; '' rejected; "
+            "anchorless blocks get ``id=`` auto-stamped."
         ),
     ),
     custom_fields: dict[str, object] | None = Field(  # noqa: B008
@@ -893,9 +894,11 @@ async def update_document(  # noqa: PLR0913
 
     PATCHes only the supplied attributes (omitted preserved); no follow-up GET.
     Fetch via ``get_document`` BEFORE updating. ``home_page_content_html`` is
-    sent verbatim/unsanitized — source it from
-    ``get_document(include_homepage_content_html=True)``; empty string rejected
-    (orphans headings), pass ``'<p></p>'`` for near-empty.
+    never sanitized or converted — source it from
+    ``get_document(include_homepage_content_html=True)``. Body blocks lacking
+    an ``id=`` get one auto-stamped; a fully anchored body is sent
+    byte-for-byte. Empty string rejected (orphans headings), pass
+    ``'<p></p>'`` for near-empty.
 
     Body rules:
 
