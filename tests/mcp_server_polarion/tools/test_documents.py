@@ -2915,6 +2915,17 @@ class TestUpdateDocumentPitfallDocumentation:
             "relationship stays unset after a macro <div> injection"
         )
 
+    def test_docstring_directs_get_before_update(self) -> None:
+        """Partial-PATCH semantics demand observing current state first."""
+        document = update_document.__doc__ or ""
+        assert "get_document" in document, (
+            "update_document docstring must direct callers to read the "
+            "document before patching it"
+        )
+        assert "BEFORE" in document, (
+            "update_document docstring must state the read happens BEFORE the update"
+        )
+
 
 class TestBuildCreateDocumentPayload:
     """Tests for the private ``_build_create_document_payload`` helper."""
@@ -3472,8 +3483,9 @@ class TestCreateDocumentRegistration:
 class TestCreateDocumentDocstringGuidance:
     """Verify enum-resolution and ghost-write guidance lives in the docstring.
 
-    Per CLAUDE.md, the write tools' docstrings are the only enforcement
-    against ghost-enum writes — the server does not validate enum IDs.
+    Standard enums are tool-guarded (``guard_document_enums``), but
+    custom-field enum values are not — the docstring is the only steer
+    toward ``list_document_enum_options``.
     """
 
     def test_docstring_mentions_list_document_enum_options(self) -> None:

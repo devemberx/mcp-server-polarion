@@ -618,10 +618,11 @@ async def list_document_enum_options(  # noqa: PLR0913
 ) -> PaginatedResult[EnumOption]:
     """List valid enum option ids for a document field of the given type.
 
-    Call before ``create_document`` / ``update_document`` — Polarion does NOT
-    validate enum values on write (unknown ids persist as ghosts). An unknown
-    ``document_type`` silently falls back to ``~``, so verify the type id
-    first.
+    Resolve enum ids here before ``create_document`` / ``update_document``.
+    Standard fields (``type``/``status``) are validated on write — invalid ids
+    raise with this set. Custom-field enum values are NOT — an unresolved id
+    persists as a ghost. An unknown ``document_type`` silently falls back to
+    ``~``, so verify the type id first.
     """
     client = get_client(ctx)
     path = (
@@ -901,16 +902,17 @@ async def update_document(  # noqa: PLR0913
     - Inline ``<h1>..<h4>`` auto-create heading work items — THE way to add a
       heading. For body text or work items use ``create_work_items`` +
       ``move_work_item_to_document``, NOT this tool.
-    - An anchorless ``<p>``/``<ul>``/``<ol>``/``<table>``/``<div>``/
-      ``<blockquote>``/``<pre>`` block PATCHes 200 but the next
-      ``read_document_parts`` returns HTTP 500 — every such block needs a
-      unique ``id=`` (tool rejects beforehand).
+    - Every anchorless ``<p>``/``<ul>``/``<ol>``/``<table>``/``<div>``/
+      ``<blockquote>``/``<pre>`` block is rejected before PATCH — give each a
+      unique ``id=``. (Unguarded, the PATCH would 200 and the next
+      ``read_document_parts`` would return HTTP 500.)
     - A ``polarion_wiki macro name=module-workitem`` ``<div>`` leaves the work
       item's ``module`` unset — attach via ``move_work_item_to_document``.
 
     ``workflow_action`` must pair with ≥1 attribute (400 otherwise). Unknown
     ``status`` / ``type`` raise ``ValueError``; ``custom_fields`` keys outside
-    the document type's schema are rejected.
+    the document type's schema are rejected, values are NOT validated —
+    resolve enum values via ``list_document_enum_options`` first.
     """
     if home_page_content_html is not None and not home_page_content_html.strip():
         raise ValueError(
@@ -1081,9 +1083,11 @@ async def create_document(  # noqa: PLR0913
     """Create a new Polarion document in a space.
 
     ``module_name`` must be unique in the space (duplicate → HTTP 409) — check
-    ``list_documents`` first. Enum ids (``type``/``status``) must come from
-    ``list_document_enum_options`` — unverified ids persist as ghosts.
-    ``custom_fields`` keys are validated against the document type's schema.
+    ``list_documents`` first. ``type``/``status`` are validated — unknown ids
+    raise ``ValueError`` with valid options. Custom-field enum values are
+    NOT — an unresolved id persists as a ghost; resolve via
+    ``list_document_enum_options`` first. ``custom_fields`` keys are validated
+    against the document type's schema.
 
     ``home_page_content`` is Markdown → sanitized HTML, blocks auto-stamped
     with unique ids. Post-create edits are raw-HTML round-trip via

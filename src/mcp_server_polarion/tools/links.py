@@ -426,8 +426,8 @@ async def create_work_item_links(
 ) -> WorkItemLinksCreateResult:
     """Create 1-50 outgoing links from one source work item, atomically.
 
-    Role and target existence are validated before POST (Polarion itself
-    stores ghost roles / dangling targets silently). Per spec:
+    Role and target existence are validated before POST — invalid ones raise
+    ``ValueError``. Per spec:
     ``target_project_id`` defaults to source, ``revision`` pins (else HEAD),
     ``suspect`` flags re-review. A 4xx (e.g. duplicate role+target → 409)
     rolls back the whole batch — re-query ``list_work_item_links`` before

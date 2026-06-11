@@ -76,7 +76,7 @@ async def move_work_item_to_document(  # noqa: PLR0913
     ),
     target_space_id: str = Field(
         min_length=1,
-        description="Target space ID ('_default' for the default space).",
+        description="Target space ID ('_default' = default space).",
     ),
     target_document_name: str = Field(
         min_length=1,

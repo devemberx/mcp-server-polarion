@@ -246,11 +246,13 @@ async def create_work_items(
 ) -> WorkItemsCreateResult:
     """Create 1-50 work items in one project in a single bulk request.
 
-    Enum values (``type`` / ``status`` / ``severity`` / custom enums) must come
-    from ``list_work_item_enum_options`` — unverified ids persist as ghosts
-    invisible to Lucene. ``custom_fields`` keys are validated against the
-    type's schema. Atomic: one bad item rejects the whole batch; an id-count
-    mismatch raises — re-query ``list_work_items`` before retrying.
+    Standard enums (``type``/``status``/``severity``/``priority``) are
+    validated — unknown ids raise ``ValueError`` with valid options.
+    Custom-field enum values are NOT — an unresolved id persists as a ghost
+    invisible to Lucene; resolve via ``list_work_item_enum_options`` first.
+    ``custom_fields`` keys are validated against the type's schema. Atomic:
+    one bad item rejects the whole batch; an id-count mismatch raises —
+    re-query ``list_work_items`` before retrying.
 
     Items are created free-floating; place into a document with
     ``move_work_item_to_document`` (this tool cannot). ``description`` is
@@ -414,7 +416,9 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
 
     ``hyperlinks`` / ``assignee_ids`` REPLACE the stored list: resubmit every
     existing entry plus the change, or omissions are silently deleted.
-    ``custom_fields`` is partial; keys outside the type's schema are rejected.
+    ``custom_fields`` is partial; keys outside the type's schema are rejected,
+    values are NOT validated — resolve enum values via
+    ``list_work_item_enum_options`` first.
 
     ``module`` not settable here — use ``move_work_item_to_document`` /
     ``move_work_item_from_document``. ``workflow_action`` / ``change_type_to``
@@ -633,9 +637,10 @@ async def list_work_item_enum_options(  # noqa: PLR0913
 ) -> PaginatedResult[EnumOption]:
     """List valid enum option ids for a work item field of the given type.
 
-    Call before ``create_work_items`` / ``update_work_item`` — Polarion does
-    NOT validate enum values on write (unknown ids persist as ghosts). An
-    unknown ``work_item_type`` silently falls back to ``~``, so verify the
+    Resolve enum ids here before ``create_work_items`` / ``update_work_item``.
+    Standard fields are validated on write — invalid ids raise with this set.
+    Custom-field enum values are NOT — an unresolved id persists as a ghost.
+    An unknown ``work_item_type`` silently falls back to ``~``, so verify the
     type id first.
     """
     client = get_client(ctx)

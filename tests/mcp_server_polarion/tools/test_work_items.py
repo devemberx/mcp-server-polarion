@@ -1572,6 +1572,20 @@ class TestUpdateWorkItemFieldValidation:
             adapter.validate_python("x" * (2_000_000 + 1))
 
 
+class TestUpdateWorkItemDocstringGuidance:
+    """Lock the read-before-update steer into the public docstring."""
+
+    def test_docstring_directs_get_before_update(self) -> None:
+        document = update_work_item.__doc__ or ""
+        assert "get_work_item" in document, (
+            "update_work_item docstring must direct callers to read the "
+            "work item before patching it"
+        )
+        assert "BEFORE" in document, (
+            "update_work_item docstring must state the read happens BEFORE the update"
+        )
+
+
 class TestEnumGuardCreateWorkItem:
     """Integration: ``create_work_items`` rejects ghost enum ids before POST."""
 
