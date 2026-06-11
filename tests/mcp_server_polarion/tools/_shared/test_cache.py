@@ -12,6 +12,7 @@ import pytest
 
 from mcp_server_polarion.tools._shared import cache as cache_mod
 from mcp_server_polarion.tools._shared.cache import (
+    DiscoveredDocument,
     TTLCache,
     get_cached_documents,
     get_cached_enum_options,
@@ -121,27 +122,28 @@ class TestDocumentListCache:
     """The mutable document-discovery listing wrappers."""
 
     def test_store_then_get_returns_a_list_copy(self) -> None:
-        store_cached_documents("P", [("_default", "Doc")])
+        doc = DiscoveredDocument("_default", "Doc")
+        store_cached_documents("P", [doc])
 
         cached = get_cached_documents("P")
-        assert cached == [("_default", "Doc")]
+        assert cached == [doc]
         # A mutation of the returned list must not corrupt the cache.
         assert cached is not None
-        cached.append(("_default", "Other"))
-        assert get_cached_documents("P") == [("_default", "Doc")]
+        cached.append(DiscoveredDocument("_default", "Other"))
+        assert get_cached_documents("P") == [doc]
 
     def test_miss_returns_none(self) -> None:
         assert get_cached_documents("absent") is None
 
     def test_invalidate_drops_the_project(self) -> None:
-        store_cached_documents("P", [("_default", "Doc")])
+        store_cached_documents("P", [DiscoveredDocument("_default", "Doc")])
 
         invalidate_documents_cache("P")
 
         assert get_cached_documents("P") is None
 
     def test_expiry_uses_document_list_ttl(self, clock: list[float]) -> None:
-        store_cached_documents("P", [("_default", "Doc")])
+        store_cached_documents("P", [DiscoveredDocument("_default", "Doc")])
 
         clock[0] += cache_mod._DOCUMENT_LIST_TTL_SECONDS + 1.0
         assert get_cached_documents("P") is None
