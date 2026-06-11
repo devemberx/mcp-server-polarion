@@ -45,11 +45,10 @@ def build_model() -> LiteLLMModel:
         model_id=model_id,
         params={
             "temperature": 0.0,
-            # gpt-4o-mini sometimes emits the SAME tool call twice in one
-            # parallel-tool-call block (observed duplicating a successful bulk
-            # create) -- provider nondeterminism no docstring can steer, so it
-            # is pinned off like temperature. drop_params lets backends that
-            # don't know the flag (e.g. Ollama) ignore it instead of erroring.
+            # Some providers emit the same tool call twice in one parallel
+            # block -- nondeterminism no docstring can steer, pinned off like
+            # temperature. drop_params lets backends without the flag
+            # (e.g. Ollama) ignore it.
             "parallel_tool_calls": False,
             "drop_params": True,
             "num_retries": max(0, int(os.environ.get("EVAL_NUM_RETRIES", "10"))),
