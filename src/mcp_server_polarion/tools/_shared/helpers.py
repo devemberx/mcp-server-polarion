@@ -230,9 +230,15 @@ def build_included_user_name_map(response: dict[str, object]) -> dict[str, str]:
     if isinstance(included, list):
         for inc in included:
             if isinstance(inc, dict) and inc.get("type") == "users":
+                user_id = safe_str(inc.get("id", ""))
+                if not user_id:
+                    # An id-less resource must not occupy the "" key: an absent
+                    # author relationship also resolves to "", and the two would
+                    # join into a phantom editor name.
+                    continue
                 attrs = inc.get("attributes", {})
                 name = attrs.get("name", "") if isinstance(attrs, dict) else ""
-                user_map[safe_str(inc.get("id", ""))] = safe_str(name)
+                user_map[user_id] = safe_str(name)
     return user_map
 
 

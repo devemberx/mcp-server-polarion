@@ -194,7 +194,7 @@ def _module_resource(
 
 
 def _user_resource(user_id: str, name: str) -> dict:
-    """An ``included`` user resource as returned by ``include=module.author``."""
+    """An ``included`` user resource as returned by an ``include=`` user path."""
     return {"type": "users", "id": user_id, "attributes": {"name": name}}
 
 
@@ -314,6 +314,29 @@ class TestListDocuments:
         )
 
         assert result.items[0].author == ""
+
+    async def test_id_less_included_user_never_matches(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """An id-less included user must not join with an absent relationship."""
+        included = [
+            _module_resource("proj1/_default/Doc1"),
+            {"type": "users", "attributes": {"name": "Phantom"}},
+        ]
+        mock_client.get.return_value = _discovery_response(
+            included, total=1, data_count=1
+        )
+
+        result = await list_documents(
+            mock_ctx,
+            project_id="proj1",
+            page_size=100,
+            page_number=1,
+        )
+
+        doc = result.items[0]
+        assert doc.author == ""
+        assert doc.last_updated_by == ""
 
     async def test_missing_metadata_defaults_empty(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
