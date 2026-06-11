@@ -760,6 +760,24 @@ class TestStampBlockIds:
         assert '<p id="anchor_0">x</p>' in result
         assert '<p id="anchor_1">y</p>' in result
 
+    def test_clean_input_returned_verbatim(self) -> None:
+        """When every target block already carries a non-blank id, the input
+        is returned byte-for-byte — no BeautifulSoup reserialization, so
+        ``&nbsp;``/``&copy;`` and quote style survive an anchored round-trip."""
+        html = '<p id="a">x&nbsp;y</p><table id="t"><tr><td>&copy;</td></tr></table>'
+        assert stamp_block_ids(html) == html
+
+    def test_heading_only_input_returned_verbatim(self) -> None:
+        # No target block at all -> nothing to stamp -> verbatim passthrough.
+        html = "<h1>a</h1><h2>b&nbsp;c</h2>"
+        assert stamp_block_ids(html) == html
+
+    def test_whitespace_only_id_is_stamped(self) -> None:
+        # A blank id does not anchor the block (mirrors first_anchorless_block);
+        # it gets restamped rather than skipped.
+        result = stamp_block_ids('<p id="   ">x</p>')
+        assert '<p id="polarion_mcp_0">x</p>' in result
+
     @pytest.mark.parametrize("value", ["", "   ", "\n\t"])
     def test_empty_or_whitespace_input_returns_empty(self, value: str) -> None:
         assert stamp_block_ids(value) == ""
