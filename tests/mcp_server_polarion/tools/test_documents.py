@@ -167,9 +167,35 @@ def reset_enum_guard_caches() -> None:
     _cache_mod._document_type_custom_key_cache.clear()
 
 
-def _module_resource(full_id: str, doc_type: str = "generic") -> dict:
+def _module_resource(
+    full_id: str,
+    doc_type: str = "generic",
+    *,
+    status: str = "",
+    updated: str = "",
+    author_id: str = "",
+    updated_by_id: str = "",
+) -> dict:
     """An ``included`` document resource as returned by ``include=module``."""
-    return {"type": "documents", "id": full_id, "attributes": {"type": doc_type}}
+    attributes: dict = {"type": doc_type}
+    if status:
+        attributes["status"] = status
+    if updated:
+        attributes["updated"] = updated
+    resource: dict = {"type": "documents", "id": full_id, "attributes": attributes}
+    relationships: dict = {}
+    if author_id:
+        relationships["author"] = {"data": {"type": "users", "id": author_id}}
+    if updated_by_id:
+        relationships["updatedBy"] = {"data": {"type": "users", "id": updated_by_id}}
+    if relationships:
+        resource["relationships"] = relationships
+    return resource
+
+
+def _user_resource(user_id: str, name: str) -> dict:
+    """An ``included`` user resource as returned by an ``include=`` user path."""
+    return {"type": "users", "id": user_id, "attributes": {"name": name}}
 
 
 def _discovery_response(
@@ -235,6 +261,102 @@ class TestListDocuments:
         assert ("Design", "SDD", "generic") in triples
         assert ("Design", "SRS", "req_specification") in triples
         assert ("Testing", "TestPlan", "testspecification") in triples
+
+    async def test_metadata_fields_populated(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """status/updated come from attributes, editor names from included users."""
+        included = [
+            _module_resource(
+                "proj1/_default/Doc1",
+                "generic",
+                status="draft",
+                updated="2026-02-22T14:53:03.244Z",
+                author_id="admin",
+                updated_by_id="72c2462f",
+            ),
+            _user_resource("admin", "System Administrator"),
+            _user_resource("72c2462f", "Dev Member"),
+        ]
+        mock_client.get.return_value = _discovery_response(
+            included, total=1, data_count=1
+        )
+
+        result = await list_documents(
+            mock_ctx,
+            project_id="proj1",
+            page_size=100,
+            page_number=1,
+        )
+
+        doc = result.items[0]
+        assert doc.status == "draft"
+        assert doc.updated == "2026-02-22T14:53:03.244Z"
+        assert doc.author == "System Administrator"
+        assert doc.last_updated_by == "Dev Member"
+
+    async def test_unresolved_user_yields_empty_name(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """A relationship pointing at a user missing from ``included`` → ``""``."""
+        included = [
+            _module_resource("proj1/_default/Doc1", author_id="ghost"),
+        ]
+        mock_client.get.return_value = _discovery_response(
+            included, total=1, data_count=1
+        )
+
+        result = await list_documents(
+            mock_ctx,
+            project_id="proj1",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.items[0].author == ""
+
+    async def test_id_less_included_user_never_matches(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """An id-less included user must not join with an absent relationship."""
+        included = [
+            _module_resource("proj1/_default/Doc1"),
+            {"type": "users", "attributes": {"name": "Phantom"}},
+        ]
+        mock_client.get.return_value = _discovery_response(
+            included, total=1, data_count=1
+        )
+
+        result = await list_documents(
+            mock_ctx,
+            project_id="proj1",
+            page_size=100,
+            page_number=1,
+        )
+
+        doc = result.items[0]
+        assert doc.author == ""
+        assert doc.last_updated_by == ""
+
+    async def test_missing_metadata_defaults_empty(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Bare module resources (no status/updated/relationships) → empty fields."""
+        included = [_module_resource("proj1/_default/Doc1")]
+        mock_client.get.return_value = _discovery_response(included, total=1)
+
+        result = await list_documents(
+            mock_ctx,
+            project_id="proj1",
+            page_size=100,
+            page_number=1,
+        )
+
+        doc = result.items[0]
+        assert doc.status == ""
+        assert doc.updated == ""
+        assert doc.author == ""
+        assert doc.last_updated_by == ""
 
     async def test_deduplicates_documents(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -470,9 +592,12 @@ class TestListDocuments:
         # Recycle-bin exclusion mirrors the Lucene type:heading default.
         assert "wi.c_deleted IS NOT TRUE" in query
         assert "p.c_id = 'proj1'" in query
-        # include=module pulls each document's type into the included array.
-        assert params["include"] == "module"
-        assert params["fields[documents]"] == "type"
+        # module pulls document attributes, the dot-paths the editors' names;
+        # the intermediate ``module`` must stay listed or documents drop out.
+        assert params["include"] == "module,module.author,module.updatedBy"
+        # Relationship names listed explicitly: sparse fieldsets drop them.
+        assert params["fields[documents]"] == "type,status,updated,author,updatedBy"
+        assert params["fields[users]"] == "name"
         # No sort=module: server-side sort costs more than client-side dedup.
         assert "sort" not in params
 
@@ -520,12 +645,21 @@ class TestGetDocument:
                     "title": "Software Requirement Spec",
                     "type": "req_specification",
                     "status": "approved",
+                    "updated": "2026-02-22T14:53:03.244Z",
                     "homePageContent": {
                         "type": "text/html",
                         "value": ("<p>This is the <strong>SRS</strong> document.</p>"),
                     },
                 },
+                "relationships": {
+                    "author": {"data": {"type": "users", "id": "admin"}},
+                    "updatedBy": {"data": {"type": "users", "id": "72c2462f"}},
+                },
             },
+            "included": [
+                _user_resource("admin", "System Administrator"),
+                _user_resource("72c2462f", "Dev Member"),
+            ],
         }
 
         result = await get_document(
@@ -540,11 +674,36 @@ class TestGetDocument:
         assert result.title == "Software Requirement Spec"
         assert result.type == "req_specification"
         assert result.status == "approved"
+        assert result.updated == "2026-02-22T14:53:03.244Z"
+        # Editor names resolved from the included users; ids never surface.
+        assert result.author == "System Administrator"
+        assert result.last_updated_by == "Dev Member"
         # Raw HTML round-trip: <p> and <strong> tags survive verbatim.
         assert result.content_html == (
             "<p>This is the <strong>SRS</strong> document.</p>"
         )
         assert result.custom_fields == {}
+
+    async def test_editor_fields_default_empty(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """No relationships / included users → editor fields stay empty."""
+        mock_client.get.return_value = {
+            "data": {
+                "attributes": {"title": "Doc", "type": "generic", "status": "draft"},
+            },
+        }
+
+        result = await get_document(
+            mock_ctx,
+            project_id="proj1",
+            space_id="_default",
+            document_name="Doc",
+        )
+
+        assert result.updated == ""
+        assert result.author == ""
+        assert result.last_updated_by == ""
 
     async def test_include_homepage_content_html_false_omits_content(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -810,6 +969,9 @@ class TestGetDocument:
         )
         _, kwargs_a = mock_client.get.call_args
         assert kwargs_a["params"]["fields[documents]"] == "@all"
+        # Editor names ride along on the same request.
+        assert kwargs_a["params"]["include"] == "author,updatedBy"
+        assert kwargs_a["params"]["fields[users]"] == "name"
 
         await get_document(
             mock_ctx,

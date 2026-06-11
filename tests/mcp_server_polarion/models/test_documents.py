@@ -25,6 +25,13 @@ class TestDocumentSummary:
         )
         assert d.document_name == "Software Requirement Specification"
 
+    def test_metadata_defaults_empty(self):
+        d = DocumentSummary(space_id="_default", document_name="SRS")
+        assert d.status == ""
+        assert d.updated == ""
+        assert d.author == ""
+        assert d.last_updated_by == ""
+
 
 class TestDocumentDetail:
     def test_valid(self):
@@ -34,6 +41,12 @@ class TestDocumentDetail:
         )
         assert d.title == "Software Requirement Specification"
         assert "<h2>Overview</h2>" in d.content_html
+
+    def test_editor_metadata_defaults_empty(self):
+        d = DocumentDetail(title="Doc")
+        assert d.updated == ""
+        assert d.author == ""
+        assert d.last_updated_by == ""
 
     def test_empty_content(self):
         d = DocumentDetail(
