@@ -285,9 +285,10 @@ async def _check_custom_field_enum_values(
     must be an option-id string or a list of them (multi-enum). Empty set
     (non-enum field, or enum with no options) defers to Polarion. One GET per
     key on a cache miss; 404s are cached long (``not_found`` TTL). Arity is
-    not checked -- the endpoint cannot distinguish single- from multi-enum,
-    so a list of valid ids passes for a single-enum field (and vice versa);
-    Polarion decides.
+    not checked -- the endpoint cannot distinguish single- from multi-enum --
+    but wrong arity fails loudly at Polarion (400 "STRING expected, but was
+    BEGIN_ARRAY" for a list on a single-enum field), so only wrong option-id
+    strings ghost.
     """
     for field_id in sorted(custom_fields):
         value = custom_fields[field_id]
