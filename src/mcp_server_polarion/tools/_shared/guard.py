@@ -128,9 +128,10 @@ async def fetch_enum_option_ids(
         response = await client.get(path, params=params)
     except PolarionNotFoundError:
         # Endpoint/field unsupported (Polarion: "Field 'X' is not an
-        # Enumeration field"): cache an empty set so _check_enum defers. The
-        # long not_found TTL spares non-enum custom fields a re-probe on every
-        # write; its stale worst case is this same deferral.
+        # Enumeration field"): cache an empty set so callers defer. The long
+        # not_found TTL spares a re-probe on every write -- non-enum custom
+        # fields, but also standard fields on builds lacking the endpoint;
+        # its stale worst case for both is this same deferral.
         logger.warning(
             "getAvailableOptions returned 404 for field=%s (resource=%s, "
             "project=%s); skipping enum validation for this field -- the "
@@ -283,17 +284,24 @@ async def _check_custom_field_enum_values(
     a non-empty option set therefore proves the field is an enum, so the value
     must be an option-id string or a list of them (multi-enum). Empty set
     (non-enum field, or enum with no options) defers to Polarion. One GET per
-    key on a cache miss; 404s are cached long (``not_found`` TTL).
+    key on a cache miss; 404s are cached long (``not_found`` TTL). Arity is
+    not checked -- the endpoint cannot distinguish single- from multi-enum,
+    so a list of valid ids passes for a single-enum field (and vice versa);
+    Polarion decides.
     """
     for field_id in sorted(custom_fields):
+        value = custom_fields[field_id]
+        # Empty values never reach Polarion (payload builders drop them), so
+        # there is nothing to validate -- skip the probe GET entirely.
+        if value is None or value in ("", []):
+            continue
         option_ids = await fetch_enum_option_ids(
             client, project_id, resource, field_id, type_id
         )
         if not option_ids:
             continue
-        value = custom_fields[field_id]
         if isinstance(value, str):
-            if value and value not in option_ids:
+            if value not in option_ids:
                 raise _bad_custom_enum_value(
                     field_id, value, option_ids, project_id, resource, type_id
                 )

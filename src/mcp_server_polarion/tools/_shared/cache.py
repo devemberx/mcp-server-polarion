@@ -149,10 +149,11 @@ def store_cached_enum_options(  # noqa: PLR0913
     *,
     not_found: bool = False,
 ) -> None:
-    """Cache the valid option ids for the field/type for ``_GUARD_TTL_SECONDS``.
+    """Cache the valid option ids for the field/type.
 
-    ``not_found=True`` marks a 404 ("not an Enumeration field") result, cached
-    for ``_ENUM_NOT_FOUND_TTL_SECONDS`` instead.
+    Entries live ``_GUARD_TTL_SECONDS``; ``not_found=True`` marks a 404
+    ("not an Enumeration field") result, cached for
+    ``_ENUM_NOT_FOUND_TTL_SECONDS`` instead.
     """
     _enum_option_cache.set(
         (project_id, resource, field_id, type_id),

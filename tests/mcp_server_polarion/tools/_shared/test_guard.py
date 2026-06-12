@@ -688,15 +688,16 @@ class TestGuardWorkItemCustomFieldEnums:
                 mock_client, "P", "task", {"asil": ["1", 2]}
             )
 
-    async def test_empty_string_and_none_skip_validation(
+    async def test_empty_values_skip_probe_entirely(
         self, mock_client: AsyncMock
     ) -> None:
-        # Payload builders drop empties; nothing reaches Polarion to ghost.
-        mock_client.get.return_value = _enum_response(["1", "2"])
-
+        # Payload builders drop empties; nothing reaches Polarion to ghost,
+        # so the guard must not even spend the probe GET.
         await guard_work_item_custom_fields(
-            mock_client, "P", "task", {"asil": "", "other": None}
-        )  # must not raise
+            mock_client, "P", "task", {"asil": "", "other": None, "platform": []}
+        )
+
+        mock_client.get.assert_not_awaited()
 
     async def test_options_fetched_once_per_key_within_ttl(
         self, mock_client: AsyncMock
