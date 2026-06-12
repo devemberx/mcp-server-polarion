@@ -716,6 +716,10 @@ class TestGuardWorkItemCustomFieldEnums:
         mock_client.get.side_effect = PolarionNotFoundError("not enum", status_code=404)
         clock = [1000.0]
         monkeypatch.setattr(cache_mod, "_now", lambda: clock[0])
+        # The fixture primed the key schema under the real monotonic clock; on
+        # a freshly booted host its expiry can precede 1000.0. Re-prime under
+        # the patched clock so only the enum cache's expiry is measured.
+        store_work_item_custom_keys("P", "task", frozenset({"f"}))
 
         await guard_work_item_custom_fields(mock_client, "P", "task", {"f": "x"})
         clock[0] += 61.0  # past _GUARD_TTL_SECONDS, within not_found TTL
