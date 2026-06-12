@@ -3655,20 +3655,11 @@ class TestCreateDocumentRegistration:
 
 
 class TestCreateDocumentDocstringGuidance:
-    """Verify enum-resolution and ghost-write guidance lives in the docstring.
+    """Lock load-bearing steers into the public docstring.
 
-    Standard enums are tool-guarded (``guard_document_enums``), but
-    custom-field enum values are not — the docstring is the only steer
-    toward ``list_document_enum_options``.
+    Enum values (standard and custom-field) are tool-guarded, so no
+    enum-resolution steer is needed; uniqueness is not.
     """
-
-    def test_docstring_mentions_list_document_enum_options(self) -> None:
-        document = create_document.__doc__ or ""
-        assert "list_document_enum_options" in document
-
-    def test_docstring_mentions_ghost_writes(self) -> None:
-        document = create_document.__doc__ or ""
-        assert "ghost" in document.lower()
 
     def test_docstring_mentions_module_name_uniqueness(self) -> None:
         document = create_document.__doc__ or ""
@@ -3703,7 +3694,8 @@ class TestEnumGuardCreateDocument:
         mock_client: AsyncMock,
         reset_enum_guard_caches: None,
     ) -> None:
-        # GETs: type options, then the heading + include=module sample.
+        # GETs: type options, the heading + include=module sample, then the
+        # enum-value probe for the key (404 = not an enum field, defers).
         dtype = "systemRequirementSpecification"
         mock_client.get.side_effect = [
             _enum_get_response([dtype]),
@@ -3713,6 +3705,7 @@ class TestEnumGuardCreateDocument:
                     {"type": "documents", "attributes": {"type": dtype, "version": "1"}}
                 ],
             },
+            PolarionNotFoundError("not an Enumeration field", status_code=404),
         ]
         mock_client.post.return_value = {
             "data": [{"type": "documents", "id": "MyProj/_default/NewSpec"}]
@@ -3724,6 +3717,38 @@ class TestEnumGuardCreateDocument:
 
         assert result.created is True  # type: ignore[attr-defined]
         mock_client.post.assert_awaited_once()
+
+    async def test_custom_field_enum_value_rejected_on_create(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        # GETs: type options, heading sample (knows docRisk), then the
+        # enum-value probe -- 'severe' is not among the field's options.
+        dtype = "generic"
+        mock_client.get.side_effect = [
+            _enum_get_response([dtype]),
+            {
+                "data": [{"type": "workitems"}],
+                "included": [
+                    {
+                        "type": "documents",
+                        "attributes": {"type": dtype, "docRisk": "low"},
+                    }
+                ],
+            },
+            _enum_get_response(["high", "moderate", "low"]),
+        ]
+
+        with pytest.raises(ValueError, match=r"'docRisk'.*'severe'"):
+            await _call_create_doc(
+                mock_ctx,
+                module_name="NewSpec",
+                type=dtype,
+                custom_fields={"docRisk": "severe"},
+            )
+        mock_client.post.assert_not_called()
 
     async def test_custom_fields_reject_ghost_key(
         self,
@@ -3806,6 +3831,33 @@ class TestEnumGuardUpdateDocument:
 
         with pytest.raises(ValueError, match="ghost_key"):
             await _call_update_doc(mock_ctx, custom_fields={"ghost_key": 1})
+        mock_client.patch.assert_not_called()
+
+    async def test_custom_field_enum_value_rejected_on_update(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        # GETs: resolve the doc's type, type sample (knows doc_risk), enum probe.
+        type_resp = {"data": {"attributes": {"title": "x", "type": "generic"}}}
+        sample = {
+            "data": [{"type": "workitems"}],
+            "included": [
+                {
+                    "type": "documents",
+                    "attributes": {"type": "generic", "doc_risk": "low"},
+                }
+            ],
+        }
+        mock_client.get.side_effect = [
+            type_resp,
+            sample,
+            _enum_get_response(["high", "moderate", "low"]),
+        ]
+
+        with pytest.raises(ValueError, match=r"'doc_risk'.*'severe'"):
+            await _call_update_doc(mock_ctx, custom_fields={"doc_risk": "severe"})
         mock_client.patch.assert_not_called()
 
     async def test_known_custom_field_key_passes_guard(

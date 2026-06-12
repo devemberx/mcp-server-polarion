@@ -44,8 +44,10 @@ class TTLCache[K, V]:
             return None
         return entry.value
 
-    def set(self, key: K, value: V) -> None:
-        self._entries[key] = _Entry(expires_at=_now() + self._ttl, value=value)
+    def set(self, key: K, value: V, ttl_seconds: float | None = None) -> None:
+        """Store *value*; *ttl_seconds* overrides the cache default for this entry."""
+        ttl = self._ttl if ttl_seconds is None else ttl_seconds
+        self._entries[key] = _Entry(expires_at=_now() + ttl, value=value)
 
     def invalidate(self, key: K) -> None:
         self._entries.pop(key, None)
@@ -72,6 +74,12 @@ class DiscoveredDocument(NamedTuple):
 # Bounded by ghost-safety: a stale entry keeps accepting an admin-removed
 # option until expiry, so 60s caps that window.
 _GUARD_TTL_SECONDS: Final[float] = 60.0
+
+# 404 "not an Enumeration field" is a stable schema fact (field-type changes
+# are rare admin ops) and its stale worst case is merely deferring to Polarion,
+# so it outlives positive option sets, whose longer life would widen the
+# admin-removed-option ghost window.
+_ENUM_NOT_FOUND_TTL_SECONDS: Final[float] = 600.0
 
 # Bounded by freshness: a new document must surface within ~1 min
 # (``create_document`` also invalidates on write).
@@ -132,15 +140,26 @@ def get_cached_enum_options(
     return _enum_option_cache.get((project_id, resource, field_id, type_id))
 
 
-def store_cached_enum_options(
+def store_cached_enum_options(  # noqa: PLR0913
     project_id: str,
     resource: Resource,
     field_id: str,
     type_id: str,
     option_ids: frozenset[str],
+    *,
+    not_found: bool = False,
 ) -> None:
-    """Cache the valid option ids for the field/type for ``_GUARD_TTL_SECONDS``."""
-    _enum_option_cache.set((project_id, resource, field_id, type_id), option_ids)
+    """Cache the valid option ids for the field/type.
+
+    Entries live ``_GUARD_TTL_SECONDS``; ``not_found=True`` marks a 404
+    ("not an Enumeration field") result, cached for
+    ``_ENUM_NOT_FOUND_TTL_SECONDS`` instead.
+    """
+    _enum_option_cache.set(
+        (project_id, resource, field_id, type_id),
+        option_ids,
+        ttl_seconds=_ENUM_NOT_FOUND_TTL_SECONDS if not_found else None,
+    )
 
 
 def get_cached_project_enum(

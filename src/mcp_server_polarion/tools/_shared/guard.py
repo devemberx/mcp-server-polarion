@@ -1,7 +1,8 @@
 """Server-side write guards that prevent silent corruption on Polarion writes.
 
-Polarion accepts unknown enum ids and custom-field keys verbatim (HTTP 200) —
-they persist but never appear in the UI, Lucene, or reports, with no error.
+Polarion accepts unknown enum ids and custom-field keys and values verbatim
+(HTTP 200) — they persist but never appear in the UI, Lucene, or reports,
+with no error.
 Docstring rules are unreliable (evals show LLMs ignore them), so each rule
 becomes a deterministic precondition: before a write, fetch the real options
 and raise if the supplied id/key is absent. Option ids and observed keys are
@@ -56,6 +57,12 @@ from mcp_server_polarion.tools._shared.sql import (
 logger = logging.getLogger("mcp_server_polarion.tools._shared.guard")
 
 _GUARD_PAGE_SIZE: int = 100
+
+# Resource -> the MCP tool that lists its enum options, for error messages.
+_ENUM_DISCOVERY_TOOL: dict[Resource, str] = {
+    "workitems": "list_work_item_enum_options",
+    "documents": "list_document_enum_options",
+}
 
 
 def _unreachable_write_block(
@@ -120,8 +127,11 @@ async def fetch_enum_option_ids(
     try:
         response = await client.get(path, params=params)
     except PolarionNotFoundError:
-        # Endpoint/field unsupported: cache an empty set so _check_enum defers
-        # and we don't re-probe a missing endpoint every write within the TTL.
+        # Endpoint/field unsupported (Polarion: "Field 'X' is not an
+        # Enumeration field"): cache an empty set so callers defer. The long
+        # not_found TTL spares a re-probe on every write -- non-enum custom
+        # fields, but also standard fields on builds lacking the endpoint;
+        # its stale worst case for both is this same deferral.
         logger.warning(
             "getAvailableOptions returned 404 for field=%s (resource=%s, "
             "project=%s); skipping enum validation for this field -- the "
@@ -131,7 +141,9 @@ async def fetch_enum_option_ids(
             resource,
             project_id,
         )
-        store_cached_enum_options(project_id, resource, field_id, type_id, frozenset())
+        store_cached_enum_options(
+            project_id, resource, field_id, type_id, frozenset(), not_found=True
+        )
         return frozenset()
     except PolarionAuthError as exc:
         raise _unauthorized_write_block(f"{field_id} options", project_id) from exc
@@ -173,7 +185,7 @@ async def _check_enum(  # noqa: PLR0913
         f"project '{project_id}' for {resource} type '{type_id}'. "
         f"Valid options: {sorted(option_ids)}. "
         f"Polarion accepts unknown ids as silent ghosts that never match "
-        f"Lucene queries -- call list_{resource[:-1]}_enum_options first."
+        f"Lucene queries -- call {_ENUM_DISCOVERY_TOOL[resource]} first."
     )
 
 
@@ -230,6 +242,90 @@ async def guard_document_enums(
         await _check_enum(
             client, project_id, "documents", "status", document_type, status
         )
+
+
+def _bad_custom_enum_value(  # noqa: PLR0913
+    field_id: str,
+    value: object,
+    option_ids: frozenset[str],
+    project_id: str,
+    resource: Resource,
+    type_id: str,
+    *,
+    shape: bool = False,
+) -> ValueError:
+    problem = (
+        f"custom_fields['{field_id}'] is an enumeration field but got "
+        f"{type(value).__name__} {value!r} -- enum values are option-id "
+        f"strings (or lists of them)"
+        if shape
+        else f"custom_fields['{field_id}']={value!r} is not a valid option"
+    )
+    return ValueError(
+        f"{problem} in project '{project_id}' for {resource} type '{type_id}'. "
+        f"Valid options: {sorted(option_ids)}. "
+        f"Polarion accepts unknown enum values as silent ghosts that never "
+        f"appear in its UI or match Lucene queries -- call "
+        f"{_ENUM_DISCOVERY_TOOL[resource]} first."
+    )
+
+
+async def _check_custom_field_enum_values(
+    client: PolarionClient,
+    project_id: str,
+    resource: Resource,
+    type_id: str,
+    custom_fields: dict[str, object],
+) -> None:
+    """Validate enum-typed ``custom_fields`` values against ``getAvailableOptions``.
+
+    The endpoint is the only API that both identifies a custom field as an
+    enumeration and yields its option ids (404 = "not an Enumeration field");
+    a non-empty option set therefore proves the field is an enum, so the value
+    must be an option-id string or a list of them (multi-enum). Empty set
+    (non-enum field, or enum with no options) defers to Polarion. One GET per
+    key on a cache miss; 404s are cached long (``not_found`` TTL). Arity is
+    not checked -- the endpoint cannot distinguish single- from multi-enum --
+    but wrong arity fails loudly at Polarion (400 "STRING expected, but was
+    BEGIN_ARRAY" for a list on a single-enum field), so only wrong option-id
+    strings ghost.
+    """
+    for field_id in sorted(custom_fields):
+        value = custom_fields[field_id]
+        # Empty values never reach Polarion (payload builders drop them), so
+        # there is nothing to validate -- skip the probe GET entirely.
+        if value is None or value in ("", []):
+            continue
+        option_ids = await fetch_enum_option_ids(
+            client, project_id, resource, field_id, type_id
+        )
+        if not option_ids:
+            continue
+        if isinstance(value, str):
+            if value not in option_ids:
+                raise _bad_custom_enum_value(
+                    field_id, value, option_ids, project_id, resource, type_id
+                )
+        elif isinstance(value, list):
+            for element in value:
+                if not isinstance(element, str):
+                    raise _bad_custom_enum_value(
+                        field_id,
+                        element,
+                        option_ids,
+                        project_id,
+                        resource,
+                        type_id,
+                        shape=True,
+                    )
+                if element not in option_ids:
+                    raise _bad_custom_enum_value(
+                        field_id, element, option_ids, project_id, resource, type_id
+                    )
+        elif value is not None:
+            raise _bad_custom_enum_value(
+                field_id, value, option_ids, project_id, resource, type_id, shape=True
+            )
 
 
 def _reject_unknown_custom_keys(
@@ -314,7 +410,7 @@ async def _fetch_work_item_type_custom_keys(
     return result
 
 
-async def guard_work_item_custom_field_keys(
+async def _check_work_item_custom_keys(
     client: PolarionClient,
     project_id: str,
     work_item_type: str,
@@ -328,9 +424,6 @@ async def guard_work_item_custom_field_keys(
     Empty schema fails closed (``RuntimeError``): a ghost write is unrecoverable.
     Unreachable validation (incl. SQL rejection) → ``RuntimeError``.
     """
-    if not custom_fields:
-        return
-
     schema = get_work_item_custom_keys(project_id, work_item_type)
     fetched_fresh = schema is None
     if schema is None:
@@ -364,6 +457,31 @@ async def guard_work_item_custom_field_keys(
         schema,
         scope=f"work_item_type '{work_item_type}'",
         discovery_tool="sample of existing items",
+    )
+
+
+async def guard_work_item_custom_fields(
+    client: PolarionClient,
+    project_id: str,
+    work_item_type: str,
+    custom_fields: dict[str, object],
+) -> None:
+    """Validate ``custom_fields`` keys and enum-typed values before a write.
+
+    Keys first, against the type's sampled schema (unknown key →
+    ``ValueError``; the order also keeps ghost keys out of the enum probe's
+    long-lived 404 cache). Then each key's value via ``getAvailableOptions``:
+    a non-empty option set makes the field an enum whose value must be a valid
+    option-id string or list of them → ``ValueError`` on wrong id or shape.
+    Fail-closed otherwise.
+    """
+    if not custom_fields:
+        return
+    await _check_work_item_custom_keys(
+        client, project_id, work_item_type, custom_fields
+    )
+    await _check_custom_field_enum_values(
+        client, project_id, "workitems", work_item_type, custom_fields
     )
 
 
@@ -436,7 +554,7 @@ async def _fetch_document_type_custom_keys(
     return frozenset(by_type[document_type])
 
 
-async def guard_document_custom_field_keys(
+async def _check_document_custom_keys(
     client: PolarionClient,
     project_id: str,
     document_type: str,
@@ -444,16 +562,13 @@ async def guard_document_custom_field_keys(
 ) -> None:
     """Reject ``custom_fields`` keys absent from the document type's real schema.
 
-    Mirrors :func:`guard_work_item_custom_field_keys` on the document-type axis:
+    Mirrors :func:`_check_work_item_custom_keys` on the document-type axis:
     the schema (cached per ``(project, document_type)`` from the heading +
     ``include=module`` sample) is the sole source of truth. A key unknown against
     a *cached* schema forces one fresh re-fetch (admin-added field) before
     rejecting → ``ValueError``. A type whose documents populate no custom field
     yields an empty schema and fails closed (``RuntimeError``).
     """
-    if not custom_fields:
-        return
-
     schema = get_document_type_custom_keys(project_id, document_type)
     fetched_fresh = schema is None
     if schema is None:
@@ -487,6 +602,26 @@ async def guard_document_custom_field_keys(
         schema,
         scope=f"document type '{document_type}'",
         discovery_tool="sample of existing documents",
+    )
+
+
+async def guard_document_custom_fields(
+    client: PolarionClient,
+    project_id: str,
+    document_type: str,
+    custom_fields: dict[str, object],
+) -> None:
+    """Validate ``custom_fields`` keys and enum-typed values before a write.
+
+    Document-axis mirror of :func:`guard_work_item_custom_fields`: keys against
+    the document type's sampled schema, then enum-typed values against
+    ``getAvailableOptions``.
+    """
+    if not custom_fields:
+        return
+    await _check_document_custom_keys(client, project_id, document_type, custom_fields)
+    await _check_custom_field_enum_values(
+        client, project_id, "documents", document_type, custom_fields
     )
 
 
@@ -778,10 +913,10 @@ async def partition_delete_links(
 __all__ = [
     "fetch_enum_option_ids",
     "fetch_project_enum_option_ids",
-    "guard_document_custom_field_keys",
+    "guard_document_custom_fields",
     "guard_document_enums",
     "guard_hyperlink_roles",
-    "guard_work_item_custom_field_keys",
+    "guard_work_item_custom_fields",
     "guard_work_item_enums",
     "guard_work_item_link_roles",
     "guard_work_item_link_targets",

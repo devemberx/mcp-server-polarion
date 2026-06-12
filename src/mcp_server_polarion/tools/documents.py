@@ -37,7 +37,7 @@ from mcp_server_polarion.tools._shared.cache import (
     store_cached_documents,
 )
 from mcp_server_polarion.tools._shared.guard import (
-    guard_document_custom_field_keys,
+    guard_document_custom_fields,
     guard_document_enums,
 )
 from mcp_server_polarion.tools._shared.helpers import (
@@ -690,10 +690,9 @@ async def list_document_enum_options(  # noqa: PLR0913
     """List valid enum option ids for a document field of the given type.
 
     Resolve enum ids here before ``create_document`` / ``update_document``.
-    Standard fields (``type``/``status``) are validated on write — invalid ids
-    raise with this set. Custom-field enum values are NOT — an unresolved id
-    persists as a ghost. An unknown ``document_type`` silently falls back to
-    ``~``, so verify the type id first.
+    Enum fields are validated on write — invalid ids raise with this set.
+    An unknown ``document_type`` silently falls back to ``~``, so verify the
+    type id first.
     """
     client = get_client(ctx)
     path = (
@@ -1049,7 +1048,7 @@ async def update_document(  # noqa: PLR0913
         effective_type = type or await _resolve_document_type(
             client, project_id, space_id, document_name
         )
-        await guard_document_custom_field_keys(
+        await guard_document_custom_fields(
             client, project_id, effective_type, custom_fields
         )
 
@@ -1150,10 +1149,8 @@ async def create_document(  # noqa: PLR0913
 
     ``module_name`` must be unique in the space (duplicate → HTTP 409) — check
     ``list_documents`` first. ``type``/``status`` are validated — unknown ids
-    raise ``ValueError`` with valid options. Custom-field enum values are
-    NOT — an unresolved id persists as a ghost; resolve via
-    ``list_document_enum_options`` first. ``custom_fields`` keys are validated
-    against the document type's schema.
+    raise ``ValueError`` with valid options. ``custom_fields`` keys are
+    validated against the document type's schema.
 
     ``home_page_content`` is Markdown → sanitized HTML, blocks auto-stamped
     with unique ids. Post-create edits are raw-HTML round-trip via
@@ -1169,7 +1166,7 @@ async def create_document(  # noqa: PLR0913
         status=status,
     )
     if custom_fields:
-        await guard_document_custom_field_keys(client, project_id, type, custom_fields)
+        await guard_document_custom_fields(client, project_id, type, custom_fields)
 
     home_page_content_html = (
         stamp_block_ids(sanitize_html(markdown_to_html(home_page_content)))
