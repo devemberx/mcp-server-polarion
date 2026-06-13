@@ -1,15 +1,6 @@
-"""Pydantic models for MCP tool inputs and outputs.
-
-Every tool accepts and returns Pydantic models — never raw ``dict``.
-Class docstrings and ``Field(description=...)`` ship in the JSON Schema, so
-keep them tight: omit a description when the field name + type say everything
-(e.g. ``items``, ``page``, ``id``), and keep one only for non-obvious semantics
-(units, empty-conditions, round-trip / read-only contracts).
-
-Models are grouped by domain into submodules (``common``, ``projects``,
-``documents``, ``work_items``, ``links``, ``comments``) and re-exported here so
-``from mcp_server_polarion.models import X`` stays the single import surface.
-"""
+"""Pydantic models for MCP tool I/O, grouped by domain and re-exported here as
+the single import surface. Class docstrings and ``Field(description=...)`` ship
+in the JSON Schema — omit a description when name + type say everything."""
 
 from __future__ import annotations
 

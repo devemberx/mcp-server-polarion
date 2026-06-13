@@ -1,19 +1,9 @@
-"""Tier-2 efficiency cases.
+"""Tier-2 efficiency cases: "took the short, correct path";
+``min_pass_rate = 0.8`` tolerates occasional waste, fails systematic waste.
 
-Same harness and deterministic checks as Tier 1, but the rule is "took the
-short, correct path", not "never corrupted state", so ``min_pass_rate = 0.8``
--- occasional wasteful runs are tolerated, systematic waste fails the gate.
-Tasks state the goal only; the efficient path must be discoverable from the
-tool docstrings alone.
-
-* single bulk call (``T2-BULK-CREATE``) -- N items go through one
-  ``create_work_items``, not N calls.
-* direct lookup (``T2-DIRECT-GET``) -- a known id is fetched, not scanned for.
-* no redundant reads (``T2-NO-DUP-READS``, ``T2-ENUM-ONCE``) -- identical
-  reads repeat only after a write could have changed the answer.
-* query mechanism (``T2-SQL-NOT-LUCENE``) -- document scoping uses the
-  ``SQL:(...)`` prefix or ``read_document_parts``, never a Lucene ``module``
-  term (not indexed).
+Cases: single bulk call (``T2-BULK-CREATE``), direct lookup
+(``T2-DIRECT-GET``), no redundant reads (``T2-NO-DUP-READS``,
+``T2-ENUM-ONCE``), SQL over Lucene ``module`` term (``T2-SQL-NOT-LUCENE``).
 """
 
 from __future__ import annotations

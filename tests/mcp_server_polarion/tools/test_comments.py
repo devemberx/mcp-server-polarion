@@ -697,13 +697,9 @@ class TestCreateDocumentCommentsErrors:
 
 
 class TestCreateDocumentCommentsFieldValidation:
-    """Verify Field constraints on create_document_comments and DocumentCommentSpec.
-
-    FastMCP enforces ``min_length`` via JSON Schema at the MCP protocol
-    layer before the tool function is invoked; calling the function
-    directly bypasses that gate.  We rebuild a ``TypeAdapter`` from each
-    parameter's annotation + ``FieldInfo`` to prove the constraint is
-    wired correctly at the schema layer.
+    """Field constraints on create_document_comments / DocumentCommentSpec — direct
+    calls bypass FastMCP's JSON Schema gate, so rebuild a ``TypeAdapter`` per
+    parameter to prove the constraint is wired.
     """
 
     @staticmethod

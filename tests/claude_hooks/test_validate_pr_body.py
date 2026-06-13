@@ -1,9 +1,5 @@
-"""Unit tests for the `validate_pr_body` PreToolUse hook in `.claude/hooks/`.
-
-The hook script lives outside any package, so it is loaded by path via importlib.
-These tests cover the pure helper functions; the `main()` stdin/exit-code path is
-left to manual / e2e checks.
-"""
+"""Unit tests for the `validate_pr_body` hook, loaded by path via importlib
+(script lives outside any package). Pure helpers only; `main()` left to e2e."""
 
 from __future__ import annotations
 

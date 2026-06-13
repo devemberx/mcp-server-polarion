@@ -723,14 +723,8 @@ class TestCreateWorkItemsResponseParsing:
 
 
 class TestCreateWorkItemsFieldValidation:
-    """Verify constraints attached to ``items`` and to ``WorkItemCreateSpec``.
-
-    FastMCP enforces these via JSON Schema at the MCP protocol layer
-    before the tool function is invoked; calling the function directly
-    in unit tests bypasses that gate. The per-item constraints now live
-    on the spec model (validated directly), and the collection-level
-    ``min_length`` / ``max_length`` are proven by rebuilding a
-    ``TypeAdapter`` from the ``items`` parameter annotation + ``FieldInfo``.
+    """Constraints on ``items`` + ``WorkItemCreateSpec`` — direct calls bypass the
+    JSON Schema gate; collection-level bounds proven via ``TypeAdapter`` rebuild.
     """
 
     @staticmethod
@@ -1014,13 +1008,9 @@ class TestUpdateWorkItemValidation:
     async def test_empty_description_html_is_noop(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """``description_html=''`` is "leave unchanged" — never PATCHes.
-
-        Asymmetric vs ``update_document(home_page_content_html='')`` which
-        RAISES (see test_home_page_content_html_empty_string_raises). The
-        difference is justified by blast radius: clearing a single work item's
-        description is recoverable; wiping a document body orphans every
-        heading work item inside it.
+        """``description_html=''`` = leave unchanged (never PATCHes) — asymmetric vs
+        update_document, where '' RAISES: a wiped document body orphans every heading,
+        a cleared description is recoverable.
         """
         with pytest.raises(ValueError, match="Nothing to update"):
             await _call_update(mock_ctx, description_html="")
@@ -1213,11 +1203,8 @@ class TestUpdateWorkItemHappyPath:
     async def test_current_description_html_blanked_by_default(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Default (False) blanks current.description_html.
-
-        GET still returns the body (the @all fieldset is needed for
-        customs), but the tool blanks it to spare LLM context unless the
-        caller opts in via include_current_description_html=True.
+        """Default blanks current.description_html — body still travels (``@all`` needed
+        for customs); tool strips it to spare LLM context.
         """
         mock_client.patch.return_value = {}
         mock_client.get.return_value = _make_get_response(
@@ -1459,11 +1446,8 @@ class TestUpdateWorkItemHappyPath:
     async def test_description_html_is_sent_verbatim(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """update_work_item passes description_html through unchanged.
-
-        Core round-trip guarantee: Polarion-specific spans and data-*
-        attributes must survive the PATCH unchanged so the round-trip
-        through ``get_work_item`` is lossless. No sanitize, no markdownify.
+        """Core round-trip guarantee: description_html PATCHed verbatim — no sanitize,
+        no markdownify.
         """
         mock_client.patch.return_value = {}
         mock_client.get.return_value = _make_get_response()
@@ -2463,11 +2447,8 @@ class TestGetWorkItem:
     async def test_include_description_html_false_blanks_field(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """include_description_html=False blanks description_html.
-
-        The body still travels over the wire (@all is needed for customs);
-        the tool strips it to save LLM context. Passed explicitly since
-        direct-call tests bypass the FastMCP Field default.
+        """include_description_html=False blanks the field — body still travels
+        (``@all`` for customs); passed explicitly since direct calls bypass defaults.
         """
         mock_client.get.return_value = {
             "data": {
@@ -2780,12 +2761,8 @@ class TestReadWorkItem:
     async def test_polarion_specific_markup_collapses_to_text(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Polarion span/data-* attributes get stripped by html_to_markdown.
-
-        Marks the read-only contract: WorkItemRead.description is NOT a
-        round-trip shape — feeding it back to update_work_item would lose
-        the polarion-rte-link span. The round-trip pair lives on
-        get_work_item / update_work_item.
+        """Read-only contract: WorkItemRead.description is NOT round-trip shape —
+        feeding it back loses the polarion-rte-link span.
         """
         raw = (
             '<p>Refs <span class="polarion-rte-link" '

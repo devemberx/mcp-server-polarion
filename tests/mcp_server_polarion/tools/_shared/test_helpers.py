@@ -1,12 +1,5 @@
-"""Direct unit tests for shared tool helpers.
-
-The bulk of `_shared/helpers.py` is exercised transitively through the per-tool
-tests against `mock_client` fixtures. This module adds
-focused tests for helpers whose contract is worth pinning directly —
-currently `extract_custom_fields` (read-side) and `merge_custom_fields`
-(write-side), whose allowlist semantics drive how custom Polarion fields
-flow between the LLM and the Polarion REST API in both directions.
-"""
+"""Direct tests for helpers worth pinning beyond the transitive per-tool
+coverage — `extract_custom_fields` / `merge_custom_fields` allowlist semantics."""
 
 from __future__ import annotations
 

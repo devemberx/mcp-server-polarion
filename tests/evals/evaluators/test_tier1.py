@@ -1,10 +1,5 @@
-"""Unit tests for the Tier-1 ``ForbiddenBehaviorEvaluator``.
-
-The evaluator is a thin dispatcher: it pulls ``check`` / ``params`` from the
-case metadata, fail-closes on an empty or non-list trajectory, and otherwise
-delegates the verdict to the named pure check in ``checks.py``. These tests
-exercise every branch with synthetic trajectories -- no LLM, no I/O.
-"""
+"""``ForbiddenBehaviorEvaluator`` tests: metadata dispatch, fail-closed on
+empty/non-list trajectory, delegation to the named check. No LLM, no I/O."""
 
 from __future__ import annotations
 

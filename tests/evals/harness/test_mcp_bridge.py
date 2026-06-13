@@ -1,10 +1,5 @@
-"""Unit tests for the MCP-to-Strands bridge helpers.
-
-``TrajectoryRecorder`` and the two result-flattening helpers are pure: they
-turn a fastmcp call result into the (name, args, result) records the Tier-1
-checks read, and into the text the LLM sees. They are driven here with tiny
-stub objects -- no real MCP client, no agent.
-"""
+"""Bridge-helper tests: ``TrajectoryRecorder`` + result flatteners are pure,
+driven with stub objects — no real MCP client, no agent."""
 
 from __future__ import annotations
 

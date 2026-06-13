@@ -1,8 +1,5 @@
-"""Internal shared helpers for the ``tools`` package (not public API).
-
-Body fields pass through as raw HTML on the get/update round-trip; Markdown
-conversion is reserved for synthesis paths in ``tools.documents``.
-"""
+"""Internal shared helpers for ``tools`` (not public API). Body fields pass
+through as raw HTML; Markdown conversion is reserved for synthesis paths."""
 
 from __future__ import annotations
 
@@ -23,8 +20,7 @@ from mcp_server_polarion.models import (
     WorkItemSummary,
 )
 
-# Bulk-write cap. Polarion throttles ~3 req/s with no concurrency, so an
-# unbounded batch is a rate-limit/payload hazard; 50 bounds one request.
+# Bulk-write cap: Polarion throttles ~3 req/s, no concurrency.
 MAX_BULK_ITEMS: Final[int] = 50
 
 
@@ -45,22 +41,18 @@ class WorkItemSummaryKwargs(TypedDict):
 # Polarion enforces a hard cap of 100 server-side.
 DEFAULT_PAGE_SIZE: Final[int] = 100
 
-# Sparse fieldsets. Detail/document fetches use ``@all`` (this server inlines
-# customs under ``attributes`` and drops ``customFields.*`` tokens);
-# ``WORK_ITEM_PART_FIELDS`` stays tight (parts surface no customs).
+# Detail fetches need ``@all`` — explicit field lists drop inline customs.
 WORK_ITEM_LIST_FIELDS: Final[str] = "title,type,status,priority,updated,module,assignee"
 WORK_ITEM_DETAIL_FIELDS: Final[str] = "@all"
 WORK_ITEM_PART_FIELDS: Final[str] = "title,type,status,description,outlineNumber"
 DOCUMENT_DETAIL_FIELDS: Final[str] = "@all"
-# Sparse fieldset filters relationships too, so author / parentComment /
-# childComments must be named explicitly. Comments have no customs, so no `@all`.
+# Sparse fieldset filters relationships too — name them explicitly.
 DOCUMENT_COMMENT_LIST_FIELDS: Final[str] = (
     "created,resolved,text,author,parentComment,childComments"
 )
 
-# Standard attribute allowlist (Polarion REST OpenAPI schema). Anything in
-# ``attributes`` outside this set is treated as a custom field, so a new
-# standard attribute is misclassified until added here.
+# Standard-attribute allowlist (REST OpenAPI schema); anything outside is
+# treated as a custom field, so new standard attrs misclassify until added.
 STANDARD_WORK_ITEM_ATTRIBUTES: Final[frozenset[str]] = frozenset(
     {
         "id",
@@ -85,8 +77,7 @@ STANDARD_WORK_ITEM_ATTRIBUTES: Final[frozenset[str]] = frozenset(
     }
 )
 
-# Standard document attributes (Polarion REST OpenAPI schema); document-side
-# mirror of ``STANDARD_WORK_ITEM_ATTRIBUTES``.
+# Document-side mirror of ``STANDARD_WORK_ITEM_ATTRIBUTES``.
 STANDARD_DOCUMENT_ATTRIBUTES: Final[frozenset[str]] = frozenset(
     {
         "id",
@@ -160,26 +151,11 @@ def compute_has_more(
     page_size: int,
     items_count: int,
 ) -> bool:
-    """Determine whether more pages exist after the current one.
-
-    Uses ``total`` when it is reliable (> 0).  When ``total`` is 0
-    (Polarion sometimes omits ``meta.totalCount``), falls back to
-    ``links.next`` if present, otherwise to a heuristic based on
-    whether the current page is full.
-
-    Args:
-        response: Decoded JSON:API response (used for ``links.next``).
-        total: Resolved total count (may be 0 if unknown).
-        page_number: Current 1-based page number.
-        page_size: Requested page size.
-        items_count: Number of items returned on this page.
-
-    Returns:
-        ``True`` if additional pages likely exist.
-    """
+    """Whether more pages exist: ``total`` when reliable (>0), else
+    ``links.next`` (Polarion sometimes omits ``meta.totalCount``), else
+    full-page heuristic."""
     if total > 0:
         return total > page_number * page_size
-    # totalCount unavailable — prefer links.next, else heuristic.
     if has_links_next(response):
         return True
     return items_count == page_size
@@ -190,18 +166,13 @@ def encode_path_segment(segment: str) -> str:
     return quote(segment, safe="")
 
 
-# Thin guard, not a format validator: accepts ``[A-Za-z0-9_-]`` (covers
-# ``MCPT-001``-style ids) before substituting into a Lucene ``linkedWorkItems:``.
+# Thin guard before Lucene substitution, not a format validator.
 _WORK_ITEM_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def validate_work_item_id_for_lucene(work_item_id: str) -> None:
-    """Reject work item IDs that would break a Lucene ``field:<id>`` clause.
-
-    Lucene treats many punctuation chars as operators; an unescaped id in
-    ``linkedWorkItems:<id>`` could reshape the query. Polarion ids never use
-    those, so hard-reject anything outside ``[A-Za-z0-9_-]`` (``ValueError``).
-    """
+    """Reject ids outside ``[A-Za-z0-9_-]`` — Lucene treats punctuation as
+    operators, so an unescaped id could reshape the query."""
     if not _WORK_ITEM_ID_PATTERN.match(work_item_id):
         msg = (
             f"work_item_id '{work_item_id}' contains characters outside "
@@ -232,9 +203,7 @@ def build_included_user_name_map(response: dict[str, object]) -> dict[str, str]:
             if isinstance(inc, dict) and inc.get("type") == "users":
                 user_id = safe_str(inc.get("id", ""))
                 if not user_id:
-                    # An id-less resource must not occupy the "" key: an absent
-                    # author relationship also resolves to "", and the two would
-                    # join into a phantom editor name.
+                    # "" key would join with absent-author "" → phantom editor.
                     continue
                 attrs = inc.get("attributes", {})
                 name = attrs.get("name", "") if isinstance(attrs, dict) else ""
@@ -276,10 +245,8 @@ def extract_relationship_ids(
 
 
 def split_module_id(module_full_id: str) -> tuple[str, str]:
-    """Split a module ID ``{proj}/{space}/{doc}`` into (space_id, document_name).
-
-    ``doc`` may contain ``/``. Returns ``("", "")`` if under three segments.
-    """
+    """Split ``{proj}/{space}/{doc}`` into (space_id, document_name); ``doc``
+    may contain ``/``. ``("", "")`` if under three segments."""
     if not module_full_id:
         return ("", "")
     parts = module_full_id.split("/", 2)
@@ -290,11 +257,7 @@ def split_module_id(module_full_id: str) -> tuple[str, str]:
 
 
 def extract_short_id(full_id: str) -> str:
-    """Strip the project / path prefix from a JSON:API ID.
-
-    For ``"projectId/MCPT-001"`` returns ``"MCPT-001"``.
-    For ``"alice"`` (no slashes) returns ``"alice"`` unchanged.
-    """
+    """Strip the path prefix from a JSON:API id (``"p/MCPT-001"`` → ``"MCPT-001"``)."""
     if "/" not in full_id:
         return full_id
     return full_id.rsplit("/", maxsplit=1)[-1]
@@ -303,11 +266,8 @@ def extract_short_id(full_id: str) -> str:
 def build_work_item_summary_kwargs(
     item: dict[str, object],
 ) -> WorkItemSummaryKwargs:
-    """Extract ``WorkItemSummary`` kwargs from a JSON:API resource.
-
-    Shared by list and detail endpoints so ``WorkItemDetail`` stays a strict
-    superset of ``WorkItemSummary``.
-    """
+    """``WorkItemSummary`` kwargs from a JSON:API resource; shared so
+    ``WorkItemDetail`` stays a strict superset of ``WorkItemSummary``."""
     attributes = item.get("attributes", {})
     if not isinstance(attributes, dict):
         attributes = {}
@@ -339,13 +299,8 @@ def extract_custom_fields(
     attributes: dict[str, object],
     standard: frozenset[str],
 ) -> dict[str, object]:
-    """Return the inline custom-field subset of a JSON:API attributes dict.
-
-    This server inlines customs as top-level ``attributes`` keys (no
-    ``customFields`` container). Anything outside *standard* is a custom field,
-    returned verbatim (primitives or ``{type,value}`` rich-text) so it
-    round-trips unchanged.
-    """
+    """Inline custom-field subset of ``attributes`` (keys outside *standard*),
+    returned verbatim so rich-text values round-trip unchanged."""
     return {k: v for k, v in attributes.items() if k not in standard}
 
 
@@ -354,16 +309,10 @@ def merge_custom_fields(
     customs: dict[str, object] | None,
     standard: frozenset[str],
 ) -> None:
-    """Merge caller custom-field key/values into *attributes* in place.
-
-    Write-side counterpart of ``extract_custom_fields`` (customs inline at the
-    top level). A key in *standard* raises ``ValueError`` (would shadow a tool
-    parameter). ``None`` / ``{}`` are no-ops; individual ``None`` values
-    skipped, other falsy values sent verbatim.
-
-    Aliasing: stored by reference, no copy — callers must NOT mutate *customs*
-    (or nested ``{type,value}`` dicts) before serialisation.
-    """
+    """Merge custom-field key/values into *attributes* in place; a key in
+    *standard* raises ``ValueError`` (would shadow a tool parameter), ``None``
+    values skipped. Values stored by reference — callers must NOT mutate
+    *customs* before serialisation."""
     if not customs:
         return
     collisions = sorted(set(customs) & standard)
@@ -408,13 +357,9 @@ def parse_work_item_detail(
     project_id: str,
     fallback_id: str = "",
 ) -> WorkItemDetail:
-    """Parse a JSON:API work-item resource into a ``WorkItemDetail``.
-
-    Shared by ``get_work_item`` / ``update_work_item``. Expects fetch with
-    ``WORK_ITEM_DETAIL_FIELDS`` + ``include=assignee``. Description passes
-    through as raw HTML (no convert/sanitize) so it round-trips unchanged.
-    ``fallback_id`` is used as ``id`` when ``item.id`` is missing.
-    """
+    """JSON:API work-item resource → ``WorkItemDetail``. Expects
+    ``WORK_ITEM_DETAIL_FIELDS`` + ``include=assignee``; description passes
+    through as raw HTML so it round-trips unchanged."""
     attributes = item.get("attributes", {})
     if not isinstance(attributes, dict):
         attributes = {}
@@ -446,10 +391,8 @@ def parse_work_item_detail(
 
 
 def summary_to_back_link(summary: WorkItemSummary) -> WorkItemLink:
-    """Lift a ``linkedWorkItems:`` query result to a back-direction link.
-
-    The query exposes no role/suspect, so ``role=None`` and ``suspect=False``.
-    """
+    """Lift a ``linkedWorkItems:`` query result to a back link; the query
+    exposes no role/suspect → ``role=None``, ``suspect=False``."""
     return WorkItemLink(
         id=summary.id,
         title=summary.title,

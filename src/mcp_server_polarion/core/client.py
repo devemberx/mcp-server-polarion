@@ -43,16 +43,8 @@ _MAX_ERROR_DETAIL_LEN: Final[int] = 200
 
 
 def _extract_json_api_detail(body: object) -> str:
-    """Extract a concise detail from a JSON:API body.
-
-    Prefers ``errors[*].detail``/``title``; falls back to truncated body.
-
-    Args:
-        body: Decoded JSON response body.
-
-    Returns:
-        Detail string, truncated to ``_MAX_ERROR_DETAIL_LEN`` chars.
-    """
+    """Concise detail from a JSON:API body: ``errors[*].detail``/``title``,
+    else truncated body."""
     if not isinstance(body, dict):
         return str(body)[:_MAX_ERROR_DETAIL_LEN]
     errors = body.get("errors")
@@ -69,15 +61,7 @@ def _extract_json_api_detail(body: object) -> str:
 
 
 def _sanitize_error_text(raw: str) -> str:
-    """Strip HTML tags and truncate raw error text for safe display.
-
-    Args:
-        raw: Raw response body text (may contain HTML).
-
-    Returns:
-        Plain text, HTML stripped, truncated to ``_MAX_ERROR_DETAIL_LEN``
-        chars with a trailing … when truncated.
-    """
+    """Strip HTML tags and truncate raw error text for safe display."""
     clean = re.sub(r"<[^>]+>", " ", raw)
     clean = " ".join(clean.split())
     if len(clean) > _MAX_ERROR_DETAIL_LEN:
@@ -86,24 +70,8 @@ def _sanitize_error_text(raw: str) -> str:
 
 
 class PolarionClient:
-    """Async HTTP client for the Polarion REST API.
-
-    Created once and reused for the MCP server lifetime (via the
-    ``lifespan`` context in ``server.py``).
-
-    Usage::
-
-        config = PolarionConfig()
-        async with PolarionClient(config) as client:
-            data = await client.get("/projects")
-
-    Args:
-        config: ``PolarionConfig`` supplying URL and token.
-        write_delay: Seconds to wait after each write (default 1.5 s).
-
-    Attributes:
-        base_url: Resolved REST API v1 base URL.
-    """
+    """Async HTTP client for the Polarion REST API; created once and reused
+    for the MCP server lifetime (``lifespan`` context in ``server.py``)."""
 
     def __init__(
         self,
@@ -124,7 +92,7 @@ class PolarionClient:
             verify=config.polarion_verify_ssl,
         )
         # Lazily bound to the running loop; serializes all calls (Polarion
-        # forbids concurrency). Not reentrant.
+        # forbids concurrency); not reentrant.
         self._request_lock: asyncio.Lock | None = None
 
     def _get_request_lock(self) -> asyncio.Lock:
@@ -158,20 +126,8 @@ class PolarionClient:
         *,
         params: dict[str, str | int] | None = None,
     ) -> dict[str, object]:
-        """Send a ``GET`` request.
-
-        Args:
-            path: URL path relative to the base API URL (e.g. ``/projects``).
-            params: Optional query parameters.
-
-        Returns:
-            Decoded JSON response body.
-
-        Raises:
-            PolarionAuthError: On HTTP 401/403.
-            PolarionNotFoundError: On HTTP 404.
-            PolarionError: On other non-2xx responses.
-        """
+        """``GET``; raises ``PolarionAuthError`` (401/403),
+        ``PolarionNotFoundError`` (404), ``PolarionError`` (other non-2xx)."""
         async with self._get_request_lock():
             return await self._request("GET", path, params=params)
 
@@ -181,18 +137,8 @@ class PolarionClient:
         *,
         json: dict[str, object] | None = None,
     ) -> dict[str, object]:
-        """Send a ``POST`` request (write operation).
-
-        Sleeps ``_write_delay`` after success, inside the lock, for
-        cluster propagation before the next call.
-
-        Args:
-            path: URL path relative to the base API URL.
-            json: JSON request body.
-
-        Returns:
-            Decoded JSON response body.
-        """
+        """``POST``; sleeps ``_write_delay`` after success, inside the lock,
+        for cluster propagation before the next call."""
         async with self._get_request_lock():
             result = await self._request("POST", path, json=json)
             await asyncio.sleep(self._write_delay)
@@ -204,17 +150,7 @@ class PolarionClient:
         *,
         json: dict[str, object] | None = None,
     ) -> dict[str, object]:
-        """Send a ``PATCH`` request (write operation).
-
-        Same post-success delay contract as :meth:`post`.
-
-        Args:
-            path: URL path relative to the base API URL.
-            json: JSON request body.
-
-        Returns:
-            Decoded JSON response body.
-        """
+        """``PATCH``; same post-success delay contract as :meth:`post`."""
         async with self._get_request_lock():
             result = await self._request("PATCH", path, json=json)
             await asyncio.sleep(self._write_delay)
@@ -226,19 +162,9 @@ class PolarionClient:
         *,
         json: dict[str, object] | None = None,
     ) -> dict[str, object]:
-        """Send a ``DELETE`` request (write operation).
-
-        ``json`` carries bulk-delete resource ids — non-standard for
-        DELETE, but ``httpx`` and Polarion's gateway both accept it.
-        Same post-success delay contract as :meth:`post`/:meth:`patch`.
-
-        Args:
-            path: URL path relative to the base API URL.
-            json: JSON request body (required for bulk-delete endpoints).
-
-        Returns:
-            Decoded JSON response body (``{}`` for 204 No Content).
-        """
+        """``DELETE``; same delay contract as :meth:`post`. ``json`` carries
+        bulk-delete ids — non-standard for DELETE, but httpx and Polarion's
+        gateway both accept it. ``{}`` for 204 No Content."""
         async with self._get_request_lock():
             result = await self._request("DELETE", path, json=json)
             await asyncio.sleep(self._write_delay)
@@ -252,26 +178,8 @@ class PolarionClient:
         params: dict[str, str | int] | None = None,
         json: dict[str, object] | None = None,
     ) -> dict[str, object]:
-        """Execute an HTTP request with retry and error mapping.
-
-        Retries 429/5xx up to ``_MAX_RETRIES`` times with exponential
-        backoff; other errors raise immediately.
-
-        Args:
-            method: HTTP method (GET, POST, PATCH, DELETE).
-            path: URL path relative to the base API URL.
-            params: Optional query parameters.
-            json: Optional JSON body.
-
-        Returns:
-            Decoded JSON response body.
-
-        Raises:
-            PolarionAuthError: On HTTP 401/403.
-            PolarionNotFoundError: On HTTP 404.
-            PolarionError: On other non-2xx responses after all retries
-                are exhausted.
-        """
+        """Execute with error mapping; retries 429/5xx up to ``_MAX_RETRIES``
+        with exponential backoff, other errors raise immediately."""
         # Lock held across retries — releasing mid-backoff would let another
         # caller slip in and hit the same 429.
         last_exception: PolarionError | None = None
@@ -330,14 +238,7 @@ class PolarionClient:
 
     @staticmethod
     def _map_status_to_error(response: httpx.Response) -> PolarionError:
-        """Map an unsuccessful HTTP response to a domain exception.
-
-        Args:
-            response: The ``httpx.Response`` with non-2xx status.
-
-        Returns:
-            A ``PolarionError`` subclass matching the status code.
-        """
+        """Map a non-2xx response to the matching ``PolarionError`` subclass."""
         status = response.status_code
         try:
             detail: str = _extract_json_api_detail(response.json())

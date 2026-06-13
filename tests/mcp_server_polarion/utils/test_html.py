@@ -107,11 +107,8 @@ class TestHtmlToMarkdown:
         assert "&" in result
 
     def test_empty_alt_filled_from_title(self) -> None:
-        """``<img title="X" src="...">`` (no alt) becomes ``![X](src)``.
-
-        Polarion stores the upload filename in ``title``; promoting it to
-        ``alt`` and dropping ``title`` keeps the rendered Markdown to a single
-        canonical label without a redundant ``"X"`` inside the parentheses.
+        """``<img title="X">`` (no alt) → ``![X](src)``; ``title`` dropped so the label
+        appears once.
         """
         html = '<img src="attachment:1-shot.png" title="shot.png"/>'
         result = html_to_markdown(html)
@@ -119,11 +116,8 @@ class TestHtmlToMarkdown:
         assert '"shot.png"' not in result
 
     def test_empty_alt_filled_from_src_filename(self) -> None:
-        """No alt, no title -> alt derived from the segment after ``:`` in src.
-
-        Real Polarion descriptions occasionally carry attachment imgs without
-        a title attribute (e.g. when pasted from the clipboard); the filename
-        portion of ``src`` is the only readable label available.
+        """No alt, no title → alt from the post-``:`` src segment (clipboard-pasted
+        attachments carry no title; the filename is the only readable label).
         """
         html = (
             '<img src="attachment:1-screenshot-20260512-142738-1.png" '

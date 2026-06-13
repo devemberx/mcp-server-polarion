@@ -1,9 +1,5 @@
-"""Unit tests for the mcp-scan summary renderer in `.github/scripts/`.
-
-The script lives outside the package, so it is loaded by path via importlib.
-Only the pure ``render`` function is covered; the ``main()`` file-I/O path is
-left to the workflow itself.
-"""
+"""mcp-scan summary tests, loaded by path via importlib. Pure ``render``
+only; ``main()`` left to the workflow."""
 
 from __future__ import annotations
 

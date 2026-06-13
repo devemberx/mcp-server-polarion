@@ -1,10 +1,5 @@
-"""Unit tests for the Tier-1 case definitions.
-
-The cases are pure data, but two invariants keep the gate honest: every case
-must name a check that actually exists in ``checks.REGISTRY`` (a typo would
-otherwise make the evaluator fail-closed on every run), and every prohibition
-must stay zero-tolerance (``min_pass_rate == 1.0``).
-"""
+"""Tier-1 case-definition invariants: every case names a check that exists in
+``checks.REGISTRY`` and stays zero-tolerance (``min_pass_rate == 1.0``)."""
 
 from __future__ import annotations
 

@@ -1,8 +1,5 @@
-"""Polarion configuration loaded from environment variables.
-
-All secrets live in ``.env`` (local dev) or real environment variables
-(CI / production).  Never hardcode credentials.
-"""
+"""Polarion configuration from environment variables; secrets live in ``.env``
+or real env vars, never hardcoded."""
 
 from __future__ import annotations
 

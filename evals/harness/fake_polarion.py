@@ -1,15 +1,7 @@
-"""In-process fake Polarion backend for the eval harness.
-
-Mirrors the *structure* of the real ``MCP_Test_Project`` (id shapes, space
-layout, enum id sets, comment-thread links, work-item field set) but the
-*content* is entirely synthetic — no real titles, bodies, comment text or
-author ids — so no production data can leak into eval logs.
-
-Installed as a single catch-all respx route scoped to the Polarion host.
-Requests to any other host (the LLM provider) fall through to the network
-because the router is created with ``assert_all_mocked=False``. Every
-mutating request (POST / PATCH / DELETE) is recorded but has no side effect.
-"""
+"""In-process fake Polarion: mirrors the real project's *structure* with fully
+synthetic *content* (no production data in eval logs). One catch-all respx
+route on the Polarion host; other hosts (LLM provider) fall through
+(``assert_all_mocked=False``). Mutations recorded, no side effects."""
 
 from __future__ import annotations
 

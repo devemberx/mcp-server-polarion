@@ -6,17 +6,14 @@ from typing import Final
 
 from pydantic import BaseModel
 
-# Recursive JSON-safe alias for internal payload builders. Result models expose
-# previews as `Mapping[str, object]`, not `dict[str, JsonValue]`: the alias'
-# `$defs/JsonValue` self-reference breaks FastMCP's `json_schema_to_type`
-# (unresolved `ForwardRef('Root')`, noisy errors on every write).
+# Internal payload-builder alias only — result models expose previews as
+# `Mapping[str, object]` because the recursive self-reference breaks FastMCP's
+# `json_schema_to_type` (unresolved `ForwardRef('Root')`).
 type JsonValue = (
     str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
 )
 
-# Per-item cap blocking a prompt-injected multi-MB body. Real bodies stay
-# ~30 KB; 2 MiB leaves ~70x headroom. Bulk requests bound by item count, not
-# this constant alone.
+# Per-item cap against prompt-injected multi-MB bodies; real bodies ~30 KB.
 MAX_BODY_HTML_LEN: Final[int] = 2_000_000
 
 

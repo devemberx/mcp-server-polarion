@@ -1,9 +1,5 @@
-"""The Tier-1 forbidden-behaviour evaluator.
-
-Dispatches on ``Case.metadata["check"]`` (carried through to
-``EvaluationData.metadata``) to the matching pure check in ``checks.py``.
-A case passes only if its named check passes.
-"""
+"""Tier-1 evaluator: dispatches on ``Case.metadata["check"]`` to the matching
+pure check in ``checks.py``."""
 
 from __future__ import annotations
 

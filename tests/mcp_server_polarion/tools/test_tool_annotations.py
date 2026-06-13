@@ -8,12 +8,8 @@ from mcp_server_polarion.server import mcp
 
 
 class TestWriteToolAnnotations:
-    """Verify each write tool advertises the expected MCP annotations.
-
-    Annotations let MCP clients display risk hints (destructive/idempotent)
-    and apply per-tool auto-approval policies. Read tools advertise
-    ``readOnlyHint=True``; write tools must mirror with the inverse plus
-    ``destructiveHint`` / ``idempotentHint`` / ``openWorldHint``.
+    """Write tools must advertise destructive/idempotent/openWorld hints — MCP
+    clients use them for risk display and auto-approval policies.
     """
 
     @staticmethod

@@ -1,10 +1,4 @@
-"""Unit tests for the eval-agent model factory.
-
-``resolve_model_id`` is the single source of truth both the agent and the
-report read; ``build_model`` translates env config into the LiteLLM params
-that keep runs deterministic. Both are env-driven, so the tests pin behaviour
-with ``monkeypatch.setenv`` / ``delenv``.
-"""
+"""Model-factory tests; env-driven, pinned via ``monkeypatch.setenv``/``delenv``."""
 
 from __future__ import annotations
 

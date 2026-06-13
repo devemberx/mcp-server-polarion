@@ -1,10 +1,5 @@
-"""Unit tests for the release-notes CI helper in `.github/scripts/`.
-
-The script lives outside the package and shells out to `gh`, so it is loaded by
-path via importlib and `_gh` is monkeypatched to feed canned API responses. Only
-the pure `tag_highlights` parser is covered; the `main()` stdout path is left to
-the workflow itself.
-"""
+"""Release-notes helper tests, loaded by path via importlib with `_gh`
+monkeypatched. Pure `tag_highlights` only; `main()` left to the workflow."""
 
 from __future__ import annotations
 

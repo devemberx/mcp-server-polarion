@@ -22,14 +22,9 @@ from mcp_server_polarion.tools.work_items import (
 
 
 class TestReadPathEncoding:
-    """Every read tool that builds a URL must URL-encode each path segment.
-
-    Without encoding, a project/space/document/work-item id containing a
-    space, slash, or other reserved character would either generate a
-    malformed URL or — worse — allow path traversal (``../``) into a
-    different Polarion resource. These tests pin the encoding behavior so
-    a future refactor cannot silently drop ``encode_path_segment()`` from
-    one of the read paths.
+    """Every read tool must URL-encode each path segment — unencoded reserved chars
+    malform the URL or allow ``../`` traversal. Pins ``encode_path_segment()`` so
+    a refactor cannot silently drop it.
     """
 
     @pytest.fixture(autouse=True)

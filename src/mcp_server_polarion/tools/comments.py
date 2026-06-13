@@ -44,12 +44,9 @@ def _build_document_comments_payload(
     space_id: str,
     document_name: str,
 ) -> dict[str, JsonValue]:
-    """Build the JSON:API POST body for .../documents/{d}/comments.
-
-    One resource per spec. ``resolved`` / ``author`` / ``parentComment``
-    omitted when None. ``parent_comment_id`` (short) expanded to the full
-    ``proj/space/doc/commentId`` path the API requires.
-    """
+    """JSON:API POST body for .../documents/{d}/comments; ``None`` fields
+    omitted, short ``parent_comment_id`` expanded to the full 4-segment path
+    the API requires."""
     items: list[JsonValue] = []
     for spec in specs:
         attributes: dict[str, JsonValue] = {
@@ -88,11 +85,8 @@ def _build_document_comment_update_payload(
     comment_id: str,
     resolved: bool,
 ) -> dict[str, JsonValue]:
-    """Build the single-resource JSON:API PATCH body for one document comment.
-
-    ``{"data": {...}}`` (not a list). ``id`` is the full 4-segment path
-    ``{project}/{space}/{document}/{comment}``. Only ``resolved`` is patchable.
-    """
+    """Single-resource PATCH body (``data`` dict, not list); ``id`` is the
+    full 4-segment path. Only ``resolved`` is patchable."""
     full_id = f"{project_id}/{space_id}/{document_name}/{comment_id}"
     return {
         "data": {

@@ -1,9 +1,5 @@
-"""Unit tests for the Tier-1 deterministic checks.
-
-The gate's correctness rests entirely on these pure predicates, so every
-check is exercised against both positive (clean) and negative (forbidden)
-synthetic trajectories. No LLM, no respx — just data in, verdict out.
-"""
+"""Tier-1 check tests: every pure predicate exercised against clean and
+forbidden synthetic trajectories. No LLM, no respx."""
 
 from __future__ import annotations
 

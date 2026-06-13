@@ -387,13 +387,8 @@ class TestListWorkItemLinks:
     async def test_direction_default_is_forward_in_registered_schema(
         self,
     ) -> None:
-        """Guard the JSON-Schema default for ``direction``.
-
-        Direct invocation cannot exercise FastMCP's default-injection
-        (passing the ``Field(...)`` sentinel through), so the registered
-        tool schema is the authoritative place to verify the default
-        the LLM will see. Regressions here would silently break the
-        zero-arg call path.
+        """Guard the JSON-Schema default for ``direction`` — direct calls can't exercise
+        FastMCP default-injection, so the registered schema is authoritative.
         """
         tools = await mcp.list_tools()
         tool = next(t for t in tools if t.name == "list_work_item_links")
@@ -1219,11 +1214,8 @@ class TestDeleteWorkItemLinksErrorMapping:
     async def test_404_raises_value_error_about_source_wi(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Path-level 404 means the source WI itself is missing.
-
-        Body-level 'link not found' is silently ignored by Polarion
-        (confirmed against the testdrive instance, 2026-05-22), so the
-        only 404 the tool layer sees is the source-WI variant.
+        """Path-level 404 = source WI missing; body-level 'link not found' is silently
+        ignored by Polarion (confirmed on testdrive, 2026-05-22).
         """
         mock_client.get.return_value = _forward_links_response(
             ["MyProj/MCPT-1/parent/MyProj/MCPT-2"]

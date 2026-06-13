@@ -53,10 +53,8 @@ logger = logging.getLogger("mcp_server_polarion.tools.links")
 
 
 def _extract_created_link_ids(response: dict[str, object]) -> list[str]:
-    """Return composite link ids verbatim, in input order, from a bulk
-    create-link response. These are the path id for later PATCH / DELETE.
-    Empty on malformed shapes (callers treat empty as failure).
-    """
+    """Composite link ids verbatim, input order, from a bulk create response —
+    the path ids for later PATCH / DELETE. Empty on malformed shapes."""
     data = response.get("data")
     if not isinstance(data, list):
         return []
@@ -74,11 +72,8 @@ def _build_create_links_payload(
     source_project_id: str,
     links: list[WorkItemLinkSpec],
 ) -> dict[str, JsonValue]:
-    """Build the JSON:API body for bulk create-link POST.
-
-    One ``linkedworkitems`` resource per spec in a single ``data`` array.
-    ``revision`` skipped when unset; ``target_project_id`` defaults to source.
-    """
+    """JSON:API body for bulk create-link POST; ``revision`` skipped when
+    unset, ``target_project_id`` defaults to source."""
     data: list[JsonValue] = []
     for spec in links:
         tgt_proj = (
@@ -112,11 +107,9 @@ def _build_delete_links_payload(
     source_work_item_id: str,
     links: list[WorkItemLinkRef],
 ) -> tuple[list[str], dict[str, JsonValue]]:
-    """Build composite ids + JSON:API body for bulk delete-link DELETE.
-
-    Each link's 5-segment id ``<srcProj>/<srcWI>/<role>/<tgtProj>/<tgtWI>`` is
-    built from the structured ref. Returns (id list, body).
-    """
+    """(composite id list, JSON:API body) for bulk delete-link DELETE; each
+    5-segment id ``<srcProj>/<srcWI>/<role>/<tgtProj>/<tgtWI>`` built from the
+    structured ref."""
     link_ids: list[str] = []
     data: list[JsonValue] = []
     for ref in links:
@@ -140,12 +133,9 @@ def _build_update_link_payload(
     source_work_item_id: str,
     spec: WorkItemLinkUpdateSpec,
 ) -> tuple[str, str, dict[str, JsonValue]]:
-    """Build the composite id, request path, and JSON:API body for one PATCH.
-
-    Per-link on ``.../linkedworkitems/{role}/{tgtProj}/{tgtWI}`` with a
-    single-resource body. ``suspect`` / ``revision`` attached only when set
-    (omit-preserve). Path returned here so id and path share one ``tgt_proj``.
-    """
+    """(composite id, path, body) for one link PATCH; ``suspect``/``revision``
+    attached only when set (omit-preserve). Path built here so id and path
+    share one ``tgt_proj``."""
     tgt_proj = (
         spec.target_project_id
         if spec.target_project_id is not None
@@ -182,12 +172,8 @@ def _parse_work_item_links(
     *,
     direction: Literal["forward", "back"],
 ) -> list[WorkItemLink]:
-    """Parse linked work items from a JSON:API response into ``WorkItemLink``s.
-
-    Role/suspect come from ``attributes``; target title/type/status resolve
-    from the ``included`` array (``include=workItem``). The target id is taken
-    from ``relationships.workItem.data.id``, never by parsing the composite id.
-    """
+    """Parse linked work items into ``WorkItemLink``s; target id from
+    ``relationships.workItem.data.id``, never by parsing the composite id."""
     work_item_map = build_included_work_item_map(response)
 
     items: list[WorkItemLink] = []

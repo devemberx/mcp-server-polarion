@@ -1,10 +1,5 @@
-"""Unit tests for the Tier-1 gate orchestration in ``evals/run.py``.
-
-The real ``run_case`` drives an LLM, so it is stubbed: these tests pin the
-deterministic glue around it -- pass-rate aggregation against ``min_pass_rate``,
-the fail-closed handling of a crashed agent run, the git-sha resolution, and
-the unknown-case exit code.
-"""
+"""Gate-orchestration tests with ``run_case`` stubbed: pass-rate aggregation,
+fail-closed crashed runs, git-sha resolution, unknown-case exit code."""
 
 from __future__ import annotations
 

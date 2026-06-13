@@ -1,10 +1,6 @@
-"""In-process TTL caches shared across tool implementations.
-
-Near-static project facts (documents, enum option ids, custom-field key
-schemas) are memoised to spare the server's tight budget (<=3 req/s, no
-concurrency). This module owns all cache state; tool logic reaches it only
-through the typed get / store wrappers below.
-"""
+"""In-process TTL caches for near-static project facts, sparing the server's
+tight budget (<=3 req/s, no concurrency). Owns ALL cache state; tool logic
+reaches it only through the typed get / store wrappers."""
 
 from __future__ import annotations
 
@@ -25,11 +21,8 @@ class _Entry[V]:
 
 
 class TTLCache[K, V]:
-    """Hashable-keyed cache whose entries expire ``ttl_seconds`` after a set.
-
-    Single-threaded; lazy expiry (a key is dropped only when next accessed past
-    its deadline), so a bounded key space never grows past that bound.
-    """
+    """Single-threaded TTL cache; lazy expiry, so a bounded key space never
+    grows past its bound."""
 
     def __init__(self, ttl_seconds: float) -> None:
         self._ttl = ttl_seconds
@@ -71,18 +64,14 @@ class DiscoveredDocument(NamedTuple):
     updated_by_name: str = ""
 
 
-# Bounded by ghost-safety: a stale entry keeps accepting an admin-removed
-# option until expiry, so 60s caps that window.
+# 60s caps the window in which a stale entry accepts an admin-removed option.
 _GUARD_TTL_SECONDS: Final[float] = 60.0
 
-# 404 "not an Enumeration field" is a stable schema fact (field-type changes
-# are rare admin ops) and its stale worst case is merely deferring to Polarion,
-# so it outlives positive option sets, whose longer life would widen the
-# admin-removed-option ghost window.
+# 404 "not an Enumeration field" is a stable schema fact whose stale worst
+# case is merely deferring to Polarion — safe to outlive positive option sets.
 _ENUM_NOT_FOUND_TTL_SECONDS: Final[float] = 600.0
 
-# Bounded by freshness: a new document must surface within ~1 min
-# (``create_document`` also invalidates on write).
+# New documents must surface within ~1 min (create also invalidates on write).
 _DOCUMENT_LIST_TTL_SECONDS: Final[float] = 60.0
 
 # project_id -> discovered documents in display order.
@@ -93,19 +82,15 @@ _document_list_cache: TTLCache[str, tuple[DiscoveredDocument, ...]] = TTLCache(
 _enum_option_cache: TTLCache[tuple[str, Resource, str, str], frozenset[str]] = TTLCache(
     _GUARD_TTL_SECONDS
 )
-# (project, enum_name) -> option ids for a project-level enum (link/hyperlink
-# role). No type axis: these are project config, not type-scoped.
+# (project, enum_name) -> project-level enum option ids (no type axis).
 _project_enum_cache: TTLCache[tuple[str, str], frozenset[str]] = TTLCache(
     _GUARD_TTL_SECONDS
 )
-# (project, work_item_type) -> the type's full custom-field key schema (MIN-per-key
-# sample). Sole source of truth for work-item custom-field validation.
+# (project, work_item_type) -> full custom-field key schema (MIN-per-key sample).
 _work_item_custom_key_cache: TTLCache[tuple[str, str], frozenset[str]] = TTLCache(
     _GUARD_TTL_SECONDS
 )
-# (project, document_type) -> the type's complete custom-field key schema, from
-# the project-wide /documents sample. Mirrors the work-item cache; the single
-# source of truth for document custom-field validation.
+# (project, document_type) -> custom-field key schema; document-side mirror.
 _document_type_custom_key_cache: TTLCache[tuple[str, str], frozenset[str]] = TTLCache(
     _GUARD_TTL_SECONDS
 )
@@ -149,12 +134,8 @@ def store_cached_enum_options(  # noqa: PLR0913
     *,
     not_found: bool = False,
 ) -> None:
-    """Cache the valid option ids for the field/type.
-
-    Entries live ``_GUARD_TTL_SECONDS``; ``not_found=True`` marks a 404
-    ("not an Enumeration field") result, cached for
-    ``_ENUM_NOT_FOUND_TTL_SECONDS`` instead.
-    """
+    """Cache option ids for the field/type; ``not_found=True`` (404 result)
+    uses the longer ``_ENUM_NOT_FOUND_TTL_SECONDS``."""
     _enum_option_cache.set(
         (project_id, resource, field_id, type_id),
         option_ids,
@@ -192,9 +173,8 @@ def store_work_item_custom_keys(
     work_item_type: str,
     keys: frozenset[str],
 ) -> None:
-    """Replace any prior set: each sample is the full key set, so an admin
-    removal shrinks the schema once the entry expires.
-    """
+    """Replace any prior set — each sample is the full key set, so an admin
+    removal shrinks the schema on expiry."""
     _work_item_custom_key_cache.set((project_id, work_item_type), keys)
 
 
@@ -216,9 +196,8 @@ def store_document_type_custom_keys(
     document_type: str,
     keys: frozenset[str],
 ) -> None:
-    """Replace any prior set: each sample is the full key set, so an admin
-    removal shrinks the schema once the entry expires.
-    """
+    """Replace any prior set — each sample is the full key set, so an admin
+    removal shrinks the schema on expiry."""
     _document_type_custom_key_cache.set((project_id, document_type), keys)
 
 

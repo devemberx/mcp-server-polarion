@@ -1,17 +1,7 @@
-"""Run a single eval case end to end and return its trajectory.
-
-``run_case`` is the ``task`` callable handed to
-``strands_evals.Experiment.run_evaluations``. It is synchronous (the
-Experiment API requires that) and drives the whole async stack inside one
-``asyncio.run`` under an active respx mock:
-
-    Strands Agent -> bridged MCP tools -> in-memory FastMCP server
-        -> PolarionClient -> respx -> FakePolarion
-
-The agent's LLM traffic is *not* mocked — respx is created with
-``assert_all_mocked=False`` so it falls through to the real provider, while
-every Polarion request is served by the fake. No real Polarion is touched.
-"""
+"""Run one eval case end to end. ``run_case`` is the synchronous ``task``
+callable for ``strands_evals``; one ``asyncio.run`` drives Agent -> bridged
+tools -> in-memory server -> respx -> FakePolarion. LLM traffic falls through
+to the real provider (``assert_all_mocked=False``); Polarion never touched."""
 
 from __future__ import annotations
 
@@ -71,12 +61,9 @@ def _set_polarion_env() -> None:
 
 
 class _CycleGuard:
-    """Model-call counter hook that fail-closes runaway agents.
-
-    Ships as a class because Strands' ``hooks=`` wants ``HookProvider``
-    instances, not bare callbacks. Exposes ``count`` for post-invoke
-    inspection: the caller fail-closes on a forced stop, since a clean
-    ``stop_event_loop`` could return empty partial text and silently pass.
+    """Model-call counter fail-closing runaway agents. A class because Strands'
+    ``hooks=`` wants ``HookProvider`` instances; caller fail-closes on a forced
+    stop (clean ``stop_event_loop`` could silently pass with empty text).
     """
 
     def __init__(self, max_cycles: int) -> None:

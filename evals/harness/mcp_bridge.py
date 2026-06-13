@@ -1,14 +1,6 @@
-"""Bridge the in-memory FastMCP server to Strands agent tools.
-
-Strands' native MCP client runs the server in a separate process, out of
-respx's reach. To keep one process (so the fake Polarion mock applies), read
-the real tool specs from the in-memory ``fastmcp.Client`` and wrap each as a
-``PythonAgentTool`` forwarding back through that client.
-
-``TrajectoryRecorder`` records each forwarded call with its parsed result, so
-checks see not just (name, args) but what each call returned -- needed e.g. by
-``check_get_before_update``.
-"""
+"""Bridge the in-memory FastMCP server to Strands tools — Strands' native MCP
+client spawns a separate process, out of respx's reach. ``TrajectoryRecorder``
+captures each call's parsed result (checks need returns, not just args)."""
 
 from __future__ import annotations
 
@@ -24,11 +16,8 @@ from strands.types.tools import ToolResult, ToolSpec, ToolUse
 
 @dataclass
 class TrajectoryRecorder:
-    """Append-only log of (name, args, result) tuples in call order.
-
-    ``result`` is the parsed structured payload (dict from a Pydantic model),
-    raw text, or ``None`` for empty/error responses -- lets checks verify the
-    agent used a value surfaced by a prior call, not a ghosted id.
+    """Append-only (name, args, result) log in call order; ``result`` is the parsed
+    payload so checks can verify values came from prior calls, not ghosted ids.
     """
 
     calls: list[dict[str, Any]] = field(default_factory=list)
