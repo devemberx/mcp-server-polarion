@@ -12,7 +12,7 @@ You are orchestrating a production release. Be deliberate. Never skip hooks. Nev
 ```bash
 git status --porcelain                  # MUST be empty
 git rev-parse --abbrev-ref HEAD         # MUST be 'main'
-git fetch origin main
+git fetch origin main --tags            # --tags so Step 2's check sees remote tags
 git rev-list --count HEAD..origin/main  # MUST be 0
 git rev-list --count origin/main..HEAD  # MUST be 0
 git config core.hooksPath               # SHOULD be '.githooks'
@@ -22,34 +22,34 @@ git config core.hooksPath               # SHOULD be '.githooks'
 - Branch != main → ask user to switch manually. Do NOT switch.
 - Behind origin → tell user to `git pull --ff-only`.
 - Ahead of origin → tell user to push or reset; release commit must sit on synced main.
-- `core.hooksPath` ≠ `.githooks` → WARN, ask user to run `git config core.hooksPath .githooks`. The commit-msg hook is the only enforcement of the 50/120 rule.
+- `core.hooksPath` ≠ `.githooks` → WARN, ask user to run `git config core.hooksPath .githooks`. Step 4 validates the 50/120 lengths itself, so a missing hook won't let a bad message through here — but the hook is the repo-wide net for every commit, not just this one.
 
 ## Step 2 — Determine new version (interactive)
 
 ```bash
-sed -n '3p' pyproject.toml
+grep -m1 '^version =' pyproject.toml
 PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
 [ -n "$PREV_TAG" ] && git log "$PREV_TAG..HEAD" --oneline || git log --oneline
 ```
 
 Analyze commits since `$PREV_TAG`:
 - `breaking` / `!:` marker → recommend **major**
-- ≥2 `feat:` → recommend **minor**
+- any `feat:` → recommend **minor**
 - only `fix:` / `chore:` / `docs:` → recommend **patch**
 
 Call **AskUserQuestion** with options `patch` / `minor` / `major` / `custom`, noting the recommendation in the question text. For `custom`, prompt for exact `X.Y.Z`.
 
-Verify the tag does not already exist:
+Verify the tag does not already exist (Step 1's `--tags` fetch means this catches remote tags too, not just local):
 
 ```bash
 git rev-parse "v${NEW_VERSION}" 2>/dev/null && abort "tag exists" || true
 ```
 
-If it exists, abort and tell the user to pick a different version or delete the stale local tag manually (likely from an aborted prior run).
+If it exists, abort and tell the user to pick a different version. A remote tag means that version already shipped (or is mid-publish) — never reuse it. A local-only tag is likely a stale leftover from an aborted prior run; the user can delete it manually (`git tag -d v${NEW_VERSION}`) after confirming it never reached origin.
 
 ## Step 3 — Bump version
 
-Edit `pyproject.toml` line 3 to `version = "X.Y.Z"` using the Edit tool (replace only that line).
+Edit the `^version = "..."` line near the top of `pyproject.toml` to `version = "X.Y.Z"` using the Edit tool (replace only that line).
 
 ```bash
 uv lock                          # syncs uv.lock self-entry
@@ -140,6 +140,8 @@ git push origin "v${NEW_VERSION}"
 ```
 
 On failure: local tag still exists; user can retry with `git push origin v${NEW_VERSION}` or delete locally via `git tag -d v${NEW_VERSION}`.
+
+On `cancel`: the version-bump commit is already on `main` (pushed in Step 5) and the tag exists locally, but no release ships — `main` sits one commit ahead of the last release. Nothing to clean up; finish later by pushing the tag (`git push origin v${NEW_VERSION}`), or just let the next deploy carry it forward.
 
 The GitHub Release is created automatically by the `release` job in `publish.yml` after PyPI succeeds: `build_release_notes.py` reads the Step 6 highlights back from the tag object and prepends them to GitHub's categorized notes, grouped per `.github/release.yml`. Do NOT create a release by hand here; a manual `gh release create` would collide with the workflow (`release already exists`). Categorization quality depends on each merged PR carrying the right label, which `.github/workflows/label-pr.yml` stamps from the PR's conventional-commit title.
 
