@@ -12,6 +12,7 @@ from fastmcp import FastMCP
 from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.core.config import PolarionConfig
 from mcp_server_polarion.core.logging import setup_logging
+from mcp_server_polarion.middleware import CompactValidationErrorMiddleware
 
 logger = logging.getLogger("mcp_server_polarion.server")
 
@@ -52,6 +53,7 @@ mcp = FastMCP(
     ),
     lifespan=_lifespan,
 )
+mcp.add_middleware(CompactValidationErrorMiddleware())
 
 # Register tool modules — must be at bottom to avoid circular imports.
 import mcp_server_polarion.tools  # noqa: E402, F401

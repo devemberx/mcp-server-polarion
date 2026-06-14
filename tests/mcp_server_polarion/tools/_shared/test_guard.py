@@ -225,6 +225,22 @@ class TestGuardWorkItemEnums:
         assert "severity='ghost'" in msg
         assert "must_have" in msg and "should_have" in msg
 
+    async def test_options_list_capped_for_pathological_enum(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # A 60-option enum shows the first 50 + a (+N more) suffix, not all 60.
+        ids = [f"opt{i:03d}" for i in range(60)]
+        mock_client.get.return_value = _enum_response(ids)
+
+        with pytest.raises(ValueError) as exc:
+            await guard_work_item_enums(mock_client, "P", "task", severity="ghost")
+
+        msg = str(exc.value)
+        assert "opt000" in msg
+        assert "opt049" in msg
+        assert "opt050" not in msg
+        assert "(+10 more)" in msg
+
     async def test_none_args_skip_all_checks(self, mock_client: AsyncMock) -> None:
         await guard_work_item_enums(mock_client, "P", "task")
 
@@ -406,10 +422,18 @@ class TestGuardWorkItemCustomFieldKeys:
     async def test_empty_sample_fails_closed(self, mock_client: AsyncMock) -> None:
         mock_client.get.return_value = {"data": []}
 
-        with pytest.raises(RuntimeError, match="Refusing the write"):
+        with pytest.raises(RuntimeError, match="Refusing the write") as exc:
             await _check_work_item_custom_keys(
                 mock_client, "P", "task", {"risk_score": 5}
             )
+
+        msg = str(exc.value)
+        # Names the unverifiable key and defers to the user -- never instructs a
+        # self-recovery write (mid-update the LLM could create junk items).
+        assert "risk_score" in msg
+        assert "ask the user" in msg.lower()
+        assert "save one" not in msg.lower()
+        assert "retry" not in msg.lower()
 
     async def test_sql_rejection_fails_closed(self, mock_client: AsyncMock) -> None:
         # No Lucene fallback: a rejected SQL sample blocks the write rather than
@@ -557,10 +581,16 @@ class TestGuardDocumentCustomFieldKeys:
         # No document of this type has any custom -> schema empty -> block.
         mock_client.get.return_value = _docs_list(("systemReqSpecification", {"v": 1}))
 
-        with pytest.raises(RuntimeError, match="Refusing the write"):
+        with pytest.raises(RuntimeError, match="Refusing the write") as exc:
             await _check_document_custom_keys(
                 mock_client, "P", "generic", {"doc_risk": 3}
             )
+
+        msg = str(exc.value)
+        assert "doc_risk" in msg
+        assert "ask the user" in msg.lower()
+        assert "save one" not in msg.lower()
+        assert "retry" not in msg.lower()
 
     async def test_sample_error_blocks_write(self, mock_client: AsyncMock) -> None:
         mock_client.get.side_effect = PolarionError("backend down")

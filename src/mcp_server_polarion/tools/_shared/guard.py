@@ -38,6 +38,7 @@ from mcp_server_polarion.tools._shared.helpers import (
     WORK_ITEM_DETAIL_FIELDS,
     encode_path_segment,
     extract_short_id,
+    format_option_list,
     safe_str,
 )
 from mcp_server_polarion.tools._shared.sql import (
@@ -65,10 +66,9 @@ def _unreachable_write_block(
         exc.message,
     )
     return RuntimeError(
-        f"Cannot validate {what} against project '{project_id}' before writing: "
-        f"Polarion validation request failed ({exc.message}). Refusing the write "
-        f"-- unknown ids/keys persist as silent ghosts that never appear in "
-        f"Polarion's UI or Lucene and are never reported as errors. Retry once "
+        f"Cannot validate {what} for project '{project_id}': validation request "
+        f"failed ({exc.message}). Refusing the write -- unknown ids/keys persist "
+        f"as silent ghosts (invisible to UI/Lucene, never error). Retry once "
         f"Polarion is reachable."
     )
 
@@ -83,9 +83,9 @@ def _unauthorized_write_block(what: str, project_id: str) -> PermissionError:
         project_id,
     )
     return PermissionError(
-        f"Cannot validate {what} against project '{project_id}' before writing: "
-        f"the POLARION_TOKEN lacks permission for the validation request. "
-        f"Refusing the write -- check your token's permissions."
+        f"Cannot validate {what} for project '{project_id}': POLARION_TOKEN lacks "
+        f"permission for the validation request. Refusing the write -- check the "
+        f"token's permissions."
     )
 
 
@@ -168,9 +168,9 @@ async def _check_enum(  # noqa: PLR0913
     raise ValueError(
         f"{field_id}='{value}' is not a valid {field_id} option in "
         f"project '{project_id}' for {resource} type '{type_id}'. "
-        f"Valid options: {sorted(option_ids)}. "
-        f"Polarion accepts unknown ids as silent ghosts that never match "
-        f"Lucene queries -- call {_ENUM_DISCOVERY_TOOL[resource]} first."
+        f"Valid options: {format_option_list(option_ids)}. "
+        f"Unknown ids ghost silently (never match Lucene) -- call "
+        f"{_ENUM_DISCOVERY_TOOL[resource]} first."
     )
 
 
@@ -247,9 +247,8 @@ def _bad_custom_enum_value(  # noqa: PLR0913
     )
     return ValueError(
         f"{problem} in project '{project_id}' for {resource} type '{type_id}'. "
-        f"Valid options: {sorted(option_ids)}. "
-        f"Polarion accepts unknown enum values as silent ghosts that never "
-        f"appear in its UI or match Lucene queries -- call "
+        f"Valid options: {format_option_list(option_ids)}. "
+        f"Unknown enum values ghost silently (invisible to UI/Lucene) -- call "
         f"{_ENUM_DISCOVERY_TOOL[resource]} first."
     )
 
@@ -317,9 +316,9 @@ def _reject_unknown_custom_keys(
     if unknown:
         raise ValueError(
             f"custom_fields key(s) {unknown} were not present in any prior "
-            f"{discovery_tool} for {scope}. Known keys: {sorted(known)}. "
-            f"Polarion accepts unknown keys as silent ghost attributes -- "
-            f"fetch a sample first to discover the project's real custom-field ids."
+            f"{discovery_tool} for {scope}. Known keys: {format_option_list(known)}. "
+            f"Unknown keys persist as silent ghost attributes -- fetch a sample "
+            f"first to discover the project's real custom-field ids."
         )
 
 
@@ -415,12 +414,12 @@ async def _check_work_item_custom_keys(
 
     if not schema:
         raise RuntimeError(
-            f"Cannot verify custom_fields for work_item_type '{work_item_type}' in "
-            f"project '{project_id}': no existing item of this type has any custom "
-            f"field populated, so its schema can't be inferred. Refusing the write "
-            f"-- unknown keys persist as silent ghosts invisible to Polarion's UI "
-            f"and Lucene. Save one item of this type with its custom fields filled "
-            f"(web UI, template, or a key you are certain of), then retry."
+            f"Cannot verify custom_fields {format_option_list(custom_fields)} for "
+            f"work_item_type '{work_item_type}' in project '{project_id}': no existing "
+            f"item of this type has custom fields populated, so the schema can't be "
+            f"sampled. Refusing the write -- an unknown key ghosts silently (invisible "
+            f"to UI/Lucene). Do not create or edit items to work around this; ask the "
+            f"user to confirm these custom-field ids exist for this type."
         )
 
     _reject_unknown_custom_keys(
@@ -543,12 +542,12 @@ async def _check_document_custom_keys(
 
     if not schema:
         raise RuntimeError(
-            f"Cannot verify custom_fields for document type '{document_type}' in "
-            f"project '{project_id}': no existing document of this type has any "
-            f"custom field populated, so its schema can't be inferred. Refusing the "
-            f"write -- unknown keys persist as silent ghosts invisible to Polarion's "
-            f"UI and Lucene. Save one document of this type with its custom fields "
-            f"filled, then retry."
+            f"Cannot verify custom_fields {format_option_list(custom_fields)} for "
+            f"document type '{document_type}' in project '{project_id}': no existing "
+            f"document of this type has custom fields populated, so the schema can't "
+            f"be sampled. Refusing the write -- an unknown key ghosts silently "
+            f"(invisible to UI/Lucene). Do not create or edit documents to work around "
+            f"this; ask the user to confirm these custom-field ids exist for this type."
         )
 
     _reject_unknown_custom_keys(
@@ -633,10 +632,9 @@ async def guard_work_item_link_targets(
 
     if missing:
         raise ValueError(
-            f"Link target work item(s) {sorted(missing)} do not exist. "
-            f"Polarion accepts a nonexistent target as a silent dangling link "
-            f"(HTTP 201) with empty title/type/status -- use list_work_items to "
-            f"discover valid target ids before linking."
+            f"Link target work item(s) {format_option_list(missing)} do not exist. "
+            f"A nonexistent target stores as a silent dangling link (HTTP 201, empty "
+            f"title/type/status) -- use list_work_items to find valid target ids first."
         )
 
 
@@ -715,9 +713,9 @@ async def _check_project_enum_roles(  # noqa: PLR0913
     if unknown:
         raise ValueError(
             f"{field_label} id(s) {unknown} are not valid in project "
-            f"'{project_id}'. Valid options: {sorted(option_ids)}. "
-            f"Polarion accepts an unknown {field_label} as a silent ghost that "
-            f"never matches Lucene queries -- {discovery_hint}"
+            f"'{project_id}'. Valid options: {format_option_list(option_ids)}. "
+            f"An unknown {field_label} ghosts silently (never matches Lucene) "
+            f"-- {discovery_hint}"
         )
 
 

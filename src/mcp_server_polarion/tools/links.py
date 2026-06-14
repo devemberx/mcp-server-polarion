@@ -552,9 +552,9 @@ async def delete_work_item_links(
     except PolarionNotFoundError as exc:
         raise ValueError(
             f"Source work item '{work_item_id}' not found in project "
-            f"'{project_id}'. (Body-level 'link not found' is silently "
-            "ignored by Polarion; this error means the source WI itself "
-            "is missing. Use `list_work_items` to discover valid IDs.)"
+            f"'{project_id}'. A nonexistent link target is ignored silently, so "
+            f"this means the source work item itself is absent -- use "
+            f"`list_work_items` to find valid ids."
         ) from exc
     except PolarionError as exc:
         raise RuntimeError(f"Failed to delete work item links: {exc.message}") from exc
