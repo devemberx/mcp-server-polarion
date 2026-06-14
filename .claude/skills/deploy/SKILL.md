@@ -22,7 +22,7 @@ git config core.hooksPath               # SHOULD be '.githooks'
 - Branch != main → ask user to switch manually. Do NOT switch.
 - Behind origin → tell user to `git pull --ff-only`.
 - Ahead of origin → tell user to push or reset; release commit must sit on synced main.
-- `core.hooksPath` ≠ `.githooks` → WARN, ask user to run `git config core.hooksPath .githooks`. Step 4 validates the 50/120 lengths itself, so a missing hook won't let a bad message through here — but the hook is the repo-wide net for every commit, not just this one.
+- `core.hooksPath` ≠ `.githooks` → WARN, ask user to run `git config core.hooksPath .githooks`. Step 4 only *prints* the 50/120 lengths for you to check by eye; with the hook missing nothing enforces them automatically, so restore the hook (the repo-wide net for every commit, not just this one) before committing.
 
 ## Step 2 — Determine new version (interactive)
 
