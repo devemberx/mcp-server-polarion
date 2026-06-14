@@ -1,0 +1,46 @@
+{
+  "skill_name": "compress-code-comments",
+  "evals": [
+    {
+      "id": 0,
+      "name": "verbose-narrative-comments",
+      "prompt": "The comments in case1_client.py are way too wordy and a lot of them just restate the code line below them. Tighten them up to our house comment style — keep the real reasons, drop the play-by-play — without changing any behavior.",
+      "expected_output": "Step-by-step what-comments removed; the 429/Polarion-rate-limit rationale kept as a tight line; executable code byte-identical (AST unchanged); total comment volume cut substantially.",
+      "files": ["files/case1_client.py"],
+      "assertions": [
+        {"text": "Executable code is unchanged: the output's AST with docstrings normalized equals the input's (no statement added/removed/reordered, no literal changed)."},
+        {"text": "Pure what-comments that merely restate the next line are gone (e.g. 'Increment the attempt counter by one', 'Send the actual POST request', 'Check whether the response status code')."},
+        {"text": "The load-bearing why survives in compressed form: a comment still conveys the 429 / Polarion ~3-req-per-second rate-limit rationale for retrying."},
+        {"text": "Total comment character count is reduced by at least 40% versus the input."},
+        {"text": "No comment is a multi-sentence paragraph and none carry NOTE:/WARNING: banner prefixes."}
+      ]
+    },
+    {
+      "id": 1,
+      "name": "preserve-boundaries",
+      "prompt": "Apply our code-comment cleanup to case2_tool.py — make the developer comments denser. Be careful about what's off-limits in this codebase.",
+      "expected_output": "@mcp.tool docstring and the Field(description=...) string left byte-identical; # noqa: E501 and # type: ignore[name-defined] preserved in place; the _build_update_payload helper's verbose comment compressed; code unchanged.",
+      "files": ["files/case2_tool.py"],
+      "assertions": [
+        {"text": "The @mcp.tool-decorated update_work_item function's docstring is byte-for-byte identical to the input (not shortened, not reworded)."},
+        {"text": "The Field(description=...) string passed to work_item_id is byte-for-byte identical to the input."},
+        {"text": "The functional pseudo-comments '# noqa: E501' and '# type: ignore[name-defined]' are still present, attached to the same statements."},
+        {"text": "The verbose multi-line comment inside _build_update_payload is compressed to a tighter form (fewer characters), and the trailing 'Now return the fully assembled payload' what-comment is removed."},
+        {"text": "Executable code is unchanged: output AST with docstrings normalized equals input AST."}
+      ]
+    },
+    {
+      "id": 2,
+      "name": "what-comments-and-todo",
+      "prompt": "case3_payload.py is littered with comments that just narrate the code, plus a sloppy lowercase todo. Clean the comments up the way we do — only keep what the code can't say — and fix the todo.",
+      "expected_output": "Trivial what-comments removed; the Polarion None-default rationale kept (compressed); the lowercase 'todo:' reformatted to Google style # TODO(...): concrete action; code unchanged.",
+      "files": ["files/case3_payload.py"],
+      "assertions": [
+        {"text": "Trivial what-comments are removed: 'create a new empty dictionary', 'iterate over each of the attribute items', 'skip it and move on', 'store the value', and 'return the final result dictionary' no longer appear."},
+        {"text": "The why is kept: a comment still explains that Polarion treats None as clear-to-default so None entries are dropped (may be compressed to one line)."},
+        {"text": "The TODO is in Google style: matches the pattern '# TODO(' owner ')' or at least '# TODO:' with uppercase TODO and a concrete action, not the original lowercase 'todo: ... not sure'."},
+        {"text": "Executable code is unchanged: output AST with docstrings normalized equals input AST."}
+      ]
+    }
+  ]
+}

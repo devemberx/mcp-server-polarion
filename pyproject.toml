@@ -56,6 +56,9 @@ packages = ["src/mcp_server_polarion"]
 [tool.ruff]
 target-version = "py313"
 line-length = 88
+# compress-code-comments eval fixtures are intentionally un-annotated, verbose
+# sample code (the skill's dirty input corpus); never lint/format them.
+extend-exclude = [".claude/skills/*/evals/files"]
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "UP", "B", "SIM", "ANN", "PL", "C4", "PTH", "RUF", "S"]
@@ -69,6 +72,8 @@ select = ["E", "W", "F", "I", "UP", "B", "SIM", "ANN", "PL", "C4", "PTH", "RUF",
 ".claude/hooks/**" = ["PLR"]
 # Release-notes CI helper: shells out to `gh`, not shipped in the wheel.
 ".github/scripts/**" = ["S603", "S607"]
+# Skill helper scripts shell out to `git`, not shipped in the wheel.
+".claude/skills/*/scripts/**" = ["S603", "S607"]
 
 [tool.mypy]
 python_version = "3.13"
