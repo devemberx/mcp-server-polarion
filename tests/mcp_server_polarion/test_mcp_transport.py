@@ -139,6 +139,27 @@ class TestSchemaValidation:
                 {"page_size": 0, "page_number": 1},
             )
 
+    async def test_invalid_args_error_is_compacted(
+        self, mcp_client: _MCPClient
+    ) -> None:
+        # 10 link entries missing required fields fail validation pre-HTTP; the
+        # middleware must compact the dump, not echo input reprs or pydantic URLs.
+        with pytest.raises(ToolError) as exc:
+            await mcp_client.call_tool(
+                "create_work_item_links",
+                {
+                    "project_id": "P1",
+                    "work_item_id": "MCPT-1",
+                    "links": [{} for _ in range(10)],
+                },
+            )
+
+        msg = str(exc.value)
+        assert "links.0.role" in msg
+        assert "input_value" not in msg
+        assert "errors.pydantic.dev" not in msg
+        assert len(msg) < 1500
+
 
 class TestEndToEndInvocation:
     """One read + one write traversing the full MCP path."""
