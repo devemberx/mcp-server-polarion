@@ -1,6 +1,6 @@
 ---
-name: shrink-tool-descriptions
-description: Minimize LLM-facing tool descriptions of an MCP server—docstrings and @Field descriptions—down to the eval-failure boundary via compress→eval→compress, keeping all gates green. Use when asked to shrink/compress/optimize/token-diet tool descriptions, docstrings, parameter descriptions, LLM-facing text, or compress/test/compress workflows. Iterates per-tool with snapshot+rollback on eval failures; tracks char/token savings. Triggers on `/shrink-tool-descriptions` or any mention of compressing MCP tool descriptions, test-gated boundary descent, or token-diet evaluation loops.
+name: shrink-mcp-tool-docs
+description: Minimize LLM-facing tool descriptions of an MCP server—docstrings and @Field descriptions—down to the eval-failure boundary via compress→eval→compress, keeping all gates green. Use when asked to shrink/compress/optimize/token-diet tool descriptions, docstrings, parameter descriptions, LLM-facing text, or compress/test/compress workflows. Iterates per-tool with snapshot+rollback on eval failures; tracks char/token savings. Triggers on `/shrink-mcp-tool-docs` or any mention of compressing MCP tool descriptions, test-gated boundary descent, or token-diet evaluation loops.
 ---
 
 # Shrink Tool Descriptions
@@ -31,7 +31,8 @@ If the operator has not opted into Scope B, **every `Field(description=...)` is 
 Dump what reaches the client and confirm your edits change it. `mcp.list_tools()` is async and returns `list[FunctionTool]` with `.name`, `.description`, `.parameters`.
 
 ```bash
-cd /tmp && uv run --project /home/devemberx/project/mcp-server-polarion python - <<'PY'
+REPO=$(git rev-parse --show-toplevel)   # capture repo root before leaving it
+cd /tmp && uv run --project "$REPO" python - <<'PY'
 import asyncio
 from mcp_server_polarion.server import mcp
 async def go():
@@ -74,7 +75,7 @@ For each param, confirm the schema description text matches what you intend to e
 ## The optimization loop
 
 **Global prep**
-1. Work on a branch off `main` (e.g. `chore/shrink-tool-descriptions`) — never run the loop on `main`. Per-cut rollback uses a working-copy snapshot (`git stash` / file copy), not a commit; reserve commits for adopted GREEN baselines. The whole session lands as one squashed commit/PR.
+1. Work on a branch off `main` (e.g. `chore/shrink-mcp-tool-docs`) — never run the loop on `main`. Per-cut rollback uses a working-copy snapshot (`git stash` / file copy), not a commit; reserve commits for adopted GREEN baselines. The whole session lands as one squashed commit/PR.
 2. **Verify the eval gate actually runs**, then confirm all 3 gates are GREEN → that is your **GREEN baseline**; checkpoint it. The gate is the only signal that a cut is safe — if no eval model is reachable (`OPENAI_API_KEY` unset *and* ollama down), **STOP and report**. Do not cut without the gate; that ships unvalidated descriptions to clients.
 3. Step-0 dump + baseline chars.
 4. Sort tools by LLM-facing chars **descending**.
