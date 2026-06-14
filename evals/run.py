@@ -2,6 +2,7 @@
 exits non-zero below ``min_pass_rate`` (1.0 Tier-1, 0.8 Tier-2/Tier-3).
 
     uv run python -m evals.run                 # all cases, EVAL_RUNS (default 10)
+    uv run python -m evals.run --tier 1        # one tier (publish gate stages tiers)
     uv run python -m evals.run --case T1-READONLY --runs 1
 """
 
@@ -34,6 +35,15 @@ from evals.harness.runner import AGENT_ERROR_PREFIX, run_case
 _REPORT_DIR = Path(__file__).parent / "reports"
 
 ALL_CASES = [*TIER1_CASES, *TIER2_CASES, *TIER3_CASES]
+
+# Staged publish gate: each tier runs as its own CI job so a cheap early-tier
+# failure skips the pricier later tiers, saving agent-API tokens.
+TIERS: dict[str, list[Case]] = {
+    "1": TIER1_CASES,
+    "2": TIER2_CASES,
+    "3": TIER3_CASES,
+    "all": ALL_CASES,
+}
 
 
 def _git_sha() -> str:
@@ -98,6 +108,12 @@ def _run_case_n_times(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Eval deploy gate")
+    parser.add_argument(
+        "--tier",
+        choices=("1", "2", "3", "all"),
+        default="all",
+        help="tier to run (default all)",
+    )
     parser.add_argument("--case", help="run only this case name (e.g. T1-READONLY)")
     parser.add_argument(
         "--runs",
@@ -107,16 +123,19 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    cases = ALL_CASES
+    cases = TIERS[args.tier]
     if args.case:
-        cases = [c for c in ALL_CASES if c.name == args.case]
+        cases = [c for c in cases if c.name == args.case]
         if not cases:
             print(f"no case named '{args.case}'", file=sys.stderr)
             return 2
 
     evaluator = ForbiddenBehaviorEvaluator()
     model = resolve_model_id()
-    print(f"Eval gate · model={model} · runs={args.runs} · cases={len(cases)}\n")
+    print(
+        f"Eval gate · tier={args.tier} · model={model} · "
+        f"runs={args.runs} · cases={len(cases)}\n"
+    )
 
     results = [_run_case_n_times(c, args.runs, evaluator) for c in cases]
     gate_passed = all(r["passed"] for r in results)

@@ -1,11 +1,15 @@
-name: Run Tier-1 evals
+name: Run evals
 description: >-
-  Set up uv + Python 3.13, install the eval dependency group, drive the
-  Tier-1 gate, and upload the JSON report as an artifact. Shared by the
-  publish gate (`publish.yml`) and the manual pre-deploy workflow
+  Set up uv + Python 3.13, install the eval dependency group, drive the eval
+  gate for one tier (or all), and upload the JSON report as an artifact. Shared
+  by the publish gate (`publish.yml`) and the manual pre-deploy workflow
   (`evals.yml`) so they cannot drift on setup steps.
 
 inputs:
+  tier:
+    description: Tier to run (1, 2, 3, or all).
+    required: false
+    default: all
   model:
     description: LiteLLM model id (sets EVAL_MODEL).
     required: false
@@ -32,17 +36,17 @@ runs:
       shell: bash
       run: uv sync --group evals
 
-    - name: Run Tier-1 gate
+    - name: Run eval gate (tier ${{ inputs.tier }})
       shell: bash
       env:
         OPENAI_API_KEY: ${{ inputs.openai-api-key }}
         EVAL_MODEL: ${{ inputs.model }}
         EVAL_RUNS: ${{ inputs.runs }}
-      run: uv run python -m evals.run
+      run: uv run python -m evals.run --tier "${{ inputs.tier }}"
 
-    - name: Upload Tier-1 report
+    - name: Upload eval report
       if: always()
       uses: actions/upload-artifact@v7
       with:
-        name: tier1-report
+        name: eval-report-tier-${{ inputs.tier }}
         path: evals/reports/

@@ -93,8 +93,39 @@ class TestMain:
         monkeypatch.setattr("sys.argv", ["run", "--case", "T1-DOES-NOT-EXIST"])
         assert run.main() == 2
 
+    def test_tier_flag_runs_only_that_tier(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        seen: list[str] = []
+
+        def _stub(case: Case, runs: int, evaluator: Any) -> dict[str, Any]:
+            seen.append(case.name)
+            return {
+                "name": case.name,
+                "runs": runs,
+                "pass_count": runs,
+                "pass_rate": 1.0,
+                "min_pass_rate": 1.0,
+                "passed": True,
+                "failures": [],
+            }
+
+        monkeypatch.setattr(run, "_run_case_n_times", _stub)
+        monkeypatch.setattr(run, "resolve_model_id", lambda: "test/model")
+        monkeypatch.setattr(run, "_REPORT_DIR", tmp_path)
+        monkeypatch.setattr("sys.argv", ["run", "--tier", "2", "--runs", "1"])
+
+        assert run.main() == 0
+        assert seen == [c.name for c in TIER2_CASES]
+
 
 class TestAllCases:
     def test_gate_loads_all_tiers(self) -> None:
         expected = [*TIER1_CASES, *TIER2_CASES, *TIER3_CASES]
         assert expected == run.ALL_CASES
+
+    def test_tiers_map_to_expected_case_lists(self) -> None:
+        assert run.TIERS["1"] == TIER1_CASES
+        assert run.TIERS["2"] == TIER2_CASES
+        assert run.TIERS["3"] == TIER3_CASES
+        assert run.TIERS["all"] == run.ALL_CASES

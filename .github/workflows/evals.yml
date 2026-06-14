@@ -1,10 +1,20 @@
-name: Tier-1 Evals
+name: Evals
 
 # Manual pre-deploy gate run. Same checks as the publish gate, but triggered
-# on demand so results can be reviewed before tagging a release.
+# on demand so results can be reviewed before tagging a release. Pick a single
+# tier or run all of them.
 on:
   workflow_dispatch:
     inputs:
+      tier:
+        description: "Tier to run"
+        default: "all"
+        type: choice
+        options:
+          - all
+          - "1"
+          - "2"
+          - "3"
       model:
         description: "LiteLLM model id (EVAL_MODEL)"
         default: "openai/gpt-4o-mini"
@@ -21,6 +31,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/run-evals
         with:
+          tier: ${{ inputs.tier }}
           model: ${{ inputs.model }}
           runs: ${{ inputs.runs }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}

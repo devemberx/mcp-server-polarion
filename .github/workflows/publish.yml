@@ -6,18 +6,42 @@ on:
       - "v*"
 
 jobs:
-  evals:
-    # Tier-1 forbidden-behaviour gate. Blocks publish if the agent takes any
-    # destructive / footgun action against the mocked Polarion backend.
+  evals-tier1:
+    # Tier-1 forbidden-behaviour gate (zero tolerance). Cheapest tier, runs
+    # first so a destructive / footgun action blocks the publish before any
+    # agent tokens are spent on the later tiers.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/run-evals
         with:
+          tier: "1"
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+
+  evals-tier2:
+    # Tier-2 efficiency gate; only runs once Tier-1 passed.
+    needs: evals-tier1
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/run-evals
+        with:
+          tier: "2"
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+
+  evals-tier3:
+    # Tier-3 orchestration gate; only runs once Tier-2 passed.
+    needs: evals-tier2
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/run-evals
+        with:
+          tier: "3"
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
 
   publish-test:
-    needs: evals
+    needs: evals-tier3
     runs-on: ubuntu-latest
     environment: testpypi
     permissions:
