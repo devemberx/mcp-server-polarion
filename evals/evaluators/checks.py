@@ -380,6 +380,169 @@ def check_scoped_query_uses_sql(
     return True, "no Lucene module query issued"
 
 
+def _resolve_observed_path(result: object, path: str) -> list[str]:
+    """Collect string leaf values at ``path`` from a recorded tool result.
+
+    Grammar: dotted with at most one ``[]`` list-spread per segment, e.g.
+    ``items[].id`` walks ``result["items"]`` then each element's ``id``. Missing
+    keys yield ``[]`` rather than raising.
+    """
+    current: list[object] = [result]
+    for segment in path.split("."):
+        spread = segment.endswith("[]")
+        key = segment[:-2] if spread else segment
+        nxt: list[object] = []
+        for node in current:
+            if not isinstance(node, dict):
+                continue
+            value = node.get(key)
+            if spread:
+                if isinstance(value, list):
+                    nxt.extend(value)
+            elif value is not None:
+                nxt.append(value)
+        current = nxt
+    return [str(v) for v in current]
+
+
+def _args_match(args: dict[str, Any], match: dict[str, Any]) -> bool:
+    """All ``match`` entries equal the call's args (``*_id`` via ``_short_id``)."""
+    for key, expected in match.items():
+        actual = args.get(key)
+        if key.endswith("_id"):
+            if _short_id(actual) != _short_id(expected):
+                return False
+        elif actual != expected:
+            return False
+    return True
+
+
+def _step_tools(step: dict[str, Any]) -> list[str]:
+    """A step's accepted tool names -- ``tool`` is one name or a list of
+    semantically-equivalent alternatives (e.g. ``get_work_item``/``read_work_item``).
+    """
+    tool = step["tool"]
+    return [tool] if isinstance(tool, str) else list(tool)
+
+
+def _observed_value(call: dict[str, Any], arg_spec: object) -> str:
+    """Short-id value a call threads, from the first ``observed_arg`` it set
+    (``arg_spec`` is one arg name or a list of alternatives)."""
+    candidates = [arg_spec] if isinstance(arg_spec, str) else list(arg_spec)
+    args = _args(call)
+    return next((_short_id(args[a]) for a in candidates if args.get(a)), "")
+
+
+def check_ordered_trajectory(
+    trajectory: Trajectory, params: dict[str, Any]
+) -> CheckResult:
+    """Composite orchestration over a partial order: every ``params['steps']``
+    must be satisfied by a trajectory call whose name is the step's ``tool`` (or
+    one of its alternatives) and whose args match ``match``. A step's ``after``
+    deps and its ``observed_in`` source must be earlier steps that ran before it;
+    an ``observed_arg`` value must appear in the source step's result. Steps are
+    matched greedily in declaration order, each picking the earliest call that
+    satisfies all its constraints (so a later read is chosen over an unrelated
+    earlier one). Order between independent steps is unconstrained. Optional
+    flags AND existing primitives.
+    """
+    if params.get("read_only") and not (r := check_readonly(trajectory, params))[0]:
+        return r
+    if (
+        params.get("scoped_sql")
+        and not (r := check_scoped_query_uses_sql(trajectory, params))[0]
+    ):
+        return r
+    if (
+        params.get("max_create_calls") is not None
+        and not (
+            r := check_single_bulk_create(
+                trajectory, {"max_calls": params["max_create_calls"]}
+            )
+        )[0]
+    ):
+        return r
+    if (
+        params.get("no_dup_reads")
+        and not (r := check_no_duplicate_reads(trajectory, params))[0]
+    ):
+        return r
+
+    forbidden = sorted(set(params.get("forbid", [])).intersection(_names(trajectory)))
+    if forbidden:
+        return False, f"used forbidden tool(s): {forbidden}"
+
+    steps = params.get("steps", [])
+    step_at: list[int] = []  # matched trajectory index per step
+    name_to_step: dict[str, int] = {}  # tool name -> earliest step producing it
+
+    for step_no, step in enumerate(steps):
+        tools = set(_step_tools(step))
+        match = step.get("match", {})
+
+        floor = -1
+        for dep in step.get("after", []):
+            dep_step = name_to_step.get(dep)
+            if dep_step is None:
+                return (
+                    False,
+                    f"step {step_no}: 'after' dep {dep} is not an earlier step",
+                )
+            floor = max(floor, step_at[dep_step])
+
+        observed = step.get("observed_arg") is not None
+        source_seen: set[str] = set()
+        if observed:
+            source = step["observed_in"]
+            src_step = name_to_step.get(source)
+            if src_step is None:
+                return False, (
+                    f"step {step_no}: observed_in {source} is not an earlier step"
+                )
+            floor = max(floor, step_at[src_step])
+            source_seen = {
+                _short_id(v)
+                for v in _resolve_observed_path(
+                    trajectory[step_at[src_step]].get("result"), step["observed_path"]
+                )
+            }
+
+        found = -1
+        for i in range(floor + 1, len(trajectory)):
+            call = trajectory[i]
+            if call.get("name") not in tools or not _args_match(_args(call), match):
+                continue
+            if (
+                observed
+                and _observed_value(call, step["observed_arg"]) not in source_seen
+            ):
+                continue
+            found = i
+            break
+
+        if found < 0:
+            label = "/".join(sorted(tools))
+            if observed:
+                return False, (
+                    f"step {step_no} ({label}) never ran after "
+                    f"{step['observed_in']} with an id observed from it -- "
+                    "threaded id missing or guessed"
+                )
+            if floor >= 0:
+                return False, (
+                    f"step {step_no} ({label}) never ran after its dependencies "
+                    f"{step.get('after')}"
+                )
+            return False, (
+                f"step {step_no} ({label}) was never called with the expected args"
+            )
+
+        step_at.append(found)
+        for name in tools:
+            name_to_step.setdefault(name, step_no)
+    return True, "orchestration satisfied"
+
+
 REGISTRY: dict[str, Callable[[Trajectory, dict[str, Any]], CheckResult]] = {
     "readonly": check_readonly,
     "no_update_document": check_no_update_document,
@@ -393,4 +556,5 @@ REGISTRY: dict[str, Callable[[Trajectory, dict[str, Any]], CheckResult]] = {
     "direct_read": check_direct_read,
     "no_duplicate_reads": check_no_duplicate_reads,
     "scoped_query_uses_sql": check_scoped_query_uses_sql,
+    "ordered_trajectory": check_ordered_trajectory,
 }

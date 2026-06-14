@@ -14,6 +14,9 @@ class PolarionConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
+        # A shared .env may hold unrelated secrets (e.g. OPENAI_API_KEY for the
+        # eval gate); ignore extras instead of failing client construction.
+        extra="ignore",
     )
 
     polarion_url: str = Field(
