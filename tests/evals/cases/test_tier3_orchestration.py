@@ -30,6 +30,13 @@ def _tools(step: dict[str, object]) -> list[str]:
     return [tool] if isinstance(tool, str) else list(tool)
 
 
+def _single_tool(step: dict[str, object]) -> set[str]:
+    """A step's tool name only if it names exactly one tool -- the names an
+    ``after``/``observed_in`` dep may resolve to unambiguously."""
+    tools = _tools(step)
+    return set(tools) if len(tools) == 1 else set()
+
+
 class TestCases:
     def test_every_case_uses_the_ordered_trajectory_check(self) -> None:
         for case in CASES:
@@ -59,7 +66,10 @@ class TestCases:
 
     def test_observed_source_appears_earlier_in_steps(self) -> None:
         # An ``observed_in`` tool with no earlier matching step can never be
-        # satisfied -- guard against a typo'd sequence.
+        # satisfied -- guard against a typo'd sequence. The source must be a
+        # single-tool step: ``name_to_step`` resolves a multi-tool alternative
+        # group ambiguously (a dep could point at a step that matched the *other*
+        # alternative), so the threaded id would not provably come from it.
         for case in CASES:
             steps = _params(case)["steps"]
             seen_tools: set[str] = set()
@@ -67,21 +77,24 @@ class TestCases:
                 if step.get("observed_arg") is not None:
                     source = step["observed_in"]
                     assert source in seen_tools, (
-                        f"{case.name}: observed_in '{source}' precedes no matching step"
+                        f"{case.name}: observed_in '{source}' precedes no "
+                        "single-tool step"
                     )
                     assert step.get("observed_path"), case.name
-                seen_tools.update(_tools(step))
+                seen_tools.update(_single_tool(step))
 
     def test_after_references_an_earlier_step_tool(self) -> None:
+        # ``after`` deps must reference a single-tool step for the same reason as
+        # ``observed_in`` -- a multi-tool group's index is ambiguous.
         for case in CASES:
             steps = _params(case)["steps"]
             seen_tools: set[str] = set()
             for step in steps:
                 for dep in step.get("after", []):
                     assert dep in seen_tools, (
-                        f"{case.name}: 'after' dep '{dep}' precedes no matching step"
+                        f"{case.name}: 'after' dep '{dep}' precedes no single-tool step"
                     )
-                seen_tools.update(_tools(step))
+                seen_tools.update(_single_tool(step))
 
     def test_helper_builds_expected_metadata_shape(self) -> None:
         case = _case("T3-X", "do a thing", steps=[{"tool": "get_document"}])
