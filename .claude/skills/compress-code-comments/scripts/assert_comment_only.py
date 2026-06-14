@@ -22,6 +22,7 @@ import argparse
 import ast
 import subprocess
 import sys
+from pathlib import Path
 
 _PLACEHOLDER = "<docstring>"
 
@@ -67,6 +68,7 @@ def _git_show(ref: str, path: str) -> str:
         ["git", "show", f"{ref}:{path}"],
         capture_output=True,
         text=True,
+        check=False,
     )
     if out.returncode != 0:
         raise FileNotFoundError(out.stderr.strip() or f"{ref}:{path} not in git")
@@ -83,7 +85,7 @@ def main() -> int:
     # usage error (exit 2), never a silent "no baseline" pass. Only once it reads
     # cleanly does a ref miss below mean a genuinely new file, not a typo'd path.
     try:
-        with open(args.path, encoding="utf-8") as fh:
+        with Path(args.path).open(encoding="utf-8") as fh:
             new = _dump(fh.read())
     except (OSError, SyntaxError) as exc:
         print(f"error: {exc}", file=sys.stderr)
