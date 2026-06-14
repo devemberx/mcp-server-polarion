@@ -1,6 +1,6 @@
 ---
 name: compress-code-comments
-description: Compress and prune verbose developer-facing code comments and dev docstrings across .py files, Google-style — keep the "why", drop the "what", one line per point — gated on a comment-only diff that leaves lint/types/tests green. Use when asked to tidy/compress/prune/shrink/clean up code comments, reduce comment verbosity, apply Google comment style, remove redundant or step-by-step inline comments, or trim over-explained docstrings. This is the comments skill, NOT the tool-description skill — it never touches `@mcp.tool` docstrings or `Field(description=...)` (those are LLM-facing; use shrink-mcp-tool-docs for them). Triggers on `/compress-code-comments` or any request about thinning code comments rather than tool/MCP descriptions.
+description: Compress verbose developer code comments and dev docstrings in .py files, Google-style — keep the why, drop the what, one line per point; gated on a comment-only AST diff. Use when asked to tidy/shrink/clean up code comments, cut comment verbosity, or trim over-explained docstrings. NOT for `@mcp.tool` docstrings or `Field(description=...)` (LLM-facing — use shrink-mcp-tool-docs). Triggers on `/compress-code-comments`.
 ---
 
 # Tidy Comments

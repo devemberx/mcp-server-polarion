@@ -1,19 +1,15 @@
 #!/usr/bin/env python3
 """Gate: prove a working-tree edit changed only comments and dev docstrings.
 
-Comments are invisible to the AST, so any executable change — or an edit to a
-non-docstring string literal such as ``Field(description=...)`` — survives into a
-diff of the two ASTs. Module/class/private-function docstrings are normalized
-away (they are this skill's editable surface), but ``@mcp.tool`` docstrings are
-NOT normalized: touching one fails the gate, enforcing the shrink-tool-
-descriptions boundary.
+Diffs two ASTs (comments are invisible to them). Editable docstrings
+(module/class/private-fn) are normalized away; @mcp.tool docstrings and
+non-docstring literals like Field(description=...) are NOT — touching either
+fails the gate, enforcing the shrink-mcp-tool-docs boundary.
 
-Usage:
-    assert_comment_only.py <path.py> [--against REF]
+Usage: assert_comment_only.py <path.py> [--against REF]
 
-Exit 0 = comment/docstring-only (or a new file with no baseline to diff).
-Exit 1 = code or protected literal changed.
-Exit 2 = usage error (path missing/unreadable) or unparseable source/baseline.
+Exit 0 = comment/docstring-only (or new file, no baseline). 1 = code/protected
+literal changed. 2 = usage error or unparseable source/baseline.
 """
 
 from __future__ import annotations
@@ -81,9 +77,8 @@ def main() -> int:
     ap.add_argument("--against", default="HEAD")
     args = ap.parse_args()
 
-    # Read the working file first: a missing/unreadable/unparseable path is a
-    # usage error (exit 2), never a silent "no baseline" pass. Only once it reads
-    # cleanly does a ref miss below mean a genuinely new file, not a typo'd path.
+    # Read working file first so a bad path is a usage error (exit 2), not a
+    # silent "new file" pass; only then does a ref miss below mean a real new file.
     try:
         with Path(args.path).open(encoding="utf-8") as fh:
             new = _dump(fh.read())

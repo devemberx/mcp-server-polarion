@@ -1,6 +1,6 @@
 ---
 name: shrink-mcp-tool-docs
-description: Minimize LLM-facing tool descriptions of an MCP server—docstrings and @Field descriptions—down to the eval-failure boundary via compress→eval→compress, keeping all gates green. Use when asked to shrink/compress/optimize/token-diet tool descriptions, docstrings, parameter descriptions, LLM-facing text, or compress/test/compress workflows. Iterates per-tool with snapshot+rollback on eval failures; tracks char/token savings. Triggers on `/shrink-mcp-tool-docs` or any mention of compressing MCP tool descriptions, test-gated boundary descent, or token-diet evaluation loops.
+description: Shrink LLM-facing MCP tool descriptions — `@mcp.tool` docstrings and `Field(description=...)` — to the eval-failure boundary via a compress→eval→compress loop with snapshot+rollback, all gates green. Use when asked to shrink/compress/optimize/token-diet tool descriptions, docstrings, or parameter descriptions. NOT for ordinary code comments (use compress-code-comments). Triggers on `/shrink-mcp-tool-docs`.
 ---
 
 # Shrink Tool Descriptions
