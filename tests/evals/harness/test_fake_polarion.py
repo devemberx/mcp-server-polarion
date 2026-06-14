@@ -10,16 +10,22 @@ from typing import Any
 import httpx
 
 from evals.harness.fake_polarion import (
+    _WORK_ITEMS,
     API_PREFIX,
+    CHILD_REQ_ID,
     DOC,
     DOC_HEADING_ID,
     DOC_INTRO_PARAGRAPH_ID,
     FLOATING_TASK_HYPERLINK_URI,
     FLOATING_TASK_ID,
     MODULE_ID,
+    PARENT_DOC,
+    PARENT_REQ_ID,
     POLARION_HOST,
     PROJECT,
+    SECTION_A_PART_ID,
     SPACE,
+    TESTCASE_ID,
     FakePolarion,
 )
 
@@ -76,7 +82,7 @@ class TestReadRouting:
     def test_work_item_list_returns_all(self) -> None:
         response = _get(FakePolarion(), f"/projects/{PROJECT}/workitems")
         assert response.status_code == 200
-        assert _json(response)["meta"]["totalCount"] == 4
+        assert _json(response)["meta"]["totalCount"] == len(_WORK_ITEMS)
 
     def test_work_item_list_filters_headings(self) -> None:
         response = _get(
@@ -86,17 +92,26 @@ class TestReadRouting:
         assert all(i["attributes"]["type"] == "heading" for i in items)
         assert len(items) == 2
 
-    def test_linked_work_items_empty(self) -> None:
+    def test_linked_work_items_empty_when_unlinked(self) -> None:
         response = _get(
             FakePolarion(),
             f"/projects/{PROJECT}/workitems/{DOC_HEADING_ID}/linkedworkitems",
         )
         assert _json(response)["meta"]["totalCount"] == 0
 
-    def test_parts_empty(self) -> None:
+    def test_parts_seeded_for_fakedoc(self) -> None:
         response = _get(
             FakePolarion(),
             f"/projects/{PROJECT}/spaces/{SPACE}/documents/{DOC}/parts",
+        )
+        data = _json(response)["data"]
+        ids = [p["id"].rsplit("/", 1)[-1] for p in data]
+        assert SECTION_A_PART_ID in ids
+
+    def test_parts_empty_for_other_document(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/spaces/{SPACE}/documents/{PARENT_DOC}/parts",
         )
         assert _json(response)["meta"]["totalCount"] == 0
 
@@ -246,3 +261,50 @@ class TestMutations:
         fake = FakePolarion()
         _get(fake, "/projects")
         assert fake.mutations == []
+
+
+class TestTier3Seeding:
+    def test_parent_document_resolves(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/spaces/{SPACE}/documents/{PARENT_DOC}",
+        )
+        assert response.status_code == 200
+        assert _json(response)["data"]["attributes"]["moduleName"] == PARENT_DOC
+
+    def test_forward_links_carry_role_and_included_target(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/workitems/{CHILD_REQ_ID}/linkedworkitems",
+        )
+        payload = _json(response)
+        roles = {item["attributes"]["role"] for item in payload["data"]}
+        assert roles == {"satisfies", "verifies"}
+        target_ids = {item["id"] for item in payload["included"]}
+        assert f"{PROJECT}/{PARENT_REQ_ID}" in target_ids
+        assert f"{PROJECT}/{TESTCASE_ID}" in target_ids
+
+    def test_uncovered_requirement_has_no_links(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/workitems/MCPT-301/linkedworkitems",
+        )
+        assert _json(response)["meta"]["totalCount"] == 0
+
+    def test_back_direction_query_finds_source(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/workitems",
+            query=f"linkedWorkItems:{PARENT_REQ_ID}",
+        )
+        ids = {i["id"].rsplit("/", 1)[-1] for i in _json(response)["data"]}
+        assert ids == {CHILD_REQ_ID}
+
+    def test_workitem_link_role_enum_resolves(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/enumerations/~/workitem-link-role/~",
+        )
+        assert response.status_code == 200
+        ids = [o["id"] for o in _json(response)["data"]["attributes"]["options"]]
+        assert "relates_to" in ids

@@ -16,6 +16,7 @@ from strands_evals import Case
 from evals import run
 from evals.cases.tier1_prohibitions import CASES as TIER1_CASES
 from evals.cases.tier2_efficiency import CASES as TIER2_CASES
+from evals.cases.tier3_orchestration import CASES as TIER3_CASES
 from evals.harness.runner import AGENT_ERROR_PREFIX
 
 
@@ -94,6 +95,6 @@ class TestMain:
 
 
 class TestAllCases:
-    def test_gate_loads_both_tiers(self) -> None:
-        expected = [*TIER1_CASES, *TIER2_CASES]
+    def test_gate_loads_all_tiers(self) -> None:
+        expected = [*TIER1_CASES, *TIER2_CASES, *TIER3_CASES]
         assert expected == run.ALL_CASES

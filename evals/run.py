@@ -1,5 +1,5 @@
 """Eval deploy gate (wired into ``publish.yml``): runs every case N times,
-exits non-zero below ``min_pass_rate`` (1.0 Tier-1, 0.8 Tier-2).
+exits non-zero below ``min_pass_rate`` (1.0 Tier-1, 0.8 Tier-2/Tier-3).
 
     uv run python -m evals.run                 # all cases, EVAL_RUNS (default 10)
     uv run python -m evals.run --case T1-READONLY --runs 1
@@ -26,13 +26,14 @@ from strands_evals.types.evaluation import EvaluationData
 
 from evals.cases.tier1_prohibitions import CASES as TIER1_CASES
 from evals.cases.tier2_efficiency import CASES as TIER2_CASES
+from evals.cases.tier3_orchestration import CASES as TIER3_CASES
 from evals.evaluators.tier1 import ForbiddenBehaviorEvaluator
 from evals.harness.model import resolve_model_id
 from evals.harness.runner import AGENT_ERROR_PREFIX, run_case
 
 _REPORT_DIR = Path(__file__).parent / "reports"
 
-ALL_CASES = [*TIER1_CASES, *TIER2_CASES]
+ALL_CASES = [*TIER1_CASES, *TIER2_CASES, *TIER3_CASES]
 
 
 def _git_sha() -> str:

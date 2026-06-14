@@ -634,3 +634,227 @@ class TestCheckScopedQueryUsesSql:
         ]
         passed, _ = checks.check_scoped_query_uses_sql(trajectory, {})
         assert passed is False
+
+
+def _parts_result(*ids: str) -> dict[str, Any]:
+    return {"items": [{"id": i} for i in ids]}
+
+
+# create + read_parts (any order) -> move(anchored) -- the authoring partial order.
+_SPEC_STEPS: list[dict[str, Any]] = [
+    {"tool": "create_work_items"},
+    {"tool": "read_document_parts", "match": {"document_name": "D"}},
+    {
+        "tool": "move_work_item_to_document",
+        "match": {"target_document_name": "D"},
+        "after": ["create_work_items"],
+        "observed_arg": ["previous_part_id", "next_part_id"],
+        "observed_in": "read_document_parts",
+        "observed_path": "items[].id",
+    },
+]
+
+
+class TestResolveObservedPath:
+    def test_list_spread_collects_leaf_values(self) -> None:
+        result = _parts_result("a", "b")
+        assert checks._resolve_observed_path(result, "items[].id") == ["a", "b"]
+
+    def test_missing_key_yields_empty(self) -> None:
+        assert checks._resolve_observed_path({"items": []}, "items[].id") == []
+        assert checks._resolve_observed_path(None, "items[].id") == []
+
+
+class TestCheckOrderedTrajectory:
+    def test_canonical_spec_sequence_passes(self) -> None:
+        trajectory = [
+            _call("create_work_items", {"items": [{"title": "x"}]}),
+            _call(
+                "read_document_parts",
+                {"document_name": "D"},
+                result=_parts_result("heading_MCPT-100"),
+            ),
+            _call(
+                "move_work_item_to_document",
+                {"target_document_name": "D", "previous_part_id": "heading_MCPT-100"},
+            ),
+        ]
+        passed, _ = checks.check_ordered_trajectory(trajectory, {"steps": _SPEC_STEPS})
+        assert passed is True
+
+    def test_next_part_id_alternative_anchor_passes(self) -> None:
+        trajectory = [
+            _call("create_work_items", {"items": [{"title": "x"}]}),
+            _call(
+                "read_document_parts",
+                {"document_name": "D"},
+                result=_parts_result("heading_MCPT-100", "workitem_MCPT-300"),
+            ),
+            _call(
+                "move_work_item_to_document",
+                {"target_document_name": "D", "next_part_id": "workitem_MCPT-300"},
+            ),
+        ]
+        passed, _ = checks.check_ordered_trajectory(trajectory, {"steps": _SPEC_STEPS})
+        assert passed is True
+
+    def test_read_before_create_tolerated(self) -> None:
+        # inspect-then-create: read_document_parts before create_work_items is a
+        # valid order; only the move's dependencies are constrained.
+        trajectory = [
+            _call(
+                "read_document_parts",
+                {"document_name": "D"},
+                result=_parts_result("heading_MCPT-100"),
+            ),
+            _call("create_work_items", {"items": [{"title": "x"}]}),
+            _call(
+                "move_work_item_to_document",
+                {"target_document_name": "D", "previous_part_id": "heading_MCPT-100"},
+            ),
+        ]
+        passed, _ = checks.check_ordered_trajectory(trajectory, {"steps": _SPEC_STEPS})
+        assert passed is True
+
+    def test_after_dependency_violation_fails(self) -> None:
+        # update_work_item before its required get_work_item.
+        steps = [
+            {"tool": "get_work_item", "match": {"work_item_id": "MCPT-1"}},
+            {
+                "tool": "update_work_item",
+                "match": {"work_item_id": "MCPT-1"},
+                "after": ["get_work_item"],
+            },
+        ]
+        trajectory = [
+            _call("update_work_item", {"work_item_id": "MCPT-1"}),
+            _call("get_work_item", {"work_item_id": "MCPT-1"}),
+        ]
+        passed, reason = checks.check_ordered_trajectory(trajectory, {"steps": steps})
+        assert passed is False
+        assert "get_work_item" in reason
+
+    def test_out_of_order_move_before_read_fails(self) -> None:
+        trajectory = [
+            _call("create_work_items", {"items": [{"title": "x"}]}),
+            _call(
+                "move_work_item_to_document",
+                {"target_document_name": "D", "previous_part_id": "heading_MCPT-100"},
+            ),
+            _call(
+                "read_document_parts",
+                {"document_name": "D"},
+                result=_parts_result("heading_MCPT-100"),
+            ),
+        ]
+        passed, reason = checks.check_ordered_trajectory(
+            trajectory, {"steps": _SPEC_STEPS}
+        )
+        assert passed is False
+        assert "move_work_item_to_document" in reason
+
+    def test_missing_step_fails(self) -> None:
+        trajectory = [
+            _call("create_work_items", {"items": [{"title": "x"}]}),
+            _call(
+                "read_document_parts",
+                {"document_name": "D"},
+                result=_parts_result("heading_MCPT-100"),
+            ),
+        ]
+        passed, reason = checks.check_ordered_trajectory(
+            trajectory, {"steps": _SPEC_STEPS}
+        )
+        assert passed is False
+        assert "move_work_item_to_document" in reason
+
+    def test_guessed_anchor_not_in_read_fails(self) -> None:
+        trajectory = [
+            _call("create_work_items", {"items": [{"title": "x"}]}),
+            _call(
+                "read_document_parts",
+                {"document_name": "D"},
+                result=_parts_result("heading_MCPT-100"),
+            ),
+            _call(
+                "move_work_item_to_document",
+                {"target_document_name": "D", "previous_part_id": "heading_GUESS"},
+            ),
+        ]
+        passed, reason = checks.check_ordered_trajectory(
+            trajectory, {"steps": _SPEC_STEPS}
+        )
+        assert passed is False
+        assert "guessed" in reason
+
+    def test_observed_threads_qualified_id_via_short_id(self) -> None:
+        # link result carries a short target id; the read uses a qualified id.
+        steps = [
+            {"tool": "list_work_item_links", "match": {"work_item_id": "MCPT-300"}},
+            {
+                "tool": "read_work_item",
+                "observed_arg": "work_item_id",
+                "observed_in": "list_work_item_links",
+                "observed_path": "items[].id",
+            },
+        ]
+        trajectory = [
+            _call(
+                "list_work_item_links",
+                {"project_id": "P", "work_item_id": "P/MCPT-300"},
+                result={"items": [{"id": "MCPT-400"}]},
+            ),
+            _call("read_work_item", {"project_id": "P", "work_item_id": "P/MCPT-400"}),
+        ]
+        passed, _ = checks.check_ordered_trajectory(trajectory, {"steps": steps})
+        assert passed is True
+
+    def test_forbidden_tool_fails(self) -> None:
+        trajectory = [
+            _call("create_work_items", {"items": [{"title": "x"}]}),
+            _call("update_document", {"document_name": "D"}),
+            _call(
+                "read_document_parts",
+                {"document_name": "D"},
+                result=_parts_result("heading_MCPT-100"),
+            ),
+            _call(
+                "move_work_item_to_document",
+                {"target_document_name": "D", "previous_part_id": "heading_MCPT-100"},
+            ),
+        ]
+        passed, reason = checks.check_ordered_trajectory(
+            trajectory, {"steps": _SPEC_STEPS, "forbid": ["update_document"]}
+        )
+        assert passed is False
+        assert "forbidden" in reason
+
+    def test_read_only_flag_fails_on_write(self) -> None:
+        trajectory = [
+            _call("list_work_items", {"query": "SQL:(...)"}),
+            _call("update_work_item", {"work_item_id": "MCPT-1"}),
+        ]
+        passed, _ = checks.check_ordered_trajectory(
+            trajectory,
+            {"steps": [{"tool": "list_work_items"}], "read_only": True},
+        )
+        assert passed is False
+
+    def test_max_create_calls_flag_fails_on_split(self) -> None:
+        trajectory = [
+            _call("create_work_items", {"items": [{"title": "a"}]}),
+            _call("create_work_items", {"items": [{"title": "b"}]}),
+        ]
+        passed, _ = checks.check_ordered_trajectory(
+            trajectory,
+            {"steps": [{"tool": "create_work_items"}], "max_create_calls": 1},
+        )
+        assert passed is False
+
+    def test_scoped_sql_flag_fails_on_lucene_module_query(self) -> None:
+        trajectory = [_call("list_work_items", {"query": "module:FakeDoc"})]
+        passed, _ = checks.check_ordered_trajectory(
+            trajectory,
+            {"steps": [{"tool": "list_work_items"}], "scoped_sql": True},
+        )
+        assert passed is False

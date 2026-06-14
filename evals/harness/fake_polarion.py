@@ -42,6 +42,19 @@ FLOATING_TASK_HYPERLINK_URI = "https://specs.example.com/fake-spec"
 # Anchored intro paragraph in the doc body; T1-ROUNDTRIP-SOURCE edits it.
 DOC_INTRO_PARAGRAPH_ID = "p-1"
 
+# Second document + requirement traceability seeds (Tier-3 orchestration).
+PARENT_DOC = "FakeParentDoc"
+PARENT_MODULE_ID = f"{PROJECT}/{SPACE}/{PARENT_DOC}"
+CHILD_REQ_ID = (
+    "MCPT-300"  # in FakeDoc; satisfies PARENT_REQ_ID, verified by TESTCASE_ID
+)
+PARENT_REQ_ID = "MCPT-400"  # in FakeParentDoc
+UNCOVERED_REQ_ID = "MCPT-301"  # in FakeDoc; no test-case link (coverage-gap signal)
+TESTCASE_ID = "MCPT-500"  # test case linked from CHILD_REQ_ID
+
+# Section A heading part id served by read_document_parts; anchors positional moves.
+SECTION_A_PART_ID = f"heading_{DOC_HEADING_ID}"
+
 _TS = "2026-01-01T00:00:00.000Z"
 
 
@@ -53,7 +66,7 @@ class _WorkItem:
     status: str = "open"
     priority: str = "50.0"
     severity: str = "should_have"
-    module: bool = False
+    module_id: str = ""  # full module id (PROJECT/SPACE/DOC) if in a document, else ""
     outline_number: str = ""
     hyperlinks: list[dict[str, str]] = field(default_factory=list)
     # Keys MUST stay outside ``STANDARD_WORK_ITEM_ATTRIBUTES`` so the merge
@@ -64,7 +77,7 @@ class _WorkItem:
 # Structure mirrored from MCP_Test_Project; every string is synthetic.
 _WORK_ITEMS: dict[str, _WorkItem] = {
     DOC_HEADING_ID: _WorkItem(
-        DOC_HEADING_ID, "Section A", "heading", module=True, outline_number="1"
+        DOC_HEADING_ID, "Section A", "heading", module_id=MODULE_ID, outline_number="1"
     ),
     FLOATING_TASK_ID: _WorkItem(
         FLOATING_TASK_ID,
@@ -75,6 +88,28 @@ _WORK_ITEMS: dict[str, _WorkItem] = {
     ),
     FLOATING_HEADING_ID: _WorkItem(FLOATING_HEADING_ID, "Floating heading", "heading"),
     FLOATING_GHOST_ID: _WorkItem(FLOATING_GHOST_ID, "Ghost type", "not_a_real_type"),
+    CHILD_REQ_ID: _WorkItem(
+        CHILD_REQ_ID, "Child requirement", "systemrequirement", module_id=MODULE_ID
+    ),
+    UNCOVERED_REQ_ID: _WorkItem(
+        UNCOVERED_REQ_ID,
+        "Uncovered requirement",
+        "systemrequirement",
+        module_id=MODULE_ID,
+    ),
+    PARENT_REQ_ID: _WorkItem(
+        PARENT_REQ_ID,
+        "Parent requirement",
+        "systemrequirement",
+        module_id=PARENT_MODULE_ID,
+    ),
+    TESTCASE_ID: _WorkItem(TESTCASE_ID, "Coverage test case", "systemtestcase"),
+}
+
+# Forward (outgoing) work-item links: source short id -> [(role, target short id)].
+# CHILD_REQ has a parent + a test case; UNCOVERED_REQ deliberately has none.
+_LINKS: dict[str, list[tuple[str, str]]] = {
+    CHILD_REQ_ID: [("satisfies", PARENT_REQ_ID), ("verifies", TESTCASE_ID)],
 }
 
 # (resource, field_id) -> enum option ids (+ which is the default).
@@ -125,6 +160,7 @@ _ENUMS: dict[tuple[str, str], list[tuple[str, bool]]] = {
 # with ``attributes.options[].id``, unlike getAvailableOptions' list.
 _PROJECT_ENUMS: dict[str, list[str]] = {
     "hyperlink-role": ["ref_int", "ref_ext"],
+    "workitem-link-role": ["relates_to", "parent", "satisfies", "verifies"],
 }
 
 
@@ -139,8 +175,10 @@ class FakePolarion:
             "assignee": {"data": []},
             "author": {"data": {"type": "users", "id": f"{PROJECT}/{AUTHOR}"}},
         }
-        if wi.module:
-            relationships["module"] = {"data": {"type": "documents", "id": MODULE_ID}}
+        if wi.module_id:
+            relationships["module"] = {
+                "data": {"type": "documents", "id": wi.module_id}
+            }
         return {
             "type": "workitems",
             "id": f"{PROJECT}/{wi.short_id}",
@@ -161,25 +199,91 @@ class FakePolarion:
             "relationships": relationships,
         }
 
-    def _document_resource(self) -> dict[str, Any]:
+    def _document_resource(self, name: str) -> dict[str, Any]:
+        if name == PARENT_DOC:
+            title, body = "Fake Parent Doc", '<h1 id="ph-1">Fake Parent Doc</h1>'
+        else:
+            title = "Fake Doc"
+            body = (
+                '<h1 id="h-1">Fake Doc</h1>'
+                f'<p id="{DOC_INTRO_PARAGRAPH_ID}">Fake intro paragraph.</p>'
+            )
         return {
             "type": "documents",
-            "id": MODULE_ID,
+            "id": f"{PROJECT}/{SPACE}/{name}",
             "attributes": {
-                "title": "Fake Doc",
+                "title": title,
                 "type": "systemRequirementSpecification",
                 "status": "draft",
-                "moduleName": DOC,
+                "moduleName": name,
                 "moduleFolder": SPACE,
-                "homePageContent": {
-                    "type": "text/html",
-                    "value": (
-                        '<h1 id="h-1">Fake Doc</h1>'
-                        f'<p id="{DOC_INTRO_PARAGRAPH_ID}">Fake intro paragraph.</p>'
-                    ),
-                },
+                "homePageContent": {"type": "text/html", "value": body},
             },
         }
+
+    def _document_parts_response(self) -> dict[str, Any]:
+        """FakeDoc's parts: a Section A heading (the move anchor) + one work-item
+        part, chained via ``nextPart``. ``include=workItem`` resources supply
+        titles so ``read_document_parts`` returns populated ``items``.
+        """
+        base = f"{PROJECT}/{SPACE}/{DOC}"
+        heading_part_id = f"{base}/{SECTION_A_PART_ID}"
+        wi_part_id = f"{base}/workitem_{CHILD_REQ_ID}"
+        data = [
+            {
+                "type": "document_parts",
+                "id": heading_part_id,
+                "attributes": {"type": "heading", "level": 1},
+                "relationships": {
+                    "workItem": {
+                        "data": {
+                            "type": "workitems",
+                            "id": f"{PROJECT}/{DOC_HEADING_ID}",
+                        }
+                    },
+                    "nextPart": {"data": {"type": "document_parts", "id": wi_part_id}},
+                },
+            },
+            {
+                "type": "document_parts",
+                "id": wi_part_id,
+                "attributes": {"type": "workitem"},
+                "relationships": {
+                    "workItem": {
+                        "data": {"type": "workitems", "id": f"{PROJECT}/{CHILD_REQ_ID}"}
+                    },
+                },
+            },
+        ]
+        included = [
+            self._work_item_resource(_WORK_ITEMS[DOC_HEADING_ID]),
+            self._work_item_resource(_WORK_ITEMS[CHILD_REQ_ID]),
+        ]
+        return {"data": data, "included": included, "meta": {"totalCount": len(data)}}
+
+    def _linked_work_items_response(self, source_id: str) -> dict[str, Any]:
+        """Forward links for ``source_id`` from ``_LINKS``; targets supplied as
+        ``include=workItem`` resources (the parser derives targets from
+        ``relationships.workItem``, never the composite id).
+        """
+        data: list[dict[str, Any]] = []
+        included: list[dict[str, Any]] = []
+        for role, target in _LINKS.get(source_id, []):
+            target_full = f"{PROJECT}/{target}"
+            data.append(
+                {
+                    "type": "linkedworkitems",
+                    "id": f"{PROJECT}/{source_id}/{role}/{PROJECT}/{target}",
+                    "attributes": {"role": role, "suspect": False},
+                    "relationships": {
+                        "workItem": {"data": {"type": "workitems", "id": target_full}}
+                    },
+                }
+            )
+            target_wi = _WORK_ITEMS.get(target)
+            if target_wi is not None:
+                included.append(self._work_item_resource(target_wi))
+        return {"data": data, "included": included, "meta": {"totalCount": len(data)}}
 
     def _comment_resources(self) -> list[dict[str, Any]]:
         base = f"{PROJECT}/{SPACE}/{DOC}"
@@ -290,15 +394,26 @@ class FakePolarion:
                 return httpx.Response(404, json={"errors": [{"status": "404"}]})
             return httpx.Response(200, json={"data": self._work_item_resource(wi)})
 
-        # Always empty: no traceability seeded.
-        if path.endswith("/linkedworkitems"):
-            return httpx.Response(200, json={"data": [], "meta": {"totalCount": 0}})
+        # Forward links from a single source work item (empty if none seeded).
+        linked = re.search(r"/workitems/([^/]+)/linkedworkitems$", path)
+        if linked:
+            return httpx.Response(
+                200, json=self._linked_work_items_response(linked.group(1))
+            )
 
-        # Work item list / discovery (query=type:heading narrows to headings).
+        # Work item list / discovery: query=type:heading narrows to headings;
+        # query=linkedWorkItems:{wi} is the back-link fallback (sources -> target).
         if path.endswith("/workitems"):
             query = params.get("query", "")
             if query == "type:heading":
                 items = [w for w in _WORK_ITEMS.values() if w.type == "heading"]
+            elif query.startswith("linkedWorkItems:"):
+                target = query.split(":", 1)[1].strip().rsplit("/", maxsplit=1)[-1]
+                items = [
+                    w
+                    for w in _WORK_ITEMS.values()
+                    if any(t == target for _, t in _LINKS.get(w.short_id, []))
+                ]
             else:
                 items = list(_WORK_ITEMS.values())
             data = [self._work_item_resource(w) for w in items]
@@ -306,8 +421,11 @@ class FakePolarion:
                 200, json={"data": data, "meta": {"totalCount": len(data)}}
             )
 
-        # Empty: no case depends on part structure.
-        if path.endswith("/parts"):
+        # Parts seeded only for FakeDoc (Section A anchor); others stay empty.
+        parts = re.search(r"/documents/([^/]+)/parts$", path)
+        if parts:
+            if parts.group(1) == DOC:
+                return httpx.Response(200, json=self._document_parts_response())
             return httpx.Response(200, json={"data": [], "meta": {"totalCount": 0}})
 
         if path.endswith("/comments"):
@@ -316,10 +434,13 @@ class FakePolarion:
                 200, json={"data": data, "meta": {"totalCount": len(data)}}
             )
 
-        # Exact match on FakeDoc: a broad "/documents/" would claim every name
-        # as existing, masking bugs in cases probing alternate names.
-        if path.endswith(f"/spaces/{SPACE}/documents/{DOC}"):
-            return httpx.Response(200, json={"data": self._document_resource()})
+        # Exact match on the two seeded docs: a broad "/documents/" would claim
+        # every name as existing, masking bugs in cases probing alternate names.
+        doc_match = re.search(rf"/spaces/{SPACE}/documents/([^/]+)$", path)
+        if doc_match and doc_match.group(1) in (DOC, PARENT_DOC):
+            return httpx.Response(
+                200, json={"data": self._document_resource(doc_match.group(1))}
+            )
 
         return httpx.Response(404, json={"errors": [{"status": "404", "path": path}]})
 

@@ -5,7 +5,7 @@ Drives an LLM agent through the **real** in-memory MCP server against a
 behaviour. Runs as a hard gate ahead of the PyPI publish jobs in
 [`.github/workflows/publish.yml`](../.github/workflows/publish.yml).
 
-Two tiers, same harness and evaluator, different tolerance:
+Three tiers, same harness and evaluator, different tolerance:
 
 - **Tier 1 — prohibitions** ([`cases/tier1_prohibitions.py`](cases/tier1_prohibitions.py)):
   destructive / corrupting / footgun actions. `min_pass_rate = 1.0` — a single
@@ -15,6 +15,11 @@ Two tiers, same harness and evaluator, different tolerance:
   direct get by known id, no redundant identical reads, right query
   mechanism). `min_pass_rate = 0.8` — occasional wasteful runs tolerated,
   systematic waste blocks.
+- **Tier 3 — orchestration** ([`cases/tier3_orchestration.py`](cases/tier3_orchestration.py)):
+  multi-step tasks where the agent must walk the correct ordered tool sequence
+  and thread ids between steps (e.g. `create_work_items → read_document_parts →
+  move_work_item_to_document` with the move's part-id observed from the read).
+  One generic `ordered_trajectory` check; cases are data. `min_pass_rate = 0.8`.
 
 No tier needs an **LLM judge**: every verdict is a pure function of the
 tool-call trajectory. The only model cost is the agent under test.
@@ -120,8 +125,11 @@ first tagged release.
 1. Add a pure check to `evaluators/checks.py` and register it in `REGISTRY`
    (or reuse an existing one). Keep it a function of the trajectory only.
 2. Add a `Case` to `cases/tier1_prohibitions.py` (prohibition,
-   `min_pass_rate: 1.0`) or `cases/tier2_efficiency.py` (efficiency,
-   `min_pass_rate: 0.8`); `run.py` loads both lists.
+   `min_pass_rate: 1.0`), `cases/tier2_efficiency.py` (efficiency,
+   `min_pass_rate: 0.8`), or `cases/tier3_orchestration.py` (multi-step
+   orchestration, `min_pass_rate: 0.8`); `run.py` loads all three lists. A
+   Tier-3 case usually reuses the `ordered_trajectory` check and just declares
+   its step sequence in `params` — no new check needed.
 3. Phrase the task neutrally — never state the rule, or you test the prompt
    instead of the tool docstrings (the only guard).
 
@@ -133,3 +141,11 @@ hyperlink, `MCPT-201` heading, `MCPT-202` ghost-typed task, comment thread
 [`harness/fake_polarion.py`](harness/fake_polarion.py). Mirror the real
 server's *structure* there; keep all content synthetic. Bulk POSTs echo one
 id per submitted entry, so bulk cases exercise the tools' count-match rule.
+
+Tier-3 adds: a second document `FakeParentDoc`; requirements `MCPT-300` (in
+`FakeDoc`, links `satisfies`→`MCPT-400` and `verifies`→`MCPT-500`), `MCPT-301`
+(in `FakeDoc`, no test-case link — coverage-gap signal), `MCPT-400` (parent, in
+`FakeParentDoc`), test case `MCPT-500`; a `FakeDoc` `/parts` response with the
+`Section A` heading part (`heading_MCPT-100`, the positional-move anchor); and
+project enum `workitem-link-role`. Forward links come from `_LINKS`; the back
+direction is served via `list_work_items` `query=linkedWorkItems:{wi}`.
