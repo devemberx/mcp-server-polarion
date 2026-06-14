@@ -1,5 +1,6 @@
 """Pure trajectory checks: f(trajectory) -> (passed, reason); no LLM, no I/O,
-deterministic. Scope = LLM-behavioural rules unreachable by server-side guards."""
+deterministic. Scope = LLM-behavioural rules unreachable by server-side guards.
+"""
 
 from __future__ import annotations
 

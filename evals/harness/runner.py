@@ -1,7 +1,8 @@
 """Run one eval case end to end. ``run_case`` is the synchronous ``task``
 callable for ``strands_evals``; one ``asyncio.run`` drives Agent -> bridged
 tools -> in-memory server -> respx -> FakePolarion. LLM traffic falls through
-to the real provider (``assert_all_mocked=False``); Polarion never touched."""
+to the real provider (``assert_all_mocked=False``); Polarion never touched.
+"""
 
 from __future__ import annotations
 

@@ -54,7 +54,8 @@ logger = logging.getLogger("mcp_server_polarion.tools.links")
 
 def _extract_created_link_ids(response: dict[str, object]) -> list[str]:
     """Composite link ids verbatim, input order, from a bulk create response —
-    the path ids for later PATCH / DELETE. Empty on malformed shapes."""
+    the path ids for later PATCH / DELETE. Empty on malformed shapes.
+    """
     data = response.get("data")
     if not isinstance(data, list):
         return []
@@ -73,7 +74,8 @@ def _build_create_links_payload(
     links: list[WorkItemLinkSpec],
 ) -> dict[str, JsonValue]:
     """JSON:API body for bulk create-link POST; ``revision`` skipped when
-    unset, ``target_project_id`` defaults to source."""
+    unset, ``target_project_id`` defaults to source.
+    """
     data: list[JsonValue] = []
     for spec in links:
         tgt_proj = (
@@ -109,7 +111,8 @@ def _build_delete_links_payload(
 ) -> tuple[list[str], dict[str, JsonValue]]:
     """(composite id list, JSON:API body) for bulk delete-link DELETE; each
     5-segment id ``<srcProj>/<srcWI>/<role>/<tgtProj>/<tgtWI>`` built from the
-    structured ref."""
+    structured ref.
+    """
     link_ids: list[str] = []
     data: list[JsonValue] = []
     for ref in links:
@@ -135,7 +138,8 @@ def _build_update_link_payload(
 ) -> tuple[str, str, dict[str, JsonValue]]:
     """(composite id, path, body) for one link PATCH; ``suspect``/``revision``
     attached only when set (omit-preserve). Path built here so id and path
-    share one ``tgt_proj``."""
+    share one ``tgt_proj``.
+    """
     tgt_proj = (
         spec.target_project_id
         if spec.target_project_id is not None
@@ -173,7 +177,8 @@ def _parse_work_item_links(
     direction: Literal["forward", "back"],
 ) -> list[WorkItemLink]:
     """Parse linked work items into ``WorkItemLink``s; target id from
-    ``relationships.workItem.data.id``, never by parsing the composite id."""
+    ``relationships.workItem.data.id``, never by parsing the composite id.
+    """
     work_item_map = build_included_work_item_map(response)
 
     items: list[WorkItemLink] = []

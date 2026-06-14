@@ -68,7 +68,8 @@ def _build_work_item_resource(
     description_html: str,
 ) -> dict[str, JsonValue]:
     """One ``workitems`` resource for a bulk create POST; skips unset (no
-    overwriting defaults). ``description_html`` arrives pre-converted."""
+    overwriting defaults). ``description_html`` arrives pre-converted.
+    """
     attributes: dict[str, JsonValue] = {
         "title": spec.title,
         "type": spec.type,
@@ -126,7 +127,8 @@ def _build_create_work_items_payload(
 def _extract_created_work_item_ids(response: dict[str, object]) -> list[str]:
     """Short work-item ids from a bulk 201 response, relying on Polarion echoing
     ``data`` in submission order (call-site count check catches missing ids,
-    not reordered ones)."""
+    not reordered ones).
+    """
     data = response.get("data")
     if not isinstance(data, list):
         return []
@@ -156,7 +158,8 @@ def _build_update_work_item_payload(  # noqa: PLR0913
     custom_fields: dict[str, object] | None = None,
 ) -> dict[str, JsonValue]:
     """JSON:API PATCH body for ``/projects/{p}/workitems/{work_item}``; skips
-    unset so an update never blanks an existing attribute."""
+    unset so an update never blanks an existing attribute.
+    """
     attributes: dict[str, JsonValue] = {}
     if title:
         attributes["title"] = title

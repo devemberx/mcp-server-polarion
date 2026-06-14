@@ -1,5 +1,6 @@
 """Tier-2 case-definition invariants: registered check, ``min_pass_rate ==
-0.8``, name unique across BOTH tiers (``run.py --case`` selects by name)."""
+0.8``, name unique across BOTH tiers (``run.py --case`` selects by name).
+"""
 
 from __future__ import annotations
 

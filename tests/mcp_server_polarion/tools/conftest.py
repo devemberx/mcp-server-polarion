@@ -1,5 +1,6 @@
 """Shared fixtures: tools called directly with a mock ``PolarionClient``
-injected via a mock ``Context``."""
+injected via a mock ``Context``.
+"""
 
 from __future__ import annotations
 

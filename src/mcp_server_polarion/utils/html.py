@@ -1,5 +1,6 @@
 """HTML ↔ Markdown for Polarion rich-text fields: read path HTML→Markdown
-(token-efficient for the LLM), write path Markdown→HTML + tag sanitization."""
+(token-efficient for the LLM), write path Markdown→HTML + tag sanitization.
+"""
 
 from __future__ import annotations
 
@@ -65,7 +66,8 @@ _md_renderer: Final[MarkdownIt] = (
 
 def html_to_markdown(html: str) -> str:
     """Polarion HTML → Markdown (headings/lists/tables/inline preserved);
-    empty/whitespace input → empty string."""
+    empty/whitespace input → empty string.
+    """
     if not html or not html.strip():
         return ""
     expanded = _expand_merged_table_cells(html)
@@ -79,7 +81,8 @@ def _render_polarion_rte_links(html: str) -> str:
     """Lift ``span.polarion-rte-link`` (empty span, target on ``data-*``) into
     ``<a href="polarion:...">`` — markdownify drops empty spans, losing the
     link. ``polarion:`` is intentionally absent from ``_SAFE_URL_SCHEMES`` so a
-    round-trip through ``sanitize_html`` strips the unresolvable href."""
+    round-trip through ``sanitize_html`` strips the unresolvable href.
+    """
     if "polarion-rte-link" not in html:
         return html
     soup = BeautifulSoup(html, "html.parser")
@@ -95,7 +98,8 @@ def _render_polarion_rte_links(html: str) -> str:
 
 def _resolve_rte_link(span: Tag) -> tuple[str, str]:
     """``(href, label)`` for one rte-link span; ``("", "")`` = unusable, caller
-    leaves span untouched. Label pre-escaped for Markdown link syntax."""
+    leaves span untouched. Label pre-escaped for Markdown link syntax.
+    """
     inner_text = span.get_text(strip=True)
     data_type_raw = span.attrs.get("data-type", "")
     data_type = data_type_raw if isinstance(data_type_raw, str) else ""
@@ -137,7 +141,8 @@ def _escape_md_link_label(text: str) -> str:
 def _fill_empty_img_alt(html: str) -> str:
     """Promote ``<img title>`` (or post-colon ``src`` filename) to ``alt`` —
     Polarion puts attachment filenames on ``title``, so markdownify emits a
-    label-less ``![](src)``."""
+    label-less ``![](src)``.
+    """
     if "<img" not in html.lower():
         return html
     soup = BeautifulSoup(html, "html.parser")
@@ -164,7 +169,8 @@ def _fill_empty_img_alt(html: str) -> str:
 def _expand_merged_table_cells(html: str) -> str:
     """Duplicate ``colspan``/``rowspan`` cells into every covered grid position
     — markdownify 1.2.2 renders colspan as empty cells and drops rowspan,
-    breaking GFM cell counts."""
+    breaking GFM cell counts.
+    """
     if "<table" not in html.lower():
         return html
     soup = BeautifulSoup(html, "html.parser")
@@ -175,7 +181,8 @@ def _expand_merged_table_cells(html: str) -> str:
 
 def _rectangularize_table(table: Tag) -> None:
     """Expand one table: ``colspan=N rowspan=M`` cell → ``N*M`` copies;
-    reservations from earlier rows shift later cells rightward."""
+    reservations from earlier rows shift later cells rightward.
+    """
     rows: list[Tag] = [
         tr for tr in table.find_all("tr") if tr.find_parent("table") is table
     ]
@@ -252,7 +259,8 @@ def _clone_cell(cell: Tag) -> Tag:
 
 def markdown_to_html(text: str) -> str:
     """Markdown (or plain text) → Polarion-compatible HTML (CommonMark + GFM
-    tables; plain text wrapped in ``<p>``); empty input → empty string."""
+    tables; plain text wrapped in ``<p>``); empty input → empty string.
+    """
     if not text or not text.strip():
         return ""
     result: str = _md_renderer.render(text)
@@ -316,7 +324,8 @@ def stamp_block_ids(html: str, prefix: str = "polarion_mcp") -> str:
     Existing non-blank ids preserved; generated ids skip in-document values
     (Polarion 400s on duplicates). Input returned verbatim (not reserialized)
     when nothing needs stamping, so an anchored round-trip body is never
-    perturbed."""
+    perturbed.
+    """
     if not html or not html.strip():
         return ""
 
@@ -348,7 +357,8 @@ def first_anchorless_block(html: str) -> str | None:
     """Name of the first block lacking a non-empty ``id=`` (whitespace-only
     counts), or ``None``. Defensive counterpart to :func:`stamp_block_ids` —
     document tools run it post-stamping so a stamping regression cannot reach
-    Polarion (anchorless block ⇒ ``GET .../parts`` HTTP 500)."""
+    Polarion (anchorless block ⇒ ``GET .../parts`` HTTP 500).
+    """
     if not html or not html.strip():
         return None
     soup = BeautifulSoup(html, "html.parser")

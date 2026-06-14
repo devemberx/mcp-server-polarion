@@ -1021,7 +1021,8 @@ class TestUpdateWorkItemValidation:
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         """``description_html=''`` is skipped from the PATCH body even when
-        paired with other fields — the existing description is preserved."""
+        paired with other fields — the existing description is preserved.
+        """
         result = await _call_update(
             mock_ctx,
             title="new title",

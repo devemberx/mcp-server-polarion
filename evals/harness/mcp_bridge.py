@@ -1,6 +1,7 @@
 """Bridge the in-memory FastMCP server to Strands tools — Strands' native MCP
 client spawns a separate process, out of respx's reach. ``TrajectoryRecorder``
-captures each call's parsed result (checks need returns, not just args)."""
+captures each call's parsed result (checks need returns, not just args).
+"""
 
 from __future__ import annotations
 

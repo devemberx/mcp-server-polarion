@@ -1,5 +1,6 @@
 """Polarion configuration from environment variables; secrets live in ``.env``
-or real env vars, never hardcoded."""
+or real env vars, never hardcoded.
+"""
 
 from __future__ import annotations
 

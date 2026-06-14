@@ -46,7 +46,8 @@ def _build_document_comments_payload(
 ) -> dict[str, JsonValue]:
     """JSON:API POST body for .../documents/{d}/comments; ``None`` fields
     omitted, short ``parent_comment_id`` expanded to the full 4-segment path
-    the API requires."""
+    the API requires.
+    """
     items: list[JsonValue] = []
     for spec in specs:
         attributes: dict[str, JsonValue] = {
@@ -86,7 +87,8 @@ def _build_document_comment_update_payload(
     resolved: bool,
 ) -> dict[str, JsonValue]:
     """Single-resource PATCH body (``data`` dict, not list); ``id`` is the
-    full 4-segment path. Only ``resolved`` is patchable."""
+    full 4-segment path. Only ``resolved`` is patchable.
+    """
     full_id = f"{project_id}/{space_id}/{document_name}/{comment_id}"
     return {
         "data": {

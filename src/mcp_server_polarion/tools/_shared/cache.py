@@ -1,6 +1,7 @@
 """In-process TTL caches for near-static project facts, sparing the server's
 tight budget (<=3 req/s, no concurrency). Owns ALL cache state; tool logic
-reaches it only through the typed get / store wrappers."""
+reaches it only through the typed get / store wrappers.
+"""
 
 from __future__ import annotations
 
@@ -22,7 +23,8 @@ class _Entry[V]:
 
 class TTLCache[K, V]:
     """Single-threaded TTL cache; lazy expiry, so a bounded key space never
-    grows past its bound."""
+    grows past its bound.
+    """
 
     def __init__(self, ttl_seconds: float) -> None:
         self._ttl = ttl_seconds
@@ -135,7 +137,8 @@ def store_cached_enum_options(  # noqa: PLR0913
     not_found: bool = False,
 ) -> None:
     """Cache option ids for the field/type; ``not_found=True`` (404 result)
-    uses the longer ``_ENUM_NOT_FOUND_TTL_SECONDS``."""
+    uses the longer ``_ENUM_NOT_FOUND_TTL_SECONDS``.
+    """
     _enum_option_cache.set(
         (project_id, resource, field_id, type_id),
         option_ids,
@@ -174,7 +177,8 @@ def store_work_item_custom_keys(
     keys: frozenset[str],
 ) -> None:
     """Replace any prior set — each sample is the full key set, so an admin
-    removal shrinks the schema on expiry."""
+    removal shrinks the schema on expiry.
+    """
     _work_item_custom_key_cache.set((project_id, work_item_type), keys)
 
 
@@ -197,7 +201,8 @@ def store_document_type_custom_keys(
     keys: frozenset[str],
 ) -> None:
     """Replace any prior set — each sample is the full key set, so an admin
-    removal shrinks the schema on expiry."""
+    removal shrinks the schema on expiry.
+    """
     _document_type_custom_key_cache.set((project_id, document_type), keys)
 
 

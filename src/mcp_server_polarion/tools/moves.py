@@ -36,7 +36,8 @@ def _build_move_to_document_payload(
 ) -> dict[str, JsonValue]:
     """Flat ``moveToDocument`` action body (not JSON:API): ``targetDocument``
     plus at most one of ``previousPart``/``nextPart`` (both omitted = append);
-    at-most-one re-checked here to fail closed."""
+    at-most-one re-checked here to fail closed.
+    """
     if previous_part_id is not None and next_part_id is not None:
         msg = (
             "_build_move_to_document_payload accepts at most one of "

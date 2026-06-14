@@ -1,5 +1,6 @@
 """REST-SQL builder tests pinning the ``'``-doubling escape (the only thing
-between a malicious id and an injected clause) and the query shape."""
+between a malicious id and an injected clause) and the query shape.
+"""
 
 from __future__ import annotations
 

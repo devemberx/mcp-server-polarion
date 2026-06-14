@@ -1,6 +1,7 @@
 """Guard tests: fetch/parse path, fail-closed on Polarion error (write
 blocked, not skipped), and the write-time guards. Caches tested in
-``test_cache.py``."""
+``test_cache.py``.
+"""
 
 from __future__ import annotations
 

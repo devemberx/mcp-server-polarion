@@ -1,5 +1,6 @@
 """Unit tests for the `validate_pr_body` hook, loaded by path via importlib
-(script lives outside any package). Pure helpers only; `main()` left to e2e."""
+(script lives outside any package). Pure helpers only; `main()` left to e2e.
+"""
 
 from __future__ import annotations
 

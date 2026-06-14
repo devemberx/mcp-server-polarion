@@ -1,7 +1,8 @@
 """Eval-agent model factory: one LiteLLM adapter, backend switched via
 ``EVAL_MODEL`` (e.g. ``openai/gpt-4o-mini``, ``ollama/...`` + base URL).
 ``temperature=0`` / ``parallel_tool_calls=False`` keep the gate stable;
-``EVAL_NUM_RETRIES``/``EVAL_LLM_TIMEOUT`` absorb transient 429s."""
+``EVAL_NUM_RETRIES``/``EVAL_LLM_TIMEOUT`` absorb transient 429s.
+"""
 
 from __future__ import annotations
 

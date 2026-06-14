@@ -1,6 +1,7 @@
 """Real MCP transport-path tests via ``fastmcp.Client(mcp)`` in-memory —
 covers registration → JSON Schema → lifespan → client → mocked HTTP, which
-direct-call tool tests bypass."""
+direct-call tool tests bypass.
+"""
 
 from __future__ import annotations
 

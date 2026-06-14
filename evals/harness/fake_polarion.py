@@ -1,7 +1,8 @@
 """In-process fake Polarion: mirrors the real project's *structure* with fully
 synthetic *content* (no production data in eval logs). One catch-all respx
 route on the Polarion host; other hosts (LLM provider) fall through
-(``assert_all_mocked=False``). Mutations recorded, no side effects."""
+(``assert_all_mocked=False``). Mutations recorded, no side effects.
+"""
 
 from __future__ import annotations
 

@@ -1,5 +1,6 @@
 """Direct tests for helpers worth pinning beyond the transitive per-tool
-coverage — `extract_custom_fields` / `merge_custom_fields` allowlist semantics."""
+coverage — `extract_custom_fields` / `merge_custom_fields` allowlist semantics.
+"""
 
 from __future__ import annotations
 

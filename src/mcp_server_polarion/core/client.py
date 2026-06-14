@@ -44,7 +44,8 @@ _MAX_ERROR_DETAIL_LEN: Final[int] = 200
 
 def _extract_json_api_detail(body: object) -> str:
     """Concise detail from a JSON:API body: ``errors[*].detail``/``title``,
-    else truncated body."""
+    else truncated body.
+    """
     if not isinstance(body, dict):
         return str(body)[:_MAX_ERROR_DETAIL_LEN]
     errors = body.get("errors")
@@ -71,7 +72,8 @@ def _sanitize_error_text(raw: str) -> str:
 
 class PolarionClient:
     """Async HTTP client for the Polarion REST API; created once and reused
-    for the MCP server lifetime (``lifespan`` context in ``server.py``)."""
+    for the MCP server lifetime (``lifespan`` context in ``server.py``).
+    """
 
     def __init__(
         self,
@@ -127,7 +129,8 @@ class PolarionClient:
         params: dict[str, str | int] | None = None,
     ) -> dict[str, object]:
         """``GET``; raises ``PolarionAuthError`` (401/403),
-        ``PolarionNotFoundError`` (404), ``PolarionError`` (other non-2xx)."""
+        ``PolarionNotFoundError`` (404), ``PolarionError`` (other non-2xx).
+        """
         async with self._get_request_lock():
             return await self._request("GET", path, params=params)
 
@@ -138,7 +141,8 @@ class PolarionClient:
         json: dict[str, object] | None = None,
     ) -> dict[str, object]:
         """``POST``; sleeps ``_write_delay`` after success, inside the lock,
-        for cluster propagation before the next call."""
+        for cluster propagation before the next call.
+        """
         async with self._get_request_lock():
             result = await self._request("POST", path, json=json)
             await asyncio.sleep(self._write_delay)
@@ -164,7 +168,8 @@ class PolarionClient:
     ) -> dict[str, object]:
         """``DELETE``; same delay contract as :meth:`post`. ``json`` carries
         bulk-delete ids — non-standard for DELETE, but httpx and Polarion's
-        gateway both accept it. ``{}`` for 204 No Content."""
+        gateway both accept it. ``{}`` for 204 No Content.
+        """
         async with self._get_request_lock():
             result = await self._request("DELETE", path, json=json)
             await asyncio.sleep(self._write_delay)
@@ -179,7 +184,8 @@ class PolarionClient:
         json: dict[str, object] | None = None,
     ) -> dict[str, object]:
         """Execute with error mapping; retries 429/5xx up to ``_MAX_RETRIES``
-        with exponential backoff, other errors raise immediately."""
+        with exponential backoff, other errors raise immediately.
+        """
         # Lock held across retries — releasing mid-backoff would let another
         # caller slip in and hit the same 429.
         last_exception: PolarionError | None = None

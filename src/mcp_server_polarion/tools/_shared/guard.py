@@ -75,7 +75,8 @@ def _unreachable_write_block(
 
 def _unauthorized_write_block(what: str, project_id: str) -> PermissionError:
     """Mirrors the tool layer's ``PolarionAuthError -> PermissionError``
-    (fixable token scope, not a backend to retry)."""
+    (fixable token scope, not a backend to retry).
+    """
     logger.warning(
         "guard blocking write: not authorized to validate %s for project=%s",
         what,
@@ -96,7 +97,8 @@ async def fetch_enum_option_ids(
     type_id: str,
 ) -> frozenset[str]:
     """Valid option ids for ``(project, resource, field, type)``; cached,
-    fail-closed, 404 defers (empty set)."""
+    fail-closed, 404 defers (empty set).
+    """
     cached = get_cached_enum_options(project_id, resource, field_id, type_id)
     if cached is not None:
         return cached
@@ -578,7 +580,8 @@ async def _existing_target_ids(
     target_ids: frozenset[str],
 ) -> frozenset[str]:
     """Subset of *target_ids* that exist in *project_id*, via chunked
-    ``id:(...)`` queries. 404 (project missing) propagates to caller."""
+    ``id:(...)`` queries. 404 (project missing) propagates to caller.
+    """
     ordered = sorted(target_ids)
     found: set[str] = set()
     for start in range(0, len(ordered), _GUARD_PAGE_SIZE):
@@ -606,7 +609,8 @@ async def guard_work_item_link_targets(
 ) -> None:
     """Reject links whose target work item does not exist — Polarion stores a
     nonexistent target as a silent dangling link (HTTP 201, empty
-    title/type/status). One ``id:(...)`` query per target project."""
+    title/type/status). One ``id:(...)`` query per target project.
+    """
     by_project: dict[str, set[str]] = {}
     for spec in links:
         target_project = spec.target_project_id or source_project_id
@@ -644,7 +648,8 @@ async def fetch_project_enum_option_ids(
     """Valid option ids for a project-level enum not in ``getAvailableOptions``
     (link/hyperlink role). Response ``data`` is a dict (not list), options at
     ``data.attributes.options[].id``. Cached; fail-closed like
-    :func:`fetch_enum_option_ids`."""
+    :func:`fetch_enum_option_ids`.
+    """
     cached = get_cached_project_enum(project_id, enum_name)
     if cached is not None:
         return cached
@@ -722,7 +727,8 @@ async def guard_work_item_link_roles(
     roles: Iterable[str],
 ) -> None:
     """Reject link roles not in ``workitem-link-role`` — an unknown role stores
-    verbatim (HTTP 201) as a ghost link."""
+    verbatim (HTTP 201) as a ghost link.
+    """
     await _check_project_enum_roles(
         client,
         project_id,
@@ -742,7 +748,8 @@ async def guard_hyperlink_roles(
     roles: Iterable[str],
 ) -> None:
     """Reject hyperlink roles not in the project's ``hyperlink-role`` enum
-    (typically ``ref_int``/``ref_ext``) — unknown roles ghost silently."""
+    (typically ``ref_int``/``ref_ext``) — unknown roles ghost silently.
+    """
     await _check_project_enum_roles(
         client,
         project_id,
@@ -762,7 +769,8 @@ async def _existing_forward_link_ids(
 ) -> frozenset[str]:
     """Composite ids of every outgoing link on the source work item — each
     ``data[].id`` is the 5-segment composite the delete payload reconstructs,
-    so it is set-membership-testable directly. 404 propagates."""
+    so it is set-membership-testable directly. 404 propagates.
+    """
     path = (
         f"/projects/{encode_path_segment(project_id)}"
         f"/workitems/{encode_path_segment(work_item_id)}/linkedworkitems"
@@ -799,7 +807,8 @@ async def partition_delete_links(
     """Pre-read existing links and split *link_ids* into ``(matched, not_found)``
     — the only way to surface the no-ops Polarion's 204 hides. Fail-closed:
     missing source → ``ValueError``, auth → ``PermissionError``, else
-    ``RuntimeError``."""
+    ``RuntimeError``.
+    """
     try:
         existing = await _existing_forward_link_ids(client, project_id, work_item_id)
     except PolarionNotFoundError as exc:

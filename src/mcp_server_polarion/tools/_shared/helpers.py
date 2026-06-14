@@ -1,5 +1,6 @@
 """Internal shared helpers for ``tools`` (not public API). Body fields pass
-through as raw HTML; Markdown conversion is reserved for synthesis paths."""
+through as raw HTML; Markdown conversion is reserved for synthesis paths.
+"""
 
 from __future__ import annotations
 
@@ -153,7 +154,8 @@ def compute_has_more(
 ) -> bool:
     """Whether more pages exist: ``total`` when reliable (>0), else
     ``links.next`` (Polarion sometimes omits ``meta.totalCount``), else
-    full-page heuristic."""
+    full-page heuristic.
+    """
     if total > 0:
         return total > page_number * page_size
     if has_links_next(response):
@@ -172,7 +174,8 @@ _WORK_ITEM_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9_-]+$")
 
 def validate_work_item_id_for_lucene(work_item_id: str) -> None:
     """Reject ids outside ``[A-Za-z0-9_-]`` — Lucene treats punctuation as
-    operators, so an unescaped id could reshape the query."""
+    operators, so an unescaped id could reshape the query.
+    """
     if not _WORK_ITEM_ID_PATTERN.match(work_item_id):
         msg = (
             f"work_item_id '{work_item_id}' contains characters outside "
@@ -246,7 +249,8 @@ def extract_relationship_ids(
 
 def split_module_id(module_full_id: str) -> tuple[str, str]:
     """Split ``{proj}/{space}/{doc}`` into (space_id, document_name); ``doc``
-    may contain ``/``. ``("", "")`` if under three segments."""
+    may contain ``/``. ``("", "")`` if under three segments.
+    """
     if not module_full_id:
         return ("", "")
     parts = module_full_id.split("/", 2)
@@ -267,7 +271,8 @@ def build_work_item_summary_kwargs(
     item: dict[str, object],
 ) -> WorkItemSummaryKwargs:
     """``WorkItemSummary`` kwargs from a JSON:API resource; shared so
-    ``WorkItemDetail`` stays a strict superset of ``WorkItemSummary``."""
+    ``WorkItemDetail`` stays a strict superset of ``WorkItemSummary``.
+    """
     attributes = item.get("attributes", {})
     if not isinstance(attributes, dict):
         attributes = {}
@@ -300,7 +305,8 @@ def extract_custom_fields(
     standard: frozenset[str],
 ) -> dict[str, object]:
     """Inline custom-field subset of ``attributes`` (keys outside *standard*),
-    returned verbatim so rich-text values round-trip unchanged."""
+    returned verbatim so rich-text values round-trip unchanged.
+    """
     return {k: v for k, v in attributes.items() if k not in standard}
 
 
@@ -312,7 +318,8 @@ def merge_custom_fields(
     """Merge custom-field key/values into *attributes* in place; a key in
     *standard* raises ``ValueError`` (would shadow a tool parameter), ``None``
     values skipped. Values stored by reference — callers must NOT mutate
-    *customs* before serialisation."""
+    *customs* before serialisation.
+    """
     if not customs:
         return
     collisions = sorted(set(customs) & standard)
@@ -359,7 +366,8 @@ def parse_work_item_detail(
 ) -> WorkItemDetail:
     """JSON:API work-item resource → ``WorkItemDetail``. Expects
     ``WORK_ITEM_DETAIL_FIELDS`` + ``include=assignee``; description passes
-    through as raw HTML so it round-trips unchanged."""
+    through as raw HTML so it round-trips unchanged.
+    """
     attributes = item.get("attributes", {})
     if not isinstance(attributes, dict):
         attributes = {}
@@ -392,7 +400,8 @@ def parse_work_item_detail(
 
 def summary_to_back_link(summary: WorkItemSummary) -> WorkItemLink:
     """Lift a ``linkedWorkItems:`` query result to a back link; the query
-    exposes no role/suspect → ``role=None``, ``suspect=False``."""
+    exposes no role/suspect → ``role=None``, ``suspect=False``.
+    """
     return WorkItemLink(
         id=summary.id,
         title=summary.title,

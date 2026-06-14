@@ -1,5 +1,6 @@
 """Tier-1 evaluator: dispatches on ``Case.metadata["check"]`` to the matching
-pure check in ``checks.py``."""
+pure check in ``checks.py``.
+"""
 
 from __future__ import annotations
 

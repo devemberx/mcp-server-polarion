@@ -258,7 +258,8 @@ class TestHtmlToMarkdownMergedCells:
     def test_table_colspan_skips_rowspan_reservation(self) -> None:
         """A colspan cell pushed past a previous row's rowspan must not
         overwrite the reservation — it should land at non-contiguous columns
-        (matching browser rendering)."""
+        (matching browser rendering).
+        """
         # Row 0: A | B(rowspan=2) | C
         # Row 1: D(colspan=2) — should occupy cols 0 and 2 (col 1 reserved)
         # Row 2: E | F | G
@@ -560,7 +561,8 @@ class TestSanitizeHtml:
 
     def test_decompose_with_nested_disallowed_child_no_error(self) -> None:
         """decompose() removes a script subtree; the loop must not crash when it
-        subsequently encounters the already-detached child tag (font inside script)."""
+        subsequently encounters the already-detached child tag (font inside script).
+        """
         html = "<p><script><font>nested</font></script>After</p>"
         # Should not raise ValueError; script + its child are silently dropped
         result = sanitize_html(html)
@@ -701,7 +703,8 @@ class TestRoundTrip:
 
 class TestStampBlockIds:
     """Verify ``stamp_block_ids`` covers exactly the blocks Polarion's
-    ``/parts`` derivation requires and leaves headings alone."""
+    ``/parts`` derivation requires and leaves headings alone.
+    """
 
     def test_each_block_tag_gets_unique_sequential_id(self) -> None:
         html = (
@@ -729,7 +732,8 @@ class TestStampBlockIds:
     def test_existing_polarion_mcp_id_avoids_collision(self) -> None:
         """A pre-existing ``polarion_mcp_N`` anchor (e.g. raw HTML embedded
         in Markdown) must not be duplicated by the counter, otherwise
-        Polarion rejects the PATCH with HTTP 400."""
+        Polarion rejects the PATCH with HTTP 400.
+        """
         html = (
             '<p id="polarion_mcp_0">manual0</p>'
             "<p>auto-a</p>"
@@ -757,7 +761,8 @@ class TestStampBlockIds:
     def test_clean_input_returned_verbatim(self) -> None:
         """When every target block already carries a non-blank id, the input
         is returned byte-for-byte — no BeautifulSoup reserialization, so
-        ``&nbsp;``/``&copy;`` and quote style survive an anchored round-trip."""
+        ``&nbsp;``/``&copy;`` and quote style survive an anchored round-trip.
+        """
         html = '<p id="a">x&nbsp;y</p><table id="t"><tr><td>&copy;</td></tr></table>'
         assert stamp_block_ids(html) == html
 
@@ -779,7 +784,8 @@ class TestStampBlockIds:
 
 class TestFirstAnchorlessBlock:
     """``first_anchorless_block`` is the write-side reject predicate; every
-    block in ``_BLOCK_TAGS_NEEDING_IDS`` must carry a non-empty id."""
+    block in ``_BLOCK_TAGS_NEEDING_IDS`` must carry a non-empty id.
+    """
 
     @pytest.mark.parametrize("value", ["", "   ", "\n\t"])
     def test_empty_or_whitespace_input_is_none(self, value: str) -> None:

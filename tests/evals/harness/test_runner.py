@@ -1,5 +1,6 @@
 """Runner tests: text extractor, runaway-agent ``_CycleGuard``, hermetic env
-pinning. End-to-end ``run_case`` (real agent + LLM) out of scope."""
+pinning. End-to-end ``run_case`` (real agent + LLM) out of scope.
+"""
 
 from __future__ import annotations
 

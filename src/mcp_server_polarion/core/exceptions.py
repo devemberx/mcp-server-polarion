@@ -1,5 +1,6 @@
 """Polarion API exceptions; each carries the HTTP ``status_code`` so tool-level
-handlers can produce actionable messages for the LLM."""
+handlers can produce actionable messages for the LLM.
+"""
 
 from __future__ import annotations
 

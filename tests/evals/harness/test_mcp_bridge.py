@@ -1,5 +1,6 @@
 """Bridge-helper tests: ``TrajectoryRecorder`` + result flatteners are pure,
-driven with stub objects — no real MCP client, no agent."""
+driven with stub objects — no real MCP client, no agent.
+"""
 
 from __future__ import annotations
 

@@ -224,7 +224,8 @@ _FENCED_MIN_LINES: Final[int] = 2
 
 def _render_parts_to_markdown(parts: list[DocumentPart]) -> str:
     """Interleave a page of parts into one Markdown string; chunks join on a
-    blank line, runs of 3+ newlines collapse to 2."""
+    blank line, runs of 3+ newlines collapse to 2.
+    """
     chunks: list[str] = []
     for part in parts:
         chunk = _render_part(part)
@@ -266,7 +267,8 @@ def _render_workitem_part(part: DocumentPart) -> str:
 
 def _decorate_wikiblock(content: str) -> str:
     """Lift the Velocity macro name (``#name(``) into the fenced-code
-    info-string; raw fence when none detectable."""
+    info-string; raw fence when none detectable.
+    """
     stripped = content.strip()
     if not stripped:
         return ""
@@ -286,7 +288,8 @@ def _decorate_wikiblock(content: str) -> str:
 @dataclass(frozen=True, slots=True)
 class _DocumentMeta:
     """Document attributes + editor user ids (join keys into included
-    ``users``; never surfaced in output — display names only)."""
+    ``users``; never surfaced in output — display names only).
+    """
 
     type: str = ""
     status: str = ""
@@ -403,7 +406,8 @@ def _extract_first_resource_id(response: dict[str, object]) -> str | None:
 
 def _extract_created_module_name(response: dict[str, object]) -> str | None:
     """Document name from a 201 create response (name may contain ``/``);
-    ``None`` on unexpected shape."""
+    ``None`` on unexpected shape.
+    """
     full_id = _extract_first_resource_id(response)
     if full_id is None:
         return None
@@ -423,7 +427,8 @@ def _build_update_document_payload(  # noqa: PLR0913
     custom_fields: dict[str, object] | None = None,
 ) -> dict[str, JsonValue]:
     """JSON:API PATCH body for ``.../documents/{d}``; skips unset.
-    ``home_page_content_html`` wrapped verbatim (empty guard in tool layer)."""
+    ``home_page_content_html`` wrapped verbatim (empty guard in tool layer).
+    """
     attributes: dict[str, JsonValue] = {}
     if title is not None:
         attributes["title"] = title

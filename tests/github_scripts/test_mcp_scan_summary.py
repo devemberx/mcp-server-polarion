@@ -1,5 +1,6 @@
 """mcp-scan summary tests, loaded by path via importlib. Pure ``render``
-only; ``main()`` left to the workflow."""
+only; ``main()`` left to the workflow.
+"""
 
 from __future__ import annotations
 

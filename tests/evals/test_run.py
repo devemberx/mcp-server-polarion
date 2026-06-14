@@ -1,5 +1,6 @@
 """Gate-orchestration tests with ``run_case`` stubbed: pass-rate aggregation,
-fail-closed crashed runs, git-sha resolution, unknown-case exit code."""
+fail-closed crashed runs, git-sha resolution, unknown-case exit code.
+"""
 
 from __future__ import annotations
 

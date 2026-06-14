@@ -1,5 +1,6 @@
 """Tier-1 case-definition invariants: every case names a check that exists in
-``checks.REGISTRY`` and stays zero-tolerance (``min_pass_rate == 1.0``)."""
+``checks.REGISTRY`` and stays zero-tolerance (``min_pass_rate == 1.0``).
+"""
 
 from __future__ import annotations
 

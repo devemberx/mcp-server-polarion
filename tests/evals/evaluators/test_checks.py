@@ -1,5 +1,6 @@
 """Tier-1 check tests: every pure predicate exercised against clean and
-forbidden synthetic trajectories. No LLM, no respx."""
+forbidden synthetic trajectories. No LLM, no respx.
+"""
 
 from __future__ import annotations
 

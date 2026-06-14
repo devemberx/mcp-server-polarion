@@ -1,5 +1,6 @@
 """Fake-Polarion tests: ``_dispatch`` is a pure request router, driven with
-hand-built requests (no respx). Pins the routing table and the mutation log."""
+hand-built requests (no respx). Pins the routing table and the mutation log.
+"""
 
 from __future__ import annotations
 

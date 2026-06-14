@@ -1,5 +1,6 @@
 """``TTLCache`` + typed wrapper tests; expiry driven by patching the
-module-level ``_now`` clock seam."""
+module-level ``_now`` clock seam.
+"""
 
 from __future__ import annotations
 

@@ -3304,7 +3304,8 @@ class TestCreateDocumentHappyPath:
     ) -> None:
         """Every block-level element from the target set gets a unique
         ``polarion_mcp_N`` id; headings are intentionally left bare so
-        Polarion can rewrite them to the macro form on save."""
+        Polarion can rewrite them to the macro form on save.
+        """
         mock_client.post.return_value = {
             "data": [{"type": "documents", "id": "MyProj/_default/MySpec"}]
         }
@@ -3337,7 +3338,8 @@ class TestCreateDocumentHappyPath:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A stamp_block_ids regression that leaves a block anchorless is
-        caught by the trailing first_anchorless_block guard before POST."""
+        caught by the trailing first_anchorless_block guard before POST.
+        """
         monkeypatch.setattr(_mod, "stamp_block_ids", lambda html: html)
         with pytest.raises(RuntimeError, match="anchorless block"):
             await create_document(
@@ -3889,7 +3891,8 @@ class TestUpdateDocumentAnchorlessGuard:
         reset_enum_guard_caches: None,
     ) -> None:
         """An already-anchored body round-trips byte-for-byte: stamp_block_ids
-        short-circuits before reserializing, so ``&nbsp;`` is not mangled."""
+        short-circuits before reserializing, so ``&nbsp;`` is not mangled.
+        """
         raw = '<p id="polarion_mcp_1">Note&nbsp;here</p>'
         result = await _call_update_doc(
             mock_ctx, home_page_content_html=raw, dry_run=True
@@ -3915,7 +3918,8 @@ class TestUpdateDocumentAnchorlessGuard:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """If a future stamp_block_ids regression leaves a block anchorless,
-        the trailing first_anchorless_block guard blocks the PATCH."""
+        the trailing first_anchorless_block guard blocks the PATCH.
+        """
         monkeypatch.setattr(_mod, "stamp_block_ids", lambda html: html)
         with pytest.raises(RuntimeError, match="anchorless block"):
             await _call_update_doc(

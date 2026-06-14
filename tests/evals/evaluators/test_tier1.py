@@ -1,5 +1,6 @@
 """``ForbiddenBehaviorEvaluator`` tests: metadata dispatch, fail-closed on
-empty/non-list trajectory, delegation to the named check. No LLM, no I/O."""
+empty/non-list trajectory, delegation to the named check. No LLM, no I/O.
+"""
 
 from __future__ import annotations
 
