@@ -5,6 +5,7 @@ through as raw HTML; Markdown conversion is reserved for synthesis paths.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from typing import Final, Literal, TypedDict, cast
 from urllib.parse import quote
 
@@ -23,6 +24,11 @@ from mcp_server_polarion.models import (
 
 # Bulk-write cap: Polarion throttles ~3 req/s, no concurrency.
 MAX_BULK_ITEMS: Final[int] = 50
+
+# Ceiling for valid-option lists embedded in guard errors: showing the full set
+# beats forcing a list_*_enum_options re-call, but a pathological enum must not
+# flood the caller's context.
+OPTION_LIST_LIMIT: Final[int] = 50
 
 
 class WorkItemSummaryKwargs(TypedDict):
@@ -118,6 +124,17 @@ def get_client(ctx: Context) -> PolarionClient:
         )
         raise TypeError(msg)
     return client
+
+
+def format_option_list(options: Iterable[str], limit: int = OPTION_LIST_LIMIT) -> str:
+    """Render a sorted option list for an error message. At or under *limit*,
+    identical to ``repr(sorted(options))``; over it, the first *limit* items
+    plus a ``(+N more)`` suffix so a pathological enum can't flood context.
+    """
+    ordered = sorted(options)
+    if len(ordered) <= limit:
+        return repr(ordered)
+    return f"{repr(ordered[:limit])[:-1]}, ...] (+{len(ordered) - limit} more)"
 
 
 def safe_str(value: object) -> str:
@@ -485,6 +502,7 @@ __all__: list[str] = [
     "DOCUMENT_COMMENT_LIST_FIELDS",
     "DOCUMENT_DETAIL_FIELDS",
     "MAX_BULK_ITEMS",
+    "OPTION_LIST_LIMIT",
     "STANDARD_DOCUMENT_ATTRIBUTES",
     "STANDARD_WORK_ITEM_ATTRIBUTES",
     "WORK_ITEM_DETAIL_FIELDS",
@@ -502,6 +520,7 @@ __all__: list[str] = [
     "extract_relationship_ids",
     "extract_short_id",
     "extract_total_count",
+    "format_option_list",
     "get_client",
     "has_links_next",
     "merge_custom_fields",
