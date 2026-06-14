@@ -1,9 +1,6 @@
-"""Tests for ``tools/_shared/guard.py``.
-
-Covers the ``fetch_enum_option_ids`` GET + parse path, the fail-closed
-behaviour on Polarion error (the write is blocked, not skipped), and the
-four write-time guards. The TTL caches the guards read from live in
-``tools/_shared/cache.py`` and are exercised in ``test_cache.py``.
+"""Guard tests: fetch/parse path, fail-closed on Polarion error (write
+blocked, not skipped), and the write-time guards. Caches tested in
+``test_cache.py``.
 """
 
 from __future__ import annotations

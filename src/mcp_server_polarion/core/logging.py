@@ -7,16 +7,9 @@ import sys
 
 
 def setup_logging(*, level: int = logging.INFO) -> logging.Logger:
-    """Configure and return the package-level logger.
-
-    A single ``StreamHandler(sys.stderr)`` is attached so that log
-    messages never pollute the MCP JSON-RPC channel on stdout.
-
-    Args:
-        level: Logging level (default ``INFO``).
-
-    Returns:
-        The configured ``mcp_server_polarion`` logger.
+    """Configure and return the package-level logger — single
+    ``StreamHandler(sys.stderr)`` so log messages never pollute the MCP
+    JSON-RPC channel on stdout.
     """
     logger = logging.getLogger("mcp_server_polarion")
 

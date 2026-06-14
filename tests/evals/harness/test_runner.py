@@ -1,9 +1,5 @@
-"""Unit tests for the eval runner's pure helpers and the cycle guard.
-
-The end-to-end ``run_case`` drives a real agent + LLM and is out of scope here
-(same boundary the hook tests draw). What is unit-testable: the text extractor,
-the runaway-agent ``_CycleGuard`` hook, and the env pinning that keeps a run
-hermetic.
+"""Runner tests: text extractor, runaway-agent ``_CycleGuard``, hermetic env
+pinning. End-to-end ``run_case`` (real agent + LLM) out of scope.
 """
 
 from __future__ import annotations

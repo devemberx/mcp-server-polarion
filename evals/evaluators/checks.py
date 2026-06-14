@@ -1,11 +1,5 @@
-"""Pure trajectory checks for Tier-1 prohibitions and Tier-2 efficiency.
-
-Each check is a function of the trajectory alone (a list of
-``{"name": str, "args": dict, "result": ...}`` in call order, plus optional
-params) returning ``(passed, reason)`` -- no LLM, no I/O, so identical input
-yields identical verdict. Scope is LLM-behavioural rules unreachable by the
-server-side guards in ``tools._guard`` / ``utils.html`` (covered by their own
-unit tests).
+"""Pure trajectory checks: f(trajectory) -> (passed, reason); no LLM, no I/O,
+deterministic. Scope = LLM-behavioural rules unreachable by server-side guards.
 """
 
 from __future__ import annotations
@@ -123,11 +117,8 @@ _UPDATE_TO_GET: dict[str, tuple[str, tuple[str, ...]]] = {
 
 
 def _target_key(call: dict[str, Any], keys: tuple[str, ...]) -> tuple[object, ...]:
-    """Identifier tuple for matching two calls on the same target.
-
-    ``work_item_id`` is normalized via ``_short_id`` so a project-qualified id
-    in one call still matches the short form in another. ``document_name`` is
-    left verbatim — document names may legitimately contain ``/``.
+    """Identifier tuple for matching two calls on one target; ``work_item_id``
+    normalized via ``_short_id``, ``document_name`` verbatim (may contain ``/``).
     """
     args = _args(call)
     return tuple(
@@ -141,13 +132,8 @@ def _target_key(call: dict[str, Any], keys: tuple[str, ...]) -> tuple[object, ..
 def check_get_before_update(
     trajectory: Trajectory, _params: dict[str, Any]
 ) -> CheckResult:
-    """Every ``update_*`` must be preceded by a matching ``get_*``.
-
-    Covers both work-item and document paths. Polarion writes REPLACE lists
-    (``hyperlinks``, ``assignee_ids``) and accept partial PATCHes silently, so
-    without a prior read clobbers and ghost-custom-key writes become possible.
-    Observable from the trajectory: a ``get_*`` on the matching identifier
-    tuple must appear earlier.
+    """Every ``update_*`` needs an earlier matching ``get_*`` — REPLACE-list and
+    partial-PATCH semantics make blind writes clobber silently.
     """
     for i, call in enumerate(trajectory):
         name = call.get("name", "")
@@ -174,14 +160,9 @@ def check_get_before_update(
 def check_resolve_root_comment(
     trajectory: Trajectory, params: dict[str, Any]
 ) -> CheckResult:
-    """Thread resolution must reach an observed root, not stop at a reply.
-
-    A resolve PATCH on a reply 400s loudly in real Polarion (server-guarded),
-    so a stray reply attempt alongside a root resolve is tolerated. The
-    silent failure the tool layer cannot catch: resolving ONLY a reply and
-    reporting the thread done, or PATCHing an id never observed via
-    ``list_document_comments``. Only ``resolved=True`` on a root counts as a
-    resolution. Root ids come from ``params["root_ids"]``.
+    """Resolution must set ``resolved=True`` on an observed root
+    (``params["root_ids"]``). Reply-only resolves and never-observed ids fail;
+    a stray reply attempt alongside a root resolve is tolerated (server 400s it).
     """
     root_ids = {str(r) for r in params.get("root_ids", [])}
     doc_keys = ("project_id", "space_id", "document_name")
@@ -220,11 +201,8 @@ def check_resolve_root_comment(
 def check_preserve_hyperlinks(
     trajectory: Trajectory, params: dict[str, Any]
 ) -> CheckResult:
-    """A ``hyperlinks`` update must carry every pre-existing URI.
-
-    Polarion REPLACES the whole list, so an update omitting an existing URI
-    silently deletes it. ``params``: ``work_item_id`` (target item) and
-    ``required_uris`` (seeded URIs that must survive).
+    """A ``hyperlinks`` update must carry every URI in ``params["required_uris"]``
+    — Polarion REPLACES the list, omissions silently delete.
     """
     target = _short_id(params.get("work_item_id", ""))
     required = [str(u) for u in params.get("required_uris", [])]
@@ -266,12 +244,8 @@ _BODY_WRITE_TO_SOURCE: dict[str, tuple[str, str, str, tuple[str, ...]]] = {
 def check_round_trip_source(
     trajectory: Trajectory, _params: dict[str, Any]
 ) -> CheckResult:
-    """Raw-HTML body writes must source from the flagged ``get_*`` read.
-
-    ``read_document`` / ``read_work_item`` emit synthesis Markdown that
-    collapses Polarion anchors; feeding it back corrupts the body. Only
-    ``get_*(include_*_html=True)`` yields the round-trip shape, so every body
-    write needs one earlier on the same target.
+    """Body writes must source from ``get_*(include_*_html=True)`` on the same
+    target — ``read_*`` synthesis Markdown collapses Polarion anchors.
     """
     for i, call in enumerate(trajectory):
         spec = _BODY_WRITE_TO_SOURCE.get(call.get("name", ""))
@@ -298,11 +272,8 @@ def check_round_trip_source(
 def check_no_blind_detach(
     trajectory: Trajectory, params: dict[str, Any]
 ) -> CheckResult:
-    """``move_work_item_from_document`` must not target a free-floating item.
-
-    The action is not idempotent: detaching an item that is in no document
-    returns HTTP 400. ``params["floating_ids"]`` lists the seeded
-    free-floating items.
+    """``move_work_item_from_document`` must not target ``params["floating_ids"]``
+    — detaching a free-floating item 400s (not idempotent).
     """
     floating = {_short_id(x) for x in params.get("floating_ids", [])}
     for call in trajectory:
@@ -362,12 +333,8 @@ def check_direct_read(trajectory: Trajectory, params: dict[str, Any]) -> CheckRe
 def check_no_duplicate_reads(
     trajectory: Trajectory, _params: dict[str, Any]
 ) -> CheckResult:
-    """No read may repeat with identical args while nothing changed.
-
-    State reads (item/document/comment fetches) reset on any write -- a
-    re-read after a mutation is legitimate. Stable reads (enum options,
-    SQL recipes, project list) never change under the agent's writes, so an
-    identical repeat is always redundant.
+    """No identical re-read while nothing changed: state reads reset on any write,
+    stable reads (enums, recipes, projects) never legitimately repeat.
     """
     seen_state: set[tuple[str, str]] = set()
     seen_stable: set[tuple[str, str]] = set()
@@ -397,11 +364,8 @@ def check_no_duplicate_reads(
 def check_scoped_query_uses_sql(
     trajectory: Trajectory, _params: dict[str, Any]
 ) -> CheckResult:
-    """Module-scoped work item searches must not use a Lucene ``module`` term.
-
-    ``module`` is not Lucene-indexed -- only the ``SQL:(...)`` prefix (or
-    ``read_document_parts``) scopes by document. Matches ``module`` only as a
-    Lucene field name (``module:`` / ``module.id:``), not as plain text.
+    """Document scoping must use ``SQL:(...)`` or ``read_document_parts`` — Lucene
+    ``module``/``module.id`` field terms match nothing (not indexed).
     """
     field_re = re.compile(r"\bmodule(?:\.\w+)?\s*:", re.IGNORECASE)
     for call in trajectory:

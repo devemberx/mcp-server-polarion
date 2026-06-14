@@ -1,10 +1,5 @@
-"""Direct unit tests for the REST-SQL query builders.
-
-The builders interpolate caller-supplied ids straight into a ``SQL:(...)``
-string with no bind parameters, so the ``'``-doubling escape is the only thing
-standing between a malicious id and an injected clause. These tests pin that
-escape and the overall query shape; the guard/document tools exercise the
-builders' behaviour transitively against `mock_client`.
+"""REST-SQL builder tests pinning the ``'``-doubling escape (the only thing
+between a malicious id and an injected clause) and the query shape.
 """
 
 from __future__ import annotations

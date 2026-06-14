@@ -1,7 +1,5 @@
-"""Shared fixtures for the domain tool tests.
-
-Each tool is exercised by calling the async function directly with a mock
-``PolarionClient`` injected via a mock ``Context``.
+"""Shared fixtures: tools called directly with a mock ``PolarionClient``
+injected via a mock ``Context``.
 """
 
 from __future__ import annotations
@@ -24,11 +22,8 @@ def _clear_guard_caches() -> None:
 
 @pytest.fixture(autouse=True)
 def _reset_guard_caches() -> None:
-    """Start every tool test with cold enum/custom-field guard caches.
-
-    The guards memoise option ids and observed custom-field keys in
-    module-level caches; without a reset, a key primed by one test would
-    leak into the next and mask a missing priming GET.
+    """Cold guard caches per test — a key primed by one test would leak into the
+    next and mask a missing priming GET.
     """
     _clear_guard_caches()
 

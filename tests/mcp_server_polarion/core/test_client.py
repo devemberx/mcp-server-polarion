@@ -1,8 +1,4 @@
-"""Tests for ``PolarionClient`` — HTTP behaviour, retry, error mapping.
-
-Every test mocks the Polarion REST API via ``respx`` so no real server
-is needed.  The client uses ``write_delay=0`` to avoid sleeping.
-"""
+"""``PolarionClient`` tests via ``respx``; ``write_delay=0`` avoids sleeping."""
 
 from __future__ import annotations
 
@@ -519,11 +515,8 @@ class TestSerialization:
             assert max_in_flight == 1
 
     async def test_write_delay_keeps_lock_held(self) -> None:
-        """A GET during a POST's write_delay must wait, not overlap.
-
-        The write_delay sleep runs inside the request lock, else a second
-        caller slips in during the propagation window. Timed: the GET must
-        start at least write_delay after the POST.
+        """A GET during a POST's write_delay must wait, not overlap — the sleep runs
+        inside the request lock.
         """
         post_start: list[float] = []
         get_start: list[float] = []

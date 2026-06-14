@@ -1,9 +1,5 @@
-"""Tests for ``tools/_shared/cache.py``.
-
-Covers the ``TTLCache`` primitive (hit / miss / overwrite / lazy expiry /
-invalidate / clear) and the typed get / store wrappers the tool layer reaches
-the caches through. TTL expiry is driven by patching the module-level ``_now``
-clock seam.
+"""``TTLCache`` + typed wrapper tests; expiry driven by patching the
+module-level ``_now`` clock seam.
 """
 
 from __future__ import annotations

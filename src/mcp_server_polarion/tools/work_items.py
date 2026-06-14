@@ -67,11 +67,8 @@ def _build_work_item_resource(
     spec: WorkItemCreateSpec,
     description_html: str,
 ) -> dict[str, JsonValue]:
-    """Build one ``workitems`` resource for a bulk create POST.
-
-    Skips unset values (no overwriting defaults). ``custom_fields`` inline via
-    ``merge_custom_fields`` (raises on standard-field collision).
-    ``description_html`` arrives pre-converted.
+    """One ``workitems`` resource for a bulk create POST; skips unset (no
+    overwriting defaults). ``description_html`` arrives pre-converted.
     """
     attributes: dict[str, JsonValue] = {
         "title": spec.title,
@@ -119,10 +116,7 @@ def _build_create_work_items_payload(
     specs: list[WorkItemCreateSpec],
     descriptions_html: list[str],
 ) -> dict[str, JsonValue]:
-    """Build the JSON:API body for bulk ``POST /projects/{p}/workitems``.
-
-    One resource per (spec, description_html) pair in a single ``data`` array.
-    """
+    """JSON:API body for bulk ``POST /projects/{p}/workitems``."""
     data: list[JsonValue] = [
         _build_work_item_resource(spec=spec, description_html=html)
         for spec, html in zip(specs, descriptions_html, strict=True)
@@ -131,10 +125,9 @@ def _build_create_work_items_payload(
 
 
 def _extract_created_work_item_ids(response: dict[str, object]) -> list[str]:
-    """Return short work-item ids (submission order) from a bulk 201 response.
-
-    Relies on Polarion echoing ``data`` in order; the call-site count check
-    catches a missing id, not a reordered one. Empty on malformed shapes.
+    """Short work-item ids from a bulk 201 response, relying on Polarion echoing
+    ``data`` in submission order (call-site count check catches missing ids,
+    not reordered ones).
     """
     data = response.get("data")
     if not isinstance(data, list):
@@ -164,10 +157,8 @@ def _build_update_work_item_payload(  # noqa: PLR0913
     assignee_ids: list[str] | None,
     custom_fields: dict[str, object] | None = None,
 ) -> dict[str, JsonValue]:
-    """Build the JSON:API PATCH body for ``/projects/{p}/workitems/{work_item}``.
-
-    Single ``data`` resource with required ``id`` ``"{project}/{work_item}"``.
-    Skips unset values so an update never blanks an existing attribute.
+    """JSON:API PATCH body for ``/projects/{p}/workitems/{work_item}``; skips
+    unset so an update never blanks an existing attribute.
     """
     attributes: dict[str, JsonValue] = {}
     if title:
@@ -479,8 +470,7 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
         custom_fields=custom_fields,
     )
 
-    # Polarion 400s on a PATCH body with no attributes/relationships, even when
-    # only workflowAction / changeTypeTo is set — catch it here.
+    # Polarion 400s on an attribute-less PATCH even with workflowAction/changeTypeTo.
     payload_data = cast(dict[str, JsonValue], payload["data"])
     if "attributes" not in payload_data and "relationships" not in payload_data:
         raise ValueError(
@@ -497,8 +487,8 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
         f"/workitems/{encode_path_segment(work_item_id)}"
     )
 
-    # Enum options are type-scoped; fetch the item's type once (on dry_run too,
-    # so preview raises the same ValueError) and prime the custom-key cache.
+    # Enum options are type-scoped: one prefetch (on dry_run too, so preview
+    # raises the same errors) resolves the type and primes the custom-key cache.
     work_item_type = ""
     if status or severity or priority or resolution or change_type_to or custom_fields:
         try:
@@ -528,8 +518,7 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
             )
             work_item_type = current_detail.type
 
-        # Scope status/severity/resolution/priority by the target type
-        # (change_type_to if set). Guard checks ``type`` first, so an invalid
+        # Scope enums by target type; guard checks ``type`` first, so an invalid
         # change_type_to raises before being reused as the scoping axis.
         effective_type = change_type_to or work_item_type or "~"
         await guard_work_item_enums(
@@ -542,8 +531,7 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
             priority=priority,
             resolution=resolution,
         )
-        # change_type_to retypes the item in the same PATCH, so custom_fields
-        # belong to the new type's schema; validate against it, not the current.
+        # change_type_to retypes in the same PATCH — customs belong to the new type.
         if custom_fields:
             await guard_work_item_custom_fields(
                 client,
@@ -601,8 +589,7 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
         fallback_id=work_item_id,
     )
     if not include_current_description_html:
-        # Blank the body (still came over the wire) to keep metadata-only
-        # updates small — mirrors get_work_item.
+        # Body still came over the wire; blank it — mirrors get_work_item.
         current = current.model_copy(update={"description_html": ""})
 
     return WorkItemUpdateResult(
@@ -765,8 +752,7 @@ async def list_work_items(
     data = response.get("data", [])
     items = parse_work_item_summaries(data)
 
-    # Fall back to the seen-item count only when the API total is missing/zero
-    # and the page is non-empty.
+    # Fallback count only on a non-empty page when the API total is missing.
     raw_wi_total = extract_total_count(response)
     work_item_total = raw_wi_total
     if work_item_total == 0 and items:

@@ -1,9 +1,5 @@
-"""HTML ↔ Markdown conversion for Polarion content fields.
-
-Polarion stores rich-text fields (Work Item descriptions, Document
-content) as HTML. Read path converts HTML→Markdown for the LLM
-(token-efficient, structure-preserving); write path converts
-Markdown→HTML and restricts pre-existing HTML to safe tags.
+"""HTML ↔ Markdown for Polarion rich-text fields: read path HTML→Markdown
+(token-efficient for the LLM), write path Markdown→HTML + tag sanitization.
 """
 
 from __future__ import annotations
@@ -46,8 +42,7 @@ ALLOWED_TAGS: Final[frozenset[str]] = frozenset(
     }
 )
 
-# Per-tag safe-attribute allowlist; tags absent permit none. Blocks on*
-# handlers and other non-presentational attrs that enable stored XSS.
+# Per-tag attr allowlist (absent tag = none); blocks on* handlers → stored XSS.
 ALLOWED_ATTRS: Final[dict[str, frozenset[str]]] = {
     "a": frozenset({"href", "title"}),
     "td": frozenset({"colspan", "rowspan"}),
@@ -60,27 +55,18 @@ _DECOMPOSE_TAGS: Final[frozenset[str]] = frozenset({"script", "style"})
 # Safe href schemes; others (javascript:, data:, vbscript:) stripped (XSS).
 _SAFE_URL_SCHEMES: Final[frozenset[str]] = frozenset({"http", "https", "mailto"})
 
-# Cap on cells per merge expansion (colspan*rowspan); bounds adversarial
-# colspan=1000 rowspan=1000 (1M clones), covers realistic tables.
+# Bounds adversarial colspan*rowspan (1M clones); covers realistic tables.
 _MAX_CELLS_PER_MERGE: Final[int] = 10_000
 
-# CommonMark + GFM tables. html_block/html_inline disabled so raw HTML in
-# supplied Markdown can't bypass sanitization.
+# html_block/html_inline disabled so raw HTML can't bypass sanitization.
 _md_renderer: Final[MarkdownIt] = (
     MarkdownIt("commonmark").disable(["html_block", "html_inline"]).enable("table")
 )
 
 
 def html_to_markdown(html: str) -> str:
-    """Convert Polarion HTML to Markdown for LLM consumption.
-
-    Preserves headings, lists, tables, and inline formatting as Markdown.
-
-    Args:
-        html: Raw HTML string from a Polarion content field.
-
-    Returns:
-        Markdown text; empty string for empty/whitespace input.
+    """Polarion HTML → Markdown (headings/lists/tables/inline preserved);
+    empty/whitespace input → empty string.
     """
     if not html or not html.strip():
         return ""
@@ -92,15 +78,10 @@ def html_to_markdown(html: str) -> str:
 
 
 def _render_polarion_rte_links(html: str) -> str:
-    """Convert ``span.polarion-rte-link`` placeholders to ``<a>`` tags.
-
-    Polarion serialises rich-text refs as empty ``<span>`` with the target
-    on ``data-*`` attrs; ``markdownify`` drops empty spans, losing the link.
-    Lift the target into ``<a href="polarion:...">label</a>``.
-
-    ``polarion:`` is intentionally absent from ``_SAFE_URL_SCHEMES``: if
-    this Markdown round-trips through ``sanitize_html`` the href is
-    stripped, keeping an unresolvable scheme out of write payloads.
+    """Lift ``span.polarion-rte-link`` (empty span, target on ``data-*``) into
+    ``<a href="polarion:...">`` — markdownify drops empty spans, losing the
+    link. ``polarion:`` is intentionally absent from ``_SAFE_URL_SCHEMES`` so a
+    round-trip through ``sanitize_html`` strips the unresolvable href.
     """
     if "polarion-rte-link" not in html:
         return html
@@ -116,11 +97,8 @@ def _render_polarion_rte_links(html: str) -> str:
 
 
 def _resolve_rte_link(span: Tag) -> tuple[str, str]:
-    """Return ``(href, label)`` for one ``polarion-rte-link`` span.
-
-    ``("", "")`` when neither richPage nor work-item metadata is usable, so
-    the caller leaves the span untouched. ``label`` is pre-escaped so
-    ``[``, ``]``, ``\\`` survive Markdown link syntax.
+    """``(href, label)`` for one rte-link span; ``("", "")`` = unusable, caller
+    leaves span untouched. Label pre-escaped for Markdown link syntax.
     """
     inner_text = span.get_text(strip=True)
     data_type_raw = span.attrs.get("data-type", "")
@@ -156,20 +134,14 @@ def _resolve_rte_link(span: Tag) -> tuple[str, str]:
 
 
 def _escape_md_link_label(text: str) -> str:
-    """Backslash-escape characters that break Markdown link syntax.
-
-    Unescaped ``[``/``]`` in anchor text collapses ``[label](href)``; a
-    trailing ``\\`` swallows the closing bracket.
-    """
+    """Escape ``[``/``]``/``\\`` — unescaped they collapse ``[label](href)``."""
     return text.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
 
 
 def _fill_empty_img_alt(html: str) -> str:
-    """Promote ``<img title>`` (or post-colon ``src`` filename) to ``alt``.
-
-    Polarion stores attachments as ``<img src="attachment:NAME"/>`` with
-    the filename on ``title``, making markdownify emit a label-less
-    ``![](src)``.
+    """Promote ``<img title>`` (or post-colon ``src`` filename) to ``alt`` —
+    Polarion puts attachment filenames on ``title``, so markdownify emits a
+    label-less ``![](src)``.
     """
     if "<img" not in html.lower():
         return html
@@ -183,8 +155,7 @@ def _fill_empty_img_alt(html: str) -> str:
         title_raw = img.attrs.get("title", "")
         title = title_raw if isinstance(title_raw, str) else ""
         label = title.strip()
-        # Skip src-filename fallback for absolute URLs — post-colon segment
-        # is host+path, not a filename.
+        # No src-filename fallback for absolute URLs (post-colon = host+path).
         if not label and "://" not in src:
             _, sep, after = src.partition(":")
             label = after if sep else src
@@ -196,12 +167,9 @@ def _fill_empty_img_alt(html: str) -> str:
 
 
 def _expand_merged_table_cells(html: str) -> str:
-    """Rectangularize tables by duplicating ``colspan``/``rowspan`` cells.
-
-    ``markdownify`` 1.2.2 renders colspan as empty cells and drops rowspan
-    entirely, breaking GFM cell counts. Duplicate each spanned cell into
-    every grid position it covers so the table is rectangular and emits
-    valid GFM.
+    """Duplicate ``colspan``/``rowspan`` cells into every covered grid position
+    — markdownify 1.2.2 renders colspan as empty cells and drops rowspan,
+    breaking GFM cell counts.
     """
     if "<table" not in html.lower():
         return html
@@ -212,11 +180,8 @@ def _expand_merged_table_cells(html: str) -> str:
 
 
 def _rectangularize_table(table: Tag) -> None:
-    """Replace one table's span attributes with duplicated cells.
-
-    A cell at (row, col) with ``colspan=N rowspan=M`` becomes ``N*M`` copies
-    at ``(row..row+M-1, col..col+N-1)``. Reservations from earlier rows shift
-    later rows' cells rightward to keep the column index correct.
+    """Expand one table: ``colspan=N rowspan=M`` cell → ``N*M`` copies;
+    reservations from earlier rows shift later cells rightward.
     """
     rows: list[Tag] = [
         tr for tr in table.find_all("tr") if tr.find_parent("table") is table
@@ -224,7 +189,7 @@ def _rectangularize_table(table: Tag) -> None:
     if not rows:
         return
 
-    # reservations[i][col]: a clone scheduled for (i, col) from a rowspan above.
+    # reservations[i][col]: clone scheduled by a rowspan above.
     reservations: list[dict[int, Tag]] = [{} for _ in rows]
 
     for row_idx, row in enumerate(rows):
@@ -239,8 +204,7 @@ def _rectangularize_table(table: Tag) -> None:
             colspan = _get_span(cell, "colspan")
             rowspan = _get_span(cell, "rowspan")
 
-            # Bound expansion per merge; drop rowspan first (rows scarcer
-            # than columns).
+            # Over cap: drop rowspan first (rows scarcer than columns).
             if colspan * rowspan > _MAX_CELLS_PER_MERGE:
                 rowspan = max(1, _MAX_CELLS_PER_MERGE // colspan)
 
@@ -248,9 +212,8 @@ def _rectangularize_table(table: Tag) -> None:
                 if attr in cell.attrs:
                     del cell.attrs[attr]
 
-            # Place original + colspan dupes one column at a time, skipping
-            # columns reserved by a rowspan above (cell may land on
-            # non-contiguous indices, as browsers do).
+            # Skip columns reserved by rowspans above — non-contiguous
+            # placement, as browsers do.
             placed_cols: list[int] = []
             for j in range(colspan):
                 while col_idx in layout:
@@ -266,18 +229,14 @@ def _rectangularize_table(table: Tag) -> None:
                 for placed_col in placed_cols:
                     reservations[target][placed_col] = _clone_cell(cell)
 
-        # Rebuild in column order; clear() also drops inter-cell whitespace
-        # (markdownify ignores it anyway).
+        # clear() drops inter-cell whitespace (markdownify ignores it anyway).
         row.clear()
         for col in sorted(layout):
             row.append(layout[col])
 
 
 def _get_span(cell: Tag, attr_name: str) -> int:
-    """Return colspan/rowspan as int in ``[1, 1000]`` (mirrors markdownify).
-
-    Missing, non-string, or non-numeric values fall back to 1.
-    """
+    """colspan/rowspan as int in ``[1, 1000]`` (mirrors markdownify); invalid → 1."""
     raw = cell.attrs.get(attr_name)
     if isinstance(raw, list):
         raw = raw[0] if raw else ""
@@ -290,11 +249,7 @@ def _get_span(cell: Tag, attr_name: str) -> int:
 
 
 def _clone_cell(cell: Tag) -> Tag:
-    """Return a detached deep copy of ``cell`` with span attributes stripped.
-
-    ``deepcopy`` yields a parent-less subtree attachable elsewhere. Span
-    attrs removed defensively (``_rectangularize_table`` already strips them).
-    """
+    """Detached deep copy of ``cell``, span attrs stripped defensively."""
     clone: Tag = deepcopy(cell)
     for attr in ("colspan", "rowspan"):
         if attr in clone.attrs:
@@ -303,17 +258,8 @@ def _clone_cell(cell: Tag) -> Tag:
 
 
 def markdown_to_html(text: str) -> str:
-    """Convert Markdown (or plain text) to Polarion-compatible HTML.
-
-    ``markdown-it-py`` (CommonMark + GFM tables) handles tables, nested
-    lists, headings, and inline formatting. Plain text is wrapped in ``<p>``.
-
-    Args:
-        text: Markdown or plain text supplied by the user or LLM.
-
-    Returns:
-        HTML for a Polarion ``description.value`` field; empty string for
-        empty/whitespace input.
+    """Markdown (or plain text) → Polarion-compatible HTML (CommonMark + GFM
+    tables; plain text wrapped in ``<p>``); empty input → empty string.
     """
     if not text or not text.strip():
         return ""
@@ -322,38 +268,24 @@ def markdown_to_html(text: str) -> str:
 
 
 def sanitize_html(html: str) -> str:
-    """Remove disallowed HTML tags and attributes.
+    """Restrict HTML to ``ALLOWED_TAGS``/``ALLOWED_ATTRS``.
 
-    Two removal strategies:
-
-    * **Decompose** (tag + content): ``script``/``style`` — executable
-      code/CSS, never visible text.
-    * **Unwrap** (tag removed, content kept): all other disallowed tags
-      (e.g. ``section``, ``font``), preserving visible text and children.
-
-    Surviving tags keep only ``ALLOWED_ATTRS`` attributes (drops all
-    ``on*`` handlers → stored XSS). ``href`` values are validated against
-    ``_SAFE_URL_SCHEMES``; dangerous schemes (``javascript:``, ``data:``)
-    have their ``href`` removed.
-
-    Args:
-        html: Raw HTML that may contain disallowed tags or attributes.
-
-    Returns:
-        HTML with only ``ALLOWED_TAGS``/``ALLOWED_ATTRS``; empty string for
-        empty/whitespace input.
+    ``script``/``style`` decomposed (content too — never visible text); other
+    disallowed tags unwrapped (children kept). Surviving tags lose non-allowed
+    attrs (kills ``on*`` → stored XSS); ``href`` outside ``_SAFE_URL_SCHEMES``
+    (``javascript:``, ``data:``) removed.
     """
     if not html or not html.strip():
         return ""
 
     soup = BeautifulSoup(html, "html.parser")
 
-    # Collect first — both decompose() and unwrap() mutate the tree in-place.
+    # Collect first — decompose()/unwrap() mutate the tree in-place.
     disallowed: list[Tag] = [
         tag for tag in soup.find_all(True) if tag.name not in ALLOWED_TAGS
     ]
     for tag in disallowed:
-        # A parent's decompose() already detached this tag; skip it.
+        # Already detached by a parent's decompose().
         if tag.parent is None:
             continue
         if tag.name in _DECOMPOSE_TAGS:
@@ -386,27 +318,13 @@ _BLOCK_TAGS_NEEDING_IDS: Final[frozenset[str]] = frozenset(
 
 
 def stamp_block_ids(html: str, prefix: str = "polarion_mcp") -> str:
-    """Stamp unique ``id=`` on the block-level elements Polarion's
-    ``/parts`` derivation requires.
-
-    Polarion stores ``homePageContent`` verbatim and does not auto-assign
-    ids. An anchorless ``<p>`` (or any ``_BLOCK_TAGS_NEEDING_IDS`` tag)
-    saves fine but makes the next ``GET .../parts`` return HTTP 500.
-    Heading tags (``<h1>..<h6>``) are skipped — Polarion rewrites their ids
-    into the ``module-workitem`` macro on save. Existing non-blank ids are
-    preserved; generated ids skip values already in the document so the
-    PATCH never trips Polarion's HTTP 400 duplicate-id rule. Returns the
-    input unchanged (verbatim, not reserialized) when every target block
-    already carries a non-blank id, so an anchored round-trip body is never
+    """Stamp unique ``id="{prefix}_{N}"`` on anchorless ``_BLOCK_TAGS_NEEDING_IDS``
+    blocks — an anchorless block saves fine but makes the next ``GET .../parts``
+    return HTTP 500. Headings skipped (Polarion rewrites their ids on save).
+    Existing non-blank ids preserved; generated ids skip in-document values
+    (Polarion 400s on duplicates). Input returned verbatim (not reserialized)
+    when nothing needs stamping, so an anchored round-trip body is never
     perturbed.
-
-    Args:
-        html: HTML string (typically ``sanitize_html`` output).
-        prefix: Base for generated ids; final form ``"{prefix}_{N}"``.
-
-    Returns:
-        HTML with a unique ``id`` on every target block; empty string for
-        empty input.
     """
     if not html or not html.strip():
         return ""
@@ -431,21 +349,15 @@ def stamp_block_ids(html: str, prefix: str = "polarion_mcp") -> str:
         used_ids.add(new_id)
         counter += 1
         stamped = True
-    # Verbatim when nothing changed: str(soup) reserializes the whole string
-    # (e.g. &nbsp; -> \xa0), which would corrupt an already-anchored round-trip body.
+    # str(soup) reserializes (&nbsp; -> \xa0): verbatim input when unstamped.
     return str(soup) if stamped else html
 
 
 def first_anchorless_block(html: str) -> str | None:
-    """Return the name of the first block lacking a non-empty ``id=``.
-
-    Defensive counterpart to :func:`stamp_block_ids`: ``create_document`` and
-    ``update_document`` run it after stamping so a stamping regression cannot
-    reach Polarion, where each anchorless block makes the next
-    ``GET .../parts`` return HTTP 500. Headings are exempt (Polarion rewrites
-    their ids). ``None`` when every ``_BLOCK_TAGS_NEEDING_IDS`` block has an
-    id, or input is empty. A whitespace-only ``id`` counts as anchorless,
-    matching ``stamp_block_ids``'s skip test.
+    """Name of the first block lacking a non-empty ``id=`` (whitespace-only
+    counts), or ``None``. Defensive counterpart to :func:`stamp_block_ids` —
+    document tools run it post-stamping so a stamping regression cannot reach
+    Polarion (anchorless block ⇒ ``GET .../parts`` HTTP 500).
     """
     if not html or not html.strip():
         return None

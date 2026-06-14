@@ -1,9 +1,5 @@
-"""Unit tests for the release-notes CI helper in `.github/scripts/`.
-
-The script lives outside the package and shells out to `gh`, so it is loaded by
-path via importlib and `_gh` is monkeypatched to feed canned API responses. Only
-the pure `tag_highlights` parser is covered; the `main()` stdout path is left to
-the workflow itself.
+"""Release-notes helper tests, loaded by path via importlib with `_gh`
+monkeypatched. Pure `tag_highlights` only; `main()` left to the workflow.
 """
 
 from __future__ import annotations
@@ -27,7 +23,8 @@ brn = load_module_from_path(SCRIPT, "build_release_notes")
 
 def _fake_gh(*, ref_object: dict[str, str], message: str | None = None):
     """Return a `_gh` stub: the ref lookup yields `ref_object`; the tag lookup
-    (only reached for annotated tags) yields `message`."""
+    (only reached for annotated tags) yields `message`.
+    """
 
     def _gh(*args: str) -> str:
         url = args[-1]

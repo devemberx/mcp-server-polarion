@@ -168,8 +168,8 @@ def _parse_document_part(
         elif short_id.startswith("pagebreak_"):
             part_type = "page_break"
 
-    # Heading/workitem body lives in title/description, not attributes.content
-    # (empty <hN> stub) — skip conversion to avoid "#" noise.
+    # Heading/workitem body lives in title/description; content is an empty
+    # <hN> stub — skip conversion to avoid "#" noise.
     content_html = (
         _extract_html_value(attributes.get("content"))
         if part_type not in {"heading", "workitem"}
@@ -223,10 +223,8 @@ _FENCED_MIN_LINES: Final[int] = 2
 
 
 def _render_parts_to_markdown(parts: list[DocumentPart]) -> str:
-    """Interleave a page of parts into one flowing Markdown string.
-
-    Per-type rendering lives in ``_render_part``. Chunks join on a blank line;
-    runs of 3+ newlines collapse to 2.
+    """Interleave a page of parts into one Markdown string; chunks join on a
+    blank line, runs of 3+ newlines collapse to 2.
     """
     chunks: list[str] = []
     for part in parts:
@@ -268,10 +266,8 @@ def _render_workitem_part(part: DocumentPart) -> str:
 
 
 def _decorate_wikiblock(content: str) -> str:
-    """Lift the Velocity macro name into the fenced-code info-string.
-
-    ``#macroName(...)`` in a fence → ` ```macroName `. Falls back to the raw
-    fence when no ``#name(`` token is detectable.
+    """Lift the Velocity macro name (``#name(``) into the fenced-code
+    info-string; raw fence when none detectable.
     """
     stripped = content.strip()
     if not stripped:
@@ -291,10 +287,8 @@ def _decorate_wikiblock(content: str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class _DocumentMeta:
-    """Document attributes plus unresolved editor user ids from discovery.
-
-    User ids are join keys into the response's included ``users`` resources;
-    they never surface in tool output (display names only).
+    """Document attributes + editor user ids (join keys into included
+    ``users``; never surfaced in output — display names only).
     """
 
     type: str = ""
@@ -308,12 +302,10 @@ def _extract_document_from_module(
     resource: object,
     documents: dict[tuple[str, str], _DocumentMeta],
 ) -> None:
-    """Record an included ``module`` resource as (space_id, document_name) -> meta.
+    """Record an included ``module`` resource as (space_id, document_name) → meta.
 
-    Module ``id`` format: ``{projectId}/{spaceId}/{documentName}``. Attributes and
-    the author/updatedBy relationships are present because discovery names them in
-    ``fields[documents]`` -- a plain ``module`` relationship carries only the
-    resource identifier.
+    Attributes/relationships only present because discovery names them in
+    ``fields[documents]``; a plain ``module`` relationship carries id only.
     """
     if not isinstance(resource, dict) or resource.get("type") != "documents":
         return
@@ -339,16 +331,11 @@ async def _discover_documents(
     client: PolarionClient,
     project_id: str,
 ) -> list[DiscoveredDocument]:
-    """Discover every document in *project_id* with its display metadata.
+    """Discover every document in *project_id* with display metadata; TTL-cached.
 
-    One ``GROUP BY mod.c_uri`` SQL query collapses every heading work item to a
-    single representative per document, so each response page is one page of
-    *documents*, not headings -- far fewer round-trips than a per-heading scan.
-    ``include=module,module.author,module.updatedBy`` pulls each document's
-    attributes plus the editors' user names into ``included`` at no extra
-    request (a dot-path include alone drops the intermediate ``module``
-    resources -- it must be listed explicitly). TTL-cached so paginated callers
-    reuse the discovery.
+    ``GROUP BY mod.c_uri`` SQL collapses headings to one per document (pages of
+    documents, not headings). ``module`` must be listed alongside its dot-path
+    includes — a dot-path alone drops the intermediate resource.
     """
     cached = get_cached_documents(project_id)
     if cached is not None:
@@ -406,11 +393,7 @@ async def _discover_documents(
 
 
 def _extract_first_resource_id(response: dict[str, object]) -> str | None:
-    """Pull the first resource ID out of a JSON:API ``{"data": [...]}`` body.
-
-    Returns ``None`` when ``data`` is missing, not a non-empty list, or its
-    first entry has no ``id`` string.
-    """
+    """First resource id from a JSON:API ``{"data": [...]}`` body, else ``None``."""
     data = response.get("data")
     if not isinstance(data, list) or not data:
         return None
@@ -422,10 +405,8 @@ def _extract_first_resource_id(response: dict[str, object]) -> str | None:
 
 
 def _extract_created_module_name(response: dict[str, object]) -> str | None:
-    """Extract the document name from a 201 document-create response.
-
-    ``id`` is ``projectId/spaceId/documentName`` (name may contain ``/``).
-    ``None`` on an unexpected shape.
+    """Document name from a 201 create response (name may contain ``/``);
+    ``None`` on unexpected shape.
     """
     full_id = _extract_first_resource_id(response)
     if full_id is None:
@@ -445,11 +426,8 @@ def _build_update_document_payload(  # noqa: PLR0913
     home_page_content_html: str | None = None,
     custom_fields: dict[str, object] | None = None,
 ) -> dict[str, JsonValue]:
-    """Build the JSON:API PATCH body for ``.../documents/{d}``.
-
-    Single ``data`` object, required ``id`` ``"{project}/{space}/{document}"``,
-    skips unset. ``home_page_content_html`` wrapped verbatim into
-    ``{type,value}`` (empty-string guard lives in the tool layer).
+    """JSON:API PATCH body for ``.../documents/{d}``; skips unset.
+    ``home_page_content_html`` wrapped verbatim (empty guard in tool layer).
     """
     attributes: dict[str, JsonValue] = {}
     if title is not None:
@@ -484,10 +462,7 @@ def _build_create_document_payload(  # noqa: PLR0913
     status: str | None,
     custom_fields: dict[str, object] | None = None,
 ) -> dict[str, JsonValue]:
-    """Build the JSON:API POST body for ``.../spaces/{s}/documents``.
-
-    ``data`` list, ``type=documents``, inline ``attributes``, skips unset.
-    """
+    """JSON:API POST body for ``.../spaces/{s}/documents``; skips unset."""
     attributes: dict[str, JsonValue] = {
         "moduleName": module_name,
         "title": title,
@@ -644,8 +619,7 @@ async def get_document(
     relationships = data.get("relationships", {})
     if not isinstance(relationships, dict):
         relationships = {}
-    # User ids are join keys into the included ``users`` resources; output
-    # carries display names only.
+    # Output carries display names only; ids are join keys into included users.
     user_names = build_included_user_name_map(response)
 
     content_html = ""
@@ -809,8 +783,7 @@ async def read_document_parts(  # noqa: PLR0913
             if part is not None:
                 items.append(part)
 
-    # Seen-item count only when the server gives no usable total and the page
-    # is non-empty, else an out-of-range page inflates it.
+    # Fallback count only on a non-empty page, else out-of-range pages inflate it.
     raw_doc_total = extract_total_count(response)
     document_total = raw_doc_total
     if document_total <= 0 and items:
@@ -847,8 +820,8 @@ async def read_document(  # noqa: PLR0913
     round-trip via ``get_document(include_homepage_content_html=True)``. For
     metadata-only extraction prefer ``list_work_items`` SQL.
     """
-    # read_document_parts handles fetch + error mapping (decorator returns the
-    # original function, so it forwards directly).
+    # read_document_parts handles fetch + error mapping (@mcp.tool returns the
+    # original function).
     page = await read_document_parts(
         ctx,
         project_id=project_id,
@@ -1020,8 +993,7 @@ async def update_document(  # noqa: PLR0913
         )
 
     client = get_client(ctx)
-    # Guard type/status against type-agnostic options: avoids an extra GET,
-    # still catches obvious ghost ids.
+    # Type-agnostic enum guard: avoids an extra GET, still catches ghost ids.
     await guard_document_enums(
         client,
         project_id,
@@ -1030,8 +1002,7 @@ async def update_document(  # noqa: PLR0913
         status=status,
     )
 
-    # Build first: merge_custom_fields rejects standard-attribute collisions —
-    # more fundamental, and cheaper than the guard's GET.
+    # Build first: merge_custom_fields collision check is cheaper than guard GET.
     payload = _build_update_document_payload(
         project_id=project_id,
         space_id=space_id,
@@ -1042,8 +1013,7 @@ async def update_document(  # noqa: PLR0913
         home_page_content_html=home_page_content_html,
         custom_fields=custom_fields,
     )
-    # Unknown custom-field keys persist as silent ghosts; validate against the
-    # type's schema. A type change keys on the new type, else the current one.
+    # A type change keys the custom-field schema on the new type, else current.
     if custom_fields:
         effective_type = type or await _resolve_document_type(
             client, project_id, space_id, document_name

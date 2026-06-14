@@ -1,9 +1,5 @@
-"""Unit tests for the in-process fake Polarion backend.
-
-``FakePolarion._dispatch`` is a pure request router -- given an ``httpx.Request``
-it returns a canned ``httpx.Response`` and records mutations -- so it can be
-driven directly with hand-built requests, no respx/network needed. These tests
-pin the routing table the eval cases rely on and the mutation side-effect log.
+"""Fake-Polarion tests: ``_dispatch`` is a pure request router, driven with
+hand-built requests (no respx). Pins the routing table and the mutation log.
 """
 
 from __future__ import annotations

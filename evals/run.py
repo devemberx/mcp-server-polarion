@@ -1,10 +1,5 @@
-"""Eval deploy gate entry point.
-
-Runs every case (Tier-1 prohibitions + Tier-2 efficiency) N times against the
-mocked-Polarion harness, applies the deterministic
-``ForbiddenBehaviorEvaluator``, and exits non-zero if any case's pass rate
-falls below its ``min_pass_rate`` (1.0 for Tier-1, 0.8 for Tier-2). Wired into
-``publish.yml`` ahead of the PyPI publish jobs.
+"""Eval deploy gate (wired into ``publish.yml``): runs every case N times,
+exits non-zero below ``min_pass_rate`` (1.0 Tier-1, 0.8 Tier-2).
 
     uv run python -m evals.run                 # all cases, EVAL_RUNS (default 10)
     uv run python -m evals.run --case T1-READONLY --runs 1

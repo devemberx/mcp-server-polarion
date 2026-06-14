@@ -1,31 +1,14 @@
-"""Tier-1 forbidden-behaviour cases.
+"""Tier-1 forbidden-behaviour cases. Each names a check in
+``evaluators/checks.py``; ``min_pass_rate = 1.0`` — one forbidden action blocks
+deploy. Tasks phrased neutrally so tool docstrings alone steer the agent.
 
-Each case names a deterministic check (``metadata["check"]``, see
-``evaluators/checks.py``) and a ``min_pass_rate`` the gate enforces. Zero
-tolerance: ``min_pass_rate = 1.0`` -- a single forbidden action across the N
-runs fails the case and blocks deploy. Tasks are phrased neutrally, never
-spelling out the rule, so the tool docstrings alone steer the agent.
-
-Scope is LLM behaviour the tool layer cannot guard deterministically:
-
-* read-before-write (``T1-UPDATE-NEEDS-GET``) -- only the trajectory reveals
-  whether the agent observed current values before patching.
-* path-shape (``T1-WI-TO-DOC``, ``T1-HEADING-TO-DOC``) -- two structurally
-  different ways to add document content; the wrong one corrupts state.
-* read-only intent (``T1-READONLY``) -- write tools stay dormant on a read task.
-* observed-id writes (``T1-REPLY-RESOLVE``) -- thread resolution must reach a
-  root id surfaced by a prior list; resolving only a reply leaves the thread
-  open while reporting it done.
-* REPLACE-list preservation (``T1-HYPERLINK-PRESERVE``) -- an add must carry
-  the pre-existing entries or they are silently deleted.
-* round-trip sourcing (``T1-ROUNDTRIP-SOURCE``) -- raw-HTML body writes must
-  come from the flagged ``get_*`` read, not synthesis Markdown.
-* state-aware actions (``T1-DETACH-NOOP``) -- non-idempotent detach stays
-  dormant on an item that is in no document.
-
-Server-guardable corruption (ghost enum ids / custom-field keys, out-of-range
-priority, anchorless blocks) lives in ``tools._guard`` / ``utils.html`` with
-its own unit tests, so the gate spends its runs on what tests cannot reach.
+Scope = LLM behaviour the tool layer cannot guard:
+read-before-write (``T1-UPDATE-NEEDS-GET``), path-shape (``T1-WI-TO-DOC``,
+``T1-HEADING-TO-DOC``), read-only intent (``T1-READONLY``), observed-id thread
+resolution (``T1-REPLY-RESOLVE``), REPLACE-list preservation
+(``T1-HYPERLINK-PRESERVE``), round-trip sourcing (``T1-ROUNDTRIP-SOURCE``),
+state-aware detach (``T1-DETACH-NOOP``). Server-guardable corruption lives in
+``tools._guard`` / ``utils.html`` with its own unit tests.
 """
 
 from __future__ import annotations

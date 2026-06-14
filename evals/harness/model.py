@@ -1,15 +1,7 @@
-"""Model factory for the eval agent.
-
-A single LiteLLM adapter serves both cloud and local backends — switch with
-the ``EVAL_MODEL`` env var, no code change:
-
-    EVAL_MODEL=openai/gpt-4o-mini            # default, CI (needs OPENAI_API_KEY)
-    EVAL_MODEL=ollama/qwen2.5-coder:7b       # local (set EVAL_MODEL_BASE_URL)
-
-``temperature`` is pinned to 0.0 and ``parallel_tool_calls`` to False to keep
-the zero-tolerance gate stable. ``EVAL_NUM_RETRIES`` / ``EVAL_LLM_TIMEOUT``
-forward to LiteLLM so transient cloud 429/RateLimitError gets absorbed by
-backoff, not failing the case.
+"""Eval-agent model factory: one LiteLLM adapter, backend switched via
+``EVAL_MODEL`` (e.g. ``openai/gpt-4o-mini``, ``ollama/...`` + base URL).
+``temperature=0`` / ``parallel_tool_calls=False`` keep the gate stable;
+``EVAL_NUM_RETRIES``/``EVAL_LLM_TIMEOUT`` absorb transient 429s.
 """
 
 from __future__ import annotations

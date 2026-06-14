@@ -34,10 +34,9 @@ def _build_move_to_document_payload(
     previous_part_id: str | None,
     next_part_id: str | None,
 ) -> dict[str, JsonValue]:
-    """Build the flat ``moveToDocument`` action body (not JSON:API).
-
-    ``targetDocument`` plus at most one of ``previousPart`` / ``nextPart``
-    (both omitted = append). At-most-one re-checked here to fail closed.
+    """Flat ``moveToDocument`` action body (not JSON:API): ``targetDocument``
+    plus at most one of ``previousPart``/``nextPart`` (both omitted = append);
+    at-most-one re-checked here to fail closed.
     """
     if previous_part_id is not None and next_part_id is not None:
         msg = (

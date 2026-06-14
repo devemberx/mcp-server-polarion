@@ -1,12 +1,6 @@
-"""Integration tests that exercise the real MCP transport path.
-
-The tests under ``tests/tools/`` call ``@mcp.tool`` functions directly
-with a mocked ``Context``, which bypasses fastmcp's JSON Schema
-validation, tool registration, and lifespan client injection. This
-module drives the server through ``fastmcp.Client(mcp)`` in-memory
-transport so the full path — registration → JSON Schema → lifespan →
-``get_client(ctx)`` → real ``PolarionClient`` → mocked HTTP — runs end
-to end.
+"""Real MCP transport-path tests via ``fastmcp.Client(mcp)`` in-memory —
+covers registration → JSON Schema → lifespan → client → mocked HTTP, which
+direct-call tool tests bypass.
 """
 
 from __future__ import annotations

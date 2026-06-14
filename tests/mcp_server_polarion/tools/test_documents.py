@@ -96,11 +96,8 @@ def _make_part(
 def _stub_parts(
     monkeypatch: pytest.MonkeyPatch, parts: list[DocumentPart]
 ) -> AsyncMock:
-    """Replace ``read_document_parts`` with an AsyncMock returning *parts*.
-
-    Returns the mock so individual tests can assert call arguments. Page
-    metadata is derived from the part list so pagination defaults stay
-    sensible without each test having to spell them out.
+    """Replace ``read_document_parts`` with an AsyncMock returning *parts*; page
+    metadata derived from the list. Returns the mock for call assertions.
     """
     stub = AsyncMock(
         return_value=PaginatedResult[DocumentPart](
@@ -708,11 +705,8 @@ class TestGetDocument:
     async def test_include_homepage_content_html_false_omits_content(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """include_homepage_content_html=False → body skipped even when API echoes it.
-
-        With ``fields[documents]=@all`` the wire always carries
-        ``homePageContent``; the tool layer is responsible for hiding it
-        from the LLM unless asked.
+        """include_homepage_content_html=False → body hidden even though ``@all``
+        always carries it on the wire.
         """
         mock_client.get.return_value = {
             "data": {
@@ -774,12 +768,8 @@ class TestGetDocument:
     async def test_polarion_specific_markup_round_trips(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Polarion-specific spans / data-* attributes must survive on read.
-
-        This is the core round-trip guarantee — the same string must
-        be passable back into update_document(home_page_content_html=...)
-        unchanged. If sanitization / markdownify ever creeps back in,
-        these markers would be the first thing to disappear.
+        """Core round-trip guarantee: Polarion spans / data-* attrs survive read, so
+        the string can go back into update_document unchanged.
         """
         raw = (
             '<p>See <span class="polarion-rte-link" '
@@ -1412,12 +1402,8 @@ class TestReadDocumentParts:
     async def test_uses_tight_workitem_fieldset(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Embedded work items are fetched with WORK_ITEM_PART_FIELDS, not ``@all``.
-
-        DocumentPart only consumes title/type/status/description from the
-        linked work item; sending ``@all`` would ship every inline custom field
-        (KBs per page) for no downstream use. This guard prevents a
-        regression to the old over-fetching behaviour.
+        """Embedded work items use WORK_ITEM_PART_FIELDS, not ``@all`` — ``@all`` ships
+        KBs of unused inline customs per page.
         """
         mock_client.get.return_value = {
             "data": [],
@@ -2269,11 +2255,8 @@ class TestReadDocument:
 
 
 class TestReadDocumentFieldValidation:
-    """Verify Field constraints on ``read_document`` parameters.
-
-    Direct invocation bypasses FastMCP's JSON Schema gate; rebuild a
-    ``TypeAdapter`` from each parameter's annotation + ``FieldInfo`` to
-    prove the constraint is wired correctly.
+    """Field constraints on ``read_document`` — direct calls bypass FastMCP's JSON
+    Schema gate, so rebuild a ``TypeAdapter`` per parameter.
     """
 
     @staticmethod
@@ -2618,11 +2601,8 @@ class TestUpdateDocumentValidation:
     async def test_custom_fields_homepagecontent_collision_raises(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """`homePageContent` is a STANDARD_DOCUMENT_ATTRIBUTES key.
-
-        Allowing it via ``custom_fields`` would let a caller bypass the
-        explicit ``home_page_content_html`` parameter (and its empty-string
-        guard). The merge helper raises on collision; pin that semantics.
+        """`homePageContent` collision raises — allowing it via custom_fields would
+        bypass the explicit parameter and its empty-string guard.
         """
         with pytest.raises(ValueError, match="custom_fields keys collide"):
             await update_document(
@@ -3044,14 +3024,9 @@ class TestUpdateDocumentFieldValidation:
 
 
 class TestUpdateDocumentPitfallDocumentation:
-    """Lock the macro-div body-edit pitfall into the public docstring so a
-    future slim pass cannot silently delete it.
-
-    The pitfall was reproduced against the live testdrive server and is
-    user-facing (MCP hosts on other platforms never load CLAUDE.md), so the
-    warning must stay inside ``update_document.__doc__``. The anchorless-block
-    pitfall is gone from the docstring on purpose: the tool now stamps ids
-    automatically, so surfacing it would only distract the LLM.
+    """Lock the macro-div pitfall into ``update_document.__doc__`` — reproduced on
+    the live testdrive server, user-facing (other MCP hosts never load CLAUDE.md).
+    Anchorless-block pitfall intentionally absent: ids now auto-stamped.
     """
 
     def test_docstring_warns_about_macro_div_module_relationship_gap(self) -> None:
@@ -3329,7 +3304,8 @@ class TestCreateDocumentHappyPath:
     ) -> None:
         """Every block-level element from the target set gets a unique
         ``polarion_mcp_N`` id; headings are intentionally left bare so
-        Polarion can rewrite them to the macro form on save."""
+        Polarion can rewrite them to the macro form on save.
+        """
         mock_client.post.return_value = {
             "data": [{"type": "documents", "id": "MyProj/_default/MySpec"}]
         }
@@ -3362,7 +3338,8 @@ class TestCreateDocumentHappyPath:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A stamp_block_ids regression that leaves a block anchorless is
-        caught by the trailing first_anchorless_block guard before POST."""
+        caught by the trailing first_anchorless_block guard before POST.
+        """
         monkeypatch.setattr(_mod, "stamp_block_ids", lambda html: html)
         with pytest.raises(RuntimeError, match="anchorless block"):
             await create_document(
@@ -3914,7 +3891,8 @@ class TestUpdateDocumentAnchorlessGuard:
         reset_enum_guard_caches: None,
     ) -> None:
         """An already-anchored body round-trips byte-for-byte: stamp_block_ids
-        short-circuits before reserializing, so ``&nbsp;`` is not mangled."""
+        short-circuits before reserializing, so ``&nbsp;`` is not mangled.
+        """
         raw = '<p id="polarion_mcp_1">Note&nbsp;here</p>'
         result = await _call_update_doc(
             mock_ctx, home_page_content_html=raw, dry_run=True
@@ -3940,7 +3918,8 @@ class TestUpdateDocumentAnchorlessGuard:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """If a future stamp_block_ids regression leaves a block anchorless,
-        the trailing first_anchorless_block guard blocks the PATCH."""
+        the trailing first_anchorless_block guard blocks the PATCH.
+        """
         monkeypatch.setattr(_mod, "stamp_block_ids", lambda html: html)
         with pytest.raises(RuntimeError, match="anchorless block"):
             await _call_update_doc(

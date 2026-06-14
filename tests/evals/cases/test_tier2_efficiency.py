@@ -1,9 +1,5 @@
-"""Unit tests for the Tier-2 case definitions.
-
-Mirrors the Tier-1 invariants at the efficiency threshold: every case must
-name a registered check, carry ``min_pass_rate == 0.8``, and keep its name
-unique across BOTH tiers (``run.py --case`` selects by name from the
-concatenated list).
+"""Tier-2 case-definition invariants: registered check, ``min_pass_rate ==
+0.8``, name unique across BOTH tiers (``run.py --case`` selects by name).
 """
 
 from __future__ import annotations
