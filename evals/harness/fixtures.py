@@ -50,7 +50,6 @@ TESTCASE_ID = "MCPT-500"  # test case linked from CHILD_REQ_ID
 # Section A heading part id served by read_document_parts; anchors positional moves.
 SECTION_A_PART_ID = f"heading_{DOC_HEADING_ID}"
 
-# public: now crosses the module boundary into fake_polarion.
 TS = "2026-01-01T00:00:00.000Z"
 
 

@@ -1,9 +1,8 @@
-"""In-process fake Polarion: mirrors the real project's *structure* with fully
-synthetic *content* (no production data in eval logs). One catch-all respx
-route on the Polarion host; other hosts (LLM provider) fall through
-(``assert_all_mocked=False``). Mutations recorded, no side effects. Seed data
-and identifiers live in ``fixtures``; ``seeds`` is injectable so a case can
-serve an alternate set without touching the global.
+"""In-process fake Polarion: real project *structure*, synthetic *content* (no
+production data in eval logs). One catch-all respx route on the Polarion host;
+other hosts (LLM provider) fall through (``assert_all_mocked=False``). Mutations
+recorded, no side effects. Seed data lives in ``fixtures``; ``seeds`` is
+injectable for per-case alternates without touching the global.
 """
 
 from __future__ import annotations
@@ -68,8 +67,7 @@ class FakePolarion:
         }
 
     def _document_resource(self, name: str) -> dict[str, Any]:
-        # Direct index, not .get: only reached after the dispatch guard confirms
-        # name is a seeded document.
+        # Direct index, not .get: only reached once dispatch confirms name seeded.
         doc = self.seeds.documents[name]
         return {
             "type": "documents",
@@ -308,7 +306,7 @@ class FakePolarion:
             )
 
         # Exact match on a seeded doc: a broad "/documents/" would claim every
-        # name as existing, masking bugs in cases probing alternate names.
+        # name as existing, masking bugs in cases probing other names.
         doc_match = re.search(rf"/spaces/{SPACE}/documents/([^/]+)$", path)
         if doc_match and doc_match.group(1) in self.seeds.documents:
             return httpx.Response(

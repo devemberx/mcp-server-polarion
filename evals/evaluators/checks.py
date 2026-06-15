@@ -436,15 +436,14 @@ def _observed_value(call: dict[str, Any], arg_spec: object) -> str:
 def check_ordered_trajectory(
     trajectory: Trajectory, params: dict[str, Any]
 ) -> CheckResult:
-    """Composite orchestration over a partial order: every ``params['steps']``
-    must be satisfied by a trajectory call whose name is the step's ``tool`` (or
-    one of its alternatives) and whose args match ``match``. A step's ``after``
-    deps and its ``observed_in`` source must be earlier steps that ran before it;
-    an ``observed_arg`` value must appear in the source step's result. Steps are
-    matched greedily in declaration order, each picking the earliest call that
-    satisfies all its constraints (so a later read is chosen over an unrelated
-    earlier one). Order between independent steps is unconstrained. Optional
-    flags AND existing primitives.
+    """Composite orchestration over a partial order: each ``params['steps']`` is
+    satisfied by a trajectory call whose name matches the step's ``tool`` (or an
+    alternative) and whose args match ``match``. ``after`` deps and the
+    ``observed_in`` source must be earlier steps that ran before it; an
+    ``observed_arg`` value must appear in the source step's result. Steps match
+    greedily in declaration order, each taking the earliest call satisfying all
+    constraints (a later read beats an unrelated earlier one). Independent steps
+    are unordered. Optional flags AND existing primitives.
     """
     if params.get("read_only") and not (r := check_readonly(trajectory, params))[0]:
         return r

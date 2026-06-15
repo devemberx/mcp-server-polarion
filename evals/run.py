@@ -36,8 +36,7 @@ _REPORT_DIR = Path(__file__).parent / "reports"
 
 ALL_CASES = [*TIER1_CASES, *TIER2_CASES, *TIER3_CASES]
 
-# Staged publish gate: each tier runs as its own CI job so a cheap early-tier
-# failure skips the pricier later tiers, saving agent-API tokens.
+# One CI job per tier: a cheap early-tier failure skips pricier later tiers.
 TIERS: dict[str, list[Case]] = {
     "1": TIER1_CASES,
     "2": TIER2_CASES,
@@ -68,7 +67,7 @@ def _evaluate_once(
     task_output = run_case(case)
     output = task_output.get("output")
     if isinstance(output, str) and output.startswith(AGENT_ERROR_PREFIX):
-        # Agent crashed before acting; a partial trajectory must not read clean.
+        # Crashed agent: partial trajectory must not read clean.
         return False, f"agent run failed: {output}"
     data: EvaluationData[Any, Any] = EvaluationData(
         input=case.input,
