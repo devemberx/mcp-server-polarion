@@ -7,6 +7,7 @@ serves resources built from ``SEEDS``.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 POLARION_HOST = "https://polarion.example.com"
 API_PREFIX = "/polarion/rest/v1"
@@ -75,7 +76,7 @@ class DocumentPart:
     as ``{kind}_{work_item_id}``; ``nextPart`` links are derived from order.
     """
 
-    kind: str  # "heading" | "workitem"
+    kind: Literal["heading", "workitem"]
     work_item_id: str
     level: int = 1  # heading level; ignored for workitem parts
 

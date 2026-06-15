@@ -68,6 +68,8 @@ class FakePolarion:
         }
 
     def _document_resource(self, name: str) -> dict[str, Any]:
+        # Direct index, not .get: only reached after the dispatch guard confirms
+        # name is a seeded document.
         doc = self.seeds.documents[name]
         return {
             "type": "documents",
