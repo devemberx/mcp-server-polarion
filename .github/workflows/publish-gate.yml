@@ -1,0 +1,43 @@
+name: Publish Gate
+
+# Pre-publish eval gate, extracted from publish.yml so the deploy pipeline and
+# the gate that guards it live in separate, clearly named files. Reusable
+# (workflow_call) so publish.yml can run it as a hard blocking job on the same
+# tag push. OPENAI_API_KEY flows in from the caller via `secrets: inherit`.
+on:
+  workflow_call:
+
+jobs:
+  evals-tier1:
+    # Tier-1 forbidden-behaviour gate (zero tolerance). Cheapest tier, runs
+    # first so a destructive / footgun action blocks the publish before any
+    # agent tokens are spent on the later tiers.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/run-evals
+        with:
+          tier: "1"
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+
+  evals-tier2:
+    # Tier-2 efficiency gate; only runs once Tier-1 passed.
+    needs: evals-tier1
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/run-evals
+        with:
+          tier: "2"
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+
+  evals-tier3:
+    # Tier-3 orchestration gate; only runs once Tier-2 passed.
+    needs: evals-tier2
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/run-evals
+        with:
+          tier: "3"
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}

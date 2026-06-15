@@ -1,8 +1,8 @@
-name: Evals
+name: Evals (on-demand)
 
-# Manual pre-deploy gate run. Same checks as the publish gate, but triggered
-# on demand so results can be reviewed before tagging a release. Pick a single
-# tier or run all of them.
+# On-demand eval run. Same checks as the publish gate (publish-gate.yml), but
+# triggered manually so results can be reviewed before tagging a release. Pick
+# a single tier or run all of them.
 on:
   workflow_dispatch:
     inputs:

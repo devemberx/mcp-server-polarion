@@ -1,4 +1,4 @@
-name: Publish to PyPI
+name: Publish
 
 on:
   push:
@@ -6,42 +6,15 @@ on:
       - "v*"
 
 jobs:
-  evals-tier1:
-    # Tier-1 forbidden-behaviour gate (zero tolerance). Cheapest tier, runs
-    # first so a destructive / footgun action blocks the publish before any
-    # agent tokens are spent on the later tiers.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/run-evals
-        with:
-          tier: "1"
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-
-  evals-tier2:
-    # Tier-2 efficiency gate; only runs once Tier-1 passed.
-    needs: evals-tier1
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/run-evals
-        with:
-          tier: "2"
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-
-  evals-tier3:
-    # Tier-3 orchestration gate; only runs once Tier-2 passed.
-    needs: evals-tier2
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/run-evals
-        with:
-          tier: "3"
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+  gate:
+    # Hard pre-publish eval gate (tier1 -> tier2 -> tier3). Lives in its own
+    # file (publish-gate.yml); called here as a blocking job so nothing ships
+    # until every tier passes. `secrets: inherit` forwards OPENAI_API_KEY.
+    uses: ./.github/workflows/publish-gate.yml
+    secrets: inherit
 
   publish-test:
-    needs: evals-tier3
+    needs: gate
     runs-on: ubuntu-latest
     environment: testpypi
     permissions:
@@ -86,9 +59,59 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
 
+  publish-mcp-registry:
+    # Publish the server entry to the official MCP Registry after PyPI succeeds.
+    # GitHub OIDC authorises the io.github.devemberx/* namespace, so no secret
+    # is needed. The registry validates the PyPI package + its mcp-name marker,
+    # hence the wait-for-index step before publishing.
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # GitHub OIDC for the io.github.* namespace
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Wait for PyPI to index the new version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          for i in $(seq 1 20); do
+            curl -fsSL "https://pypi.org/pypi/mcp-server-polarion/${VERSION}/json" >/dev/null 2>&1 \
+              && { echo "PyPI has ${VERSION}"; exit 0; }
+            echo "waiting for PyPI ${VERSION} ($i)"; sleep 15
+          done
+          echo "PyPI did not index ${VERSION}"; exit 1
+
+      - name: Inject release version into server.json
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          python3 - "$VERSION" <<'PY'
+          import json, sys
+          v = sys.argv[1]
+          d = json.load(open("server.json"))
+          d["version"] = v
+          for pkg in d.get("packages", []):
+              pkg["version"] = v
+          json.dump(d, open("server.json", "w"), indent=2)
+          PY
+
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      - name: Authenticate to MCP Registry (GitHub OIDC)
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish to MCP Registry
+        run: ./mcp-publisher publish
+
   release:
-    # Publish the GitHub Release only after PyPI succeeds. Notes are generated
-    # natively from merged PRs and grouped by label via .github/release.yml.
+    # Publish the GitHub Release after PyPI succeeds. Kept independent of
+    # publish-mcp-registry (needs: publish, not the registry job): the registry
+    # is in preview and may be flaky, and a registry hiccup must not block the
+    # release notes. Notes are generated from merged PRs, grouped via
+    # .github/release.yml.
     needs: publish
     runs-on: ubuntu-latest
     permissions:

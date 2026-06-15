@@ -108,11 +108,13 @@ EVAL_MAX_CYCLES=10 EVAL_CASE_TIMEOUT=600 \
 
 ## Release pipeline
 
-- **Hard gate** — the `evals` job in
-  [`publish.yml`](../.github/workflows/publish.yml) runs on tag push, and
-  `publish-test` / `publish` depend on it, so a failing gate blocks the release.
-- **Manual pre-deploy run** — the
-  [`Tier-1 Evals`](../.github/workflows/evals.yml) workflow is
+- **Hard gate** — the `gate` job in
+  [`publish.yml`](../.github/workflows/publish.yml) calls the reusable
+  [`publish-gate.yml`](../.github/workflows/publish-gate.yml) (tier1 -> tier2 ->
+  tier3) on tag push, and every later publish job depends on it, so a failing
+  gate blocks the release.
+- **On-demand run** — the
+  [`Evals (on-demand)`](../.github/workflows/evals-on-demand.yml) workflow is
   `workflow_dispatch`: trigger it from the Actions tab with a chosen `model`
   and `runs` to review results before deciding to tag.
 
