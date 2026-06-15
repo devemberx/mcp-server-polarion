@@ -9,8 +9,8 @@ from typing import Any
 
 import httpx
 
-from evals.harness.fake_polarion import (
-    _WORK_ITEMS,
+from evals.harness.fake_polarion import FakePolarion
+from evals.harness.fixtures import (
     API_PREFIX,
     CHILD_REQ_ID,
     DOC,
@@ -24,9 +24,9 @@ from evals.harness.fake_polarion import (
     POLARION_HOST,
     PROJECT,
     SECTION_A_PART_ID,
+    SEEDS,
     SPACE,
     TESTCASE_ID,
-    FakePolarion,
 )
 
 _BASE = f"{POLARION_HOST}{API_PREFIX}"
@@ -82,7 +82,7 @@ class TestReadRouting:
     def test_work_item_list_returns_all(self) -> None:
         response = _get(FakePolarion(), f"/projects/{PROJECT}/workitems")
         assert response.status_code == 200
-        assert _json(response)["meta"]["totalCount"] == len(_WORK_ITEMS)
+        assert _json(response)["meta"]["totalCount"] == len(SEEDS.work_items)
 
     def test_work_item_list_filters_headings(self) -> None:
         response = _get(

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from strands_evals import Case
 
-from evals.harness.fake_polarion import (
+from evals.harness.fixtures import (
     CHILD_REQ_ID,
     DOC,
     FLOATING_TASK_ID,
