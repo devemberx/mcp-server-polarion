@@ -53,11 +53,18 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/mcp_server_polarion"]
 
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests/mcp_server_polarion",
+    "/tests/__init__.py",
+    "/tests/conftest.py",
+]
+
 [tool.ruff]
 target-version = "py313"
 line-length = 88
-# compress-code-comments eval fixtures are intentionally un-annotated, verbose
-# sample code (the skill's dirty input corpus); never lint/format them.
+# eval fixtures: un-annotated verbose samples (skill input corpus).
 extend-exclude = [".claude/skills/*/evals/files"]
 
 [tool.ruff.lint]
@@ -65,14 +72,13 @@ select = ["E", "W", "F", "I", "UP", "B", "SIM", "ANN", "PL", "C4", "PTH", "RUF",
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["ANN", "PLR", "S101", "S105", "S106"]
-# The eval harness drives third-party agent/LLM types (lots of `Any`) and is
-# not shipped in the wheel; relax the same rules tests get.
+# eval harness: third-party agent/LLM types (Any-heavy), not shipped.
 "evals/**" = ["ANN", "PLR", "S101", "S105", "S106", "S603", "S607", "E402"]
-# Claude Code PreToolUse hooks: local tooling scripts, not shipped in the wheel.
+# PreToolUse hooks: local scripts, not shipped.
 ".claude/hooks/**" = ["PLR"]
-# Release-notes CI helper: shells out to `gh`, not shipped in the wheel.
+# CI release-notes helper: shells out to gh, not shipped.
 ".github/scripts/**" = ["S603", "S607"]
-# Skill helper scripts shell out to `git`, not shipped in the wheel.
+# Skill scripts: shell out to git, not shipped.
 ".claude/skills/*/scripts/**" = ["S603", "S607"]
 
 [tool.mypy]

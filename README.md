@@ -2,9 +2,33 @@
 
 A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for **Polarion ALM**. Lets AI assistants read documents, work items, and traceability links — and create, update, and reorganize work items — directly from your Polarion instance.
 
+[![CI](https://github.com/devemberx/mcp-server-polarion/actions/workflows/ci.yml/badge.svg)](https://github.com/devemberx/mcp-server-polarion/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/mcp-server-polarion)](https://pypi.org/project/mcp-server-polarion/)
 [![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
+![mcp-server-polarion demo](https://raw.githubusercontent.com/devemberx/mcp-server-polarion/main/.github/assets/demo.gif)
+
+## Features
+
+- **24 tools** covering read and write across documents, work items, traceability links, and comments.
+- **Read** — render documents as Markdown, search with Lucene or SQL, walk incoming/outgoing links, resolve enum options.
+- **Write** — create and update work items and documents, manage links, reorganize document structure, post comments.
+- **Safe writes** — every write tool supports `dry_run`, and pre-write guards validate fields, enum values, and link targets before hitting Polarion.
+- **Built for LLMs** — strict async, fully typed, pagination on every list tool, docstrings written as the assistant's manual.
+
+## Quickstart
+
+Requires [**uv**](https://docs.astral.sh/uv/) (see [Prerequisites](#prerequisites)). Fastest path — Claude Code:
+
+```bash
+claude mcp add mcp-server-polarion \
+  -e POLARION_URL=https://polarion.example.com \
+  -e POLARION_TOKEN=your-personal-access-token \
+  -- uvx mcp-server-polarion
+```
+
+Other clients (VS Code, Claude Desktop, Cursor) — see [Setup](#setup).
 
 ## Prerequisites
 
@@ -131,7 +155,7 @@ claude mcp add mcp-server-polarion \
 | `list_projects` | List accessible projects |
 | `list_documents` | List documents in a project |
 | `list_work_items` | Search work items with Lucene or SQL queries |
-| `get_sql_query_recipes` | Fetch copy-paste SQL recipes for
+| `get_sql_query_recipes` | Fetch copy-paste SQL recipes for advanced queries |
 | `get_document` | Get document metadata, optionally with the raw body HTML |
 | `read_document` | Render a document end-to-end as Markdown |
 | `read_document_parts` | List a document's structural parts with embedded work item metadata |
