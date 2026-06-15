@@ -20,7 +20,8 @@ from strands_evals.types import TaskOutput
 import mcp_server_polarion.core.client as _client_mod
 from mcp_server_polarion.server import mcp
 
-from .fake_polarion import POLARION_HOST, PROJECT, FakePolarion
+from .fake_polarion import FakePolarion
+from .fixtures import POLARION_HOST, PROJECT
 from .mcp_bridge import TrajectoryRecorder, build_agent_tools
 from .model import build_model
 

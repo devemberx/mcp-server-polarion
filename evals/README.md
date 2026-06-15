@@ -138,8 +138,9 @@ intro paragraph, free-floating `MCPT-200` task carrying
 `custom_fields={"acceptance_criteria_id": "AC-1"}` and one `ref_ext`
 hyperlink, `MCPT-201` heading, `MCPT-202` ghost-typed task, comment thread
 `1`→`2`, project enum `hyperlink-role`) live in
-[`harness/fake_polarion.py`](harness/fake_polarion.py). Mirror the real
-server's *structure* there; keep all content synthetic. Bulk POSTs echo one
+[`harness/fixtures.py`](harness/fixtures.py) as `SEEDS`;
+[`harness/fake_polarion.py`](harness/fake_polarion.py) serves them. Mirror the
+real server's *structure* there; keep all content synthetic. Bulk POSTs echo one
 id per submitted entry, so bulk cases exercise the tools' count-match rule.
 
 Tier-3 adds: a second document `FakeParentDoc`; requirements `MCPT-300` (in
@@ -147,5 +148,5 @@ Tier-3 adds: a second document `FakeParentDoc`; requirements `MCPT-300` (in
 (in `FakeDoc`, no test-case link — coverage-gap signal), `MCPT-400` (parent, in
 `FakeParentDoc`), test case `MCPT-500`; a `FakeDoc` `/parts` response with the
 `Section A` heading part (`heading_MCPT-100`, the positional-move anchor); and
-project enum `workitem-link-role`. Forward links come from `_LINKS`; the back
+project enum `workitem-link-role`. Forward links come from `SEEDS.links`; the back
 direction is served via `list_work_items` `query=linkedWorkItems:{wi}`.
