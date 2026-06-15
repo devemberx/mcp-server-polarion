@@ -7,9 +7,7 @@ on:
 
 jobs:
   gate:
-    # Hard pre-publish eval gate (tier1 -> tier2 -> tier3). Lives in its own
-    # file (publish-gate.yml); called here as a blocking job so nothing ships
-    # until every tier passes. `secrets: inherit` forwards OPENAI_API_KEY.
+    # Blocking pre-publish eval gate; secrets: inherit forwards OPENAI_API_KEY.
     uses: ./.github/workflows/publish-gate.yml
     secrets: inherit
 
@@ -60,10 +58,8 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
 
   publish-mcp-registry:
-    # Publish the server entry to the official MCP Registry after PyPI succeeds.
-    # GitHub OIDC authorises the io.github.devemberx/* namespace, so no secret
-    # is needed. The registry validates the PyPI package + its mcp-name marker,
-    # hence the wait-for-index step before publishing.
+    # MCP Registry publish via GitHub OIDC (io.github.devemberx/* namespace, no
+    # secret). Registry validates the PyPI package, so wait-for-index runs first.
     needs: publish
     runs-on: ubuntu-latest
     permissions:
@@ -107,11 +103,8 @@ jobs:
         run: ./mcp-publisher publish
 
   release:
-    # Publish the GitHub Release after PyPI succeeds. Kept independent of
-    # publish-mcp-registry (needs: publish, not the registry job): the registry
-    # is in preview and may be flaky, and a registry hiccup must not block the
-    # release notes. Notes are generated from merged PRs, grouped via
-    # .github/release.yml.
+    # GitHub Release; needs publish (not the registry) so a flaky preview
+    # registry can't block notes. Notes built from merged PRs via release.yml.
     needs: publish
     runs-on: ubuntu-latest
     permissions:
@@ -124,7 +117,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Skip if release already exists (idempotent on job re-run).
+          # idempotent on re-run
           gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 && exit 0
           python3 .github/scripts/build_release_notes.py > "${RUNNER_TEMP}/notes.md"
           gh release create "${GITHUB_REF_NAME}" \

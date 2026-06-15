@@ -23,8 +23,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # 1. Parse title "type(scope)!: subject" into components.
-          #    Example: "feat(auth)!: add OAuth" → type=feat  scope=auth  bang=!
+          # 1. Parse "type(scope)!: subject" → type / scope / bang.
           type="$(printf '%s' "$PR_TITLE" | sed -nE 's/^([a-z]+)(\([^)]*\))?!?:.*/\1/p')"
           scope="$(printf '%s' "$PR_TITLE" | sed -nE 's/^[a-z]+\(([^)]*)\)!?:.*/\1/p')"
           bang="$(printf '%s' "$PR_TITLE" | sed -nE 's/^[a-z]+(\([^)]*\))?(!):.*/\2/p')"
