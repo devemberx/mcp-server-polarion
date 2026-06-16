@@ -7,7 +7,7 @@ description: Shrink LLM-facing MCP tool descriptions — `@mcp.tool` docstrings 
 
 Goal: minimize the characters (tokens) shipped to the client LLM through `@mcp.tool` descriptions — the tool `description` (the whole docstring) and the `Field(description=...)` param descriptions — pushing to the **failure boundary** while keeping the eval gate GREEN. Operate as a **compress → eval → compress** loop that probes the boundary and adopts the **last GREEN before it**. RED is never committed — RED only means "one cut too far."
 
-Be deliberate. One tool, one ladder step at a time. Snapshot before every cut. Reproduce a RED before trusting it (`min_pass_rate=1.0` makes a single RED possibly noise).
+Be deliberate. One tool at a time; each cut is a small delta from the current GREEN, never a jump to an absolute terse form. Snapshot before every cut. On RED, **bisect** the cut set — never full-revert to original (that is the net-zero trap). Reproduce a RED before trusting it (`min_pass_rate=1.0` makes a single RED possibly noise).
 
 ## What actually ships to the LLM (reprove every run — Step 0)
 
@@ -80,22 +80,30 @@ For each param, confirm the schema description text matches what you intend to e
 3. Step-0 dump + baseline chars.
 4. Sort tools by LLM-facing chars **descending**.
 
-**Per tool (greedy descent + rollback)** — one tool, one ladder step per iteration (small diffs make a RED traceable):
+**Cut risk classes** (L1 safest → L4 riskiest; draw candidate cuts in this order, cheapest-risk first — these are a *risk ordering of edits*, not atomic rungs to jump to):
+- **L1** — bits restated by the signature / self-evident clauses / trivially redundant prose (Scope B: redundant param trims if opted in).
+- **L2** — rewrite prose what→when(trigger); compress boundary + negative to one line each.
+- **L3** — prose toward trigger line + boundary line; params (Scope B) toward format/constraint/source only.
+- **L4 (floor-adjacent)** — trigger line + only load-bearing enum/format/source. No further.
+
+**Per tool (incremental descent + bisection)** — each cut is a small delta from the *current GREEN*, never a jump to an absolute terse form; a RED is recovered by **bisecting the cut set**, never by reverting to the original (revert-to-original is the net-zero trap):
 1. Snapshot current GREEN (working-copy snapshot, cheap to revert).
-2. Apply **the next single ladder step**:
-   - **L1** — drop bits restated by the signature / self-evident clauses (Scope B param trims if opted in; trivially redundant prose).
-   - **L2** — rewrite prose what→when(trigger); compress boundary + negative to one line each.
-   - **L3** — prose = trigger line + boundary line; params (Scope B) = format/constraint/source only.
-   - **L4 (floor-adjacent)** — trigger line + only load-bearing enum/format/source. No further.
-3. **Fast gate** → GREEN: go to 4-a. RED: go to 4-b.
+2. **First cut is always the gentlest** — L1 redundancy only. Gate → commit as the tool's first GREEN baseline **before** any rewrite. Guarantees ≥1 committed GREEN for every tool with slack, so a later overshoot can never zero the tool out.
+3. Build the next **candidate-cut set**: independent edits from the lowest unfinished risk class. Target ~15–20% of remaining reducible chars per step — a delta, not a leap to the floor.
+4. Apply the whole set, **Fast gate** → GREEN: go to 4-a. RED: go to 4-b.
 4-a. Fast GREEN → run **Confirm gate**:
-   - Confirm GREEN → commit as **new GREEN baseline**, refresh baseline chars, **re-sort**, descend again (step 2, next rung).
-   - Confirm RED (variance or overfit) → revert to snapshot, **lock** this tool at its last GREEN, move to next tool.
-4-b. Fast RED — diagnose before reverting:
-   - Read the failing eval transcript; identify **which tool was mis-selected or mis-parametrized, and why** (extended thinking on if available).
-   - If a specific load-bearing phrase is the cause (a trigger word, an enum value, a source line) → restore **only that phrase**, re-run Fast. GREEN → proceed to 4-a.
-   - If unclear or still RED after restore → full revert to snapshot, retry **one rung gentler**. If even the smallest meaningful cut is RED → tool is at **floor → lock**.
-   - `min_pass_rate=1.0`: **reproduce the RED once more** (re-run Fast) before locking — a lone RED can be noise.
+   - Confirm GREEN → commit as **new GREEN baseline**, refresh baseline chars, **re-sort**, build the next set (step 3).
+   - Confirm RED (variance or overfit) → revert to last GREEN, **lock** this tool, move to next tool.
+4-b. Fast RED — **bisect the candidate set, do NOT full-revert**:
+   - Split the set: safer half (L1 / redundant-param trims) vs riskier half (trigger/boundary/enum rewrites). Read the failing transcript to decide which cuts are riskier — **which tool was mis-selected or mis-parametrized, and why** (extended thinking on if available).
+   - Drop the riskier half, re-gate the safer half. GREEN → commit that subset, then re-attempt the dropped cuts **one at a time** (step 3). RED → recurse: bisect the still-applied set again.
+   - A single cut alone RED → that phrase is load-bearing → restore **only it**, keep the rest, lock it out of future sets.
+   - `min_pass_rate=1.0`: **reproduce a RED once** (re-run Fast) before calling a cut load-bearing — a lone RED can be noise.
+5. Repeat from 3 until the reducible set is exhausted or every remaining single cut is RED → **lock** at last GREEN.
+
+**Invariant:** a RED discards only the last delta, never accumulated GREEN. Net-zero for a tool happens only if its very first L1 trim is RED — meaning it was already at floor.
+
+**Confirm-gate cost:** smaller deltas mean more iterations, so don't run the (expensive) Confirm gate per delta far from the floor. For early L1 deltas, batch several Fast-GREEN deltas and Confirm once before switching risk class; near the boundary, Confirm per delta. A batched Confirm RED bisects the batch.
 
 **Global stop:** all tools locked; or a full pass's cumulative saving < ~50 chars; or an operator-set iteration cap is hit. **On stop, re-run all 3 gates at the last GREEN baseline and confirm green.** Submission = last GREEN, never RED.
 
@@ -138,7 +146,7 @@ Trigger/when line · one sibling-boundary line when a near-duplicate tool exists
 ## Output format
 
 1. **Step-0 result:** which surface each string ships on, the Scope-B param list (the no-op-for-Scope-A set), and the baseline char table.
-2. **Per tool** (LLM-facing chars descending): before/after diff + one-line rationale ("what was cut and why") + adopted ladder step + char (and token, if available) savings.
-3. **Loop log:** one row per iteration `[tool | cut (Lx / surgical restore) | Fast | Confirm | decision (commit/back-off/lock)]`; each RED cut + its diagnosis (which tool mis-selected and why) on one line.
+2. **Per tool** (LLM-facing chars descending): before/after diff + one-line rationale ("what was cut and why") + adopted risk class (Lx) and final cut set (post-bisection) + char (and token, if available) savings.
+3. **Loop log:** one row per iteration `[tool | cut (Lx set / bisect-subset / single restore) | Fast | Confirm | decision (commit/bisect/lock)]`; each RED cut + its diagnosis (which tool mis-selected and why) + the bisection outcome on one line.
 4. **Final gate captures:** all 3 green at the last GREEN baseline.
 5. **Total LLM-facing savings:** summed chars (+ token estimate) + per-tool before→after table.
