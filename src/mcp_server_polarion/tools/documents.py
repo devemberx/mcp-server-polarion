@@ -497,10 +497,9 @@ async def list_documents(
 ) -> PaginatedResult[DocumentSummary]:
     """List a project's documents.
 
-    Returns ``space_id`` + ``document_name`` (inputs to the other document
-    tools) plus ``type``, ``status``, ``updated`` timestamp, and the display
-    names of the creator (``author``) and last editor (``last_updated_by``).
-    Discovery scan cached 60s.
+    Returns space_id + document_name (inputs to the other document tools) plus
+    type, status, updated timestamp, and display names of creator (author) and
+    last editor (last_updated_by). Discovery scan cached 60s.
     """
     client = get_client(ctx)
 
@@ -560,23 +559,23 @@ async def get_document(
         description="Space ID ('_default' = default space).",
     ),
     document_name: str = Field(
-        description="Document name within ``space_id``.",
+        description="Document name within space_id.",
     ),
     include_homepage_content_html: bool = Field(
         default=False,
-        description="Fill ``content_html`` with raw HTML for round-trip editing.",
+        description="Fill content_html with raw HTML for round-trip editing.",
     ),
 ) -> DocumentDetail:
     """Get a document's metadata: title/type/status/editors/custom fields.
 
-    ``author`` / ``last_updated_by`` are display names (creator and last
-    editor); ``updated`` is the last-modified timestamp.
+    author / last_updated_by are display names (creator, last editor); updated
+    is the last-modified timestamp.
 
-    ``include_homepage_content_html=True`` fills ``content_html`` with raw
-    ``homePageContent`` HTML — the required source for
-    ``update_document(home_page_content_html=...)``. That body is inline prose
-    only (headings / embedded work items live elsewhere; ``read_document``
-    renders everything). Never feed back a blanked (flag=False) body.
+    include_homepage_content_html=True fills content_html with raw
+    homePageContent HTML — the required source for
+    update_document(home_page_content_html=...). That body is inline prose only
+    (headings / embedded work items live elsewhere; read_document renders all).
+    Never feed back a blanked (flag=False) body.
     """
     client = get_client(ctx)
     path = (
@@ -661,12 +660,11 @@ async def list_document_enum_options(  # noqa: PLR0913
     page_size: int = Field(default=DEFAULT_PAGE_SIZE, ge=1, le=100),
     page_number: int = Field(default=1, ge=1),
 ) -> PaginatedResult[EnumOption]:
-    """List valid enum option ids for a document field of the given type.
+    """List valid enum option ids for a document field of a given type.
 
-    Resolve enum ids here before ``create_document`` / ``update_document``.
-    Enum fields are validated on write — invalid ids raise with this set.
-    An unknown ``document_type`` silently falls back to ``~``, so verify the
-    type id first.
+    Resolve enum ids here before create_document / update_document — enums are
+    validated on write, invalid ids raise with this set. An unknown
+    document_type silently falls back to ~, so verify the type id first.
     """
     client = get_client(ctx)
     path = (
@@ -728,16 +726,15 @@ async def read_document_parts(  # noqa: PLR0913
     ctx: Context,
     project_id: str = Field(description="Polarion project ID."),
     space_id: str = Field(description="Space ID ('_default' = default space)."),
-    document_name: str = Field(description="Document name within ``space_id``."),
+    document_name: str = Field(description="Document name within space_id."),
     page_size: int = Field(default=DEFAULT_PAGE_SIZE, ge=1, le=100),
     page_number: int = Field(default=1, ge=1),
 ) -> PaginatedResult[DocumentPart]:
     """List a document's structural parts in order.
 
-    Use for structure: part IDs (positions for
-    ``move_work_item_to_document``), heading levels, per-part Markdown. Plain
-    reading → ``read_document``; listing a document's work items →
-    ``list_work_items``.
+    Use for structure: part IDs (positions for move_work_item_to_document),
+    heading levels, per-part Markdown. Plain reading → read_document; a
+    document's work items → list_work_items.
     """
     client = get_client(ctx)
     path = (
@@ -809,16 +806,16 @@ async def read_document(  # noqa: PLR0913
     ctx: Context,
     project_id: str = Field(description="Polarion project ID."),
     space_id: str = Field(description="Space ID ('_default' = default space)."),
-    document_name: str = Field(description="Document name within ``space_id``."),
+    document_name: str = Field(description="Document name within space_id."),
     page_size: int = Field(default=DEFAULT_PAGE_SIZE, ge=1, le=100),
     page_number: int = Field(default=1, ge=1),
 ) -> DocumentReadResult:
     """Render a document end-to-end as flowing Markdown — THE way to read a body.
 
     Interleaves headings, work-item descriptions, and prose. Synthesis output:
-    NEVER feed it to ``update_document`` (anchors collapse, headings orphan) —
-    round-trip via ``get_document(include_homepage_content_html=True)``. For
-    metadata-only extraction prefer ``list_work_items`` SQL.
+    NEVER feed to update_document (anchors collapse, headings orphan) —
+    round-trip via get_document(include_homepage_content_html=True). For
+    metadata-only extraction prefer list_work_items SQL.
     """
     # read_document_parts handles fetch + error mapping (@mcp.tool returns the
     # original function).
@@ -899,12 +896,12 @@ async def update_document(  # noqa: PLR0913
     ),
     document_name: str = Field(
         min_length=1,
-        description="Document name within ``space_id``.",
+        description="Document name within space_id.",
     ),
     title: str | None = None,
     status: str | None = Field(
         default=None,
-        description="New status; prefer ``workflow_action`` for real transitions.",
+        description="New status; prefer workflow_action for real transitions.",
     ),
     type: str | None = Field(
         default=None, description="New document type (e.g. 'req_specification')."
@@ -914,15 +911,13 @@ async def update_document(  # noqa: PLR0913
         max_length=MAX_BODY_HTML_LEN,
         description=(
             "New body as raw HTML from "
-            "``get_document(include_homepage_content_html=True)``; '' rejected; "
-            "anchorless blocks get ``id=`` auto-stamped."
+            "get_document(include_homepage_content_html=True); '' rejected; "
+            "anchorless blocks get id= auto-stamped."
         ),
     ),
     custom_fields: dict[str, object] | None = Field(  # noqa: B008
         default=None,
-        description=(
-            "Partial update; rich-text values as ``{'type':'text/html','value':...}``."
-        ),
+        description="Partial; rich-text values as {'type':'text/html','value':...}.",
     ),
     workflow_action: str | None = Field(
         default=None,
@@ -935,26 +930,25 @@ async def update_document(  # noqa: PLR0913
 ) -> DocumentUpdateResult:
     """Update a Polarion document's metadata or body.
 
-    PATCHes only the supplied attributes (omitted preserved); no follow-up GET.
-    Fetch via ``get_document`` BEFORE updating. ``home_page_content_html`` is
-    never sanitized or converted — source it from
-    ``get_document(include_homepage_content_html=True)``. Body blocks lacking
-    an ``id=`` get one auto-stamped; a fully anchored body is sent
-    byte-for-byte. Empty string rejected (orphans headings), pass
-    ``'<p></p>'`` for near-empty.
+    PATCHes only supplied attributes (omitted preserved); no follow-up GET.
+    Fetch via get_document BEFORE updating. home_page_content_html is never
+    sanitized or converted — source from
+    get_document(include_homepage_content_html=True); blocks lacking an id= get
+    one auto-stamped, a fully anchored body is sent byte-for-byte. Empty string
+    rejected (orphans headings) — pass '<p></p>' for near-empty.
 
     Body rules:
 
-    - Inline ``<h1>..<h4>`` auto-create heading work items — THE way to add a
-      heading. For body text or work items use ``create_work_items`` +
-      ``move_work_item_to_document``, NOT this tool.
-    - A ``polarion_wiki macro name=module-workitem`` ``<div>`` leaves the work
-      item's ``module`` unset — attach via ``move_work_item_to_document``.
+    - Inline <h1>..<h4> auto-create heading work items — THE way to add a
+      heading. For body text or work items use create_work_items +
+      move_work_item_to_document, NOT this tool.
+    - A polarion_wiki macro name=module-workitem <div> leaves the work item's
+      module unset — attach via move_work_item_to_document.
 
-    ``workflow_action`` must pair with ≥1 attribute (400 otherwise). Unknown
-    ``status`` / ``type`` raise ``ValueError``; ``custom_fields`` keys outside
-    the document type's schema are rejected, values are NOT validated —
-    resolve enum values via ``list_document_enum_options`` first.
+    workflow_action must pair with ≥1 attribute (else 400). Unknown status/type
+    raise ValueError; custom_fields keys outside the document type's schema are
+    rejected, values NOT validated — resolve via list_document_enum_options
+    first.
     """
     if home_page_content_html is not None and not home_page_content_html.strip():
         raise ValueError(
@@ -1082,7 +1076,7 @@ async def create_document(  # noqa: PLR0913
     module_name: str = Field(
         min_length=1,
         description=(
-            "Document identifier (e.g. 'MySpecV1'); unique within ``space_id``, "
+            "Document identifier (e.g. 'MySpecV1'); unique within space_id, "
             "appears in the document URL."
         ),
     ),
@@ -1107,7 +1101,7 @@ async def create_document(  # noqa: PLR0913
         default=None,
         description=(
             "Keyed by Polarion field ID (copy keys from a sibling document); "
-            "rich-text values as ``{'type':'text/html','value':...}``."
+            "rich-text values as {'type':'text/html','value':...}."
         ),
     ),
     dry_run: bool = Field(
@@ -1117,15 +1111,14 @@ async def create_document(  # noqa: PLR0913
 ) -> DocumentCreateResult:
     """Create a new Polarion document in a space.
 
-    ``module_name`` must be unique in the space (duplicate → HTTP 409) — check
-    ``list_documents`` first. ``type``/``status`` are validated — unknown ids
-    raise ``ValueError`` with valid options. ``custom_fields`` keys are
-    validated against the document type's schema.
+    module_name must be unique in the space (duplicate → HTTP 409) — check
+    list_documents first. type/status validated — unknown ids raise ValueError
+    with options; custom_fields keys validated against the document type schema.
 
-    ``home_page_content`` is Markdown → sanitized HTML, blocks auto-stamped
-    with unique ids. Post-create edits are raw-HTML round-trip via
-    ``get_document(include_homepage_content_html=True)`` ↔ ``update_document``;
-    add work items via ``move_work_item_to_document``.
+    home_page_content is Markdown → sanitized HTML, blocks auto-stamped with
+    unique ids. Post-create edits round-trip raw HTML via
+    get_document(include_homepage_content_html=True) ↔ update_document; add work
+    items via move_work_item_to_document.
     """
     client = get_client(ctx)
     await guard_document_enums(

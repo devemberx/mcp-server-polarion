@@ -83,11 +83,11 @@ async def move_work_item_to_document(  # noqa: PLR0913
     ),
     previous_part_id: str | None = Field(
         default=None,
-        description="Insert AFTER this part ID; exclusive with ``next_part_id``.",
+        description="Insert AFTER this part ID; exclusive with next_part_id.",
     ),
     next_part_id: str | None = Field(
         default=None,
-        description="Insert BEFORE this part ID; exclusive with ``previous_part_id``.",
+        description="Insert BEFORE this part ID; exclusive with previous_part_id.",
     ),
     dry_run: bool = Field(
         default=False,
@@ -96,15 +96,15 @@ async def move_work_item_to_document(  # noqa: PLR0913
 ) -> WorkItemMoveResult:
     """Move an existing work item into a document at a given position.
 
-    THE attach path: atomically sets ``module`` and inserts a part. Headings
-    rejected (HTTP 400) — add headings via ``update_document`` ``<hN>``. An
-    item already in a document is moved, not copied.
+    THE attach path: atomically sets module and inserts a part. Headings
+    rejected (HTTP 400) — add headings via update_document <hN>. An item
+    already in a document is moved, not copied.
 
-    At most one of ``previous_part_id`` (AFTER) / ``next_part_id`` (BEFORE);
-    omit both to append. Part IDs from ``read_document_parts``.
+    At most one of previous_part_id (AFTER) / next_part_id (BEFORE); omit both
+    to append. Part IDs from read_document_parts.
 
     Auto-creates one link to the enclosing heading; a later same-role
-    ``create_work_item_links`` returns 201 but is NOT persisted.
+    create_work_item_links returns 201 but is NOT persisted.
     """
     if previous_part_id is not None and next_part_id is not None:
         raise ValueError(
@@ -186,9 +186,9 @@ async def move_work_item_from_document(
     """Detach a work item from its document — the ONLY detach path.
 
     NOT idempotent: an already free-floating item returns HTTP 400 — first
-    confirm it is in a document (``get_work_item``: non-empty ``space_id``)
-    and skip the call when already detached. Item preserved, re-attachable
-    via ``move_work_item_to_document``. Headings detachable too.
+    confirm it is in a document (get_work_item: non-empty space_id) and skip
+    the call when already detached. Item preserved, re-attachable via
+    move_work_item_to_document. Headings detachable too.
     """
     if dry_run:
         return WorkItemMoveResult(

@@ -237,16 +237,15 @@ async def create_work_items(
 ) -> WorkItemsCreateResult:
     """Create 1-50 work items in one project in a single bulk request.
 
-    Standard enums (``type``/``status``/``severity``/``priority``) are
-    validated — unknown ids raise ``ValueError`` with valid options.
-    ``custom_fields`` keys are validated against the type's schema. Atomic:
-    one bad item rejects the whole batch; an id-count mismatch raises —
-    re-query ``list_work_items`` before retrying.
+    Standard enums (type/status/severity/priority) are validated — unknown ids
+    raise ValueError with valid options. custom_fields keys are validated
+    against the type's schema. Atomic: one bad item rejects the whole batch; an
+    id-count mismatch raises — re-query list_work_items before retrying.
 
     Items are created free-floating; place into a document with
-    ``move_work_item_to_document`` (this tool cannot). ``description`` is
-    Markdown → sanitized HTML; later edits are raw-HTML round-trip via
-    ``get_work_item(include_description_html=True)`` ↔ ``update_work_item``.
+    move_work_item_to_document (this tool cannot). description is Markdown →
+    sanitized HTML; later edits are raw-HTML round-trip via
+    get_work_item(include_description_html=True) ↔ update_work_item.
     """
     client = get_client(ctx)
     for spec in items:
@@ -341,13 +340,12 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
         default=None,
         max_length=MAX_BODY_HTML_LEN,
         description=(
-            "Raw HTML from ``get_work_item(include_description_html=True)``; "
-            "sent verbatim, unsanitized."
+            "Raw HTML from get_work_item(include_description_html=True); verbatim."
         ),
     ),
     status: str | None = Field(
         default=None,
-        description="New status; prefer ``workflow_action`` for real transitions.",
+        description="New status; prefer workflow_action for real transitions.",
     ),
     priority: str | None = Field(
         default=None,
@@ -361,7 +359,7 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     ),
     resolution: str | None = Field(
         default=None,
-        description="Prefer ``workflow_action`` so workflow rules apply.",
+        description="Prefer workflow_action so workflow rules apply.",
     ),
     hyperlinks: list[Hyperlink] | None = Field(  # noqa: B008
         default=None,
@@ -373,9 +371,7 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     ),
     custom_fields: dict[str, object] | None = Field(  # noqa: B008
         default=None,
-        description=(
-            "Partial update; rich-text values as ``{'type':'text/html','value':...}``."
-        ),
+        description="Partial; rich-text values as {'type':'text/html','value':...}.",
     ),
     workflow_action: str | None = Field(
         default=None,
@@ -387,33 +383,30 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     ),
     include_current_description_html: bool = Field(
         default=False,
-        description="Return post-PATCH raw HTML in ``current.description_html``.",
+        description="Return post-PATCH raw HTML in current.description_html.",
     ),
     dry_run: bool = Field(
         default=False,
         description="Preview payload without writing; guards still query Polarion.",
     ),
 ) -> WorkItemUpdateResult:
-    """Update fields on an existing work item; ``None``/empty = leave unchanged.
+    """Update fields on an existing work item; None/empty = leave unchanged.
 
-    Fetch current state with ``get_work_item`` BEFORE updating. PATCHes then
-    GETs (``current`` reflects the result).
+    Fetch current state with get_work_item BEFORE updating; PATCHes then GETs.
+    description_html is raw Polarion HTML, sent verbatim — source from
+    get_work_item(include_description_html=True); greenfield bodies use
+    create_work_items Markdown, formats never mix.
 
-    ``description_html`` is raw Polarion HTML, sent verbatim/unsanitized —
-    source it from ``get_work_item(include_description_html=True)``. Greenfield
-    bodies go through ``create_work_items`` Markdown; formats never mix.
+    hyperlinks/assignee_ids REPLACE the stored list — resubmit every existing
+    entry plus the change or omissions are deleted. custom_fields is partial,
+    keys outside the type schema rejected, values NOT validated — resolve via
+    list_work_item_enum_options first.
 
-    ``hyperlinks`` / ``assignee_ids`` REPLACE the stored list: resubmit every
-    existing entry plus the change, or omissions are silently deleted.
-    ``custom_fields`` is partial; keys outside the type's schema are rejected,
-    values are NOT validated — resolve enum values via
-    ``list_work_item_enum_options`` first.
-
-    ``module`` not settable here — use ``move_work_item_to_document`` /
-    ``move_work_item_from_document``. ``workflow_action`` / ``change_type_to``
-    must pair with ≥1 body field (400 otherwise). Unknown enum ids raise
-    ``ValueError`` listing valid options; with ``change_type_to``,
-    status/severity/resolution scope to the target type.
+    module not settable here — use move_work_item_to_document /
+    move_work_item_from_document. workflow_action/change_type_to must pair with
+    ≥1 body field (else 400); unknown enum ids raise ValueError with options;
+    change_type_to scopes status/severity/resolution to the target type and
+    resets status.
     """
     changes: dict[str, JsonValue] = {}
     if title:
@@ -620,12 +613,11 @@ async def list_work_item_enum_options(  # noqa: PLR0913
     page_size: int = Field(default=DEFAULT_PAGE_SIZE, ge=1, le=100),
     page_number: int = Field(default=1, ge=1),
 ) -> PaginatedResult[EnumOption]:
-    """List valid enum option ids for a work item field of the given type.
+    """List valid enum option ids for a work item field of a given type.
 
-    Resolve enum ids here before ``create_work_items`` / ``update_work_item``.
-    Enum fields are validated on write — invalid ids raise with this set.
-    An unknown ``work_item_type`` silently falls back to ``~``, so verify the
-    type id first.
+    Resolve enum ids here before create_work_items / update_work_item — enums
+    are validated on write, invalid ids raise with this set. An unknown
+    work_item_type silently falls back to ~, so verify the type id first.
     """
     client = get_client(ctx)
     path = (
@@ -683,11 +675,11 @@ async def list_work_item_enum_options(  # noqa: PLR0913
     annotations={"readOnlyHint": True},
 )
 async def get_sql_query_recipes() -> SqlRecipeGallery:
-    """Fetch copy-paste SQL recipes for the ``list_work_items`` ``SQL:(...)`` prefix.
+    """Fetch copy-paste SQL recipes for the list_work_items SQL:(...) prefix.
 
     Call before writing any SQL query (document scope, custom-field,
-    traceability) and adapt a recipe instead of hand-writing joins; includes
-    the table schema.
+    traceability); adapt a recipe instead of hand-writing joins. Includes the
+    table schema.
     """
     return SqlRecipeGallery(recipes=_SQL_QUERY_RECIPES)
 
@@ -712,15 +704,14 @@ async def list_work_items(
 ) -> PaginatedResult[WorkItemSummary]:
     """List / search work items in a project.
 
-    Lucene ``query`` (`type:requirement`, `title:SRS*`; leading wildcards 400)
-    or omit for all. ``module`` and body text are NOT Lucene-indexed — scope by
-    document via ``SQL:(...)`` or ``read_document_parts``, never a Lucene
-    ``module`` term.
+    Lucene query (type:requirement, title:SRS*; leading wildcards 400) or omit
+    for all. module and body text are NOT Lucene-indexed — scope by document
+    via SQL:(...) or read_document_parts, never a Lucene module term.
 
-    ``SQL:(...)`` runs native SQL. Call ``get_sql_query_recipes`` first and
-    adapt a recipe (document scope, custom-field, traceability); do not
-    hand-write. Escape ``'`` as ``''``; keep ``LIKE`` top-level via ``INNER
-    JOIN`` (rejected inside ``EXISTS``; ``C_DESCRIPTION LIKE`` never matches).
+    SQL:(...) runs native SQL: call get_sql_query_recipes first and adapt a
+    recipe (document scope, custom-field, traceability), do not hand-write.
+    Escape ' as ''; keep LIKE top-level via INNER JOIN (rejected inside EXISTS;
+    C_DESCRIPTION LIKE never matches).
     """
     client = get_client(ctx)
     params: dict[str, str | int] = {
@@ -785,9 +776,9 @@ async def get_work_item(
 ) -> WorkItemDetail:
     """Get full details of one work item by ID.
 
-    ``include_description_html=True`` fills ``description_html`` with raw
-    HTML — the required source for ``update_work_item(description_html=...)``.
-    Never feed back a blanked (flag=False) body.
+    include_description_html=True fills description_html with raw HTML — the
+    required source for update_work_item(description_html=...). Never feed back
+    a blanked (flag=False) body.
     """
     client = get_client(ctx)
     path = (
@@ -844,9 +835,9 @@ async def read_work_item(
 ) -> WorkItemRead:
     """Read one work item with its body rendered as Markdown.
 
-    ``get_work_item`` plus ``description`` as Markdown. Synthesis output
-    (collapses Polarion anchors) — NEVER feed it to ``update_work_item``;
-    round-trip via the HTML pair instead.
+    get_work_item plus description as Markdown. Synthesis output (collapses
+    Polarion anchors) — NEVER feed to update_work_item; round-trip via the HTML
+    pair instead.
     """
     # Pull raw HTML from get_work_item so conversion needs no second round trip.
     detail = await get_work_item(
