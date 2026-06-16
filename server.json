@@ -1,0 +1,33 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.devemberx/mcp-server-polarion",
+  "description": "MCP server for Polarion ALM — read and write documents and work items",
+  "repository": {
+    "url": "https://github.com/devemberx/mcp-server-polarion",
+    "source": "github"
+  },
+  "version": "0.0.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "mcp-server-polarion",
+      "version": "0.0.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "POLARION_URL",
+          "description": "Base URL of the Polarion server",
+          "isRequired": true
+        },
+        {
+          "name": "POLARION_TOKEN",
+          "description": "Polarion personal access token",
+          "isRequired": true,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}

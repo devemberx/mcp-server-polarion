@@ -133,7 +133,7 @@ git show "v${NEW_VERSION}" --no-patch
 
 ## Step 7 — Push tag (confirm #2, with irreversibility warning)
 
-AskUserQuestion with this exact warning text: **"Pushing tag v${NEW_VERSION} triggers `.github/workflows/publish.yml` → evals → TestPyPI → PyPI → GitHub Release. IRREVERSIBLE (PyPI blocks re-uploading the same version). Continue?"** Options: `push` / `cancel`.
+AskUserQuestion with this exact warning text: **"Pushing tag v${NEW_VERSION} triggers `.github/workflows/publish.yml` → publish gate (evals) → TestPyPI → PyPI → MCP Registry + GitHub Release. IRREVERSIBLE (PyPI blocks re-uploading the same version). Continue?"** Options: `push` / `cancel`.
 
 ```bash
 git push origin "v${NEW_VERSION}"

@@ -62,7 +62,7 @@ jobs:
           if-no-files-found: warn
 
   audit:
-    # Dependabot covers deps on its own cadence, so skip the audit on the nightly cron.
+    # Dependabot covers deps nightly, so skip the audit on the cron run.
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
@@ -75,9 +75,7 @@ jobs:
         run: uv python install 3.13
 
       - name: Export production-only requirements
-        # Scan only the deps that ship in the wheel.
-        # --no-hashes is required 
-        # because the OSV scanner's pip parser does not read the multiline hash form.
+        # Wheel deps only; --no-hashes since OSV's pip parser can't read multiline hashes.
         run: |
           uv export --no-dev --no-emit-project --no-hashes \
             --format requirements-txt > runtime-requirements.txt
