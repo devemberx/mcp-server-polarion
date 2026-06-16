@@ -84,15 +84,8 @@ jobs:
       - name: Inject release version into server.json
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          python3 - "$VERSION" <<'PY'
-          import json, sys
-          v = sys.argv[1]
-          d = json.load(open("server.json"))
-          d["version"] = v
-          for pkg in d.get("packages", []):
-              pkg["version"] = v
-          json.dump(d, open("server.json", "w"), indent=2)
-          PY
+          jq --arg v "$VERSION" '.version = $v | (.packages[].version) = $v' \
+            server.json > server.tmp && mv server.tmp server.json
 
       - name: Install mcp-publisher
         # Pinned to a release + sha256: this job holds an OIDC token, so a
