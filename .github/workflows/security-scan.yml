@@ -62,7 +62,7 @@ jobs:
           if-no-files-found: warn
 
   audit:
-    # Dependabot covers deps on its own cadence, so skip the audit on the nightly cron.
+    # Dependabot covers deps nightly, so skip the audit on the cron run.
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:

@@ -7,7 +7,7 @@ on:
 
 jobs:
   gate:
-    # Blocking pre-publish eval gate; secrets: inherit forwards OPENAI_API_KEY.
+    # secrets: inherit forwards OPENAI_API_KEY to the gate.
     uses: ./.github/workflows/publish-gate.yml
     secrets: inherit
 
@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: testpypi
     permissions:
-      id-token: write  # Required for trusted publishing
+      id-token: write
 
     steps:
       - uses: actions/checkout@v6
@@ -40,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
-      id-token: write  # Required for trusted publishing
+      id-token: write
 
     steps:
       - uses: actions/checkout@v6
@@ -58,14 +58,12 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
 
   publish-mcp-registry:
-    # MCP Registry publish via GitHub OIDC (io.github.devemberx/* namespace, no
-    # secret). Registry validates the PyPI package, so wait-for-index runs first.
-    # Not idempotent: re-running a tag whose version is already in the registry
-    # fails at the publish step. Recovery is a new version tag, not a re-run.
+    # Not idempotent: re-tagging an already-published version fails; recover with a
+    # new version tag. wait-for-index runs first since the registry validates PyPI.
     needs: publish
     runs-on: ubuntu-latest
     permissions:
-      id-token: write  # GitHub OIDC for the io.github.* namespace
+      id-token: write  # OIDC for io.github.* namespace
       contents: read
 
     steps:
@@ -88,9 +86,8 @@ jobs:
             server.json > server.tmp && mv server.tmp server.json
 
       - name: Install mcp-publisher
-        # Pinned to a release + sha256: this job holds an OIDC token, so a
-        # compromised "latest" asset must not run here. Runner is always
-        # linux/amd64; bump version + checksum together when upgrading.
+        # Pinned + sha256-checked: this job holds an OIDC token. Bump version and
+        # checksum together; runner is always linux/amd64.
         env:
           MCP_PUBLISHER_VERSION: v1.7.9
           MCP_PUBLISHER_SHA256: ab128162b0616090b47cf245afe0a23f3ef08936fdce19074f5ba0a4469281ac
@@ -107,8 +104,7 @@ jobs:
         run: ./mcp-publisher publish
 
   release:
-    # GitHub Release; needs publish (not the registry) so a flaky preview
-    # registry can't block notes. Notes built from merged PRs via release.yml.
+    # needs publish, not the registry, so a flaky registry can't block notes.
     needs: publish
     runs-on: ubuntu-latest
     permissions:

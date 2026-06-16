@@ -1,13 +1,12 @@
 name: Publish Gate
 
-# Reusable pre-publish eval gate; publish.yml calls it as a blocking job.
-# OPENAI_API_KEY flows in from the caller via secrets: inherit.
+# Reusable blocking eval gate; OPENAI_API_KEY arrives via caller's secrets: inherit.
 on:
   workflow_call:
 
 jobs:
   evals-tier1:
-    # Tier-1 forbidden-behaviour gate (zero tolerance); cheapest, runs first.
+    # Tier-1 forbidden-behaviour gate (zero tolerance), cheapest so runs first.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -17,7 +16,7 @@ jobs:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
 
   evals-tier2:
-    # Tier-2 efficiency gate; only runs once Tier-1 passed.
+    # Tier-2 efficiency gate.
     needs: evals-tier1
     runs-on: ubuntu-latest
     steps:
@@ -28,7 +27,7 @@ jobs:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
 
   evals-tier3:
-    # Tier-3 orchestration gate; only runs once Tier-2 passed.
+    # Tier-3 orchestration gate.
     needs: evals-tier2
     runs-on: ubuntu-latest
     steps:
