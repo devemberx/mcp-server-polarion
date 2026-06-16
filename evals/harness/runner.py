@@ -25,8 +25,8 @@ from .fixtures import POLARION_HOST, PROJECT
 from .mcp_bridge import TrajectoryRecorder, build_agent_tools
 from .model import build_model
 
-# Runaway-agent caps. _MAX_CYCLES counts BeforeModelCallEvent firings;
-# _CASE_TIMEOUT_SECONDS is a wall-clock ceiling on the whole invoke_async.
+# Runaway-agent caps: _MAX_CYCLES counts BeforeModelCallEvent firings;
+# _CASE_TIMEOUT_SECONDS is a wall-clock ceiling on invoke_async.
 _MAX_CYCLES: int = max(1, int(os.environ.get("EVAL_MAX_CYCLES", "10")))
 _CASE_TIMEOUT_SECONDS: float = max(
     1.0, float(os.environ.get("EVAL_CASE_TIMEOUT", "120"))
@@ -41,8 +41,8 @@ SYSTEM_PROMPT = (
     "Choose tools by reading their descriptions. Stop once the request is done."
 )
 
-# Sentinel for an output from an agent that raised before finishing. The gate
-# fails any output starting with this: a crashed agent's clean verdict is moot.
+# Output prefix for an agent that raised before finishing; the gate fails any
+# output starting with it (a crashed agent's clean verdict is moot).
 AGENT_ERROR_PREFIX = "<agent-error:"
 
 
@@ -56,8 +56,8 @@ def _extract_text(result: Any) -> str:
 
 
 def _set_polarion_env() -> None:
-    # Hard-set, not setdefault: an inherited real POLARION_URL would route
-    # writes past respx (matched by host) to a live instance. Pin for hermeticity.
+    # Hard-set, not setdefault: an inherited real POLARION_URL would route writes
+    # (respx matches by host) to a live instance.
     os.environ["POLARION_URL"] = POLARION_HOST
     os.environ["POLARION_TOKEN"] = "fake-token"
 
