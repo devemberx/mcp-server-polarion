@@ -2,8 +2,8 @@ name: Run evals
 description: >-
   Set up uv + Python 3.13, install the eval dependency group, drive the eval
   gate for one tier (or all), and upload the JSON report as an artifact. Shared
-  by the publish gate (`publish.yml`) and the manual pre-deploy workflow
-  (`evals.yml`) so they cannot drift on setup steps.
+  by the publish gate (`publish-gate.yml`) and the on-demand workflow
+  (`evals-on-demand.yml`) so they cannot drift on setup steps.
 
 inputs:
   tier:

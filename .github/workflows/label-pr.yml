@@ -1,7 +1,7 @@
 name: Label PR by title
 
-# Maps each PR's conventional-commit title prefix to a label for .github/release.yml grouping.
-# Uses pull_request_target for fork PR access; title passed via env, no PR code runs.
+# Labels PRs by conventional-commit title prefix for .github/release.yml grouping.
+# pull_request_target for fork access; title via env, so no PR code runs.
 on:
   pull_request_target:
     types: [opened, edited, reopened]
@@ -23,8 +23,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # 1. Parse title "type(scope)!: subject" into components.
-          #    Example: "feat(auth)!: add OAuth" → type=feat  scope=auth  bang=!
+          # 1. Parse "type(scope)!: subject" → type / scope / bang.
           type="$(printf '%s' "$PR_TITLE" | sed -nE 's/^([a-z]+)(\([^)]*\))?!?:.*/\1/p')"
           scope="$(printf '%s' "$PR_TITLE" | sed -nE 's/^[a-z]+\(([^)]*)\)!?:.*/\1/p')"
           bang="$(printf '%s' "$PR_TITLE" | sed -nE 's/^[a-z]+(\([^)]*\))?(!):.*/\2/p')"
@@ -43,7 +42,7 @@ jobs:
 
           labels=()
           case "$scope" in
-            deps|deps-dev) labels+=("dependencies") ;;  # dependabot: group under Dependencies
+            deps|deps-dev) labels+=("dependencies") ;;  # dependabot → Dependencies group
             *) [ -n "${map[$type]:-}" ] && labels+=("${map[$type]}") ;;
           esac
           [ -n "$bang" ] && labels+=("breaking")

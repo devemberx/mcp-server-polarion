@@ -22,7 +22,7 @@ jobs:
         run: uv python install 3.13
 
       - name: Install dependencies
-        # Include the evals group so the eval harness' unit tests actually run here
+        # evals group so the eval harness' unit tests run here
         run: uv sync --dev --group evals
 
       - name: Run ruff (lint + format check)
@@ -40,4 +40,4 @@ jobs:
     uses: ./.github/workflows/security-scan.yml
     permissions:
       contents: read
-      pull-requests: write   # let the reusable workflow post the sticky PR comment
+      pull-requests: write   # reusable workflow posts the sticky PR comment

@@ -1,0 +1,38 @@
+name: Publish Gate
+
+# Reusable blocking eval gate; OPENAI_API_KEY arrives via caller's secrets: inherit.
+on:
+  workflow_call:
+
+jobs:
+  evals-tier1:
+    # Tier-1 forbidden-behaviour gate (zero tolerance), cheapest so runs first.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/run-evals
+        with:
+          tier: "1"
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+
+  evals-tier2:
+    # Tier-2 efficiency gate.
+    needs: evals-tier1
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/run-evals
+        with:
+          tier: "2"
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+
+  evals-tier3:
+    # Tier-3 orchestration gate.
+    needs: evals-tier2
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/run-evals
+        with:
+          tier: "3"
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}

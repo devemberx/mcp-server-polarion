@@ -1,4 +1,4 @@
-name: Publish to PyPI
+name: Publish
 
 on:
   push:
@@ -6,46 +6,17 @@ on:
       - "v*"
 
 jobs:
-  evals-tier1:
-    # Tier-1 forbidden-behaviour gate (zero tolerance). Cheapest tier, runs
-    # first so a destructive / footgun action blocks the publish before any
-    # agent tokens are spent on the later tiers.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/run-evals
-        with:
-          tier: "1"
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-
-  evals-tier2:
-    # Tier-2 efficiency gate; only runs once Tier-1 passed.
-    needs: evals-tier1
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/run-evals
-        with:
-          tier: "2"
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-
-  evals-tier3:
-    # Tier-3 orchestration gate; only runs once Tier-2 passed.
-    needs: evals-tier2
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/run-evals
-        with:
-          tier: "3"
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+  gate:
+    # secrets: inherit forwards OPENAI_API_KEY to the gate.
+    uses: ./.github/workflows/publish-gate.yml
+    secrets: inherit
 
   publish-test:
-    needs: evals-tier3
+    needs: gate
     runs-on: ubuntu-latest
     environment: testpypi
     permissions:
-      id-token: write  # Required for trusted publishing
+      id-token: write
 
     steps:
       - uses: actions/checkout@v6
@@ -69,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
-      id-token: write  # Required for trusted publishing
+      id-token: write
 
     steps:
       - uses: actions/checkout@v6
@@ -86,9 +57,54 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
 
+  publish-mcp-registry:
+    # Not idempotent: re-tagging an already-published version fails; recover with a
+    # new version tag. wait-for-index runs first since the registry validates PyPI.
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # OIDC for io.github.* namespace
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Wait for PyPI to index the new version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          for i in $(seq 1 20); do
+            curl -fsSL "https://pypi.org/pypi/mcp-server-polarion/${VERSION}/json" >/dev/null 2>&1 \
+              && { echo "PyPI has ${VERSION}"; exit 0; }
+            echo "waiting for PyPI ${VERSION} ($i)"; sleep 15
+          done
+          echo "PyPI did not index ${VERSION}"; exit 1
+
+      - name: Inject release version into server.json
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          jq --arg v "$VERSION" '.version = $v | (.packages[].version) = $v' \
+            server.json > server.tmp && mv server.tmp server.json
+
+      - name: Install mcp-publisher
+        # Pinned + sha256-checked: this job holds an OIDC token. Bump version and
+        # checksum together; runner is always linux/amd64.
+        env:
+          MCP_PUBLISHER_VERSION: v1.7.9
+          MCP_PUBLISHER_SHA256: ab128162b0616090b47cf245afe0a23f3ef08936fdce19074f5ba0a4469281ac
+        run: |
+          curl -fsSL -o mcp-publisher.tar.gz \
+            "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz"
+          echo "${MCP_PUBLISHER_SHA256}  mcp-publisher.tar.gz" | sha256sum -c -
+          tar xz -f mcp-publisher.tar.gz mcp-publisher
+
+      - name: Authenticate to MCP Registry (GitHub OIDC)
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish to MCP Registry
+        run: ./mcp-publisher publish
+
   release:
-    # Publish the GitHub Release only after PyPI succeeds. Notes are generated
-    # natively from merged PRs and grouped by label via .github/release.yml.
+    # needs publish, not the registry, so a flaky registry can't block notes.
     needs: publish
     runs-on: ubuntu-latest
     permissions:
@@ -101,7 +117,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Skip if release already exists (idempotent on job re-run).
+          # idempotent on re-run
           gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 && exit 0
           python3 .github/scripts/build_release_notes.py > "${RUNNER_TEMP}/notes.md"
           gh release create "${GITHUB_REF_NAME}" \
