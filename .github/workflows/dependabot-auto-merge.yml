@@ -17,8 +17,10 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Enable auto-merge for patch and minor updates
-        if: steps.meta.outputs.update-type == 'version-update:semver-patch' || steps.meta.outputs.update-type == 'version-update:semver-minor'
+      # indirect deps report a null update-type (fetch-metadata lacks the previous version),
+      # so gate on "not major" to auto-merge those too while still flagging real majors below.
+      - name: Enable auto-merge for non-major updates
+        if: steps.meta.outputs.update-type != 'version-update:semver-major'
         run: gh pr merge --auto --squash "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
