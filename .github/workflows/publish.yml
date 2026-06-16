@@ -60,6 +60,8 @@ jobs:
   publish-mcp-registry:
     # MCP Registry publish via GitHub OIDC (io.github.devemberx/* namespace, no
     # secret). Registry validates the PyPI package, so wait-for-index runs first.
+    # Not idempotent: re-running a tag whose version is already in the registry
+    # fails at the publish step. Recovery is a new version tag, not a re-run.
     needs: publish
     runs-on: ubuntu-latest
     permissions:
@@ -93,8 +95,17 @@ jobs:
           PY
 
       - name: Install mcp-publisher
+        # Pinned to a release + sha256: this job holds an OIDC token, so a
+        # compromised "latest" asset must not run here. Runner is always
+        # linux/amd64; bump version + checksum together when upgrading.
+        env:
+          MCP_PUBLISHER_VERSION: v1.7.9
+          MCP_PUBLISHER_SHA256: ab128162b0616090b47cf245afe0a23f3ef08936fdce19074f5ba0a4469281ac
         run: |
-          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+          curl -fsSL -o mcp-publisher.tar.gz \
+            "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz"
+          echo "${MCP_PUBLISHER_SHA256}  mcp-publisher.tar.gz" | sha256sum -c -
+          tar xz -f mcp-publisher.tar.gz mcp-publisher
 
       - name: Authenticate to MCP Registry (GitHub OIDC)
         run: ./mcp-publisher login github-oidc
