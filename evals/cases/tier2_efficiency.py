@@ -61,7 +61,7 @@ CASES: list[Case] = [
     _case(
         "T2-DETACH-NOOP",
         f"Make sure work item {FLOATING_TASK_ID} is not part of any document.",
-        "no_blind_detach",
+        "no_detach_retry_loop",
         floating_ids=[FLOATING_TASK_ID],
     ),
 ]

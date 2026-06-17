@@ -269,7 +269,7 @@ def check_round_trip_source(
     return True, "every body write was round-trip sourced"
 
 
-def check_no_blind_detach(
+def check_no_detach_retry_loop(
     trajectory: Trajectory, params: dict[str, Any]
 ) -> CheckResult:
     """Free-floating ``params["floating_ids"]`` detach 400s ("not in Document") —
@@ -555,7 +555,7 @@ REGISTRY: dict[str, Callable[[Trajectory, dict[str, Any]], CheckResult]] = {
     "resolve_root_comment": check_resolve_root_comment,
     "preserve_hyperlinks": check_preserve_hyperlinks,
     "round_trip_source": check_round_trip_source,
-    "no_blind_detach": check_no_blind_detach,
+    "no_detach_retry_loop": check_no_detach_retry_loop,
     "single_bulk_create": check_single_bulk_create,
     "direct_read": check_direct_read,
     "no_duplicate_reads": check_no_duplicate_reads,
