@@ -364,9 +364,9 @@ async def list_work_item_links(  # noqa: PLR0913
 ) -> PaginatedResult[WorkItemLink]:
     """List a work item's links, one direction per call.
 
-    Forward carries ``role`` (``parent``, ``verifies``, …) and ``suspect``;
-    back is a Lucene fallback that drops ``role`` (always ``None``) — recover
-    it via forward on the source.
+    Forward carries role (parent, verifies, …) and suspect; back is a Lucene
+    fallback that drops role (always None) — recover it via forward on the
+    source.
     """
     client = get_client(ctx)
 
@@ -417,17 +417,15 @@ async def create_work_item_links(
 ) -> WorkItemLinksCreateResult:
     """Create 1-50 outgoing links from one source work item, atomically.
 
-    Role and target existence are validated before POST — invalid ones raise
-    ``ValueError``. Per spec:
-    ``target_project_id`` defaults to source, ``revision`` pins (else HEAD),
-    ``suspect`` flags re-review. A 4xx (e.g. duplicate role+target → 409)
-    rolls back the whole batch — re-query ``list_work_item_links`` before
-    retrying. ``link_ids`` are the delete-path ids, input order.
+    Role and target existence validated before POST — invalid ones raise
+    ValueError. Per spec: target_project_id defaults to source, revision pins
+    (else HEAD), suspect flags re-review. A 4xx (e.g. duplicate role+target →
+    409) rolls back the whole batch — re-query list_work_item_links before
+    retrying. link_ids are the delete-path ids, input order.
 
     Phantom success: when the source sits in a document,
-    ``move_work_item_to_document`` already auto-created one heading link; a
-    NEW same-role link 201s but is NOT persisted — verify with
-    ``list_work_item_links``.
+    move_work_item_to_document already auto-created one heading link; a NEW
+    same-role link 201s but is NOT persisted — verify with list_work_item_links.
     """
     payload = _build_create_links_payload(
         source_project_id=project_id,
@@ -513,10 +511,10 @@ async def delete_work_item_links(
 ) -> WorkItemLinksDeleteResult:
     """Delete 1-50 outgoing links from one source work item.
 
-    Outgoing only — delete a back link from its source item. Refs come from
-    ``list_work_item_links(direction="forward")`` or a prior create. Stale
-    refs never raise: a pre-read splits results into ``deleted_link_ids`` /
-    ``not_found_link_ids``.
+    Outgoing only — delete a back link from its source item. Refs from
+    list_work_item_links(direction="forward") or a prior create. Stale refs
+    never raise: a pre-read splits results into deleted_link_ids /
+    not_found_link_ids.
     """
     link_ids, payload = _build_delete_links_payload(
         source_project_id=project_id,
@@ -598,23 +596,22 @@ async def update_work_item_link(  # noqa: PLR0913
     ),
     suspect: bool | None = Field(
         default=None,
-        description="New suspect flag; ``None`` = unchanged.",
+        description="New suspect flag; None = unchanged.",
     ),
     revision: str | None = Field(
         default=None,
-        description="New revision pin; ``None`` = unchanged.",
+        description="New revision pin; None = unchanged.",
     ),
     dry_run: bool = Field(
         default=False,
         description="Preview payload without calling Polarion.",
     ),
 ) -> WorkItemLinkUpdateResult:
-    """Set ``suspect`` and/or ``revision`` on one existing outgoing link.
+    """Set suspect and/or revision on one existing outgoing link.
 
-    Identify the link via ``list_work_item_links(direction="forward")``
-    (role + target address one link). ``None`` = unchanged; at least one of
-    ``suspect`` / ``revision`` required. One link per call. A ``role`` typo
-    404s.
+    Identify the link via list_work_item_links(direction="forward") (role +
+    target address one link). None = unchanged; at least one of suspect /
+    revision required. One link per call. A role typo 404s.
     """
     if suspect is None and revision is None:
         raise ValueError(

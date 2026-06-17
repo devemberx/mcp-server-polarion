@@ -333,6 +333,24 @@ class FakePolarion:
             if isinstance(data, list) and data:
                 submitted = len(data)
         if request.method == "POST":
+            # moveFromDocument 400s on a free-floating item; 204 only when in a doc.
+            if path.endswith("/actions/moveFromDocument"):
+                m = re.search(r"/workitems/([^/]+)/actions/moveFromDocument$", path)
+                wi = self.seeds.work_items.get(m.group(1)) if m else None
+                if wi is None or not wi.module_id:
+                    return httpx.Response(
+                        400,
+                        json={
+                            "errors": [
+                                {
+                                    "status": "400",
+                                    "title": "Bad Request",
+                                    "detail": "Work Item is not in Document.",
+                                }
+                            ]
+                        },
+                    )
+                return httpx.Response(204)
             if path.endswith("/workitems"):
                 return httpx.Response(
                     201,

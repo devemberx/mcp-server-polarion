@@ -3,7 +3,8 @@
 
 Cases: single bulk call (``T2-BULK-CREATE``), direct lookup
 (``T2-DIRECT-GET``), no redundant reads (``T2-NO-DUP-READS``,
-``T2-ENUM-ONCE``), SQL over Lucene ``module`` term (``T2-SQL-NOT-LUCENE``).
+``T2-ENUM-ONCE``), SQL over Lucene ``module`` term (``T2-SQL-NOT-LUCENE``),
+no doomed-detach retry loop (``T2-DETACH-NOOP``).
 """
 
 from __future__ import annotations
@@ -56,5 +57,11 @@ CASES: list[Case] = [
         f"List the IDs of the work items contained in the document '{DOC}' "
         f"in space '{SPACE}'.",
         "scoped_query_uses_sql",
+    ),
+    _case(
+        "T2-DETACH-NOOP",
+        f"Make sure work item {FLOATING_TASK_ID} is not part of any document.",
+        "no_detach_retry_loop",
+        floating_ids=[FLOATING_TASK_ID],
     ),
 ]

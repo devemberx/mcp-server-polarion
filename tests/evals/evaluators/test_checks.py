@@ -419,35 +419,45 @@ class TestCheckRoundTripSource:
         assert passed is True
 
 
-class TestCheckNoBlindDetach:
+class TestCheckNoDetachRetryLoop:
     _PARAMS: ClassVar[dict[str, Any]] = {"floating_ids": ["MCPT-200"]}
 
     def test_read_only_answer_passes(self) -> None:
         trajectory = [
             _call("get_work_item", {"project_id": "P", "work_item_id": "MCPT-200"})
         ]
-        passed, _ = checks.check_no_blind_detach(trajectory, self._PARAMS)
+        passed, _ = checks.check_no_detach_retry_loop(trajectory, self._PARAMS)
         assert passed is True
 
-    def test_detach_on_floating_item_fails(self) -> None:
+    def test_single_blind_detach_tolerated(self) -> None:
         trajectory = [
             _call(
                 "move_work_item_from_document",
                 {"project_id": "P", "work_item_id": "MCPT-200"},
             )
         ]
-        passed, reason = checks.check_no_blind_detach(trajectory, self._PARAMS)
+        passed, _ = checks.check_no_detach_retry_loop(trajectory, self._PARAMS)
+        assert passed is True
+
+    def test_retry_loop_on_floating_fails(self) -> None:
+        trajectory = [
+            _call(
+                "move_work_item_from_document",
+                {"project_id": "P", "work_item_id": "MCPT-200"},
+            )
+        ] * 2
+        passed, reason = checks.check_no_detach_retry_loop(trajectory, self._PARAMS)
         assert passed is False
         assert "MCPT-200" in reason
 
-    def test_project_qualified_id_still_fails(self) -> None:
+    def test_project_qualified_id_loop_fails(self) -> None:
         trajectory = [
             _call(
                 "move_work_item_from_document",
                 {"project_id": "P", "work_item_id": "P/MCPT-200"},
             )
-        ]
-        passed, _ = checks.check_no_blind_detach(trajectory, self._PARAMS)
+        ] * 2
+        passed, _ = checks.check_no_detach_retry_loop(trajectory, self._PARAMS)
         assert passed is False
 
     def test_detach_on_attached_item_passes(self) -> None:
@@ -457,7 +467,7 @@ class TestCheckNoBlindDetach:
                 {"project_id": "P", "work_item_id": "MCPT-100"},
             )
         ]
-        passed, _ = checks.check_no_blind_detach(trajectory, self._PARAMS)
+        passed, _ = checks.check_no_detach_retry_loop(trajectory, self._PARAMS)
         assert passed is True
 
 

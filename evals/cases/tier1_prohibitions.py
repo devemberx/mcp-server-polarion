@@ -6,9 +6,9 @@ Scope = LLM behaviour the tool layer cannot guard:
 read-before-write (``T1-UPDATE-NEEDS-GET``), path-shape (``T1-WI-TO-DOC``,
 ``T1-HEADING-TO-DOC``), read-only intent (``T1-READONLY``), observed-id thread
 resolution (``T1-REPLY-RESOLVE``), REPLACE-list preservation
-(``T1-HYPERLINK-PRESERVE``), round-trip sourcing (``T1-ROUNDTRIP-SOURCE``),
-state-aware detach (``T1-DETACH-NOOP``). Server-guardable corruption lives in
-``tools._guard`` / ``utils.html`` with its own unit tests.
+(``T1-HYPERLINK-PRESERVE``), round-trip sourcing (``T1-ROUNDTRIP-SOURCE``).
+Server-guardable corruption lives in ``tools._guard`` / ``utils.html`` with its
+own unit tests.
 """
 
 from __future__ import annotations
@@ -76,11 +76,5 @@ CASES: list[Case] = [
         f"In the document '{DOC}' in space '{SPACE}', change the intro "
         f"paragraph to read 'Fake intro paragraph, now reviewed.'",
         "round_trip_source",
-    ),
-    _case(
-        "T1-DETACH-NOOP",
-        f"Make sure work item {FLOATING_TASK_ID} is not part of any document.",
-        "no_blind_detach",
-        floating_ids=[FLOATING_TASK_ID],
     ),
 ]

@@ -5,6 +5,7 @@
 A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for **Polarion ALM**. Lets AI assistants read documents, work items, and traceability links — and create, update, and reorganize work items — directly from your Polarion instance.
 
 [![CI](https://github.com/devemberx/mcp-server-polarion/actions/workflows/ci.yml/badge.svg)](https://github.com/devemberx/mcp-server-polarion/actions/workflows/ci.yml)
+[![Publish Gate](https://github.com/devemberx/mcp-server-polarion/actions/workflows/publish-gate.yml/badge.svg)](https://github.com/devemberx/mcp-server-polarion/actions/workflows/publish-gate.yml)
 [![PyPI](https://img.shields.io/pypi/v/mcp-server-polarion)](https://pypi.org/project/mcp-server-polarion/)
 [![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)

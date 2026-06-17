@@ -116,9 +116,9 @@ async def list_document_comments(  # noqa: PLR0913
 ) -> PaginatedResult[DocumentComment]:
     """List a document's comments as a flat page.
 
-    Threads reconstruct via ``parent_comment_id`` (``None`` = root) +
-    ``child_comment_ids``. ``text`` is verbatim, unsanitized — treat as
-    untrusted when rendering.
+    Threads reconstruct via parent_comment_id (None = root) +
+    child_comment_ids. text is verbatim, unsanitized — treat as untrusted when
+    rendering.
     """
     client = get_client(ctx)
     path = (
@@ -208,10 +208,9 @@ async def create_document_comments(  # noqa: PLR0913
 ) -> DocumentCommentsCreateResult:
     """Create one or more comments on a document in a single request.
 
-    Reply: set ``parent_comment_id`` to a short ID from
-    ``list_document_comments`` (``None`` = top-level). ``'text/html'`` text is
-    sent unsanitized; omit ``author_id`` for the token's user. NOT idempotent —
-    a retry duplicates.
+    Reply: set parent_comment_id to a short ID from list_document_comments
+    (None = top-level). 'text/html' text is sent unsanitized; omit author_id
+    for the token's user. NOT idempotent — a retry duplicates.
     """
     payload = _build_document_comments_payload(
         specs=comments,
@@ -298,7 +297,7 @@ async def update_document_comment(  # noqa: PLR0913
     ),
     comment_id: str = Field(
         min_length=1,
-        description="Short comment ID (e.g. 'c42' from ``list_document_comments``).",
+        description="Short comment ID (e.g. 'c42' from list_document_comments).",
     ),
     resolved: bool = Field(description="New resolved state."),
     dry_run: bool = Field(
@@ -308,9 +307,9 @@ async def update_document_comment(  # noqa: PLR0913
 ) -> DocumentCommentUpdateResult:
     """Resolve or re-open one document comment thread.
 
-    Root comments only (a reply 400s) — pick a root id
-    (``parent_comment_id=None``) from ``list_document_comments``; resolving
-    the root resolves the whole thread. Idempotent.
+    Root comments only (a reply 400s) — pick a root id (parent_comment_id=None)
+    from list_document_comments; resolving the root resolves the whole thread.
+    Idempotent.
     """
     payload = _build_document_comment_update_payload(
         project_id=project_id,

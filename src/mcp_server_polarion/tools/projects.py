@@ -45,8 +45,7 @@ async def list_projects(
 ) -> PaginatedResult[ProjectSummary]:
     """List accessible Polarion projects — the source of project IDs.
 
-    Lucene ``query`` allows trailing wildcards (``name:ILCU*``); leading ones
-    400.
+    Lucene query allows trailing wildcards (name:ILCU*); leading ones 400.
     """
     client = get_client(ctx)
     params: dict[str, str | int] = {
