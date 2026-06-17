@@ -272,20 +272,25 @@ def check_round_trip_source(
 def check_no_blind_detach(
     trajectory: Trajectory, params: dict[str, Any]
 ) -> CheckResult:
-    """``move_work_item_from_document`` must not target ``params["floating_ids"]``
-    — detaching a free-floating item 400s (not idempotent).
+    """Free-floating ``params["floating_ids"]`` detach 400s ("not in Document") —
+    recoverable, so one attempt passes; only a retry loop on the same item fails.
     """
     floating = {_short_id(x) for x in params.get("floating_ids", [])}
+    attempts: dict[str, int] = {}
     for call in trajectory:
         if call.get("name") != "move_work_item_from_document":
             continue
         work_item_id = _short_id(_args(call).get("work_item_id", ""))
         if work_item_id in floating:
-            return False, (
-                f"called move_work_item_from_document on {work_item_id}, which "
-                "is not in any document -- the action 400s instead of no-opping"
-            )
-    return True, "no detach was issued against a free-floating item"
+            attempts[work_item_id] = attempts.get(work_item_id, 0) + 1
+    looped = {wid: n for wid, n in attempts.items() if n > 1}
+    if looped:
+        worst = max(looped, key=lambda k: looped[k])
+        return False, (
+            f"retried move_work_item_from_document on {worst} {looped[worst]}x "
+            "despite a clear 'not in Document' 400 -- a doomed retry loop"
+        )
+    return True, "no retry loop against a free-floating item"
 
 
 def check_single_bulk_create(
