@@ -1,6 +1,6 @@
 [project]
 name = "mcp-server-polarion"
-version = "1.3.0"
+version = "1.3.1"
 description = "MCP server for Polarion ALM — read and write documents and work items"
 readme = "README.md"
 authors = [{ name = "devemberx", email = "devemberx@gmail.com" }]
