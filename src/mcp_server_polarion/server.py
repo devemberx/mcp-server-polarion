@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from typing import TypedDict
 
 from fastmcp import FastMCP
+from mcp.types import Icon
 
 from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.core.config import PolarionConfig
@@ -15,6 +16,11 @@ from mcp_server_polarion.core.logging import setup_logging
 from mcp_server_polarion.middleware import CompactValidationErrorMiddleware
 
 logger = logging.getLogger("mcp_server_polarion.server")
+
+ICON_URL = (
+    "https://raw.githubusercontent.com/devemberx/mcp-server-polarion"
+    "/main/.github/assets/icon.png"
+)
 
 
 class LifespanContext(TypedDict):
@@ -51,6 +57,7 @@ mcp = FastMCP(
         "MCP server for Polarion ALM. "
         "Read and write documents and work items in Polarion."
     ),
+    icons=[Icon(src=ICON_URL, mimeType="image/png", sizes=["512x512"])],
     lifespan=_lifespan,
 )
 mcp.add_middleware(CompactValidationErrorMiddleware())

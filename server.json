@@ -2,6 +2,13 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.devemberx/mcp-server-polarion",
   "description": "MCP server for Polarion ALM — read and write documents and work items",
+  "icons": [
+    {
+      "src": "https://raw.githubusercontent.com/devemberx/mcp-server-polarion/main/.github/assets/icon.png",
+      "mimeType": "image/png",
+      "sizes": ["512x512"]
+    }
+  ],
   "repository": {
     "url": "https://github.com/devemberx/mcp-server-polarion",
     "source": "github"
