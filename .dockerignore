@@ -1,12 +1,16 @@
-# Environment variables — NEVER commit secrets
+# Environment variables — NEVER bake secrets into the image
 .env
+.env.*
+
+# Git
+.git
+.github
 
 # Python caches
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
-.Python
 
 # Virtual environments
 .venv/
@@ -21,23 +25,20 @@ build/
 
 # Tool caches
 .mypy_cache/
-.dmypy.json
 .ruff_cache/
 .pytest_cache/
 .coverage
 htmlcov/
 
-# Eval gate reports (generated per run)
-evals/reports/
+# Not needed at runtime
+tests/
+evals/
 
 # Claude / MCP configuration
-.claude/*
-!.claude/skills/
-!.claude/hooks/
-!.claude/settings.json
+.claude/
 .mcp.json
 
 # Editor / OS
-.vscode/*
+.vscode/
 .DS_Store
 Thumbs.db
