@@ -1,0 +1,61 @@
+name: Bug report
+description: Something doesn't work as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please don't include secrets (tokens, URLs) in logs.
+        For security vulnerabilities, use SECURITY.md instead of a public issue.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps (or the prompt you gave the assistant) that trigger the bug.
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: polarion-version
+    attributes:
+      label: Polarion version
+      description: Server requires Polarion 2506 or higher.
+      placeholder: "2506"
+    validations:
+      required: true
+  - type: dropdown
+    id: client
+    attributes:
+      label: MCP client
+      options:
+        - Claude Code
+        - Claude Desktop
+        - Cursor
+        - VS Code (GitHub Copilot)
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: server-version
+    attributes:
+      label: mcp-server-polarion version
+      placeholder: "e.g. 1.3.1 (from `pip show mcp-server-polarion` or PyPI)"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Server stderr output, if any. Redact tokens and instance URLs.
+      render: shell
+    validations:
+      required: false
