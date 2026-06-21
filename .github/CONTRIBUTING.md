@@ -1,181 +1,147 @@
-# Contributing Guide
+# Contributing to mcp-server-polarion
 
-Thanks for contributing to `mcp-server-polarion`. This document describes the **branch strategy**, **commit message rules**, and **pull request workflow** used in this repository. For codebase architecture and engineering rules, see [CLAUDE.md](../CLAUDE.md).
+Thanks for taking the time to contribute. Every bug report, doc fix, and pull request helps.
 
----
+This guide walks you through the contributor's path: **find something to work on → set up your
+environment → make the change → open a pull request.** For the codebase architecture, tool-design
+conventions, and Polarion API gotchas, see [CLAUDE.md](../CLAUDE.md) — read it before touching
+`tools/` or `core/`.
 
-## 1. Branch Strategy
-
-We use a lightweight trunk-based flow: `main` is always releasable, and all work happens on short-lived topic branches.
-
-### Branch naming
-
-Format: `<type>/<short-kebab-summary>`
-
-| Type        | When to use                                                    | Example                       |
-| ----------- | -------------------------------------------------------------- | ----------------------------- |
-| `feature/`  | New tool, capability, or user-visible behavior                 | `feature/read-fidelity`       |
-| `fix/`      | Bug fix on existing behavior                                   | `fix/utils-html-attachments`  |
-| `refactor/` | Internal restructuring with no functional change               | `refactor/tools`              |
-| `test/`     | Test-only changes (unit tests, eval cases, fixtures)           | `test/tier2-efficiency-evals` |
-| `docs/`     | Documentation-only changes                                     | `docs/contributing`           |
-| `chore/`    | Dependency bumps, build tooling, repository housekeeping       | `chore/bump-fastmcp`          |
-| `ci/`       | GitHub Actions / workflow / release-pipeline changes           | `ci/cache-uv-deps`            |
-
-Rules:
-
-- Use **lowercase kebab-case** for the summary segment.
-- Keep the summary short (≤4 words). The PR title carries the full description.
-- One topic per branch. Split unrelated changes into separate branches.
-- Branch off the latest `main`; rebase (do not merge) `main` into the branch before opening a PR.
-- **Branch prefixes use the long form (`feature/`, `refactor/`); commit types use the short Conventional Commits form (`feat`, `refactor`).** The asymmetry is intentional — branch names read as English nouns, commit types follow the Conventional Commits spec.
-
-### Protection rules
-
-- `main` is protected. Direct pushes are not allowed — every change must go through a PR.
-- **Force push to `main` is forbidden.** Force push to your own feature branch is allowed only after explicit reviewer authorization (e.g. after `git rebase -i` cleanup).
+> **The best first step is often an issue.** A clear bug report or a short design proposal lets us
+> agree on the approach before anyone writes code — that saves you from reworking a PR later.
 
 ---
 
-## 2. Commit Message Rules
+## Ways to contribute
 
-### Format
+- **Report a bug** — open a [bug report](https://github.com/devemberx/mcp-server-polarion/issues/new/choose).
+  Include your Polarion version, MCP client, and steps to reproduce.
+- **Request a feature** — open a [feature request](https://github.com/devemberx/mcp-server-polarion/issues/new/choose)
+  describing the problem first, then your proposed tool or behavior.
+- **Improve the docs** — fix a typo, clarify a tool docstring, or expand the README. Small docs PRs
+  are always welcome and need no prior discussion.
+- **Write code** — fix a bug or add a feature. Issues tagged **`good first issue`** are a friendly
+  starting point. For anything larger than a small fix, open an issue first so we can align.
 
-```
-<type>(<scope>): <subject>
+Security vulnerabilities go through [SECURITY.md](SECURITY.md), **not** public issues.
 
-- <motivation — why the change is needed>
-- <change — what concretely was done>
-```
+---
 
-### Type (Conventional Commits)
+## Development setup
 
-| Type       | Meaning                                                                |
-| ---------- | ---------------------------------------------------------------------- |
-| `feat`     | New feature (e.g. a new MCP tool, resource, or prompt)                 |
-| `fix`      | Bug fix (logic error, protocol non-compliance)                         |
-| `docs`     | Documentation-only change (README, docstrings, internal guides)        |
-| `refactor` | Code change that neither fixes a bug nor adds a feature                |
-| `perf`     | Performance improvement                                                |
-| `test`     | Adding missing tests or correcting existing tests                      |
-| `ci`       | CI configuration / GitHub Actions changes                              |
-| `chore`    | Build process, dependency updates, auxiliary tooling                   |
+### Prerequisites
 
-### Scope (never omit)
+- [**uv**](https://docs.astral.sh/uv/) — manages the Python toolchain and dependencies.
+- **Python 3.13+** (uv will fetch it if missing).
+- A live **Polarion 2506+** instance is **not** required to contribute — the test suite mocks
+  Polarion. You only need one to exercise the server end to end.
 
-| Scope       | Area                                                                                       |
-| ----------- | ------------------------------------------------------------------------------------------ |
-| `tool`      | Executable tool functions exposed to the LLM (e.g. `read.py`, `write.py`)                  |
-| `server`    | MCP server lifecycle, initialization, internal state                                       |
-| `transport` | Communication layer (stdio / sse / http)                                                   |
-| `config`    | Environment variables, `.env`, static settings                                             |
-| `deps`      | Python package management (`pyproject.toml`, lock files)                                   |
-| `utils`     | Shared helper modules (e.g. `utils/html.py`)                                               |
-| `model`     | Pydantic schemas in `models.py`                                                            |
-| `project`   | Cross-cutting changes touching multiple scopes simultaneously                              |
-| `meta`      | Repository maintenance (`.github/`, licenses, root-level configs)                          |
-| `git`       | Git-specific config (`.gitignore`, pre-commit hooks, commit templates)                     |
+### Get the code
 
-### Subject constraints
+1. **Fork** this repository (the **Fork** button on GitHub).
+2. **Clone** your fork and install dependencies:
 
-- Imperative, present tense (`add`, not `added` or `adds`).
-- Start with **lowercase**.
-- **No** trailing period.
-- **≤50 characters**, including `type(scope):` prefix.
+   ```bash
+   uv sync --dev
+   ```
 
-### Body constraints
+> Collaborators with write access may skip the fork and branch directly in this repo.
 
-- One blank line between subject and body.
-- **Exactly 2 bullets**, in this order: motivation first, then change.
-- Do **not** prefix bullets with literal `Why:` / `What:` — the order alone carries that meaning.
-- Each bullet is a **single line, ≤120 characters**. Longer rationale goes in the PR description.
-
-### Examples
-
-**Correct**
-
-```
-feat(tool): add description_html flag to get_work_item
-
-- Round-trip editing was lossy because Markdown conversion dropped Polarion macros.
-- Return raw HTML when description_html=True so update_work_item can re-apply it verbatim.
-```
-
-```
-fix(utils): preserve attachment imgs on read
-
-- Sanitizer stripped <img src="attachment:..."> tags, breaking image references in reads.
-- Allow attachment: scheme through the BeautifulSoup sanitization allowlist.
-```
-
-**Incorrect (and why)**
-
-| Bad                                              | Reason                                                  |
-| ------------------------------------------------ | ------------------------------------------------------- |
-| `feat: add new tool`                             | Missing scope                                           |
-| `feat(TOOL): Add new tool`                       | Scope and subject must be lowercase                     |
-| `fix(tool): Fixed the prompt injection bug.`     | Wrong tense + trailing period                           |
-| `feat(docs): add guide`                          | Never combine `feat` with documentation — use `docs`    |
-| `docs(git): update readme`                       | Missing mandatory blank line and 2-bullet body          |
-| `- Why: ...` / `- What: ...`                     | Drop the literal `Why:` / `What:` prefixes              |
-
-### Enforcement
-
-The repo ships a `commit-msg` hook in [`.githooks/`](../.githooks/commit-msg) that mechanically enforces the subject and bullet length limits. Enable it once per clone:
+Optionally enable the local commit-message helper (see [Commit messages](#commit-messages)):
 
 ```bash
 git config core.hooksPath .githooks
 ```
 
-The hook rejects any commit whose subject exceeds 50 chars or whose body does not contain exactly two bullets ≤120 chars each. Merge / revert / fixup / squash / amend autosquash subjects are skipped.
+---
+
+## Development workflow
+
+1. **Branch off the latest `main`.** Use the `<type>/<short-kebab-summary>` form:
+
+   | Prefix      | For                                          | Example                       |
+   | ----------- | -------------------------------------------- | ----------------------------- |
+   | `feature/`  | new tool or user-visible behavior            | `feature/read-fidelity`       |
+   | `fix/`      | bug fix on existing behavior                 | `fix/utils-html-attachments`  |
+   | `refactor/` | internal restructuring, no behavior change   | `refactor/tools`              |
+   | `test/`     | tests, eval cases, fixtures only             | `test/tier2-efficiency-evals` |
+   | `docs/`     | documentation only                           | `docs/contributing`           |
+   | `chore/`    | deps, build tooling, housekeeping            | `chore/bump-fastmcp`          |
+   | `ci/`       | GitHub Actions / release pipeline            | `ci/cache-uv-deps`            |
+
+   One topic per branch; split unrelated work apart.
+
+2. **Make your change.** Follow the rules in [CLAUDE.md](../CLAUDE.md) — strict async, full type
+   annotations, log to stderr (never `print()`), and keep tool docstrings in sync with their models.
+
+3. **Add tests.** `tests/` mirrors the source tree one-to-one. For write tools, verify the
+   `dry_run=True` path. New `@mcp.tool`s also need their name added to `EXPECTED_TOOL_NAMES`.
+
+4. **Run the checks locally** — the same gate CI runs:
+
+   ```bash
+   uv run ruff check . && uv run ruff format --check .
+   uv run mypy src/
+   uv run pytest
+   ```
+
+5. **Push to your fork** (`origin`) and open a pull request.
 
 ---
 
-## 3. Pull Request Guidelines
+## Commit messages
 
-### Before opening
+We **squash-merge** PRs, so the final commit is built from your **PR title** plus the **Changes**
+bullets — that's what follows the format. Your branch's "wip" commits don't matter; they vanish on
+squash.
 
-- Branch is rebased onto the latest `origin/main`.
-- All checks pass locally:
-  ```bash
-  uv run ruff check . && uv run ruff format --check .
-  uv run mypy src/
-  uv run pytest
-  ```
-- For write-tool changes: `dry_run=True` path verified.
-- Public-facing tool changes are reflected in the tool's docstring (the LLM-facing manual).
+```
+type(scope): summary       ← imperative, lowercase, no period, ≤50 chars
 
-### Opening the PR
+- why the change is needed  ← two bullets, ≤120 chars each
+- what changed
+```
 
-- **Title** follows the commit-subject format: `type(scope): summary`, ≤70 characters. Keep details for the body. Since the merge strategy is squash, the PR title becomes the squashed commit subject — if your title exceeds the 50-char commit-subject limit, shorten it (or edit the subject at squash time) before merging.
-- **Base branch**: `main`.
-- Use the [pull request template](PULL_REQUEST_TEMPLATE.md). It is auto-loaded by GitHub.
-- Fill every section: **Summary**, **Type of Change**, **Changes**, **Testing**.
-- In **Type of Change**, keep the full checkbox list as written — only flip `[ ]` → `[x]` for matching items. Do **not** delete unchecked options.
-- Link related issues with `Closes #<n>` or `Refs #<n>` in the Summary. Remove the placeholder line if there is no linked issue.
+- **type**: `feat` `fix` `docs` `refactor` `perf` `test` `ci` `chore`
+- **scope**: `tool` `server` `transport` `config` `deps` `utils` `model` `project` `meta` `git`
+
+Want it checked locally as you commit? Enable the optional hook:
+`git config core.hooksPath .githooks`.
+
+---
+
+## Pull requests
+
+- **Keep it small.** Small, focused PRs get reviewed fast; large ones sit in the queue. One concern
+  per PR.
+- **Open it against `devemberx/mcp-server-polarion:main`**, from your fork's branch.
+- **Use the [pull request template](PULL_REQUEST_TEMPLATE.md)** (auto-loaded). Fill every section —
+  Summary, Type of Change, Changes, Testing.
+- **Link issues** with `Closes #<n>` or `Refs #<n>` in the Summary.
+- **Make sure CI is green** — `ruff check` → `ruff format --check` → `mypy` → `pytest`.
 
 ### Review and merge
 
-- At least one approving review is required.
-- CI must be green: `ruff check` → `ruff format --check` → `mypy` → `pytest`.
-- Resolve conversations before merging; do not auto-resolve reviewer threads.
-- **Merge strategy: squash and merge.** The squashed commit message must follow the commit-message rules above (the PR title becomes the subject; the PR description supplies the 2-bullet body).
-- Delete the topic branch after merge.
-
-### Force push policy
-
-- Allowed on your own feature branch after explicit reviewer authorization (typically to clean up history before merge).
-- **Forbidden on `main`** under any circumstance.
+- At least one approving review is required; resolve review threads before merge.
+- Merge strategy is **squash and merge** — your PR title becomes the commit subject and the
+  *Changes* bullets become the body, so make them match the [commit format](#commit-messages).
+- Force-pushing your own fork branch is fine (e.g. to clean up history before merge).
 
 ---
 
-## 4. Development Quickstart
+## AI-assisted contributions
 
-```bash
-uv sync --dev                                            # install deps
-uv run pytest                                            # run all tests
-uv run ruff check . && uv run ruff format . && uv run mypy src/   # lint + format + types
-uv run mcp-server-polarion                               # run server (stdio)
-```
+Using an AI assistant to help write code or docs is welcome — this project is itself an MCP server.
+But the same bar applies to every line:
 
-Architectural rules, tool-design conventions, and Polarion API gotchas live in [CLAUDE.md](../CLAUDE.md). Read it before touching `tools/` or `core/`.
+- **You are the author.** Understand, and be able to explain, everything you submit. Review and test
+  AI-generated output before opening a PR; don't open unreviewed machine-generated PRs.
+- **Stay focused.** Don't let a tool expand the diff with unrelated refactors or boilerplate.
+- **Bug fixes start with a failing test** that passes after your change, AI-assisted or not.
+
+---
+
+## Code of Conduct & License
+
+This project follows a [Code of Conduct](CODE_OF_CONDUCT.md); by participating you agree to uphold it.
+Contributions are licensed under the project's [MIT License](../LICENSE).
