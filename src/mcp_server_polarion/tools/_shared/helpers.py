@@ -13,7 +13,7 @@ from fastmcp import Context
 
 from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.models import (
-    DocumentComment,
+    Comment,
     EnumOption,
     Hyperlink,
     JsonValue,
@@ -56,6 +56,10 @@ DOCUMENT_DETAIL_FIELDS: Final[str] = "@all"
 # Sparse fieldset filters relationships too — name them explicitly.
 DOCUMENT_COMMENT_LIST_FIELDS: Final[str] = (
     "created,resolved,text,author,parentComment,childComments"
+)
+# Work item comments add ``title``; document comments have none.
+WORK_ITEM_COMMENT_LIST_FIELDS: Final[str] = (
+    "created,resolved,title,text,author,parentComment,childComments"
 )
 
 # Standard-attribute allowlist (REST OpenAPI schema); anything outside is
@@ -447,8 +451,8 @@ def parse_work_item_summaries(
     return items
 
 
-def build_document_comment(item: dict[str, object]) -> DocumentComment:
-    """Build a ``DocumentComment`` from a JSON:API resource (short relationship IDs)."""
+def build_comment(item: dict[str, object]) -> Comment:
+    """Build a ``Comment`` from a JSON:API resource (short relationship IDs)."""
     attributes_raw = item.get("attributes")
     attributes: dict[str, object] = (
         attributes_raw if isinstance(attributes_raw, dict) else {}
@@ -470,10 +474,11 @@ def build_document_comment(item: dict[str, object]) -> DocumentComment:
     parent_full = extract_relationship_id(relationships, "parentComment")
     child_full = extract_relationship_ids(relationships, "childComments")
 
-    return DocumentComment(
+    return Comment(
         id=extract_short_id(safe_str(item.get("id", ""))),
         created=safe_str(attributes.get("created", "")),
         resolved=bool(attributes.get("resolved", False)),
+        title=safe_str(attributes.get("title", "")),
         text=text_value,
         text_format=text_format,
         author_id=extract_short_id(author_full) or None,
@@ -505,10 +510,11 @@ __all__: list[str] = [
     "OPTION_LIST_LIMIT",
     "STANDARD_DOCUMENT_ATTRIBUTES",
     "STANDARD_WORK_ITEM_ATTRIBUTES",
+    "WORK_ITEM_COMMENT_LIST_FIELDS",
     "WORK_ITEM_DETAIL_FIELDS",
     "WORK_ITEM_LIST_FIELDS",
     "WORK_ITEM_PART_FIELDS",
-    "build_document_comment",
+    "build_comment",
     "build_enum_option",
     "build_included_user_name_map",
     "build_included_work_item_map",

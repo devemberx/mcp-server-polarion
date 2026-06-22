@@ -1,4 +1,4 @@
-"""Tests for document comment models in ``mcp_server_polarion.models.comments``."""
+"""Tests for comment models in ``mcp_server_polarion.models.comments``."""
 
 from __future__ import annotations
 
@@ -6,24 +6,25 @@ import pytest
 from pydantic import ValidationError
 
 from mcp_server_polarion.models import (
-    DocumentComment,
+    Comment,
     DocumentCommentsCreateResult,
     DocumentCommentSpec,
     DocumentCommentUpdateResult,
 )
 
 
-class TestDocumentComment:
+class TestComment:
     def test_top_level_defaults(self):
-        c = DocumentComment(id="c1", created="2026-01-01T00:00:00Z")
+        c = Comment(id="c1", created="2026-01-01T00:00:00Z")
         assert c.resolved is False
+        assert c.title == ""
         assert c.text == ""
         assert c.text_format == "text/html"
         assert c.parent_comment_id is None
         assert c.child_comment_ids == []
 
     def test_reply_with_children(self):
-        c = DocumentComment(
+        c = Comment(
             id="c2",
             created="2026-01-01T00:00:00Z",
             parent_comment_id="c1",

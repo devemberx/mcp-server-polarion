@@ -1,4 +1,4 @@
-"""Document comment models — comment views, create specs, and write results."""
+"""Comment models — shared comment view, document create specs, and write results."""
 
 from __future__ import annotations
 
@@ -8,12 +8,13 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-class DocumentComment(BaseModel):
-    """A single document comment returned by ``list_document_comments``."""
+class Comment(BaseModel):
+    """A single comment returned by the comment list tools."""
 
     id: str
     created: str
     resolved: bool = False
+    title: str = ""
     text: str = ""
     text_format: Literal["text/html", "text/plain"] = "text/html"
     author_id: str | None = None

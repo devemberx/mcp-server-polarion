@@ -68,6 +68,7 @@ Applies to ALL comments/docstrings incl. CLAUDE.md.
 - Link ids composite `<srcProj>/<srcWI>/<role>/<tgtProj>/<tgtWI>`. Bulk tools cap at `MAX_BULK_ITEMS` (50). Link-create POST atomic — 4xx rolls back batch; re-query `list_work_item_links` before retry.
 - `PATCH /workitems` needs ≥1 `attributes`/`relationships` entry. `changeTypeTo` resets `status` to new type's initial state.
 - `update_document_comment`: root comments only (replies 400); resolving root resolves whole thread.
+- Comment ids: work item comments 3-segment (`<proj>/<wi>/<cmt>`), document comments 4-segment. `list_work_item_comments`/`list_document_comments` share the `Comment` model + `build_comment` parser; work item comments add `title` (own `WORK_ITEM_COMMENT_LIST_FIELDS`), documents send none.
 
 ## Testing
 

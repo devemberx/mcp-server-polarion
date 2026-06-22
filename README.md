@@ -14,7 +14,7 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for **P
 
 ## Features
 
-- **24 tools** covering read and write across documents, work items, traceability links, and comments.
+- **25 tools** covering read and write across documents, work items, traceability links, and comments.
 - **Read** — render documents as Markdown, search with Lucene or SQL, walk incoming/outgoing links, resolve enum options.
 - **Write** — create and update work items and documents, manage links, reorganize document structure, post comments.
 - **Safe writes** — every write tool supports `dry_run`, and pre-write guards validate fields, enum values, and link targets before hitting Polarion.
@@ -166,6 +166,7 @@ claude mcp add mcp-server-polarion \
 | `read_work_item` | Get work item details with the body as Markdown |
 | `list_work_item_links` | List a work item's outgoing or incoming links |
 | `list_document_comments` | List a document's comments with thread relationships |
+| `list_work_item_comments` | List a work item's comments with thread relationships |
 | `list_document_enum_options` | Resolve valid enum ids for a document field |
 | `list_work_item_enum_options` | Resolve valid enum ids for a work item field |
 
