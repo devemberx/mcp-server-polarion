@@ -1,4 +1,4 @@
-"""Comment models — shared comment view, document create specs, and write results."""
+"""Comment models — shared comment view, create specs, and update results."""
 
 from __future__ import annotations
 
@@ -41,8 +41,8 @@ class DocumentCommentsCreateResult(BaseModel):
     payload_preview: Mapping[str, object] | None
 
 
-class DocumentCommentUpdateResult(BaseModel):
-    """Result of an ``update_document_comment`` operation."""
+class CommentUpdateResult(BaseModel):
+    """Shared result of a comment-resolve update, across all comment types."""
 
     updated: bool
     dry_run: bool

@@ -1,4 +1,4 @@
-"""Comment tools — list document/work-item comments; create/update document comments."""
+"""Comment tools — list comments, create + resolve them."""
 
 from __future__ import annotations
 
@@ -15,9 +15,9 @@ from mcp_server_polarion.core.exceptions import (
 )
 from mcp_server_polarion.models import (
     Comment,
+    CommentUpdateResult,
     DocumentCommentsCreateResult,
     DocumentCommentSpec,
-    DocumentCommentUpdateResult,
     JsonValue,
     PaginatedResult,
 )
@@ -77,6 +77,26 @@ def _build_document_comments_payload(
     return {"data": items}
 
 
+def _comment_update_payload(
+    *,
+    full_id: str,
+    comment_type: str,
+    resolved: bool,
+) -> dict[str, JsonValue]:
+    """Single-resource PATCH body (``data`` dict, not list). Only ``resolved``
+    is patchable; ``id`` is the full resource path the API expects.
+    """
+    return {
+        "data": {
+            "type": comment_type,
+            "id": full_id,
+            "attributes": {
+                "resolved": resolved,
+            },
+        }
+    }
+
+
 def _build_document_comment_update_payload(
     *,
     project_id: str,
@@ -85,19 +105,29 @@ def _build_document_comment_update_payload(
     comment_id: str,
     resolved: bool,
 ) -> dict[str, JsonValue]:
-    """Single-resource PATCH body (``data`` dict, not list); ``id`` is the
-    full 4-segment path. Only ``resolved`` is patchable.
-    """
+    """PATCH body for a document comment; ``id`` is the full 4-segment path."""
     full_id = f"{project_id}/{space_id}/{document_name}/{comment_id}"
-    return {
-        "data": {
-            "type": "document_comments",
-            "id": full_id,
-            "attributes": {
-                "resolved": resolved,
-            },
-        }
-    }
+    return _comment_update_payload(
+        full_id=full_id,
+        comment_type="document_comments",
+        resolved=resolved,
+    )
+
+
+def _build_work_item_comment_update_payload(
+    *,
+    project_id: str,
+    work_item_id: str,
+    comment_id: str,
+    resolved: bool,
+) -> dict[str, JsonValue]:
+    """PATCH body for a work item comment; ``id`` is the full 3-segment path."""
+    full_id = f"{project_id}/{work_item_id}/{comment_id}"
+    return _comment_update_payload(
+        full_id=full_id,
+        comment_type="workitem_comments",
+        resolved=resolved,
+    )
 
 
 @mcp.tool(
@@ -335,7 +365,7 @@ async def update_document_comment(  # noqa: PLR0913
         default=False,
         description="Preview payload without calling Polarion.",
     ),
-) -> DocumentCommentUpdateResult:
+) -> CommentUpdateResult:
     """Resolve or re-open one document comment thread.
 
     Root comments only (a reply 400s) — pick a root id (parent_comment_id=None)
@@ -351,7 +381,7 @@ async def update_document_comment(  # noqa: PLR0913
     )
 
     if dry_run:
-        return DocumentCommentUpdateResult(
+        return CommentUpdateResult(
             updated=False,
             dry_run=True,
             comment_id=None,
@@ -381,7 +411,88 @@ async def update_document_comment(  # noqa: PLR0913
     except PolarionError as exc:
         raise RuntimeError(f"Failed to update document comment: {exc.message}") from exc
 
-    return DocumentCommentUpdateResult(
+    return CommentUpdateResult(
+        updated=True,
+        dry_run=False,
+        comment_id=comment_id,
+        resolved=resolved,
+        payload_preview=None,
+    )
+
+
+@mcp.tool(
+    tags={"write"},
+    timeout=60.0,
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def update_work_item_comment(  # noqa: PLR0913
+    ctx: Context,
+    project_id: str = Field(min_length=1, description="Polarion project ID."),
+    work_item_id: str = Field(
+        min_length=1,
+        description="Work item ID, e.g. 'MCPT-001'.",
+    ),
+    comment_id: str = Field(
+        min_length=1,
+        description="Short comment ID (e.g. 'c42' from list_work_item_comments).",
+    ),
+    resolved: bool = Field(description="New resolved state."),
+    dry_run: bool = Field(
+        default=False,
+        description="Preview payload without calling Polarion.",
+    ),
+) -> CommentUpdateResult:
+    """Resolve or re-open one work item comment.
+
+    Root comments only (a reply 400s) — pick a root id (parent_comment_id=None)
+    from list_work_item_comments; resolving a root flips only that comment.
+    Idempotent.
+    """
+    payload = _build_work_item_comment_update_payload(
+        project_id=project_id,
+        work_item_id=work_item_id,
+        comment_id=comment_id,
+        resolved=resolved,
+    )
+
+    if dry_run:
+        return CommentUpdateResult(
+            updated=False,
+            dry_run=True,
+            comment_id=None,
+            resolved=resolved,
+            payload_preview=payload,
+        )
+
+    client = get_client(ctx)
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/workitems/{encode_path_segment(work_item_id)}"
+        f"/comments/{encode_path_segment(comment_id)}"
+    )
+    try:
+        await client.patch(path, json=cast(dict[str, object], payload))
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot update work item comment -- check your POLARION_TOKEN permissions."
+        ) from exc
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Comment '{comment_id}' on work item '{work_item_id}'"
+            f" (project '{project_id}') not found."
+            " Use `list_work_item_comments` to discover valid comment IDs."
+        ) from exc
+    except PolarionError as exc:
+        raise RuntimeError(
+            f"Failed to update work item comment: {exc.message}"
+        ) from exc
+
+    return CommentUpdateResult(
         updated=True,
         dry_run=False,
         comment_id=comment_id,

@@ -7,9 +7,9 @@ from __future__ import annotations
 
 from mcp_server_polarion.models.comments import (
     Comment,
+    CommentUpdateResult,
     DocumentCommentsCreateResult,
     DocumentCommentSpec,
-    DocumentCommentUpdateResult,
 )
 from mcp_server_polarion.models.common import (
     MAX_BODY_HTML_LEN,
@@ -50,8 +50,8 @@ from mcp_server_polarion.models.work_items import (
 __all__: list[str] = [
     "MAX_BODY_HTML_LEN",
     "Comment",
+    "CommentUpdateResult",
     "DocumentCommentSpec",
-    "DocumentCommentUpdateResult",
     "DocumentCommentsCreateResult",
     "DocumentCreateResult",
     "DocumentDetail",

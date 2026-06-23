@@ -7,9 +7,9 @@ from pydantic import ValidationError
 
 from mcp_server_polarion.models import (
     Comment,
+    CommentUpdateResult,
     DocumentCommentsCreateResult,
     DocumentCommentSpec,
-    DocumentCommentUpdateResult,
 )
 
 
@@ -60,9 +60,9 @@ class TestDocumentCommentsCreateResult:
         assert result.payload_preview is not None
 
 
-class TestDocumentCommentUpdateResult:
+class TestCommentUpdateResult:
     def test_resolve(self):
-        result = DocumentCommentUpdateResult(
+        result = CommentUpdateResult(
             updated=True,
             dry_run=False,
             comment_id="proj/space/doc/c1",
@@ -71,3 +71,14 @@ class TestDocumentCommentUpdateResult:
         )
         assert result.comment_id == "proj/space/doc/c1"
         assert result.resolved is True
+
+    def test_resolve_work_item_three_segment_id(self):
+        result = CommentUpdateResult(
+            updated=True,
+            dry_run=False,
+            comment_id="c1",
+            resolved=False,
+            payload_preview=None,
+        )
+        assert result.comment_id == "c1"
+        assert result.resolved is False
