@@ -69,6 +69,7 @@ Applies to ALL comments/docstrings incl. CLAUDE.md.
 - `PATCH /workitems` needs ≥1 `attributes`/`relationships` entry. `changeTypeTo` resets `status` to new type's initial state.
 - `update_document_comment`/`update_work_item_comment`: root comments only (replies 400). Document resolve cascades to whole thread; work item resolve flips only that comment (no cascade).
 - Comment ids: work item comments 3-segment (`<proj>/<wi>/<cmt>`), document comments 4-segment. `list_work_item_comments`/`list_document_comments` share the `Comment` model + `build_comments_page` parser; work item comments add `title` (own `WORK_ITEM_COMMENT_LIST_FIELDS`), documents send none.
+- `create_document_comments`/`create_work_item_comments` share the `CommentSpec` input + `_comment_create_payload` helper; `title` honored only for work item comments (document create drops it). No `MAX_BULK_ITEMS` cap on either.
 
 ## Testing
 

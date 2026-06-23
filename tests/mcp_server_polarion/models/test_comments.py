@@ -7,9 +7,9 @@ from pydantic import ValidationError
 
 from mcp_server_polarion.models import (
     Comment,
+    CommentsCreateResult,
+    CommentSpec,
     CommentUpdateResult,
-    DocumentCommentsCreateResult,
-    DocumentCommentSpec,
 )
 
 
@@ -34,26 +34,31 @@ class TestComment:
         assert c.child_comment_ids == ["c3", "c4"]
 
 
-class TestDocumentCommentSpec:
+class TestCommentSpec:
     def test_minimal(self):
-        spec = DocumentCommentSpec(text="hello")
+        spec = CommentSpec(text="hello")
         assert spec.text == "hello"
         assert spec.text_format == "text/plain"
+        assert spec.title is None
         assert spec.resolved is None
         assert spec.parent_comment_id is None
 
+    def test_title(self):
+        spec = CommentSpec(text="hello", title="Heads up")
+        assert spec.title == "Heads up"
+
     def test_empty_text_rejected(self):
         with pytest.raises(ValidationError):
-            DocumentCommentSpec(text="")
+            CommentSpec(text="")
 
 
-class TestDocumentCommentsCreateResult:
+class TestCommentsCreateResult:
     def test_dry_run(self):
-        result = DocumentCommentsCreateResult(
+        result = CommentsCreateResult(
             created=False,
             dry_run=True,
             comment_ids=[],
-            payload_preview={"data": [{"type": "document_comments"}]},
+            payload_preview={"data": [{"type": "workitem_comments"}]},
         )
         assert result.dry_run is True
         assert result.comment_ids == []

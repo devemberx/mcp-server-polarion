@@ -15,9 +15,9 @@ from mcp_server_polarion.core.exceptions import (
 )
 from mcp_server_polarion.models import (
     Comment,
+    CommentsCreateResult,
+    CommentSpec,
     CommentUpdateResult,
-    DocumentCommentsCreateResult,
-    DocumentCommentSpec,
     JsonValue,
     PaginatedResult,
 )
@@ -36,22 +36,24 @@ from mcp_server_polarion.tools._shared.helpers import (
 logger = logging.getLogger("mcp_server_polarion.tools.comments")
 
 
-def _build_document_comments_payload(
+def _comment_create_payload(
     *,
-    specs: list[DocumentCommentSpec],
-    project_id: str,
-    space_id: str,
-    document_name: str,
+    specs: list[CommentSpec],
+    comment_type: str,
+    parent_prefix: str,
+    include_title: bool,
 ) -> dict[str, JsonValue]:
-    """JSON:API POST body for .../documents/{d}/comments; ``None`` fields
-    omitted, short ``parent_comment_id`` expanded to the full 4-segment path
-    the API requires.
+    """JSON:API POST body (``data`` list); ``None`` fields omitted, short
+    ``parent_comment_id`` expanded to the full path the API requires. ``title``
+    only emitted when supported by the comment type.
     """
     items: list[JsonValue] = []
     for spec in specs:
         attributes: dict[str, JsonValue] = {
             "text": {"type": spec.text_format, "value": spec.text},
         }
+        if include_title and spec.title is not None:
+            attributes["title"] = spec.title
         if spec.resolved is not None:
             attributes["resolved"] = spec.resolved
 
@@ -59,15 +61,15 @@ def _build_document_comments_payload(
         if spec.author_id is not None:
             relationships["author"] = {"data": {"id": spec.author_id, "type": "users"}}
         if spec.parent_comment_id is not None:
-            full_parent = (
-                f"{project_id}/{space_id}/{document_name}/{spec.parent_comment_id}"
-            )
             relationships["parentComment"] = {
-                "data": {"id": full_parent, "type": "document_comments"}
+                "data": {
+                    "id": f"{parent_prefix}/{spec.parent_comment_id}",
+                    "type": comment_type,
+                }
             }
 
         item: dict[str, JsonValue] = {
-            "type": "document_comments",
+            "type": comment_type,
             "attributes": attributes,
         }
         if relationships:
@@ -75,6 +77,39 @@ def _build_document_comments_payload(
         items.append(item)
 
     return {"data": items}
+
+
+def _build_document_comments_payload(
+    *,
+    specs: list[CommentSpec],
+    project_id: str,
+    space_id: str,
+    document_name: str,
+) -> dict[str, JsonValue]:
+    """POST body for .../documents/{d}/comments; parent ids are 4-segment.
+    Document comments have no title, so ``title`` is dropped.
+    """
+    return _comment_create_payload(
+        specs=specs,
+        comment_type="document_comments",
+        parent_prefix=f"{project_id}/{space_id}/{document_name}",
+        include_title=False,
+    )
+
+
+def _build_work_item_comments_payload(
+    *,
+    specs: list[CommentSpec],
+    project_id: str,
+    work_item_id: str,
+) -> dict[str, JsonValue]:
+    """POST body for .../workitems/{wi}/comments; parent ids are 3-segment."""
+    return _comment_create_payload(
+        specs=specs,
+        comment_type="workitem_comments",
+        parent_prefix=f"{project_id}/{work_item_id}",
+        include_title=True,
+    )
 
 
 def _comment_update_payload(
@@ -258,7 +293,7 @@ async def create_document_comments(  # noqa: PLR0913
         min_length=1,
         description="Document name within ``space_id``.",
     ),
-    comments: list[DocumentCommentSpec] = Field(  # noqa: B008
+    comments: list[CommentSpec] = Field(  # noqa: B008
         min_length=1,
         description="Comments to create in one request.",
     ),
@@ -266,12 +301,13 @@ async def create_document_comments(  # noqa: PLR0913
         default=False,
         description="Preview payload without calling Polarion.",
     ),
-) -> DocumentCommentsCreateResult:
+) -> CommentsCreateResult:
     """Create one or more comments on a document in a single request.
 
     Reply: set parent_comment_id to a short ID from list_document_comments
     (None = top-level). 'text/html' text is sent unsanitized; omit author_id
-    for the token's user. NOT idempotent — a retry duplicates.
+    for the token's user. title is ignored for documents. NOT idempotent — a
+    retry duplicates.
     """
     payload = _build_document_comments_payload(
         specs=comments,
@@ -281,7 +317,7 @@ async def create_document_comments(  # noqa: PLR0913
     )
 
     if dry_run:
-        return DocumentCommentsCreateResult(
+        return CommentsCreateResult(
             created=False,
             dry_run=True,
             comment_ids=[],
@@ -327,7 +363,100 @@ async def create_document_comments(  # noqa: PLR0913
             " The POST may have succeeded — verify with `list_document_comments`."
         )
 
-    return DocumentCommentsCreateResult(
+    return CommentsCreateResult(
+        created=True,
+        dry_run=False,
+        comment_ids=comment_ids,
+        payload_preview=None,
+    )
+
+
+@mcp.tool(
+    tags={"write"},
+    timeout=60.0,
+    annotations={
+        # Additive: non-destructive, but non-idempotent (a retry duplicates comments).
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    },
+)
+async def create_work_item_comments(
+    ctx: Context,
+    project_id: str = Field(min_length=1, description="Polarion project ID."),
+    work_item_id: str = Field(
+        min_length=1,
+        description="Work item ID, e.g. 'MCPT-001'.",
+    ),
+    comments: list[CommentSpec] = Field(  # noqa: B008
+        min_length=1,
+        description="Comments to create in one request.",
+    ),
+    dry_run: bool = Field(
+        default=False,
+        description="Preview payload without calling Polarion.",
+    ),
+) -> CommentsCreateResult:
+    """Create one or more comments on a work item in a single request.
+
+    Reply: set parent_comment_id to a short ID from list_work_item_comments
+    (None = top-level). Optional title sets the comment heading. 'text/html'
+    text is sent unsanitized; omit author_id for the token's user. NOT
+    idempotent — a retry duplicates.
+    """
+    payload = _build_work_item_comments_payload(
+        specs=comments,
+        project_id=project_id,
+        work_item_id=work_item_id,
+    )
+
+    if dry_run:
+        return CommentsCreateResult(
+            created=False,
+            dry_run=True,
+            comment_ids=[],
+            payload_preview=payload,
+        )
+
+    client = get_client(ctx)
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/workitems/{encode_path_segment(work_item_id)}"
+        "/comments"
+    )
+    try:
+        response = await client.post(path, json=cast(dict[str, object], payload))
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot create work item comments -- check your POLARION_TOKEN permissions."
+        ) from exc
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Work item '{work_item_id}' (project '{project_id}') not found."
+            " Use `list_work_items` to discover valid IDs."
+        ) from exc
+    except PolarionError as exc:
+        raise RuntimeError(
+            f"Failed to create work item comments: {exc.message}"
+        ) from exc
+
+    raw_data = response.get("data", []) if isinstance(response, dict) else []
+    comment_ids: list[str] = []
+    if isinstance(raw_data, list):
+        for entry in raw_data:
+            if isinstance(entry, dict):
+                full_id = safe_str(entry.get("id", ""))
+                if full_id:
+                    comment_ids.append(extract_short_id(full_id))
+
+    if not comment_ids:
+        raise RuntimeError(
+            "Polarion returned no comment IDs after creation."
+            " The POST may have succeeded — verify with `list_work_item_comments`."
+        )
+
+    return CommentsCreateResult(
         created=True,
         dry_run=False,
         comment_ids=comment_ids,

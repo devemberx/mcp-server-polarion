@@ -22,18 +22,22 @@ class Comment(BaseModel):
     child_comment_ids: list[str] = Field(default_factory=list)
 
 
-class DocumentCommentSpec(BaseModel):
-    """One comment to create via ``create_document_comments``."""
+class CommentSpec(BaseModel):
+    """A comment to create via the comment-create tools."""
 
     text: str = Field(min_length=1)
     text_format: Literal["text/html", "text/plain"] = "text/plain"
+    title: str | None = Field(
+        default=None,
+        description="Comment title -- work item comments only; ignored for documents.",
+    )
     resolved: bool | None = None
     author_id: str | None = None
     parent_comment_id: str | None = None
 
 
-class DocumentCommentsCreateResult(BaseModel):
-    """Result of a ``create_document_comments`` operation."""
+class CommentsCreateResult(BaseModel):
+    """Result of a comment-create operation."""
 
     created: bool
     dry_run: bool
