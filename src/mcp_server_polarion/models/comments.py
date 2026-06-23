@@ -29,7 +29,7 @@ class CommentSpec(BaseModel):
     text_format: Literal["text/html", "text/plain"] = "text/plain"
     title: str | None = Field(
         default=None,
-        description="Comment title -- work item comments only; ignored for documents.",
+        description="Comment title; ignored only for document comments.",
     )
     resolved: bool | None = None
     author_id: str | None = None
