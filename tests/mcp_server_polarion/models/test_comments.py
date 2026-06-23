@@ -10,6 +10,7 @@ from mcp_server_polarion.models import (
     CommentsCreateResult,
     CommentSpec,
     CommentUpdateResult,
+    WorkItemCommentSpec,
 )
 
 
@@ -39,17 +40,32 @@ class TestCommentSpec:
         spec = CommentSpec(text="hello")
         assert spec.text == "hello"
         assert spec.text_format == "text/plain"
-        assert spec.title is None
         assert spec.resolved is None
         assert spec.parent_comment_id is None
 
-    def test_title(self):
-        spec = CommentSpec(text="hello", title="Heads up")
-        assert spec.title == "Heads up"
+    def test_no_title_field(self):
+        """Base spec (document comments) has no title field at all."""
+        assert not hasattr(CommentSpec(text="hello"), "title")
 
     def test_empty_text_rejected(self):
         with pytest.raises(ValidationError):
             CommentSpec(text="")
+
+
+class TestWorkItemCommentSpec:
+    def test_inherits_base_fields(self):
+        spec = WorkItemCommentSpec(text="hello")
+        assert spec.text == "hello"
+        assert spec.text_format == "text/plain"
+        assert spec.title is None
+
+    def test_title(self):
+        spec = WorkItemCommentSpec(text="hello", title="Heads up")
+        assert spec.title == "Heads up"
+
+    def test_empty_text_rejected(self):
+        with pytest.raises(ValidationError):
+            WorkItemCommentSpec(text="")
 
 
 class TestCommentsCreateResult:

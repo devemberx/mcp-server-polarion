@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from typing import cast
 
 from fastmcp import Context
@@ -20,6 +21,7 @@ from mcp_server_polarion.models import (
     CommentUpdateResult,
     JsonValue,
     PaginatedResult,
+    WorkItemCommentSpec,
 )
 from mcp_server_polarion.server import mcp
 from mcp_server_polarion.tools._shared.helpers import (
@@ -38,22 +40,23 @@ logger = logging.getLogger("mcp_server_polarion.tools.comments")
 
 def _comment_create_payload(
     *,
-    specs: list[CommentSpec],
+    specs: Sequence[CommentSpec],
     comment_type: str,
     parent_prefix: str,
-    include_title: bool,
 ) -> dict[str, JsonValue]:
     """JSON:API POST body (``data`` list); ``None`` fields omitted, short
     ``parent_comment_id`` expanded to the full path the API requires. ``title``
-    only emitted when supported by the comment type.
+    emitted only when the spec carries one (WorkItemCommentSpec); base
+    CommentSpec has no title, so document comments never send it.
     """
     items: list[JsonValue] = []
     for spec in specs:
         attributes: dict[str, JsonValue] = {
             "text": {"type": spec.text_format, "value": spec.text},
         }
-        if include_title and spec.title is not None:
-            attributes["title"] = spec.title
+        title = getattr(spec, "title", None)
+        if title is not None:
+            attributes["title"] = title
         if spec.resolved is not None:
             attributes["resolved"] = spec.resolved
 
@@ -86,20 +89,17 @@ def _build_document_comments_payload(
     space_id: str,
     document_name: str,
 ) -> dict[str, JsonValue]:
-    """POST body for .../documents/{d}/comments; parent ids are 4-segment.
-    Document comments have no title, so ``title`` is dropped.
-    """
+    """POST body for .../documents/{d}/comments; parent ids are 4-segment."""
     return _comment_create_payload(
         specs=specs,
         comment_type="document_comments",
         parent_prefix=f"{project_id}/{space_id}/{document_name}",
-        include_title=False,
     )
 
 
 def _build_work_item_comments_payload(
     *,
-    specs: list[CommentSpec],
+    specs: list[WorkItemCommentSpec],
     project_id: str,
     work_item_id: str,
 ) -> dict[str, JsonValue]:
@@ -108,7 +108,6 @@ def _build_work_item_comments_payload(
         specs=specs,
         comment_type="workitem_comments",
         parent_prefix=f"{project_id}/{work_item_id}",
-        include_title=True,
     )
 
 
@@ -306,8 +305,7 @@ async def create_document_comments(  # noqa: PLR0913
 
     Reply: set parent_comment_id to a short ID from list_document_comments
     (None = top-level). 'text/html' text is sent unsanitized; omit author_id
-    for the token's user. title is ignored for documents. NOT idempotent — a
-    retry duplicates.
+    for the token's user. NOT idempotent — a retry duplicates.
     """
     payload = _build_document_comments_payload(
         specs=comments,
@@ -389,7 +387,7 @@ async def create_work_item_comments(
         min_length=1,
         description="Work item ID, e.g. 'MCPT-001'.",
     ),
-    comments: list[CommentSpec] = Field(  # noqa: B008
+    comments: list[WorkItemCommentSpec] = Field(  # noqa: B008
         min_length=1,
         description="Comments to create in one request.",
     ),

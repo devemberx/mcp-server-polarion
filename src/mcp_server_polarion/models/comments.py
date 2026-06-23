@@ -23,17 +23,19 @@ class Comment(BaseModel):
 
 
 class CommentSpec(BaseModel):
-    """A comment to create via the comment-create tools."""
+    """Common fields for a comment to create; base for type-specific specs."""
 
     text: str = Field(min_length=1)
     text_format: Literal["text/html", "text/plain"] = "text/plain"
-    title: str | None = Field(
-        default=None,
-        description="Comment title; ignored only for document comments.",
-    )
     resolved: bool | None = None
     author_id: str | None = None
     parent_comment_id: str | None = None
+
+
+class WorkItemCommentSpec(CommentSpec):
+    """Work item comment to create; adds ``title`` (document comments have none)."""
+
+    title: str | None = Field(default=None, description="Comment heading.")
 
 
 class CommentsCreateResult(BaseModel):

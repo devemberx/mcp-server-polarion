@@ -10,6 +10,7 @@ from mcp_server_polarion.models.comments import (
     CommentsCreateResult,
     CommentSpec,
     CommentUpdateResult,
+    WorkItemCommentSpec,
 )
 from mcp_server_polarion.models.common import (
     MAX_BODY_HTML_LEN,
@@ -65,6 +66,7 @@ __all__: list[str] = [
     "PaginatedResult",
     "ProjectSummary",
     "SqlRecipeGallery",
+    "WorkItemCommentSpec",
     "WorkItemCreateSpec",
     "WorkItemDetail",
     "WorkItemLink",

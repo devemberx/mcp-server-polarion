@@ -19,6 +19,7 @@ from mcp_server_polarion.models import (
     CommentSpec,
     CommentUpdateResult,
     PaginatedResult,
+    WorkItemCommentSpec,
 )
 from mcp_server_polarion.tools.comments import (
     _build_document_comment_update_payload,
@@ -773,10 +774,12 @@ class TestBuildDocumentCommentsPayload:
         assert isinstance(payload["data"], list)
         assert len(payload["data"]) == 1  # type: ignore[arg-type]
 
-    def test_title_dropped_for_documents(self) -> None:
-        """Document comments have no title — it must not reach attributes."""
+    def test_no_title_for_documents(self) -> None:
+        """Base CommentSpec has no title field, so it never reaches attributes."""
+        spec = CommentSpec(text="t")
+        assert not hasattr(spec, "title")
         payload = _build_document_comments_payload(
-            specs=[CommentSpec(text="t", title="ignored")],
+            specs=[spec],
             project_id="P",
             space_id="S",
             document_name="D",
@@ -1065,7 +1068,7 @@ class TestBuildWorkItemCommentsPayload:
 
     def test_single_plain_text_spec(self) -> None:
         payload = _build_work_item_comments_payload(
-            specs=[CommentSpec(text="hello")],
+            specs=[WorkItemCommentSpec(text="hello")],
             project_id="Proj",
             work_item_id="MCPT-1",
         )
@@ -1084,7 +1087,7 @@ class TestBuildWorkItemCommentsPayload:
 
     def test_title_in_attributes(self) -> None:
         payload = _build_work_item_comments_payload(
-            specs=[CommentSpec(text="t", title="Heads up")],
+            specs=[WorkItemCommentSpec(text="t", title="Heads up")],
             project_id="P",
             work_item_id="MCPT-1",
         )
@@ -1094,7 +1097,7 @@ class TestBuildWorkItemCommentsPayload:
     def test_resolved_false_in_attributes(self) -> None:
         """Explicit False must be sent, not silently omitted like None."""
         payload = _build_work_item_comments_payload(
-            specs=[CommentSpec(text="t", resolved=False)],
+            specs=[WorkItemCommentSpec(text="t", resolved=False)],
             project_id="P",
             work_item_id="MCPT-1",
         )
@@ -1103,7 +1106,7 @@ class TestBuildWorkItemCommentsPayload:
 
     def test_resolved_none_omits_key(self) -> None:
         payload = _build_work_item_comments_payload(
-            specs=[CommentSpec(text="t", resolved=None)],
+            specs=[WorkItemCommentSpec(text="t", resolved=None)],
             project_id="P",
             work_item_id="MCPT-1",
         )
@@ -1112,7 +1115,7 @@ class TestBuildWorkItemCommentsPayload:
 
     def test_author_relationship(self) -> None:
         payload = _build_work_item_comments_payload(
-            specs=[CommentSpec(text="t", author_id="alice")],
+            specs=[WorkItemCommentSpec(text="t", author_id="alice")],
             project_id="P",
             work_item_id="MCPT-1",
         )
@@ -1125,7 +1128,7 @@ class TestBuildWorkItemCommentsPayload:
     def test_parent_comment_full_path_composed(self) -> None:
         """Short parent_comment_id is expanded to the full 3-segment path."""
         payload = _build_work_item_comments_payload(
-            specs=[CommentSpec(text="t", parent_comment_id="c1")],
+            specs=[WorkItemCommentSpec(text="t", parent_comment_id="c1")],
             project_id="Proj",
             work_item_id="MCPT-1",
         )
@@ -1136,7 +1139,10 @@ class TestBuildWorkItemCommentsPayload:
 
     def test_multiple_specs_produce_multiple_items(self) -> None:
         payload = _build_work_item_comments_payload(
-            specs=[CommentSpec(text="first"), CommentSpec(text="second")],
+            specs=[
+                WorkItemCommentSpec(text="first"),
+                WorkItemCommentSpec(text="second"),
+            ],
             project_id="P",
             work_item_id="MCPT-1",
         )
@@ -1153,7 +1159,7 @@ class TestCreateWorkItemCommentsDryRun:
             mock_ctx,
             project_id="P",
             work_item_id="MCPT-1",
-            comments=[CommentSpec(text="hello")],
+            comments=[WorkItemCommentSpec(text="hello")],
             dry_run=True,
         )
         mock_client.post.assert_not_called()
@@ -1168,7 +1174,10 @@ class TestCreateWorkItemCommentsDryRun:
             mock_ctx,
             project_id="P",
             work_item_id="MCPT-1",
-            comments=[CommentSpec(text="first", title="T"), CommentSpec(text="second")],
+            comments=[
+                WorkItemCommentSpec(text="first", title="T"),
+                WorkItemCommentSpec(text="second"),
+            ],
             dry_run=True,
         )
         assert result.payload_preview is not None
@@ -1192,7 +1201,10 @@ class TestCreateWorkItemCommentsHappyPath:
             mock_ctx,
             project_id="p",
             work_item_id="MCPT-1",
-            comments=[CommentSpec(text="first"), CommentSpec(text="second")],
+            comments=[
+                WorkItemCommentSpec(text="first"),
+                WorkItemCommentSpec(text="second"),
+            ],
             dry_run=False,
         )
         assert result.created is True
@@ -1210,7 +1222,7 @@ class TestCreateWorkItemCommentsHappyPath:
             mock_ctx,
             project_id="Proj",
             work_item_id="MCPT-1",
-            comments=[CommentSpec(text="hello")],
+            comments=[WorkItemCommentSpec(text="hello")],
             dry_run=False,
         )
         call_args = mock_client.post.call_args
@@ -1226,7 +1238,7 @@ class TestCreateWorkItemCommentsHappyPath:
             mock_ctx,
             project_id="P",
             work_item_id="MY WI",
-            comments=[CommentSpec(text="hi")],
+            comments=[WorkItemCommentSpec(text="hi")],
             dry_run=False,
         )
         assert "MY%20WI" in mock_client.post.call_args[0][0]
@@ -1241,7 +1253,7 @@ class TestCreateWorkItemCommentsHappyPath:
             mock_ctx,
             project_id="P",
             work_item_id="MCPT-1",
-            comments=[CommentSpec(text="t", title="Heads up")],
+            comments=[WorkItemCommentSpec(text="t", title="Heads up")],
             dry_run=False,
         )
         body = mock_client.post.call_args[1]["json"]
@@ -1260,7 +1272,7 @@ class TestCreateWorkItemCommentsErrors:
                 mock_ctx,
                 project_id="P",
                 work_item_id="MCPT-1",
-                comments=[CommentSpec(text="hi")],
+                comments=[WorkItemCommentSpec(text="hi")],
                 dry_run=False,
             )
 
@@ -1275,7 +1287,7 @@ class TestCreateWorkItemCommentsErrors:
                 mock_ctx,
                 project_id="P",
                 work_item_id="MCPT-1",
-                comments=[CommentSpec(text="hi")],
+                comments=[WorkItemCommentSpec(text="hi")],
                 dry_run=False,
             )
 
@@ -1288,7 +1300,7 @@ class TestCreateWorkItemCommentsErrors:
                 mock_ctx,
                 project_id="P",
                 work_item_id="MCPT-1",
-                comments=[CommentSpec(text="hi")],
+                comments=[WorkItemCommentSpec(text="hi")],
                 dry_run=False,
             )
 
@@ -1302,7 +1314,7 @@ class TestCreateWorkItemCommentsErrors:
                 mock_ctx,
                 project_id="P",
                 work_item_id="MCPT-1",
-                comments=[CommentSpec(text="hi")],
+                comments=[WorkItemCommentSpec(text="hi")],
                 dry_run=False,
             )
 
