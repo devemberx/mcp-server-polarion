@@ -14,7 +14,6 @@ from mcp_server_polarion.models.comments import (
 )
 from mcp_server_polarion.models.common import (
     MAX_BODY_HTML_LEN,
-    EnumOption,
     JsonValue,
     PaginatedResult,
 )
@@ -26,6 +25,7 @@ from mcp_server_polarion.models.documents import (
     DocumentSummary,
     DocumentUpdateResult,
 )
+from mcp_server_polarion.models.enum import EnumOption
 from mcp_server_polarion.models.links import (
     WorkItemLink,
     WorkItemLinkRef,
