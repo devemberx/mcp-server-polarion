@@ -26,27 +26,32 @@ from mcp_server_polarion.models import (
     WorkItemLinkUpdateSpec,
 )
 from mcp_server_polarion.server import mcp
+from mcp_server_polarion.tools._shared.fields import (
+    MAX_BULK_ITEMS,
+    WORK_ITEM_LIST_FIELDS,
+)
 from mcp_server_polarion.tools._shared.guard import (
     guard_work_item_link_roles,
     guard_work_item_link_targets,
     partition_delete_links,
 )
 from mcp_server_polarion.tools._shared.helpers import (
-    DEFAULT_PAGE_SIZE,
-    MAX_BULK_ITEMS,
-    WORK_ITEM_LIST_FIELDS,
-    build_included_work_item_map,
-    compute_has_more,
     encode_path_segment,
+    get_client,
+    safe_str,
+    validate_work_item_id_for_lucene,
+)
+from mcp_server_polarion.tools._shared.pagination import (
+    DEFAULT_PAGE_SIZE,
+    build_page,
+)
+from mcp_server_polarion.tools._shared.parse import (
     extract_relationship_id,
     extract_short_id,
-    extract_total_count,
-    get_client,
+    parse_included_work_item_map,
     parse_work_item_summaries,
-    safe_str,
     split_module_id,
     summary_to_back_link,
-    validate_work_item_id_for_lucene,
 )
 
 logger = logging.getLogger("mcp_server_polarion.tools.links")
@@ -179,7 +184,7 @@ def _parse_work_item_links(
     """Parse linked work items into ``WorkItemLink``s; target id from
     ``relationships.workItem.data.id``, never by parsing the composite id.
     """
-    work_item_map = build_included_work_item_map(response)
+    work_item_map = parse_included_work_item_map(response)
 
     items: list[WorkItemLink] = []
     data = response.get("data", [])
@@ -279,20 +284,7 @@ async def _get_forward_link_page(
 
     items = _parse_work_item_links(response, direction="forward")
 
-    raw_total = extract_total_count(response)
-    total = raw_total
-    if total <= 0 and items:
-        total = (page_number - 1) * page_size + len(items)
-
-    return PaginatedResult[WorkItemLink](
-        items=items,
-        total_count=total,
-        page=page_number,
-        page_size=page_size,
-        has_more=compute_has_more(
-            response, raw_total, page_number, page_size, len(items)
-        ),
-    )
+    return build_page(items, response, page_number, page_size)
 
 
 async def _get_back_link_page(
@@ -333,20 +325,7 @@ async def _get_back_link_page(
     summaries = parse_work_item_summaries(response.get("data", []))
     items = [summary_to_back_link(s) for s in summaries]
 
-    raw_total = extract_total_count(response)
-    total = raw_total
-    if total <= 0 and items:
-        total = (page_number - 1) * page_size + len(items)
-
-    return PaginatedResult[WorkItemLink](
-        items=items,
-        total_count=total,
-        page=page_number,
-        page_size=page_size,
-        has_more=compute_has_more(
-            response, raw_total, page_number, page_size, len(items)
-        ),
-    )
+    return build_page(items, response, page_number, page_size)
 
 
 @mcp.tool(

@@ -24,15 +24,19 @@ from mcp_server_polarion.models import (
     WorkItemCommentSpec,
 )
 from mcp_server_polarion.server import mcp
-from mcp_server_polarion.tools._shared.helpers import (
-    DEFAULT_PAGE_SIZE,
+from mcp_server_polarion.tools._shared.fields import (
     DOCUMENT_COMMENT_LIST_FIELDS,
     WORK_ITEM_COMMENT_LIST_FIELDS,
-    build_comments_page,
+)
+from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
-    extract_short_id,
     get_client,
     safe_str,
+)
+from mcp_server_polarion.tools._shared.pagination import DEFAULT_PAGE_SIZE
+from mcp_server_polarion.tools._shared.parse import (
+    extract_short_id,
+    parse_comments_page,
 )
 
 logger = logging.getLogger("mcp_server_polarion.tools.comments")
@@ -124,7 +128,7 @@ def _extract_created_comment_ids(response: object) -> list[str]:
     return comment_ids
 
 
-def _comment_update_payload(
+def _build_comment_update_payload(
     *,
     full_id: str,
     comment_type: str,
@@ -154,7 +158,7 @@ def _build_document_comment_update_payload(
 ) -> dict[str, JsonValue]:
     """PATCH body for a document comment; ``id`` is the full 4-segment path."""
     full_id = f"{project_id}/{space_id}/{document_name}/{comment_id}"
-    return _comment_update_payload(
+    return _build_comment_update_payload(
         full_id=full_id,
         comment_type="document_comments",
         resolved=resolved,
@@ -170,7 +174,7 @@ def _build_work_item_comment_update_payload(
 ) -> dict[str, JsonValue]:
     """PATCH body for a work item comment; ``id`` is the full 3-segment path."""
     full_id = f"{project_id}/{work_item_id}/{comment_id}"
-    return _comment_update_payload(
+    return _build_comment_update_payload(
         full_id=full_id,
         comment_type="workitem_comments",
         resolved=resolved,
@@ -228,7 +232,7 @@ async def list_document_comments(  # noqa: PLR0913
             f"Failed to list comments for '{space_id}/{document_name}': {exc.message}"
         ) from exc
 
-    return build_comments_page(response, page_number, page_size)
+    return parse_comments_page(response, page_number, page_size)
 
 
 @mcp.tool(
@@ -280,7 +284,7 @@ async def list_work_item_comments(
             f"Failed to list comments for '{work_item_id}': {exc.message}"
         ) from exc
 
-    return build_comments_page(response, page_number, page_size)
+    return parse_comments_page(response, page_number, page_size)
 
 
 @mcp.tool(

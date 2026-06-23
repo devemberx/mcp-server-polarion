@@ -31,16 +31,20 @@ from mcp_server_polarion.tools._shared.cache import (
     store_document_type_custom_keys,
     store_work_item_custom_keys,
 )
-from mcp_server_polarion.tools._shared.helpers import (
-    DOCUMENT_DETAIL_FIELDS,
+from mcp_server_polarion.tools._shared.custom_fields import (
     STANDARD_DOCUMENT_ATTRIBUTES,
     STANDARD_WORK_ITEM_ATTRIBUTES,
+)
+from mcp_server_polarion.tools._shared.fields import (
+    DOCUMENT_DETAIL_FIELDS,
     WORK_ITEM_DETAIL_FIELDS,
+)
+from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
-    extract_short_id,
     format_option_list,
     safe_str,
 )
+from mcp_server_polarion.tools._shared.parse import extract_short_id
 from mcp_server_polarion.tools._shared.sql import (
     one_heading_per_document_sql,
     one_item_per_custom_field_sql,
