@@ -7,9 +7,10 @@ from __future__ import annotations
 
 from mcp_server_polarion.models.comments import (
     Comment,
+    CommentsCreateResult,
+    CommentSpec,
     CommentUpdateResult,
-    DocumentCommentsCreateResult,
-    DocumentCommentSpec,
+    WorkItemCommentSpec,
 )
 from mcp_server_polarion.models.common import (
     MAX_BODY_HTML_LEN,
@@ -50,9 +51,9 @@ from mcp_server_polarion.models.work_items import (
 __all__: list[str] = [
     "MAX_BODY_HTML_LEN",
     "Comment",
+    "CommentSpec",
     "CommentUpdateResult",
-    "DocumentCommentSpec",
-    "DocumentCommentsCreateResult",
+    "CommentsCreateResult",
     "DocumentCreateResult",
     "DocumentDetail",
     "DocumentPart",
@@ -65,6 +66,7 @@ __all__: list[str] = [
     "PaginatedResult",
     "ProjectSummary",
     "SqlRecipeGallery",
+    "WorkItemCommentSpec",
     "WorkItemCreateSpec",
     "WorkItemDetail",
     "WorkItemLink",

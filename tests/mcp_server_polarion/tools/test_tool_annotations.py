@@ -88,6 +88,15 @@ class TestWriteToolAnnotations:
                 },
             ),
             (
+                "create_work_item_comments",
+                {
+                    "readOnlyHint": False,
+                    "destructiveHint": False,
+                    "idempotentHint": False,
+                    "openWorldHint": True,
+                },
+            ),
+            (
                 "update_document_comment",
                 {
                     "readOnlyHint": False,
