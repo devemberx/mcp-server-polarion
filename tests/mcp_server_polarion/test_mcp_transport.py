@@ -52,6 +52,7 @@ _WRITE_TOOL_NAMES: frozenset[str] = frozenset(
         "update_document",
         "create_document_comments",
         "update_document_comment",
+        "update_work_item_comment",
     }
 )
 EXPECTED_TOOL_NAMES: frozenset[str] = _READ_TOOL_NAMES | _WRITE_TOOL_NAMES
