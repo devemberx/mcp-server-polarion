@@ -421,7 +421,7 @@ class TestListDocumentEnumOptions:
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.get.return_value = {
-            "data": _STATUS_DATA * 34,  # 102 entries; trimmed below by assert
+            "data": _STATUS_DATA * 34,
             "meta": {"totalCount": 150},
         }
 
