@@ -26,11 +26,9 @@ from mcp_server_polarion.tools._shared.helpers import (
     DEFAULT_PAGE_SIZE,
     DOCUMENT_COMMENT_LIST_FIELDS,
     WORK_ITEM_COMMENT_LIST_FIELDS,
-    build_comment,
-    compute_has_more,
+    build_comments_page,
     encode_path_segment,
     extract_short_id,
-    extract_total_count,
     get_client,
     safe_str,
 )
@@ -153,27 +151,7 @@ async def list_document_comments(  # noqa: PLR0913
             f"Failed to list comments for '{space_id}/{document_name}': {exc.message}"
         ) from exc
 
-    raw_data = response.get("data", []) if isinstance(response, dict) else []
-    comment_items: list[Comment] = []
-    if isinstance(raw_data, list):
-        for entry in raw_data:
-            if isinstance(entry, dict):
-                comment_items.append(build_comment(entry))
-
-    raw_total = extract_total_count(response)
-    total = raw_total
-    if total <= 0 and comment_items:
-        total = (page_number - 1) * page_size + len(comment_items)
-
-    return PaginatedResult[Comment](
-        items=comment_items,
-        total_count=total,
-        page=page_number,
-        page_size=page_size,
-        has_more=compute_has_more(
-            response, raw_total, page_number, page_size, len(comment_items)
-        ),
-    )
+    return build_comments_page(response, page_number, page_size)
 
 
 @mcp.tool(
@@ -225,27 +203,7 @@ async def list_work_item_comments(
             f"Failed to list comments for '{work_item_id}': {exc.message}"
         ) from exc
 
-    raw_data = response.get("data", []) if isinstance(response, dict) else []
-    comment_items: list[Comment] = []
-    if isinstance(raw_data, list):
-        for entry in raw_data:
-            if isinstance(entry, dict):
-                comment_items.append(build_comment(entry))
-
-    raw_total = extract_total_count(response)
-    total = raw_total
-    if total <= 0 and comment_items:
-        total = (page_number - 1) * page_size + len(comment_items)
-
-    return PaginatedResult[Comment](
-        items=comment_items,
-        total_count=total,
-        page=page_number,
-        page_size=page_size,
-        has_more=compute_has_more(
-            response, raw_total, page_number, page_size, len(comment_items)
-        ),
-    )
+    return build_comments_page(response, page_number, page_size)
 
 
 @mcp.tool(

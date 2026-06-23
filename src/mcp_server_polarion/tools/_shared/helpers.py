@@ -17,6 +17,7 @@ from mcp_server_polarion.models import (
     EnumOption,
     Hyperlink,
     JsonValue,
+    PaginatedResult,
     WorkItemDetail,
     WorkItemLink,
     WorkItemSummary,
@@ -451,7 +452,7 @@ def parse_work_item_summaries(
     return items
 
 
-def build_comment(item: dict[str, object]) -> Comment:
+def _build_comment(item: dict[str, object]) -> Comment:
     """Build a ``Comment`` from a JSON:API resource (short relationship IDs)."""
     attributes_raw = item.get("attributes")
     attributes: dict[str, object] = (
@@ -487,6 +488,37 @@ def build_comment(item: dict[str, object]) -> Comment:
     )
 
 
+def build_comments_page(
+    response: dict[str, object], page_number: int, page_size: int
+) -> PaginatedResult[Comment]:
+    """Parse a JSON:API comments response into a ``PaginatedResult`` page.
+
+    Shared by the document- and work-item comment list tools; ``total`` falls
+    back to an offset estimate when Polarion omits ``meta.totalCount``.
+    """
+    raw_data = response.get("data", [])
+    comment_items: list[Comment] = []
+    if isinstance(raw_data, list):
+        for entry in raw_data:
+            if isinstance(entry, dict):
+                comment_items.append(_build_comment(entry))
+
+    raw_total = extract_total_count(response)
+    total = raw_total
+    if total <= 0 and comment_items:
+        total = (page_number - 1) * page_size + len(comment_items)
+
+    return PaginatedResult[Comment](
+        items=comment_items,
+        total_count=total,
+        page=page_number,
+        page_size=page_size,
+        has_more=compute_has_more(
+            response, raw_total, page_number, page_size, len(comment_items)
+        ),
+    )
+
+
 def build_enum_option(entry: dict[str, object]) -> EnumOption:
     def _bool(key: str) -> bool:
         value = entry.get(key)
@@ -514,7 +546,7 @@ __all__: list[str] = [
     "WORK_ITEM_DETAIL_FIELDS",
     "WORK_ITEM_LIST_FIELDS",
     "WORK_ITEM_PART_FIELDS",
-    "build_comment",
+    "build_comments_page",
     "build_enum_option",
     "build_included_user_name_map",
     "build_included_work_item_map",
