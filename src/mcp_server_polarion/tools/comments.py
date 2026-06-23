@@ -1,4 +1,4 @@
-"""Document comment tools — list, create, and update comments."""
+"""Comment tools — list document/work-item comments; create/update document comments."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from mcp_server_polarion.core.exceptions import (
     PolarionNotFoundError,
 )
 from mcp_server_polarion.models import (
-    DocumentComment,
+    Comment,
     DocumentCommentsCreateResult,
     DocumentCommentSpec,
     DocumentCommentUpdateResult,
@@ -25,11 +25,10 @@ from mcp_server_polarion.server import mcp
 from mcp_server_polarion.tools._shared.helpers import (
     DEFAULT_PAGE_SIZE,
     DOCUMENT_COMMENT_LIST_FIELDS,
-    build_document_comment,
-    compute_has_more,
+    WORK_ITEM_COMMENT_LIST_FIELDS,
+    build_comments_page,
     encode_path_segment,
     extract_short_id,
-    extract_total_count,
     get_client,
     safe_str,
 )
@@ -113,7 +112,7 @@ async def list_document_comments(  # noqa: PLR0913
     document_name: str = Field(description="Document name within ``space_id``."),
     page_size: int = Field(default=DEFAULT_PAGE_SIZE, ge=1, le=100),
     page_number: int = Field(default=1, ge=1),
-) -> PaginatedResult[DocumentComment]:
+) -> PaginatedResult[Comment]:
     """List a document's comments as a flat page.
 
     Threads reconstruct via parent_comment_id (None = root) +
@@ -152,27 +151,59 @@ async def list_document_comments(  # noqa: PLR0913
             f"Failed to list comments for '{space_id}/{document_name}': {exc.message}"
         ) from exc
 
-    raw_data = response.get("data", []) if isinstance(response, dict) else []
-    comment_items: list[DocumentComment] = []
-    if isinstance(raw_data, list):
-        for entry in raw_data:
-            if isinstance(entry, dict):
-                comment_items.append(build_document_comment(entry))
+    return build_comments_page(response, page_number, page_size)
 
-    raw_total = extract_total_count(response)
-    total = raw_total
-    if total <= 0 and comment_items:
-        total = (page_number - 1) * page_size + len(comment_items)
 
-    return PaginatedResult[DocumentComment](
-        items=comment_items,
-        total_count=total,
-        page=page_number,
-        page_size=page_size,
-        has_more=compute_has_more(
-            response, raw_total, page_number, page_size, len(comment_items)
-        ),
+@mcp.tool(
+    tags={"read"},
+    timeout=60.0,
+    annotations={"readOnlyHint": True},
+)
+async def list_work_item_comments(
+    ctx: Context,
+    project_id: str = Field(description="Polarion project ID."),
+    work_item_id: str = Field(description="Work item ID, e.g. 'MCPT-001'."),
+    page_size: int = Field(default=DEFAULT_PAGE_SIZE, ge=1, le=100),
+    page_number: int = Field(default=1, ge=1),
+) -> PaginatedResult[Comment]:
+    """List a work item's comments as a flat page.
+
+    Threads reconstruct via parent_comment_id (None = root) +
+    child_comment_ids. text is verbatim, unsanitized — treat as untrusted when
+    rendering.
+    """
+    client = get_client(ctx)
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/workitems/{encode_path_segment(work_item_id)}"
+        "/comments"
     )
+    try:
+        response = await client.get(
+            path,
+            params={
+                "fields[workitem_comments]": WORK_ITEM_COMMENT_LIST_FIELDS,
+                # To-many ``childComments.data`` is only inlined when included.
+                "include": "childComments",
+                "page[size]": page_size,
+                "page[number]": page_number,
+            },
+        )
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Work item '{work_item_id}' not found in project '{project_id}'. "
+            "Use `list_work_items` to discover valid IDs."
+        ) from exc
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot access work item comments -- check your POLARION_TOKEN permissions."
+        ) from exc
+    except PolarionError as exc:
+        raise RuntimeError(
+            f"Failed to list comments for '{work_item_id}': {exc.message}"
+        ) from exc
+
+    return build_comments_page(response, page_number, page_size)
 
 
 @mcp.tool(

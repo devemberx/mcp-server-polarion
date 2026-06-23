@@ -13,10 +13,11 @@ from fastmcp import Context
 
 from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.models import (
-    DocumentComment,
+    Comment,
     EnumOption,
     Hyperlink,
     JsonValue,
+    PaginatedResult,
     WorkItemDetail,
     WorkItemLink,
     WorkItemSummary,
@@ -56,6 +57,10 @@ DOCUMENT_DETAIL_FIELDS: Final[str] = "@all"
 # Sparse fieldset filters relationships too — name them explicitly.
 DOCUMENT_COMMENT_LIST_FIELDS: Final[str] = (
     "created,resolved,text,author,parentComment,childComments"
+)
+# Work item comments add ``title``; document comments have none.
+WORK_ITEM_COMMENT_LIST_FIELDS: Final[str] = (
+    "created,resolved,title,text,author,parentComment,childComments"
 )
 
 # Standard-attribute allowlist (REST OpenAPI schema); anything outside is
@@ -447,8 +452,8 @@ def parse_work_item_summaries(
     return items
 
 
-def build_document_comment(item: dict[str, object]) -> DocumentComment:
-    """Build a ``DocumentComment`` from a JSON:API resource (short relationship IDs)."""
+def _build_comment(item: dict[str, object]) -> Comment:
+    """Build a ``Comment`` from a JSON:API resource (short relationship IDs)."""
     attributes_raw = item.get("attributes")
     attributes: dict[str, object] = (
         attributes_raw if isinstance(attributes_raw, dict) else {}
@@ -470,15 +475,47 @@ def build_document_comment(item: dict[str, object]) -> DocumentComment:
     parent_full = extract_relationship_id(relationships, "parentComment")
     child_full = extract_relationship_ids(relationships, "childComments")
 
-    return DocumentComment(
+    return Comment(
         id=extract_short_id(safe_str(item.get("id", ""))),
         created=safe_str(attributes.get("created", "")),
         resolved=bool(attributes.get("resolved", False)),
+        title=safe_str(attributes.get("title", "")),
         text=text_value,
         text_format=text_format,
         author_id=extract_short_id(author_full) or None,
         parent_comment_id=extract_short_id(parent_full) or None,
         child_comment_ids=[extract_short_id(c) for c in child_full],
+    )
+
+
+def build_comments_page(
+    response: dict[str, object], page_number: int, page_size: int
+) -> PaginatedResult[Comment]:
+    """Parse a JSON:API comments response into a ``PaginatedResult`` page.
+
+    Shared by the document- and work-item comment list tools; ``total`` falls
+    back to an offset estimate when Polarion omits ``meta.totalCount``.
+    """
+    raw_data = response.get("data", [])
+    comment_items: list[Comment] = []
+    if isinstance(raw_data, list):
+        for entry in raw_data:
+            if isinstance(entry, dict):
+                comment_items.append(_build_comment(entry))
+
+    raw_total = extract_total_count(response)
+    total = raw_total
+    if total <= 0 and comment_items:
+        total = (page_number - 1) * page_size + len(comment_items)
+
+    return PaginatedResult[Comment](
+        items=comment_items,
+        total_count=total,
+        page=page_number,
+        page_size=page_size,
+        has_more=compute_has_more(
+            response, raw_total, page_number, page_size, len(comment_items)
+        ),
     )
 
 
@@ -505,10 +542,11 @@ __all__: list[str] = [
     "OPTION_LIST_LIMIT",
     "STANDARD_DOCUMENT_ATTRIBUTES",
     "STANDARD_WORK_ITEM_ATTRIBUTES",
+    "WORK_ITEM_COMMENT_LIST_FIELDS",
     "WORK_ITEM_DETAIL_FIELDS",
     "WORK_ITEM_LIST_FIELDS",
     "WORK_ITEM_PART_FIELDS",
-    "build_document_comment",
+    "build_comments_page",
     "build_enum_option",
     "build_included_user_name_map",
     "build_included_work_item_map",

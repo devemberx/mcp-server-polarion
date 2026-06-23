@@ -1,4 +1,4 @@
-"""Tests for the document comment tools."""
+"""Tests for the comment tools."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from mcp_server_polarion.core.exceptions import (
     PolarionNotFoundError,
 )
 from mcp_server_polarion.models import (
-    DocumentComment,
+    Comment,
     DocumentCommentSpec,
     DocumentCommentUpdateResult,
     PaginatedResult,
@@ -25,6 +25,7 @@ from mcp_server_polarion.tools.comments import (
     _build_document_comments_payload,
     create_document_comments,
     list_document_comments,
+    list_work_item_comments,
     update_document_comment,
 )
 
@@ -73,7 +74,7 @@ class TestListDocumentComments:
         assert len(result.items) == 1
 
         comment = result.items[0]
-        assert isinstance(comment, DocumentComment)
+        assert isinstance(comment, Comment)
         assert comment.id == "cmt-1"
         assert comment.created == "2026-04-01T12:00:00Z"
         assert comment.resolved is False
@@ -337,6 +338,308 @@ class TestListDocumentComments:
                 project_id="proj1",
                 space_id="Design",
                 document_name="SRS",
+                page_size=100,
+                page_number=1,
+            )
+
+
+class TestListWorkItemComments:
+    """Tests for the ``list_work_item_comments`` tool."""
+
+    async def test_returns_paginated_result(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "type": "workitem_comments",
+                    "id": "proj1/MCPT-1/cmt-1",
+                    "attributes": {
+                        "id": "cmt-1",
+                        "created": "2026-04-01T12:00:00Z",
+                        "resolved": False,
+                        "title": "Needs review",
+                        "text": {"type": "text/html", "value": "<p>Review me</p>"},
+                    },
+                    "relationships": {
+                        "author": {
+                            "data": {"type": "users", "id": "alice"},
+                        },
+                    },
+                },
+            ],
+            "meta": {"totalCount": 1},
+        }
+
+        result = await list_work_item_comments(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT-1",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert isinstance(result, PaginatedResult)
+        assert result.total_count == 1
+        assert result.page == 1
+        assert result.page_size == 100
+        assert result.has_more is False
+        assert len(result.items) == 1
+
+        comment = result.items[0]
+        assert isinstance(comment, Comment)
+        assert comment.id == "cmt-1"
+        assert comment.created == "2026-04-01T12:00:00Z"
+        assert comment.resolved is False
+        assert comment.title == "Needs review"
+        assert comment.text == "<p>Review me</p>"
+        assert comment.text_format == "text/html"
+        assert comment.author_id == "alice"
+        assert comment.parent_comment_id is None
+        assert comment.child_comment_ids == []
+
+    async def test_extracts_thread_relationships(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "type": "workitem_comments",
+                    "id": "proj1/MCPT-1/cmt-reply",
+                    "attributes": {
+                        "id": "cmt-reply",
+                        "created": "2026-04-02T09:00:00Z",
+                        "resolved": True,
+                        "text": {"type": "text/html", "value": "<p>thanks</p>"},
+                    },
+                    "relationships": {
+                        "author": {"data": {"type": "users", "id": "bob"}},
+                        "parentComment": {
+                            "data": {
+                                "type": "workitem_comments",
+                                "id": "proj1/MCPT-1/cmt-root",
+                            },
+                        },
+                        "childComments": {
+                            "data": [
+                                {
+                                    "type": "workitem_comments",
+                                    "id": "proj1/MCPT-1/cmt-grand-1",
+                                },
+                                {
+                                    "type": "workitem_comments",
+                                    "id": "proj1/MCPT-1/cmt-grand-2",
+                                },
+                            ],
+                        },
+                    },
+                },
+            ],
+            "meta": {"totalCount": 1},
+        }
+
+        result = await list_work_item_comments(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT-1",
+            page_size=100,
+            page_number=1,
+        )
+
+        comment = result.items[0]
+        assert comment.resolved is True
+        assert comment.parent_comment_id == "cmt-root"
+        assert comment.child_comment_ids == ["cmt-grand-1", "cmt-grand-2"]
+
+    async def test_handles_plain_text_format(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "type": "workitem_comments",
+                    "id": "proj1/MCPT-1/cmt-plain",
+                    "attributes": {
+                        "id": "cmt-plain",
+                        "created": "2026-04-03T00:00:00Z",
+                        "resolved": False,
+                        "text": {
+                            "type": "text/plain",
+                            "value": "raw <not html> text",
+                        },
+                    },
+                    "relationships": {},
+                },
+            ],
+            "meta": {"totalCount": 1},
+        }
+
+        result = await list_work_item_comments(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT-1",
+            page_size=100,
+            page_number=1,
+        )
+
+        comment = result.items[0]
+        assert comment.text_format == "text/plain"
+        assert comment.text == "raw <not html> text"
+
+    async def test_missing_relationships_default_to_none(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "type": "workitem_comments",
+                    "id": "proj1/MCPT-1/cmt-empty",
+                    "attributes": {
+                        "id": "cmt-empty",
+                        "created": "2026-04-04T00:00:00Z",
+                        "resolved": False,
+                    },
+                },
+            ],
+            "meta": {"totalCount": 1},
+        }
+
+        result = await list_work_item_comments(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT-1",
+            page_size=100,
+            page_number=1,
+        )
+
+        comment = result.items[0]
+        assert comment.author_id is None
+        assert comment.parent_comment_id is None
+        assert comment.child_comment_ids == []
+        assert comment.title == ""
+        assert comment.text == ""
+        assert comment.text_format == "text/html"
+
+    async def test_signals_has_more_when_total_exceeds_page(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "type": "workitem_comments",
+                    "id": f"proj1/MCPT-1/cmt-{i}",
+                    "attributes": {
+                        "id": f"cmt-{i}",
+                        "created": "2026-04-01T00:00:00Z",
+                        "resolved": False,
+                        "text": {"type": "text/html", "value": "<p>x</p>"},
+                    },
+                    "relationships": {},
+                }
+                for i in range(2)
+            ],
+            "meta": {"totalCount": 5},
+        }
+
+        result = await list_work_item_comments(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT-1",
+            page_size=2,
+            page_number=1,
+        )
+
+        assert result.total_count == 5
+        assert result.has_more is True
+        assert len(result.items) == 2
+
+    async def test_passes_pagination_and_fieldset_params(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {"data": []}
+
+        await list_work_item_comments(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT-1",
+            page_size=25,
+            page_number=3,
+        )
+
+        calls = mock_client.get.call_args_list
+        assert len(calls) == 1
+        assert calls[0][0][0] == "/projects/proj1/workitems/MCPT-1/comments"
+        params = calls[0][1]["params"]
+        assert params["fields[workitem_comments]"] == (
+            "created,resolved,title,text,author,parentComment,childComments"
+        )
+        assert params["include"] == "childComments"
+        assert params["page[size]"] == 25
+        assert params["page[number]"] == 3
+
+    async def test_url_encodes_work_item_id(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {"data": []}
+
+        await list_work_item_comments(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT 1/2",
+            page_size=100,
+            page_number=1,
+        )
+
+        path = mock_client.get.call_args_list[0][0][0]
+        assert path == "/projects/proj1/workitems/MCPT%201%2F2/comments"
+
+    async def test_not_found_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionNotFoundError(
+            "Not found",
+            status_code=404,
+        )
+
+        with pytest.raises(ValueError, match="MCPT-1"):
+            await list_work_item_comments(
+                mock_ctx,
+                project_id="proj1",
+                work_item_id="MCPT-1",
+                page_size=100,
+                page_number=1,
+            )
+
+    async def test_auth_error_raises_permission_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError(
+            "Forbidden",
+            status_code=403,
+        )
+
+        with pytest.raises(PermissionError, match="POLARION_TOKEN"):
+            await list_work_item_comments(
+                mock_ctx,
+                project_id="proj1",
+                work_item_id="MCPT-1",
+                page_size=100,
+                page_number=1,
+            )
+
+    async def test_polarion_error_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionError(
+            "Boom",
+            status_code=500,
+        )
+
+        with pytest.raises(RuntimeError, match="Failed to list comments"):
+            await list_work_item_comments(
+                mock_ctx,
+                project_id="proj1",
+                work_item_id="MCPT-1",
                 page_size=100,
                 page_number=1,
             )

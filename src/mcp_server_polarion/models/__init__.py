@@ -6,7 +6,7 @@ in the JSON Schema — omit a description when name + type say everything.
 from __future__ import annotations
 
 from mcp_server_polarion.models.comments import (
-    DocumentComment,
+    Comment,
     DocumentCommentsCreateResult,
     DocumentCommentSpec,
     DocumentCommentUpdateResult,
@@ -49,7 +49,7 @@ from mcp_server_polarion.models.work_items import (
 
 __all__: list[str] = [
     "MAX_BODY_HTML_LEN",
-    "DocumentComment",
+    "Comment",
     "DocumentCommentSpec",
     "DocumentCommentUpdateResult",
     "DocumentCommentsCreateResult",
