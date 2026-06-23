@@ -25,7 +25,6 @@ from mcp_server_polarion.models import (
     DocumentReadResult,
     DocumentSummary,
     DocumentUpdateResult,
-    EnumOption,
     JsonValue,
     PaginatedResult,
 )
@@ -45,7 +44,6 @@ from mcp_server_polarion.tools._shared.helpers import (
     DOCUMENT_DETAIL_FIELDS,
     STANDARD_DOCUMENT_ATTRIBUTES,
     WORK_ITEM_PART_FIELDS,
-    build_enum_option,
     build_included_user_name_map,
     build_included_work_item_map,
     compute_has_more,
@@ -641,80 +639,6 @@ async def get_document(
         custom_fields=extract_custom_fields(attributes, STANDARD_DOCUMENT_ATTRIBUTES),
     )
     return detail
-
-
-@mcp.tool(
-    tags={"read"},
-    timeout=60.0,
-    annotations={"readOnlyHint": True},
-)
-async def list_document_enum_options(  # noqa: PLR0913
-    ctx: Context,
-    project_id: str = Field(description="Polarion project ID."),
-    field_id: str = Field(
-        description="e.g. 'status', 'type', or a custom field id.",
-    ),
-    document_type: str = Field(
-        description="e.g. 'systemReqSpecification'; '~' = type-agnostic.",
-    ),
-    page_size: int = Field(default=DEFAULT_PAGE_SIZE, ge=1, le=100),
-    page_number: int = Field(default=1, ge=1),
-) -> PaginatedResult[EnumOption]:
-    """List valid enum option ids for a document field of a given type.
-
-    Resolve enum ids here before create_document / update_document — enums are
-    validated on write, invalid ids raise with this set. An unknown
-    document_type silently falls back to ~, so verify the type id first.
-    """
-    client = get_client(ctx)
-    path = (
-        f"/projects/{encode_path_segment(project_id)}"
-        f"/documents/fields/{encode_path_segment(field_id)}"
-        "/actions/getAvailableOptions"
-    )
-    params: dict[str, str | int] = {
-        "type": document_type,
-        "page[size]": page_size,
-        "page[number]": page_number,
-    }
-    try:
-        response = await client.get(path, params=params)
-    except PolarionNotFoundError as exc:
-        raise ValueError(
-            f"No enum options for field '{field_id}' on document type "
-            f"'{document_type}' in project '{project_id}'."
-        ) from exc
-    except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot list document enum options"
-            " -- check your POLARION_TOKEN permissions."
-        ) from exc
-    except PolarionError as exc:
-        raise RuntimeError(
-            f"Failed to list enum options for field '{field_id}': {exc.message}"
-        ) from exc
-
-    data = response.get("data", [])
-    items: list[EnumOption] = []
-    if isinstance(data, list):
-        for entry in data:
-            if isinstance(entry, dict):
-                items.append(build_enum_option(entry))
-
-    raw_total = extract_total_count(response)
-    total = raw_total
-    if total <= 0 and items:
-        total = (page_number - 1) * page_size + len(items)
-
-    return PaginatedResult[EnumOption](
-        items=items,
-        total_count=total,
-        page=page_number,
-        page_size=page_size,
-        has_more=compute_has_more(
-            response, raw_total, page_number, page_size, len(items)
-        ),
-    )
 
 
 @mcp.tool(
