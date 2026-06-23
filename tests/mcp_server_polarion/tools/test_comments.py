@@ -1094,6 +1094,16 @@ class TestBuildWorkItemCommentsPayload:
         attrs = payload["data"][0]["attributes"]  # type: ignore[index]
         assert attrs["title"] == "Heads up"  # type: ignore[index]
 
+    def test_empty_title_omitted(self) -> None:
+        """Empty title is dropped, not sent as a blank heading."""
+        payload = _build_work_item_comments_payload(
+            specs=[WorkItemCommentSpec(text="t", title="")],
+            project_id="P",
+            work_item_id="MCPT-1",
+        )
+        attrs = payload["data"][0]["attributes"]  # type: ignore[index]
+        assert "title" not in attrs  # type: ignore[operator]
+
     def test_resolved_false_in_attributes(self) -> None:
         """Explicit False must be sent, not silently omitted like None."""
         payload = _build_work_item_comments_payload(

@@ -38,16 +38,16 @@ from mcp_server_polarion.tools._shared.helpers import (
 logger = logging.getLogger("mcp_server_polarion.tools.comments")
 
 
-def _comment_create_payload(
+def _build_comment_create_payload(
     *,
     specs: Sequence[CommentSpec],
     comment_type: str,
     parent_prefix: str,
 ) -> dict[str, JsonValue]:
-    """JSON:API POST body (``data`` list); ``None`` fields omitted, short
+    """JSON:API POST body (``data`` list); ``None``/empty fields omitted, short
     ``parent_comment_id`` expanded to the full path the API requires. ``title``
-    emitted only when the spec carries one (WorkItemCommentSpec); base
-    CommentSpec has no title, so document comments never send it.
+    emitted only when the spec carries a non-empty one (WorkItemCommentSpec);
+    base CommentSpec has no title, so document comments never send it.
     """
     items: list[JsonValue] = []
     for spec in specs:
@@ -55,7 +55,7 @@ def _comment_create_payload(
             "text": {"type": spec.text_format, "value": spec.text},
         }
         title = getattr(spec, "title", None)
-        if title is not None:
+        if title:
             attributes["title"] = title
         if spec.resolved is not None:
             attributes["resolved"] = spec.resolved
@@ -90,7 +90,7 @@ def _build_document_comments_payload(
     document_name: str,
 ) -> dict[str, JsonValue]:
     """POST body for .../documents/{d}/comments; parent ids are 4-segment."""
-    return _comment_create_payload(
+    return _build_comment_create_payload(
         specs=specs,
         comment_type="document_comments",
         parent_prefix=f"{project_id}/{space_id}/{document_name}",
@@ -104,11 +104,24 @@ def _build_work_item_comments_payload(
     work_item_id: str,
 ) -> dict[str, JsonValue]:
     """POST body for .../workitems/{wi}/comments; parent ids are 3-segment."""
-    return _comment_create_payload(
+    return _build_comment_create_payload(
         specs=specs,
         comment_type="workitem_comments",
         parent_prefix=f"{project_id}/{work_item_id}",
     )
+
+
+def _extract_created_comment_ids(response: object) -> list[str]:
+    """Short ids from a comment-create POST response (``data`` list)."""
+    raw_data = response.get("data", []) if isinstance(response, dict) else []
+    comment_ids: list[str] = []
+    if isinstance(raw_data, list):
+        for entry in raw_data:
+            if isinstance(entry, dict):
+                full_id = safe_str(entry.get("id", ""))
+                if full_id:
+                    comment_ids.append(extract_short_id(full_id))
+    return comment_ids
 
 
 def _comment_update_payload(
@@ -346,15 +359,7 @@ async def create_document_comments(  # noqa: PLR0913
             f"Failed to create document comments: {exc.message}"
         ) from exc
 
-    raw_data = response.get("data", []) if isinstance(response, dict) else []
-    comment_ids: list[str] = []
-    if isinstance(raw_data, list):
-        for entry in raw_data:
-            if isinstance(entry, dict):
-                full_id = safe_str(entry.get("id", ""))
-                if full_id:
-                    comment_ids.append(extract_short_id(full_id))
-
+    comment_ids = _extract_created_comment_ids(response)
     if not comment_ids:
         raise RuntimeError(
             "Polarion returned no comment IDs after creation."
@@ -439,15 +444,7 @@ async def create_work_item_comments(
             f"Failed to create work item comments: {exc.message}"
         ) from exc
 
-    raw_data = response.get("data", []) if isinstance(response, dict) else []
-    comment_ids: list[str] = []
-    if isinstance(raw_data, list):
-        for entry in raw_data:
-            if isinstance(entry, dict):
-                full_id = safe_str(entry.get("id", ""))
-                if full_id:
-                    comment_ids.append(extract_short_id(full_id))
-
+    comment_ids = _extract_created_comment_ids(response)
     if not comment_ids:
         raise RuntimeError(
             "Polarion returned no comment IDs after creation."
