@@ -21,7 +21,7 @@ from mcp_server_polarion.tools._shared.custom_fields import (
     extract_custom_fields,
 )
 from mcp_server_polarion.tools._shared.helpers import safe_str
-from mcp_server_polarion.tools._shared.pagination import build_page
+from mcp_server_polarion.tools._shared.pagination import make_page
 
 
 class WorkItemSummaryKwargs(TypedDict):
@@ -297,10 +297,12 @@ def parse_comments_page(
             if isinstance(entry, dict):
                 comment_items.append(_parse_comment(entry))
 
-    return build_page(comment_items, response, page_number, page_size)
+    return make_page(comment_items, response, page_number, page_size)
 
 
 def parse_enum_option(entry: dict[str, object]) -> EnumOption:
+    """JSON:API enumeration entry → ``EnumOption``; non-bool flags coerce to False."""
+
     def _bool(key: str) -> bool:
         value = entry.get(key)
         return value if isinstance(value, bool) else False

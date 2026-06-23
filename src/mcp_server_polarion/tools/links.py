@@ -43,7 +43,7 @@ from mcp_server_polarion.tools._shared.helpers import (
 )
 from mcp_server_polarion.tools._shared.pagination import (
     DEFAULT_PAGE_SIZE,
-    build_page,
+    make_page,
 )
 from mcp_server_polarion.tools._shared.parse import (
     extract_relationship_id,
@@ -284,7 +284,7 @@ async def _get_forward_link_page(
 
     items = _parse_work_item_links(response, direction="forward")
 
-    return build_page(items, response, page_number, page_size)
+    return make_page(items, response, page_number, page_size)
 
 
 async def _get_back_link_page(
@@ -325,7 +325,7 @@ async def _get_back_link_page(
     summaries = parse_work_item_summaries(response.get("data", []))
     items = [summary_to_back_link(s) for s in summaries]
 
-    return build_page(items, response, page_number, page_size)
+    return make_page(items, response, page_number, page_size)
 
 
 @mcp.tool(

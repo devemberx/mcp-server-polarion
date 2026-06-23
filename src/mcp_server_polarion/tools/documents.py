@@ -55,9 +55,9 @@ from mcp_server_polarion.tools._shared.helpers import (
 )
 from mcp_server_polarion.tools._shared.pagination import (
     DEFAULT_PAGE_SIZE,
-    build_page,
     compute_has_more,
     extract_total_count,
+    make_page,
 )
 from mcp_server_polarion.tools._shared.parse import (
     extract_relationship_id,
@@ -713,7 +713,7 @@ async def read_document_parts(  # noqa: PLR0913
             if part is not None:
                 items.append(part)
 
-    return build_page(items, response, page_number, page_size)
+    return make_page(items, response, page_number, page_size)
 
 
 @mcp.tool(

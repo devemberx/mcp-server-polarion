@@ -22,7 +22,7 @@ from mcp_server_polarion.tools._shared.helpers import (
 )
 from mcp_server_polarion.tools._shared.pagination import (
     DEFAULT_PAGE_SIZE,
-    build_page,
+    make_page,
 )
 
 logger = logging.getLogger("mcp_server_polarion.tools.projects")
@@ -84,4 +84,4 @@ async def list_projects(
                 )
             )
 
-    return build_page(items, response, page_number, page_size)
+    return make_page(items, response, page_number, page_size)

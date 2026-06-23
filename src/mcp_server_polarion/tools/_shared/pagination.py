@@ -1,5 +1,5 @@
 """Pagination math for list tools: total-count extraction, has-more decision,
-and the shared ``build_page`` wrapper every list response ends in.
+and the shared ``make_page`` wrapper every list response ends in.
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ def compute_has_more(
     return items_count == page_size
 
 
-def build_page[T](
+def make_page[T](
     items: list[T],
     response: dict[str, object],
     page_number: int,
@@ -75,8 +75,8 @@ def build_page[T](
 
 __all__: list[str] = [
     "DEFAULT_PAGE_SIZE",
-    "build_page",
     "compute_has_more",
     "extract_total_count",
     "has_links_next",
+    "make_page",
 ]

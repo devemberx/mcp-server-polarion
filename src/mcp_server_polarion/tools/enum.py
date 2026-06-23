@@ -24,7 +24,7 @@ from mcp_server_polarion.tools._shared.helpers import (
 )
 from mcp_server_polarion.tools._shared.pagination import (
     DEFAULT_PAGE_SIZE,
-    build_page,
+    make_page,
 )
 from mcp_server_polarion.tools._shared.parse import parse_enum_option
 
@@ -75,7 +75,7 @@ async def _list_enum_options(  # noqa: PLR0913
             if isinstance(entry, dict):
                 items.append(parse_enum_option(entry))
 
-    return build_page(items, response, page_number, page_size)
+    return make_page(items, response, page_number, page_size)
 
 
 @mcp.tool(

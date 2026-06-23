@@ -51,7 +51,7 @@ from mcp_server_polarion.tools._shared.helpers import (
 )
 from mcp_server_polarion.tools._shared.pagination import (
     DEFAULT_PAGE_SIZE,
-    build_page,
+    make_page,
 )
 from mcp_server_polarion.tools._shared.parse import (
     extract_short_id,
@@ -672,7 +672,7 @@ async def list_work_items(
     data = response.get("data", [])
     items = parse_work_item_summaries(data)
 
-    return build_page(items, response, page_number, page_size)
+    return make_page(items, response, page_number, page_size)
 
 
 @mcp.tool(
