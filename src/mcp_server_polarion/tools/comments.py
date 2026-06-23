@@ -54,7 +54,7 @@ def _build_comment_create_payload(
         attributes: dict[str, JsonValue] = {
             "text": {"type": spec.text_format, "value": spec.text},
         }
-        title = getattr(spec, "title", None)
+        title = spec.title if isinstance(spec, WorkItemCommentSpec) else None
         if title:
             attributes["title"] = title
         if spec.resolved is not None:
