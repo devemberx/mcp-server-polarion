@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import mcp_server_polarion.tools.comments
 import mcp_server_polarion.tools.documents
+import mcp_server_polarion.tools.enum
 import mcp_server_polarion.tools.links
 import mcp_server_polarion.tools.moves
 import mcp_server_polarion.tools.projects

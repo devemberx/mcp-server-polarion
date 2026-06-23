@@ -1,4 +1,4 @@
-"""Shared wrappers, enums, and constants used across model groups."""
+"""Shared wrappers and constants used across model groups."""
 
 from __future__ import annotations
 
@@ -25,14 +25,3 @@ class PaginatedResult[T](BaseModel):
     page: int
     page_size: int
     has_more: bool = False
-
-
-class EnumOption(BaseModel):
-    """Single enum option returned by ``list_*_enum_options``."""
-
-    id: str
-    name: str
-    description: str = ""
-    default: bool = False
-    hidden: bool = False
-    terminal: bool = False
