@@ -32,8 +32,9 @@ The number-based `tier0/1/2/3` split is gone: it conflated *behaviour* with
 `min_pass_rate`.
 
 Every case carries an `intent` (one line: what passes vs. fails) and a `covers`
-list (the tools it exercises) in its metadata; `uv run python -m evals.run
---list` prints the catalog.
+list (the tools it exercises) in its metadata. `uv run python -m evals.run
+--list` prints the catalog; `tests/evals/test_coverage.py` fails if any
+registered tool has no `covers` entry and is not explicitly deferred.
 
 No category needs an **LLM judge**: every verdict is a pure function of the
 tool-call trajectory. The only model cost is the agent under test.
@@ -156,6 +157,8 @@ first tagged release.
    `ordered_trajectory` check, just declaring its step sequence in `params`.
 3. Phrase the task neutrally — never state the rule, or you test the prompt
    instead of the tool docstrings (the only guard).
+4. If the case exercises a previously-uncovered tool, drop it from the
+   `DEFERRED` map in `tests/evals/test_coverage.py`.
 
 Seed entities (project `MCP_Test_Project`, doc `FakeDoc` with an anchored
 intro paragraph, free-floating `MCPT-200` task carrying
