@@ -15,7 +15,7 @@ from mcp_server_polarion.tools._shared.pagination import (
 
 
 class TestMakePage:
-    """Tests for `make_page(items, response, page_number, page_size)`."""
+    """Tests for `make_page`."""
 
     def test_meta_total_count_honored(self) -> None:
         response: dict[str, object] = {"meta": {"totalCount": 50}}
@@ -65,7 +65,7 @@ class TestMakePage:
 
 
 class TestComputeHasMore:
-    """Tests for `compute_has_more(response, total, page, size, items_count)`."""
+    """Tests for `compute_has_more`."""
 
     def test_reliable_total_more_pages(self) -> None:
         assert compute_has_more({}, 50, 1, 10, 10) is True
@@ -84,7 +84,7 @@ class TestComputeHasMore:
 
 
 class TestExtractTotalCount:
-    """Tests for `extract_total_count(response)`."""
+    """Tests for `extract_total_count`."""
 
     def test_reads_meta_total_count(self) -> None:
         assert extract_total_count({"meta": {"totalCount": 7}}) == 7
@@ -105,7 +105,7 @@ class TestExtractTotalCount:
 
 
 class TestHasLinksNext:
-    """Tests for `has_links_next(response)`."""
+    """Tests for `has_links_next`."""
 
     def test_true_when_next_present(self) -> None:
         assert has_links_next({"links": {"next": "/x?page=2"}}) is True

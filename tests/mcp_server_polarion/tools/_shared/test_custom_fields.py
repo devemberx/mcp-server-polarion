@@ -17,7 +17,7 @@ from mcp_server_polarion.tools._shared.custom_fields import (
 
 
 class TestExtractCustomFields:
-    """Tests for `extract_custom_fields(attributes, standard)`."""
+    """Tests for `extract_custom_fields`."""
 
     def test_returns_only_non_standard_keys(self) -> None:
         attributes: dict[str, object] = {
@@ -100,7 +100,7 @@ class TestExtractCustomFields:
 
 
 class TestMergeCustomFields:
-    """Tests for `merge_custom_fields(attributes, customs, standard)`."""
+    """Tests for `merge_custom_fields`."""
 
     def test_merges_into_empty_attributes(self) -> None:
         attributes: dict[str, JsonValue] = {}

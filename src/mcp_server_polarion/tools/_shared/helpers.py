@@ -1,7 +1,5 @@
 """Core cross-cutting helpers for ``tools`` (not public API): client lookup,
-string coercion, path encoding, option-list formatting, and lucene-id guarding.
-Response parsing lives in ``parse``; page math in ``pagination``; field/attribute
-constants in ``fields``/``custom_fields``.
+string coercion, path encoding, option-list formatting, lucene-id guarding.
 """
 
 from __future__ import annotations
@@ -15,9 +13,8 @@ from fastmcp import Context
 
 from mcp_server_polarion.core.client import PolarionClient
 
-# Ceiling for valid-option lists embedded in guard errors: showing the full set
-# beats forcing a list_*_enum_options re-call, but a pathological enum must not
-# flood the caller's context.
+# Ceiling for option lists in guard errors: showing the full set beats a
+# list_*_enum_options re-call, but a pathological enum must not flood context.
 OPTION_LIST_LIMIT: Final[int] = 50
 
 
@@ -39,9 +36,8 @@ def get_client(ctx: Context) -> PolarionClient:
 
 
 def format_option_list(options: Iterable[str], limit: int = OPTION_LIST_LIMIT) -> str:
-    """Render a sorted option list for an error message. At or under *limit*,
-    identical to ``repr(sorted(options))``; over it, the first *limit* items
-    plus a ``(+N more)`` suffix so a pathological enum can't flood context.
+    """Sorted option list for an error message; past *limit*, truncates to the
+    first *limit* items plus a ``(+N more)`` suffix.
     """
     ordered = sorted(options)
     if len(ordered) <= limit:

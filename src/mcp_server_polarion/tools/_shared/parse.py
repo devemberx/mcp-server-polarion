@@ -286,9 +286,8 @@ def _parse_comment(item: dict[str, object]) -> Comment:
 def parse_comments_page(
     response: dict[str, object], page_number: int, page_size: int
 ) -> PaginatedResult[Comment]:
-    """Parse a JSON:API comments response into a ``PaginatedResult`` page.
-
-    Shared by the document- and work-item comment list tools.
+    """Parse a JSON:API comments response into a ``PaginatedResult`` page; shared
+    by the document- and work-item comment list tools.
     """
     raw_data = response.get("data", [])
     comment_items: list[Comment] = []

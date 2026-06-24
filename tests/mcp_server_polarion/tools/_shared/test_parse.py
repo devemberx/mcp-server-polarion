@@ -25,7 +25,7 @@ from mcp_server_polarion.tools._shared.parse import (
 
 
 class TestExtractRelationshipId:
-    """Tests for `extract_relationship_id(relationships, rel_name)`."""
+    """Tests for `extract_relationship_id`."""
 
     def test_returns_data_id(self) -> None:
         rels = {"author": {"data": {"id": "proj/jdoe", "type": "users"}}}
@@ -44,7 +44,7 @@ class TestExtractRelationshipId:
 
 
 class TestExtractRelationshipIds:
-    """Tests for `extract_relationship_ids(relationships, rel_name)`."""
+    """Tests for `extract_relationship_ids`."""
 
     def test_preserves_declaration_order(self) -> None:
         rels = {"assignee": {"data": [{"id": "p/u2"}, {"id": "p/u1"}]}}
@@ -62,7 +62,7 @@ class TestExtractRelationshipIds:
 
 
 class TestSplitModuleId:
-    """Tests for `split_module_id(module_full_id)`."""
+    """Tests for `split_module_id`."""
 
     def test_three_segments(self) -> None:
         assert split_module_id("proj/Design/Spec") == ("Design", "Spec")
@@ -79,7 +79,7 @@ class TestSplitModuleId:
 
 
 class TestExtractShortId:
-    """Tests for `extract_short_id(full_id)`."""
+    """Tests for `extract_short_id`."""
 
     def test_strips_path_prefix(self) -> None:
         assert extract_short_id("proj/MCPT-001") == "MCPT-001"
@@ -92,7 +92,7 @@ class TestExtractShortId:
 
 
 class TestParseIncludedWorkItemMap:
-    """Tests for `parse_included_work_item_map(response)`."""
+    """Tests for `parse_included_work_item_map`."""
 
     def test_maps_only_workitems_resources(self) -> None:
         response: dict[str, object] = {
@@ -110,7 +110,7 @@ class TestParseIncludedWorkItemMap:
 
 
 class TestParseIncludedUserNameMap:
-    """Tests for `parse_included_user_name_map(response)`."""
+    """Tests for `parse_included_user_name_map`."""
 
     def test_maps_user_id_to_name(self) -> None:
         response: dict[str, object] = {
@@ -135,7 +135,7 @@ class TestParseIncludedUserNameMap:
 
 
 class TestParseWorkItemSummaryKwargs:
-    """Tests for `parse_work_item_summary_kwargs(item)`."""
+    """Tests for `parse_work_item_summary_kwargs`."""
 
     def test_splits_module_and_shortens_assignees(self) -> None:
         item: dict[str, object] = {
@@ -163,7 +163,7 @@ class TestParseWorkItemSummaryKwargs:
 
 
 class TestParseHyperlinks:
-    """Tests for `parse_hyperlinks(value)`."""
+    """Tests for `parse_hyperlinks`."""
 
     def test_parses_entries(self) -> None:
         value = [{"role": "ref", "title": "Spec", "uri": "https://x"}]
@@ -184,7 +184,7 @@ class TestParseHyperlinks:
 
 
 class TestParseWorkItemDetail:
-    """Tests for `parse_work_item_detail(item, *, project_id, fallback_id)`."""
+    """Tests for `parse_work_item_detail`."""
 
     def test_passes_description_html_verbatim(self) -> None:
         item: dict[str, object] = {
@@ -212,7 +212,7 @@ class TestParseWorkItemDetail:
 
 
 class TestSummaryToBackLink:
-    """Tests for `summary_to_back_link(summary)`."""
+    """Tests for `summary_to_back_link`."""
 
     def test_lifts_with_no_role_and_back_direction(self) -> None:
         summary = WorkItemSummary(
@@ -232,7 +232,7 @@ class TestSummaryToBackLink:
 
 
 class TestParseWorkItemSummaries:
-    """Tests for `parse_work_item_summaries(data)`."""
+    """Tests for `parse_work_item_summaries`."""
 
     def test_parses_each_resource(self) -> None:
         data = [
@@ -262,7 +262,7 @@ class TestParseWorkItemSummaries:
 
 
 class TestParseComment:
-    """Tests for `_parse_comment(item)` text-format and id handling."""
+    """Tests for `_parse_comment` text-format and id handling."""
 
     def test_html_format_and_short_ids(self) -> None:
         item: dict[str, object] = {
@@ -315,7 +315,7 @@ class TestParseComment:
 
 
 class TestParseCommentsPage:
-    """Tests for `parse_comments_page(response, page_number, page_size)`."""
+    """Tests for `parse_comments_page`."""
 
     def test_wraps_parsed_comments(self) -> None:
         response: dict[str, object] = {
@@ -335,7 +335,7 @@ class TestParseCommentsPage:
 
 
 class TestParseEnumOption:
-    """Tests for `parse_enum_option(entry)` bool coercion."""
+    """Tests for `parse_enum_option` bool coercion."""
 
     def test_coerces_non_bool_flags_to_false(self) -> None:
         # Non-bool flag values default to False rather than raising.

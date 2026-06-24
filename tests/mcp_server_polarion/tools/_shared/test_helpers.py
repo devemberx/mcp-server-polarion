@@ -20,7 +20,7 @@ from mcp_server_polarion.tools._shared.helpers import (
 
 
 class TestFormatOptionList:
-    """Tests for `format_option_list(options, limit)`."""
+    """Tests for `format_option_list`."""
 
     def test_empty_matches_repr_sorted(self) -> None:
         assert format_option_list([]) == repr([])
@@ -60,7 +60,7 @@ class TestFormatOptionList:
 
 
 class TestSafeStr:
-    """Tests for `safe_str(value)`."""
+    """Tests for `safe_str`."""
 
     def test_none_becomes_empty_string(self) -> None:
         # None → "" so absent attributes don't surface as the literal "None".
@@ -79,7 +79,7 @@ class TestSafeStr:
 
 
 class TestEncodePathSegment:
-    """Tests for `encode_path_segment(segment)`."""
+    """Tests for `encode_path_segment`."""
 
     def test_encodes_spaces(self) -> None:
         assert encode_path_segment("My Doc") == "My%20Doc"
@@ -97,7 +97,7 @@ class TestEncodePathSegment:
 
 
 class TestValidateWorkItemIdForLucene:
-    """Tests for `validate_work_item_id_for_lucene(work_item_id)`."""
+    """Tests for `validate_work_item_id_for_lucene`."""
 
     def test_accepts_alphanumeric_hyphen_underscore(self) -> None:
         # Returns None (no raise) for the allowed character set.
@@ -120,7 +120,7 @@ class TestValidateWorkItemIdForLucene:
 
 
 class TestGetClient:
-    """Tests for `get_client(ctx)` (error paths are pragma-excluded)."""
+    """Tests for `get_client` (error paths are pragma-excluded)."""
 
     def test_returns_injected_client(self, mock_ctx: MagicMock) -> None:
         client = mock_ctx.lifespan_context["polarion_client"]
