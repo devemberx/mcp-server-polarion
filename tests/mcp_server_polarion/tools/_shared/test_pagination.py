@@ -1,11 +1,17 @@
-"""Direct tests for pagination math — `make_page` total/has_more derivation
-and `compute_has_more` branch coverage. Behavior shared by every list tool.
+"""Direct tests for pagination math — `make_page` total/has_more derivation,
+`compute_has_more`, `extract_total_count`, and `has_links_next` branch coverage.
+Behavior shared by every list tool.
 """
 
 from __future__ import annotations
 
 from mcp_server_polarion.models import PaginatedResult, ProjectSummary
-from mcp_server_polarion.tools._shared.pagination import compute_has_more, make_page
+from mcp_server_polarion.tools._shared.pagination import (
+    compute_has_more,
+    extract_total_count,
+    has_links_next,
+    make_page,
+)
 
 
 class TestMakePage:
@@ -75,3 +81,40 @@ class TestComputeHasMore:
 
     def test_zero_total_partial_page_no_more(self) -> None:
         assert compute_has_more({}, 0, 1, 10, 3) is False
+
+
+class TestExtractTotalCount:
+    """Tests for `extract_total_count(response)`."""
+
+    def test_reads_meta_total_count(self) -> None:
+        assert extract_total_count({"meta": {"totalCount": 7}}) == 7
+
+    def test_missing_meta_is_zero(self) -> None:
+        assert extract_total_count({}) == 0
+
+    def test_meta_not_dict_is_zero(self) -> None:
+        assert extract_total_count({"meta": "nope"}) == 0
+
+    def test_non_int_total_count_is_zero(self) -> None:
+        # A non-int totalCount (e.g. null/str) coerces to 0, not a raise.
+        assert extract_total_count({"meta": {"totalCount": None}}) == 0
+        assert extract_total_count({"meta": {"totalCount": "12"}}) == 0
+
+    def test_absent_total_count_key_is_zero(self) -> None:
+        assert extract_total_count({"meta": {"other": 1}}) == 0
+
+
+class TestHasLinksNext:
+    """Tests for `has_links_next(response)`."""
+
+    def test_true_when_next_present(self) -> None:
+        assert has_links_next({"links": {"next": "/x?page=2"}}) is True
+
+    def test_false_when_links_dict_without_next(self) -> None:
+        assert has_links_next({"links": {"self": "/x"}}) is False
+
+    def test_false_when_links_absent(self) -> None:
+        assert has_links_next({}) is False
+
+    def test_false_when_links_not_dict(self) -> None:
+        assert has_links_next({"links": "nope"}) is False
