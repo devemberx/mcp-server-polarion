@@ -40,7 +40,7 @@ to the real provider while **no request ever reaches a real Polarion**. Every
 mutating request is recorded but has no effect.
 
 The agent's tool calls are captured by `TrajectoryRecorder`; the
-`ForbiddenBehaviorEvaluator` dispatches on `Case.metadata["check"]` to a pure
+`CheckDispatchEvaluator` dispatches on `Case.metadata["check"]` to a pure
 check in [`evaluators/checks.py`](evaluators/checks.py) plus cross-cutting global
 checks (e.g. every `update_document` body block must carry a non-empty `id`).
 

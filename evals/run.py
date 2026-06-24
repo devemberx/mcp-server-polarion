@@ -28,7 +28,7 @@ from strands_evals.types.evaluation import EvaluationData
 from evals.cases.tier1_prohibitions import CASES as TIER1_CASES
 from evals.cases.tier2_efficiency import CASES as TIER2_CASES
 from evals.cases.tier3_orchestration import CASES as TIER3_CASES
-from evals.evaluators.tier1 import ForbiddenBehaviorEvaluator
+from evals.evaluators.dispatch import CheckDispatchEvaluator
 from evals.harness.model import resolve_model_id
 from evals.harness.runner import AGENT_ERROR_PREFIX, run_case
 
@@ -61,9 +61,7 @@ def _git_sha() -> str:
         return "unknown"
 
 
-def _evaluate_once(
-    case: Case, evaluator: ForbiddenBehaviorEvaluator
-) -> tuple[bool, str]:
+def _evaluate_once(case: Case, evaluator: CheckDispatchEvaluator) -> tuple[bool, str]:
     task_output = run_case(case)
     output = task_output.get("output")
     if isinstance(output, str) and output.startswith(AGENT_ERROR_PREFIX):
@@ -81,7 +79,7 @@ def _evaluate_once(
 
 
 def _run_case_n_times(
-    case: Case, runs: int, evaluator: ForbiddenBehaviorEvaluator
+    case: Case, runs: int, evaluator: CheckDispatchEvaluator
 ) -> dict[str, Any]:
     min_rate = float((case.metadata or {}).get("min_pass_rate", 1.0))
     passes = 0
@@ -129,7 +127,7 @@ def main() -> int:
             print(f"no case named '{args.case}'", file=sys.stderr)
             return 2
 
-    evaluator = ForbiddenBehaviorEvaluator()
+    evaluator = CheckDispatchEvaluator()
     model = resolve_model_id()
     print(
         f"Eval gate · tier={args.tier} · model={model} · "

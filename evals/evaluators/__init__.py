@@ -1,1 +1,1 @@
-"""Deterministic Tier-1 evaluators."""
+"""Deterministic check dispatch + pure trajectory checks."""
