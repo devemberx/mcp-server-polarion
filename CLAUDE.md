@@ -16,7 +16,7 @@ CI: `ruff check` → `ruff format --check` → `mypy` → `pytest`.
 ## Architecture
 
 - `core/` — `client.py` (async httpx, retries 429/5xx, maps to `PolarionError`/`PolarionAuthError`/`PolarionNotFoundError`), `config.py` (`POLARION_URL`/`POLARION_TOKEN`), `logging.py` (stderr-only). Loggers: `logging.getLogger("mcp_server_polarion.<module>")`.
-- `tools/` — domain modules; `_build_*_payload` helpers = unit-test seam. Import in `tools/__init__.py` registers `@mcp.tool`s. `tools/_shared/`: `helpers.py`, `cache.py` (`TTLCache`), `guard.py` (write guards). `tools/guides/` = on-demand data.
+- `tools/` — domain modules; `_build_*_payload` helpers = unit-test seam. Import in `tools/__init__.py` registers `@mcp.tool`s. `tools/_shared/`: `helpers.py` (client/string/path/lucene), `parse.py` (JSON:API→models), `pagination.py` (`make_page`), `fields.py`/`custom_fields.py` (sparse-fieldset constants + custom-field policy), `cache.py` (`TTLCache`), `guard.py` (write guards), `sql.py` (query recipes). `tools/guides/` = on-demand data.
 - `utils/html.py` — Markdown ↔ HTML, `stamp_block_ids`, `first_anchorless_block`.
 - `models/` — Pydantic v2, re-exported from `models/__init__.py`. `PaginatedResult[T]` wraps all list responses.
 - `server.py` — FastMCP instance; lifespan owns `PolarionClient`.
