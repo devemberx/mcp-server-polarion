@@ -12,6 +12,7 @@ import pytest
 # ``run`` imports ``strands_evals`` at load; skip on the bare dev install.
 pytest.importorskip("strands_evals")
 
+from evals.cases.triggers import CASES as TRIGGER_CASES
 from evals.run import ALL_CASES
 from tests.mcp_server_polarion.test_mcp_transport import EXPECTED_TOOL_NAMES
 
@@ -45,3 +46,19 @@ def test_covers_only_names_real_tools() -> None:
 
 def test_deferred_only_names_real_tools() -> None:
     assert set(DEFERRED) <= EXPECTED_TOOL_NAMES
+
+
+def test_triggers_cases_cover_exactly_what_they_assert() -> None:
+    # ``covers`` is otherwise an unverified claim. A triggers_tool case asserts
+    # one tool family fires; its ``covers`` must name exactly that family, so a
+    # case can't bank coverage for a tool its check never asserts.
+    for case in TRIGGER_CASES:
+        meta = case.metadata or {}
+        if meta.get("check") != "triggers_tool":
+            continue
+        raw = meta.get("params", {}).get("expect", [])
+        expect = {raw} if isinstance(raw, str) else set(raw)
+        covers = set(meta.get("covers", []))
+        assert covers == expect, (
+            f"{case.name}: covers {sorted(covers)} != expected tools {sorted(expect)}"
+        )

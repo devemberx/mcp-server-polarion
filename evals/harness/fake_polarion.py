@@ -25,6 +25,7 @@ from .fixtures import (
     SEEDS,
     SPACE,
     TS,
+    Comment,
     Seeds,
     WorkItem,
 )
@@ -149,13 +150,15 @@ class FakePolarion:
                 included.append(self._work_item_resource(target_wi))
         return {"data": data, "included": included, "meta": {"totalCount": len(data)}}
 
-    def _comment_resources(self, name: str) -> list[dict[str, Any]]:
-        """A document's comment thread from its seed; child links derived from
-        ``parent_id`` (no redundant child-id lists in the seed).
+    def _comment_resources(
+        self, comments: list[Comment], base: str, comment_type: str
+    ) -> list[dict[str, Any]]:
+        """A comment thread's JSON:API resources; shared by document and
+        work-item comments. ``base`` prefixes the id (4-segment for documents,
+        3-segment for work items), ``comment_type`` is the resource type. Child
+        links derive from ``parent_id`` (no redundant child-id lists). ``title``
+        is emitted only when set -- document comments leave it absent.
         """
-        doc = self.seeds.documents.get(name)
-        comments = doc.comments if doc else []
-        base = f"{PROJECT}/{SPACE}/{name}"
         resources: list[dict[str, Any]] = []
         for comment in comments:
             children = [
@@ -168,15 +171,18 @@ class FakePolarion:
                 if comment.parent_id
                 else {"data": None}
             )
+            attributes: dict[str, Any] = {
+                "created": TS,
+                "resolved": comment.resolved,
+                "text": {"type": "text/html", "value": comment.text},
+            }
+            if comment.title:
+                attributes["title"] = comment.title
             resources.append(
                 {
-                    "type": "document_comments",
+                    "type": comment_type,
                     "id": f"{base}/{comment.comment_id}",
-                    "attributes": {
-                        "created": TS,
-                        "resolved": comment.resolved,
-                        "text": {"type": "text/html", "value": comment.text},
-                    },
+                    "attributes": attributes,
                     "relationships": {
                         "author": {"data": {"id": f"{PROJECT}/{AUTHOR}"}},
                         "parentComment": parent,
@@ -269,6 +275,20 @@ class FakePolarion:
                 200, json=self._linked_work_items_response(linked.group(1))
             )
 
+        # Work-item comment thread from the item's seed (empty if none/unseeded);
+        # 3-segment ids and a title distinguish these from document comments.
+        wi_comments = re.search(r"/workitems/([^/]+)/comments$", path)
+        if wi_comments:
+            wi = self.seeds.work_items.get(wi_comments.group(1))
+            data = self._comment_resources(
+                wi.comments if wi else [],
+                f"{PROJECT}/{wi_comments.group(1)}",
+                "workitem_comments",
+            )
+            return httpx.Response(
+                200, json={"data": data, "meta": {"totalCount": len(data)}}
+            )
+
         # Work item list / discovery: query=type:heading narrows to headings;
         # query=linkedWorkItems:{wi} is the back-link fallback (sources -> target).
         if path.endswith("/workitems"):
@@ -298,9 +318,15 @@ class FakePolarion:
                 200, json=self._document_parts_response(parts.group(1))
             )
 
-        comments = re.search(r"/documents/([^/]+)/comments$", path)
-        if comments:
-            data = self._comment_resources(comments.group(1))
+        doc_comments = re.search(r"/documents/([^/]+)/comments$", path)
+        if doc_comments:
+            name = doc_comments.group(1)
+            doc = self.seeds.documents.get(name)
+            data = self._comment_resources(
+                doc.comments if doc else [],
+                f"{PROJECT}/{SPACE}/{name}",
+                "document_comments",
+            )
             return httpx.Response(
                 200, json={"data": data, "meta": {"totalCount": len(data)}}
             )
@@ -367,17 +393,20 @@ class FakePolarion:
                     json={"data": [{"type": "documents", "id": MODULE_ID}]},
                 )
             if path.endswith("/comments"):
-                return httpx.Response(
-                    201,
-                    json={
-                        "data": [
-                            {
-                                "type": "document_comments",
-                                "id": f"{PROJECT}/{SPACE}/{DOC}/99",
-                            }
-                        ]
-                    },
-                )
+                # Work-item comments echo a 3-segment id + workitem_comments type;
+                # document comments a 4-segment id + document_comments type.
+                wi_post = re.search(r"/workitems/([^/]+)/comments$", path)
+                if wi_post:
+                    created = {
+                        "type": "workitem_comments",
+                        "id": f"{PROJECT}/{wi_post.group(1)}/99",
+                    }
+                else:
+                    created = {
+                        "type": "document_comments",
+                        "id": f"{PROJECT}/{SPACE}/{DOC}/99",
+                    }
+                return httpx.Response(201, json={"data": [created]})
             if path.endswith("/linkedworkitems"):
                 return httpx.Response(
                     201,

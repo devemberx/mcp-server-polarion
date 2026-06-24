@@ -67,6 +67,7 @@ class WorkItem:
     # Keys MUST stay outside ``STANDARD_WORK_ITEM_ATTRIBUTES`` so the merge
     # into the resource attributes dict doesn't shadow real attributes.
     custom_fields: dict[str, str] = field(default_factory=dict)
+    comments: list[Comment] = field(default_factory=list)
 
 
 @dataclass
@@ -82,14 +83,16 @@ class DocumentPart:
 
 @dataclass
 class Comment:
-    """A document comment. ``parent_id is None`` marks a thread root; child
-    links are derived from the set (no redundant child-id lists).
+    """A document or work-item comment. ``parent_id is None`` marks a thread
+    root; child links are derived from the set (no redundant child-id lists).
+    ``title`` is work-item-only — document comments leave it "" (never emitted).
     """
 
     comment_id: str
     text: str
     resolved: bool = False
     parent_id: str | None = None
+    title: str = ""
 
 
 @dataclass
@@ -134,6 +137,9 @@ SEEDS = Seeds(
             "task",
             hyperlinks=[{"role": "ref_ext", "uri": FLOATING_TASK_HYPERLINK_URI}],
             custom_fields={"acceptance_criteria_id": "AC-1"},
+            # One root comment so list_work_item_comments returns a populated page;
+            # work-item comment ids are 3-segment and carry a title.
+            comments=[Comment("c-1", "Fake work item comment", title="Initial note")],
         ),
         FLOATING_HEADING_ID: WorkItem(
             FLOATING_HEADING_ID, "Floating heading", "heading"
