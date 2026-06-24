@@ -78,9 +78,9 @@ Applies to ALL comments/docstrings incl. CLAUDE.md.
 - New `@mcp.tool` requires updating `EXPECTED_TOOL_NAMES` in `test_mcp_transport.py`.
 - `tests/evals/` opens with `pytest.importorskip` (`evals` dependency group; CI syncs `--group evals`).
 
-## Evals — Tier-1 deploy gate
+## Evals — deploy gate
 
-`evals/` drives real LLM through in-memory server against mocked Polarion; deterministic checks, no judge. Hard gate before PyPI publish (`min_pass_rate=1.0`). New case: check in `evals/evaluators/checks.py::REGISTRY` + `Case` in `cases/tier1_prohibitions.py`; phrase task neutrally. Detail: [evals/README.md](evals/README.md).
+`evals/` drives real LLM through in-memory server against mocked Polarion; deterministic checks, no judge. Hard gate before PyPI publish. Cases grouped by behaviour (file = category): `triggers`/`safety` (`min_pass_rate=1.0`), `efficiency`/`orchestration` (`0.8`); one `CheckDispatchEvaluator` dispatches `metadata["check"]` to a pure check. New case: check in `evals/evaluators/checks.py::REGISTRY` + `Case` in the matching `cases/<category>.py` with `intent` + `covers`; phrase task neutrally. Detail: [evals/README.md](evals/README.md).
 
 ## Repo Conventions
 

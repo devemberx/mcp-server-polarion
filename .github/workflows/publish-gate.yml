@@ -5,34 +5,46 @@ on:
   workflow_call:
 
 jobs:
-  evals-tier1:
-    # Tier-1 forbidden-behaviour gate (zero tolerance), cheapest so runs first.
+  evals-triggers:
+    # Trigger gate (zero tolerance): right tool fires for the request. Cheapest,
+    # so runs first.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/run-evals
         with:
-          tier: "1"
+          category: triggers
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
 
-  evals-tier2:
-    # Tier-2 efficiency gate.
-    needs: evals-tier1
+  evals-safety:
+    # Safety gate (zero tolerance): destructive/corrupting footguns never happen.
+    needs: evals-triggers
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/run-evals
         with:
-          tier: "2"
+          category: safety
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
 
-  evals-tier3:
-    # Tier-3 orchestration gate.
-    needs: evals-tier2
+  evals-efficiency:
+    # Efficiency gate: the correct answer reached without waste.
+    needs: evals-safety
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/run-evals
         with:
-          tier: "3"
+          category: efficiency
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+
+  evals-orchestration:
+    # Orchestration gate: correct ordered multi-step path + id threading.
+    needs: evals-efficiency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/run-evals
+        with:
+          category: orchestration
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
