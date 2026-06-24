@@ -1,24 +1,26 @@
-"""Direct tests for helpers worth pinning beyond the transitive per-tool
-coverage — `extract_custom_fields` / `merge_custom_fields` allowlist semantics.
+"""Direct tests for core helpers worth pinning beyond transitive per-tool
+coverage — `format_option_list` rendering, `safe_str` coercion, the slash-encoding
+contract of `encode_path_segment`, the Lucene-id guard, and `get_client` lookup.
 """
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
 
-from mcp_server_polarion.models import JsonValue
 from mcp_server_polarion.tools._shared.helpers import (
     OPTION_LIST_LIMIT,
-    STANDARD_DOCUMENT_ATTRIBUTES,
-    STANDARD_WORK_ITEM_ATTRIBUTES,
-    extract_custom_fields,
+    encode_path_segment,
     format_option_list,
-    merge_custom_fields,
+    get_client,
+    safe_str,
+    validate_work_item_id_for_lucene,
 )
 
 
 class TestFormatOptionList:
-    """Tests for `format_option_list(options, limit)`."""
+    """Tests for `format_option_list`."""
 
     def test_empty_matches_repr_sorted(self) -> None:
         assert format_option_list([]) == repr([])
@@ -57,188 +59,69 @@ class TestFormatOptionList:
         assert "(+1 more)" in result
 
 
-class TestExtractCustomFields:
-    """Tests for `extract_custom_fields(attributes, standard)`."""
+class TestSafeStr:
+    """Tests for `safe_str`."""
 
-    def test_returns_only_non_standard_keys(self) -> None:
-        attributes: dict[str, object] = {
-            "title": "T",
-            "type": "task",
-            "status": "open",
-            "riskLevel": "high",
-            "effortHours": 8.0,
-        }
-        assert extract_custom_fields(attributes, STANDARD_WORK_ITEM_ATTRIBUTES) == {
-            "riskLevel": "high",
-            "effortHours": 8.0,
-        }
+    def test_none_becomes_empty_string(self) -> None:
+        # None → "" so absent attributes don't surface as the literal "None".
+        assert safe_str(None) == ""
 
-    def test_empty_when_attrs_are_all_standard(self) -> None:
-        attributes: dict[str, object] = {
-            "title": "T",
-            "type": "task",
-            "status": "open",
-            "priority": "50.0",
-        }
-        assert extract_custom_fields(attributes, STANDARD_WORK_ITEM_ATTRIBUTES) == {}
+    def test_str_passes_through(self) -> None:
+        assert safe_str("hi") == "hi"
 
-    def test_empty_attrs_dict(self) -> None:
-        assert extract_custom_fields({}, STANDARD_WORK_ITEM_ATTRIBUTES) == {}
+    def test_empty_str_stays_empty(self) -> None:
+        assert safe_str("") == ""
 
-    def test_preserves_rich_text_value_verbatim(self) -> None:
-        # Rich-text {type, value} dicts stay verbatim to round-trip on PATCH.
-        rich = {"type": "text/html", "value": "<p>x</p>"}
-        attributes: dict[str, object] = {"title": "T", "reviewerNote": rich}
-        result = extract_custom_fields(attributes, STANDARD_WORK_ITEM_ATTRIBUTES)
-        assert result == {"reviewerNote": rich}
-        # Same object identity, no defensive copy.
-        assert result["reviewerNote"] is rich
-
-    def test_preserves_heterogeneous_value_types(self) -> None:
-        attributes: dict[str, object] = {
-            "title": "T",
-            "custom_str": "s",
-            "custom_int": 42,
-            "custom_float": 1.5,
-            "custom_bool": True,
-            "custom_list": [1, 2, 3],
-            "custom_dict": {"nested": "value"},
-        }
-        assert extract_custom_fields(attributes, STANDARD_WORK_ITEM_ATTRIBUTES) == {
-            "custom_str": "s",
-            "custom_int": 42,
-            "custom_float": 1.5,
-            "custom_bool": True,
-            "custom_list": [1, 2, 3],
-            "custom_dict": {"nested": "value"},
-        }
-
-    def test_document_allowlist_filters_document_attrs(self) -> None:
-        # Document allowlist filters document-only keys (homePageContent, moduleFolder).
-        attributes: dict[str, object] = {
-            "title": "Doc",
-            "type": "req_specification",
-            "status": "draft",
-            "homePageContent": {"type": "text/html", "value": "<p/>"},
-            "moduleFolder": "Design",
-            # Customs on this project's documents:
-            "documentVersion": "1.0",
-            "complianceLevel": "L3",
-        }
-        assert extract_custom_fields(attributes, STANDARD_DOCUMENT_ATTRIBUTES) == {
-            "documentVersion": "1.0",
-            "complianceLevel": "L3",
-        }
-
-    def test_allowlist_swap_changes_classification(self) -> None:
-        # autoSuspect is standard for documents but custom for work items;
-        # swapping the allowlist flips its classification.
-        attributes: dict[str, object] = {"autoSuspect": False}
-        assert extract_custom_fields(attributes, STANDARD_DOCUMENT_ATTRIBUTES) == {}
-        assert extract_custom_fields(attributes, STANDARD_WORK_ITEM_ATTRIBUTES) == {
-            "autoSuspect": False,
-        }
+    def test_non_str_coerced(self) -> None:
+        assert safe_str(42) == "42"
+        assert safe_str(1.5) == "1.5"
+        assert safe_str(False) == "False"
 
 
-class TestMergeCustomFields:
-    """Tests for `merge_custom_fields(attributes, customs, standard)`."""
+class TestEncodePathSegment:
+    """Tests for `encode_path_segment`."""
 
-    def test_merges_into_empty_attributes(self) -> None:
-        attributes: dict[str, JsonValue] = {}
-        merge_custom_fields(
-            attributes,
-            {"riskLevel": "high", "effortHours": 8.0},
-            STANDARD_WORK_ITEM_ATTRIBUTES,
-        )
-        assert attributes == {"riskLevel": "high", "effortHours": 8.0}
+    def test_encodes_spaces(self) -> None:
+        assert encode_path_segment("My Doc") == "My%20Doc"
 
-    def test_merges_into_pre_populated_attributes(self) -> None:
-        # Existing standard fields stay; customs are appended.
-        attributes: dict[str, JsonValue] = {"title": "T", "status": "open"}
-        merge_custom_fields(
-            attributes, {"riskLevel": "high"}, STANDARD_WORK_ITEM_ATTRIBUTES
-        )
-        assert attributes == {"title": "T", "status": "open", "riskLevel": "high"}
+    def test_encodes_slash(self) -> None:
+        # safe="" is the whole point: a document name with "/" must not split
+        # into extra path segments.
+        assert encode_path_segment("a/b") == "a%2Fb"
 
-    def test_none_customs_is_noop(self) -> None:
-        attributes: dict[str, JsonValue] = {"title": "T"}
-        merge_custom_fields(attributes, None, STANDARD_WORK_ITEM_ATTRIBUTES)
-        assert attributes == {"title": "T"}
+    def test_plain_segment_unchanged(self) -> None:
+        assert encode_path_segment("MCPT-001") == "MCPT-001"
 
-    def test_empty_dict_customs_is_noop(self) -> None:
-        attributes: dict[str, JsonValue] = {"title": "T"}
-        merge_custom_fields(attributes, {}, STANDARD_WORK_ITEM_ATTRIBUTES)
-        assert attributes == {"title": "T"}
+    def test_empty_segment(self) -> None:
+        assert encode_path_segment("") == ""
 
-    def test_skips_none_values_inside_dict(self) -> None:
-        # None values skip (no clearing); other falsy values pass through.
-        attributes: dict[str, JsonValue] = {}
-        merge_custom_fields(
-            attributes,
-            {
-                "skip_me": None,
-                "empty_string": "",
-                "zero": 0,
-                "false": False,
-                "empty_list": [],
-            },
-            STANDARD_WORK_ITEM_ATTRIBUTES,
-        )
-        assert attributes == {
-            "empty_string": "",
-            "zero": 0,
-            "false": False,
-            "empty_list": [],
-        }
-        assert "skip_me" not in attributes
 
-    def test_rich_text_dict_passes_through_identity(self) -> None:
-        # {type, value} dict round-trips by identity, no defensive copy.
-        rich = {"type": "text/html", "value": "<p>x</p>"}
-        attributes: dict[str, JsonValue] = {}
-        merge_custom_fields(
-            attributes,
-            {"reviewerNote": rich},
-            STANDARD_WORK_ITEM_ATTRIBUTES,
-        )
-        assert attributes["reviewerNote"] is rich
+class TestValidateWorkItemIdForLucene:
+    """Tests for `validate_work_item_id_for_lucene`."""
 
-    def test_collision_with_standard_attr_raises(self) -> None:
-        # A custom key overlapping the allowlist would shadow a standard param.
-        with pytest.raises(ValueError, match="custom_fields keys collide"):
-            merge_custom_fields(
-                {},
-                {"title": "y"},
-                STANDARD_WORK_ITEM_ATTRIBUTES,
-            )
+    def test_accepts_alphanumeric_hyphen_underscore(self) -> None:
+        # Returns None (no raise) for the allowed character set.
+        assert validate_work_item_id_for_lucene("MCPT-001_a9") is None
 
-    def test_collision_message_lists_offending_keys_sorted(self) -> None:
-        # Collisions reported sorted for a predictable message.
-        with pytest.raises(ValueError) as exc_info:
-            merge_custom_fields(
-                {},
-                {"title": "x", "riskLevel": "high", "status": "y"},
-                STANDARD_WORK_ITEM_ATTRIBUTES,
-            )
-        assert "['status', 'title']" in str(exc_info.value)
+    @pytest.mark.parametrize(
+        "bad_id",
+        [
+            "MCPT 001",  # space
+            "MCPT:001",  # lucene field operator
+            "MCPT*",  # wildcard
+            'MCPT"x',  # quote
+            "MCPT/001",  # slash
+            "",  # empty (pattern needs 1+)
+        ],
+    )
+    def test_rejects_lucene_unsafe_ids(self, bad_id: str) -> None:
+        with pytest.raises(ValueError, match="outside"):
+            validate_work_item_id_for_lucene(bad_id)
 
-    def test_document_allowlist_recognises_document_collisions(self) -> None:
-        # moduleFolder is standard for documents but custom for work items.
-        merge_custom_fields(
-            {}, {"moduleFolder": "Design"}, STANDARD_WORK_ITEM_ATTRIBUTES
-        )  # OK for work items
-        with pytest.raises(ValueError, match="moduleFolder"):
-            merge_custom_fields(
-                {},
-                {"moduleFolder": "Design"},
-                STANDARD_DOCUMENT_ATTRIBUTES,
-            )
 
-    def test_returns_none_mutates_in_place(self) -> None:
-        # Mutates attributes in place and returns None, like _build_*_payload.
-        attributes: dict[str, JsonValue] = {}
-        result = merge_custom_fields(
-            attributes, {"riskLevel": "high"}, STANDARD_WORK_ITEM_ATTRIBUTES
-        )
-        assert result is None
-        assert attributes == {"riskLevel": "high"}
+class TestGetClient:
+    """Tests for `get_client` (error paths are pragma-excluded)."""
+
+    def test_returns_injected_client(self, mock_ctx: MagicMock) -> None:
+        client = mock_ctx.lifespan_context["polarion_client"]
+        assert get_client(mock_ctx) is client

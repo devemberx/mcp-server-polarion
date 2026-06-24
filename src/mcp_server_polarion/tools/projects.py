@@ -17,11 +17,12 @@ from mcp_server_polarion.models import (
 )
 from mcp_server_polarion.server import mcp
 from mcp_server_polarion.tools._shared.helpers import (
-    DEFAULT_PAGE_SIZE,
-    compute_has_more,
-    extract_total_count,
     get_client,
     safe_str,
+)
+from mcp_server_polarion.tools._shared.pagination import (
+    DEFAULT_PAGE_SIZE,
+    make_page,
 )
 
 logger = logging.getLogger("mcp_server_polarion.tools.projects")
@@ -83,17 +84,4 @@ async def list_projects(
                 )
             )
 
-    raw_total = extract_total_count(response)
-    total = raw_total
-    if total <= 0 and items:
-        total = (page_number - 1) * page_size + len(items)
-
-    return PaginatedResult[ProjectSummary](
-        items=items,
-        total_count=total,
-        page=page_number,
-        page_size=page_size,
-        has_more=compute_has_more(
-            response, raw_total, page_number, page_size, len(items)
-        ),
-    )
+    return make_page(items, response, page_number, page_size)

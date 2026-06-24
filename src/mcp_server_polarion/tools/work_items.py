@@ -30,26 +30,33 @@ from mcp_server_polarion.models import (
     WorkItemUpdateResult,
 )
 from mcp_server_polarion.server import mcp
+from mcp_server_polarion.tools._shared.custom_fields import (
+    STANDARD_WORK_ITEM_ATTRIBUTES,
+    merge_custom_fields,
+)
+from mcp_server_polarion.tools._shared.fields import (
+    MAX_BULK_ITEMS,
+    WORK_ITEM_DETAIL_FIELDS,
+    WORK_ITEM_LIST_FIELDS,
+)
 from mcp_server_polarion.tools._shared.guard import (
     guard_hyperlink_roles,
     guard_work_item_custom_fields,
     guard_work_item_enums,
 )
 from mcp_server_polarion.tools._shared.helpers import (
-    DEFAULT_PAGE_SIZE,
-    MAX_BULK_ITEMS,
-    STANDARD_WORK_ITEM_ATTRIBUTES,
-    WORK_ITEM_DETAIL_FIELDS,
-    WORK_ITEM_LIST_FIELDS,
-    compute_has_more,
     encode_path_segment,
-    extract_short_id,
-    extract_total_count,
     get_client,
-    merge_custom_fields,
+    safe_str,
+)
+from mcp_server_polarion.tools._shared.pagination import (
+    DEFAULT_PAGE_SIZE,
+    make_page,
+)
+from mcp_server_polarion.tools._shared.parse import (
+    extract_short_id,
     parse_work_item_detail,
     parse_work_item_summaries,
-    safe_str,
 )
 from mcp_server_polarion.utils import (
     html_to_markdown,
@@ -665,21 +672,7 @@ async def list_work_items(
     data = response.get("data", [])
     items = parse_work_item_summaries(data)
 
-    # Fallback count only on a non-empty page when the API total is missing.
-    raw_wi_total = extract_total_count(response)
-    work_item_total = raw_wi_total
-    if work_item_total == 0 and items:
-        work_item_total = (page_number - 1) * page_size + len(items)
-
-    return PaginatedResult[WorkItemSummary](
-        items=items,
-        total_count=work_item_total,
-        page=page_number,
-        page_size=page_size,
-        has_more=compute_has_more(
-            response, raw_wi_total, page_number, page_size, len(items)
-        ),
-    )
+    return make_page(items, response, page_number, page_size)
 
 
 @mcp.tool(

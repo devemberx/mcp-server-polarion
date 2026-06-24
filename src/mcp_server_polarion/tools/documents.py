@@ -35,25 +35,34 @@ from mcp_server_polarion.tools._shared.cache import (
     invalidate_documents_cache,
     store_cached_documents,
 )
+from mcp_server_polarion.tools._shared.custom_fields import (
+    STANDARD_DOCUMENT_ATTRIBUTES,
+    extract_custom_fields,
+    merge_custom_fields,
+)
+from mcp_server_polarion.tools._shared.fields import (
+    DOCUMENT_DETAIL_FIELDS,
+    WORK_ITEM_PART_FIELDS,
+)
 from mcp_server_polarion.tools._shared.guard import (
     guard_document_custom_fields,
     guard_document_enums,
 )
 from mcp_server_polarion.tools._shared.helpers import (
-    DEFAULT_PAGE_SIZE,
-    DOCUMENT_DETAIL_FIELDS,
-    STANDARD_DOCUMENT_ATTRIBUTES,
-    WORK_ITEM_PART_FIELDS,
-    build_included_user_name_map,
-    build_included_work_item_map,
-    compute_has_more,
     encode_path_segment,
-    extract_custom_fields,
-    extract_relationship_id,
-    extract_total_count,
     get_client,
-    merge_custom_fields,
     safe_str,
+)
+from mcp_server_polarion.tools._shared.pagination import (
+    DEFAULT_PAGE_SIZE,
+    compute_has_more,
+    extract_total_count,
+    make_page,
+)
+from mcp_server_polarion.tools._shared.parse import (
+    extract_relationship_id,
+    parse_included_user_name_map,
+    parse_included_work_item_map,
     split_module_id,
 )
 from mcp_server_polarion.tools._shared.sql import one_heading_per_document_sql
@@ -365,7 +374,7 @@ async def _discover_documents(
         if isinstance(included, list):
             for resource in included:
                 _extract_document_from_module(resource, documents)
-        user_names.update(build_included_user_name_map(response))
+        user_names.update(parse_included_user_name_map(response))
 
         raw_total = extract_total_count(response)
         if not compute_has_more(
@@ -617,7 +626,7 @@ async def get_document(
     if not isinstance(relationships, dict):
         relationships = {}
     # Output carries display names only; ids are join keys into included users.
-    user_names = build_included_user_name_map(response)
+    user_names = parse_included_user_name_map(response)
 
     content_html = ""
     if include_homepage_content_html:
@@ -694,7 +703,7 @@ async def read_document_parts(  # noqa: PLR0913
             f"Failed to get parts for '{document_name}': {exc.message}"
         ) from exc
 
-    work_item_map = build_included_work_item_map(response)
+    work_item_map = parse_included_work_item_map(response)
 
     data = response.get("data", [])
     items: list[DocumentPart] = []
@@ -704,21 +713,7 @@ async def read_document_parts(  # noqa: PLR0913
             if part is not None:
                 items.append(part)
 
-    # Fallback count only on a non-empty page, else out-of-range pages inflate it.
-    raw_doc_total = extract_total_count(response)
-    document_total = raw_doc_total
-    if document_total <= 0 and items:
-        document_total = (page_number - 1) * page_size + len(items)
-
-    return PaginatedResult[DocumentPart](
-        items=items,
-        total_count=document_total,
-        page=page_number,
-        page_size=page_size,
-        has_more=compute_has_more(
-            response, raw_doc_total, page_number, page_size, len(items)
-        ),
-    )
+    return make_page(items, response, page_number, page_size)
 
 
 @mcp.tool(
