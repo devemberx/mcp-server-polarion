@@ -1,4 +1,4 @@
-"""Tier-1 check tests: every pure predicate exercised against clean and
+"""Evaluator check tests: every pure predicate exercised against clean and
 forbidden synthetic trajectories. No LLM, no respx.
 """
 

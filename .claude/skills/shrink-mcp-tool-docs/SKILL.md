@@ -135,7 +135,7 @@ Trigger/when line · one sibling-boundary line when a near-duplicate tool exists
 ## Absolute rules
 
 1. **Final submission = the last GREEN baseline, with all 3 green:**
-   - `uv run python -m evals.run` (Tier-1 all pass at 1.0; Tier-2 at 0.8)
+   - `uv run python -m evals.run` (triggers/safety all pass at 1.0; efficiency/orchestration at 0.8)
    - `uv run pytest` (esp. `tests/mcp_server_polarion/test_mcp_transport.py` and `tests/evals/`)
    - `uv run ruff check . && uv run ruff format . && uv run mypy src/`
 2. **Scope A: docstring only.** Scope B (opt-in): only the `description=` string of `Field(...)`; never type/default/constraint/logic. Signatures, return types, behavior unchanged in both.

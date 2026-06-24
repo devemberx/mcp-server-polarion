@@ -27,10 +27,6 @@ property, not a per-category one:
   move_work_item_to_document` with the move's part-id observed from the read).
   One generic `ordered_trajectory` check; cases are data. `min_pass_rate = 0.8`.
 
-The number-based `tier0/1/2/3` split is gone: it conflated *behaviour* with
-*gate strictness*. Category = behaviour (the file); strictness = each case's
-`min_pass_rate`.
-
 Every case carries an `intent` (one line: what passes vs. fails) and a `covers`
 list (the tools it exercises) in its metadata; `uv run python -m evals.run
 --list` prints the catalog.

@@ -64,7 +64,7 @@ git config core.hooksPath .githooks
    | `feature/`  | new tool or user-visible behavior            | `feature/read-fidelity`       |
    | `fix/`      | bug fix on existing behavior                 | `fix/utils-html-attachments`  |
    | `refactor/` | internal restructuring, no behavior change   | `refactor/tools`              |
-   | `test/`     | tests, eval cases, fixtures only             | `test/tier2-efficiency-evals` |
+   | `test/`     | tests, eval cases, fixtures only             | `test/efficiency-eval-cases`  |
    | `docs/`     | documentation only                           | `docs/contributing`           |
    | `chore/`    | deps, build tooling, housekeeping            | `chore/bump-fastmcp`          |
    | `ci/`       | GitHub Actions / release pipeline            | `ci/cache-uv-deps`            |
