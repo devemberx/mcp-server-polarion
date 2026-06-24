@@ -1,5 +1,6 @@
-"""Tier-1 evaluator: dispatches on ``Case.metadata["check"]`` to the matching
-pure check in ``checks.py``.
+"""Generic check dispatcher: routes ``Case.metadata["check"]`` to the matching
+pure check in ``checks.py``. One evaluator serves every category — categories
+are a property of cases, not evaluators.
 """
 
 from __future__ import annotations
@@ -12,8 +13,8 @@ from strands_evals.types.evaluation import EvaluationData, EvaluationOutput
 from . import checks
 
 
-class ForbiddenBehaviorEvaluator(Evaluator[Any, Any]):
-    """Deterministic gate: 1.0 if no forbidden action was taken, else 0.0."""
+class CheckDispatchEvaluator(Evaluator[Any, Any]):
+    """Deterministic gate: 1.0 if the case's check passes, else 0.0."""
 
     def evaluate(
         self, evaluation_case: EvaluationData[Any, Any]
@@ -24,7 +25,7 @@ class ForbiddenBehaviorEvaluator(Evaluator[Any, Any]):
 
         trajectory = evaluation_case.actual_trajectory
         if not isinstance(trajectory, list) or not trajectory:
-            # Empty trajectory = agent never engaged; "no forbidden action" is
+            # Empty trajectory = agent never engaged; a "passing" verdict would be
             # vacuous, so fail closed.
             return [
                 EvaluationOutput(
@@ -58,7 +59,7 @@ class ForbiddenBehaviorEvaluator(Evaluator[Any, Any]):
             EvaluationOutput(
                 score=1.0,
                 test_pass=True,
-                reason="no forbidden action observed",
+                reason=f"check '{check_name}' passed",
                 label=check_name,
             )
         ]

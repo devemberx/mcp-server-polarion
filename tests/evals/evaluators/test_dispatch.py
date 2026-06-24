@@ -1,4 +1,4 @@
-"""``ForbiddenBehaviorEvaluator`` tests: metadata dispatch, fail-closed on
+"""``CheckDispatchEvaluator`` tests: metadata dispatch, fail-closed on
 empty/non-list trajectory, delegation to the named check. No LLM, no I/O.
 """
 
@@ -12,7 +12,7 @@ pytest.importorskip("strands_evals")
 
 from strands_evals.types.evaluation import EvaluationData
 
-from evals.evaluators.tier1 import ForbiddenBehaviorEvaluator
+from evals.evaluators.dispatch import CheckDispatchEvaluator
 
 
 def _call(name: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -39,42 +39,42 @@ def _data(
     )
 
 
-class TestForbiddenBehaviorEvaluator:
+class TestCheckDispatchEvaluator:
     def test_empty_trajectory_fails_closed(self) -> None:
-        result = ForbiddenBehaviorEvaluator().evaluate(_data([]))[0]
+        result = CheckDispatchEvaluator().evaluate(_data([]))[0]
         assert result.test_pass is False
         assert result.score == 0.0
         assert "no tool-call trajectory" in (result.reason or "")
 
     def test_unknown_check_fails_closed(self) -> None:
         data = _data([_call("get_document")], check="does_not_exist")
-        result = ForbiddenBehaviorEvaluator().evaluate(data)[0]
+        result = CheckDispatchEvaluator().evaluate(data)[0]
         assert result.test_pass is False
         assert "does_not_exist" in (result.reason or "")
 
     def test_missing_check_name_fails_closed(self) -> None:
         data = _data([_call("get_document")], check=None)
-        result = ForbiddenBehaviorEvaluator().evaluate(data)[0]
+        result = CheckDispatchEvaluator().evaluate(data)[0]
         assert result.test_pass is False
 
     def test_registered_check_passing_scores_one(self) -> None:
         data = _data([_call("get_document")], check="readonly")
-        result = ForbiddenBehaviorEvaluator().evaluate(data)[0]
+        result = CheckDispatchEvaluator().evaluate(data)[0]
         assert result.test_pass is True
         assert result.score == 1.0
         assert result.label == "readonly"
 
     def test_registered_check_failing_scores_zero_with_reason(self) -> None:
         data = _data([_call("create_work_items")], check="readonly")
-        result = ForbiddenBehaviorEvaluator().evaluate(data)[0]
+        result = CheckDispatchEvaluator().evaluate(data)[0]
         assert result.test_pass is False
         assert result.score == 0.0
         assert "create_work_items" in (result.reason or "")
 
     async def test_evaluate_async_delegates(self) -> None:
         data = _data([_call("get_document")], check="readonly")
-        sync = ForbiddenBehaviorEvaluator().evaluate(data)[0]
-        asy = (await ForbiddenBehaviorEvaluator().evaluate_async(data))[0]
+        sync = CheckDispatchEvaluator().evaluate(data)[0]
+        asy = (await CheckDispatchEvaluator().evaluate_async(data))[0]
         assert (asy.test_pass, asy.score, asy.label) == (
             sync.test_pass,
             sync.score,
