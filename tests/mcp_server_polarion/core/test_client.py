@@ -669,6 +669,41 @@ class TestSerialization:
             f"first ended; expected < {min_interval:.3f}s (no extra pacing)."
         )
 
+    async def test_retry_restamps_pacing(self) -> None:
+        """A retried request stamps each attempt, so the next request paces from
+        the last attempt sent — not from the original (now-stale) start time.
+        """
+        starts: list[float] = []
+
+        async def _on_get(request: httpx.Request) -> httpx.Response:
+            starts.append(asyncio.get_running_loop().time())
+            if len(starts) == 1:
+                return httpx.Response(429, json={"error": "Too Many Requests"})
+            return httpx.Response(200, json={"data": []})
+
+        min_interval = 0.2
+
+        with respx.mock(base_url=BASE) as mock:
+            mock.get("/projects").mock(side_effect=_on_get)
+
+            # Small but non-zero backoff so the retry attempt lands measurably
+            # after the first — exposing pacing that spaces from the stale start.
+            with patch("mcp_server_polarion.core.client._INITIAL_BACKOFF_SECONDS", 0.1):
+                async with PolarionClient(
+                    _config(), write_delay=0, min_interval=min_interval
+                ) as client:
+                    await client.get("/projects")  # 429 → retried → 200
+                    await client.get("/projects")  # follow-up
+
+        # Attempts: first 429, retry 200, follow-up 200.
+        assert len(starts) == 3
+        # The follow-up must space from the retry attempt (starts[1]), not the
+        # original start (starts[0]); 0.9 slack absorbs scheduler jitter.
+        assert starts[2] - starts[1] >= min_interval * 0.9, (
+            f"follow-up GET started {starts[2] - starts[1]:.3f}s after the retry "
+            f"attempt; expected ≥ {min_interval * 0.9:.3f}s (re-stamped pacing)."
+        )
+
 
 class TestContextManager:
     """Verify async context-manager protocol."""

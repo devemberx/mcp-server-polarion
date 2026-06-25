@@ -110,16 +110,14 @@ class PolarionClient:
         return self._request_lock
 
     async def _pace(self) -> None:
-        """Sleep until ``_min_interval`` has elapsed since the previous request
-        was issued, then stamp this request's issue time. Caller holds the lock.
+        """Block until ``_min_interval`` has elapsed since the previous request
+        was issued. Caller holds the lock; :meth:`_request` stamps each attempt's
+        issue time, so the next request paces from the last one actually sent.
         """
         loop = asyncio.get_running_loop()
         wait = self._min_interval - (loop.time() - self._last_request_monotonic)
         if wait > 0:
             await asyncio.sleep(wait)
-        # Stamp after the sleep: the real issue time the next request spaces from.
-        # Before the sleep would under-space (a fast follower reads a stale value).
-        self._last_request_monotonic = loop.time()
 
     async def __aenter__(self) -> PolarionClient:
         return self
@@ -211,8 +209,12 @@ class PolarionClient:
         await self._pace()
         last_exception: PolarionError | None = None
         backoff = _INITIAL_BACKOFF_SECONDS
+        loop = asyncio.get_running_loop()
 
         for attempt in range(_MAX_RETRIES + 1):
+            # Stamp each attempt's issue time so the next request spaces from the
+            # last one actually sent, not the stale first-attempt time after retries.
+            self._last_request_monotonic = loop.time()
             try:
                 response = await self._client.request(
                     method,
