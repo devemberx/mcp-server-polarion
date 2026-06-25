@@ -1,10 +1,8 @@
-"""Trigger cases: a neutral request must route to the correct tool / path.
+"""Trigger cases: a neutral request must route to the correct tool.
 
-The behaviour under test is tool selection — did the right tool fire (and the
-tempting wrong one not)? ``min_pass_rate = 1.0``: a mis-trigger blocks deploy,
-so each prompt is phrased to admit exactly one correct tool family. Tasks stay
-neutral — never state the rule, or you test the prompt instead of the tool
-docstrings (the only guard).
+``min_pass_rate = 1.0`` — a mis-trigger blocks deploy. Each prompt admits one
+correct tool family; never state the rule, or you test the prompt instead of
+the tool docstrings (the only guard).
 """
 
 from __future__ import annotations
@@ -49,20 +47,23 @@ CASES: list[Case] = [
         "TRIG-WI-TO-DOC",
         f"Add a new requirement work item titled 'Login latency budget' "
         f"into the document '{DOC}' in space '{SPACE}'.",
-        "no_update_document",
-        intent="Adding a work item to a document must create + move; using "
-        "update_document fails.",
-        covers=["create_work_items", "move_work_item_to_document"],
+        "triggers_tool",
+        intent="Adding a work item to a document must move it in (which needs a "
+        "prior create); update_document fails.",
+        covers=["move_work_item_to_document"],
+        expect="move_work_item_to_document",
+        reject=["update_document"],
     ),
     _case(
         "TRIG-HEADING-TO-DOC",
         f"Add a new section heading titled 'Performance' to the document "
         f"'{DOC}' in space '{SPACE}'.",
-        "heading_to_doc",
+        "triggers_tool",
         intent="Adding a heading must go through update_document; create/move fails.",
         covers=["update_document"],
+        expect="update_document",
+        reject=["create_work_items", "move_work_item_to_document"],
     ),
-    # --- natural-language routing: request -> the one correct tool family -----
     _case(
         "TRIG-PROJECTS",
         "List the Polarion projects.",
@@ -122,6 +123,46 @@ CASES: list[Case] = [
         "list_document_enum_options.",
         covers=["list_document_enum_options"],
         expect="list_document_enum_options",
+    ),
+    _case(
+        "TRIG-WI-ENUM",
+        f"What severity levels can be set on work item {FLOATING_TASK_ID}?",
+        "triggers_tool",
+        intent="Asking for a work item field's options must call "
+        "list_work_item_enum_options.",
+        covers=["list_work_item_enum_options"],
+        expect="list_work_item_enum_options",
+    ),
+    _case(
+        "TRIG-WI-COMMENT-RESOLVE",
+        f"The note on work item {FLOATING_TASK_ID} has been handled -- mark it "
+        f"resolved.",
+        "triggers_tool",
+        intent="Resolving a work item comment must call update_work_item_comment.",
+        covers=["update_work_item_comment"],
+        expect="update_work_item_comment",
+    ),
+    _case(
+        "TRIG-LINK-SUSPECT",
+        f"Flag the link from work item {CHILD_REQ_ID} to its parent requirement "
+        f"as suspect.",
+        "triggers_tool",
+        intent="Changing an existing link's suspect flag must call "
+        "update_work_item_link, not delete.",
+        covers=["update_work_item_link"],
+        expect="update_work_item_link",
+        reject=["delete_work_item_links"],
+    ),
+    _case(
+        "TRIG-READ-NOT-GET",
+        f"Summarize the document '{DOC}' in space '{SPACE}'.",
+        "triggers_tool",
+        intent="Summarizing a document routes to read_document (renders the full "
+        "body); get_document (metadata only) and read_document_parts (structure) "
+        "are the wrong read path.",
+        covers=["read_document"],
+        expect="read_document",
+        reject=["get_document", "read_document_parts"],
     ),
     _case(
         "TRIG-UNLINK",

@@ -44,7 +44,7 @@ class TestCases:
         case = _case(
             "TRIG-X",
             "do a thing",
-            "no_update_document",
+            "triggers_tool",
             intent="x must y",
             covers=["create_work_items"],
             foo="bar",
@@ -52,7 +52,7 @@ class TestCases:
         assert case.name == "TRIG-X"
         assert case.input == "do a thing"
         assert case.metadata == {
-            "check": "no_update_document",
+            "check": "triggers_tool",
             "params": {"foo": "bar"},
             "min_pass_rate": 1.0,
             "intent": "x must y",

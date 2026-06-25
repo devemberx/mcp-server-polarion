@@ -18,11 +18,7 @@ from tests.mcp_server_polarion.test_mcp_transport import EXPECTED_TOOL_NAMES
 
 # Tools deliberately not yet eval-covered, each with a reason. Shrinks over time
 # — remove an entry as soon as a case covers the tool (enforced below).
-DEFERRED: dict[str, str] = {
-    "get_sql_query_recipes": "pointer tool; exercised indirectly by EFF-SQL-NOT-LUCENE",
-    "update_work_item_link": "niche edit op; low NL-trigger value, add later",
-    "update_work_item_comment": "niche edit op; low NL-trigger value, add later",
-}
+DEFERRED: dict[str, str] = {}
 
 
 def _covered() -> set[str]:
