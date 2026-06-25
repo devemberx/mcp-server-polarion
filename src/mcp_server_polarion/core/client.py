@@ -32,6 +32,9 @@ _RETRYABLE_STATUS_CODES: Final[frozenset[int]] = frozenset({429, 500, 502, 503, 
 
 # Pause after each mutation (Polarion forbids concurrent writes).
 _WRITE_DELAY_SECONDS: Final[float] = 1.5
+# Min gap between request starts → ≤3 req/s; start-based, so slow
+# requests add no extra wait.
+_MIN_REQUEST_INTERVAL_SECONDS: Final[float] = 1.0 / 3.0
 _DEFAULT_TIMEOUT_SECONDS: Final[float] = 30.0
 
 _HTTP_NO_CONTENT: Final[int] = 204
@@ -80,9 +83,13 @@ class PolarionClient:
         config: PolarionConfig,
         *,
         write_delay: float = _WRITE_DELAY_SECONDS,
+        min_interval: float = _MIN_REQUEST_INTERVAL_SECONDS,
     ) -> None:
         self.base_url: str = config.base_api_url
         self._write_delay = write_delay
+        self._min_interval = min_interval
+        # -inf: first request never waits, whatever the clock epoch.
+        self._last_request_monotonic: float = float("-inf")
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
             headers={
@@ -93,14 +100,23 @@ class PolarionClient:
             timeout=httpx.Timeout(_DEFAULT_TIMEOUT_SECONDS),
             verify=config.polarion_verify_ssl,
         )
-        # Lazily bound to the running loop; serializes all calls (Polarion
-        # forbids concurrency); not reentrant.
+        # Lazily bound to running loop; serializes all calls
+        # (no concurrency); not reentrant.
         self._request_lock: asyncio.Lock | None = None
 
     def _get_request_lock(self) -> asyncio.Lock:
         if self._request_lock is None:
             self._request_lock = asyncio.Lock()
         return self._request_lock
+
+    async def _pace(self) -> None:
+        """Block until ``_min_interval`` since the previous request issued. Caller
+        holds the lock; :meth:`_request` stamps each attempt's issue time.
+        """
+        loop = asyncio.get_running_loop()
+        wait = self._min_interval - (loop.time() - self._last_request_monotonic)
+        if wait > 0:
+            await asyncio.sleep(wait)
 
     async def __aenter__(self) -> PolarionClient:
         return self
@@ -186,12 +202,17 @@ class PolarionClient:
         """Execute with error mapping; retries 429/5xx up to ``_MAX_RETRIES``
         with exponential backoff, other errors raise immediately.
         """
-        # Lock held across retries — releasing mid-backoff would let another
-        # caller slip in and hit the same 429.
+        # Lock held across retries — releasing mid-backoff would let another caller
+        # slip in and hit the same 429. Pace before first attempt; backoffs widen gap.
+        await self._pace()
         last_exception: PolarionError | None = None
         backoff = _INITIAL_BACKOFF_SECONDS
+        loop = asyncio.get_running_loop()
 
         for attempt in range(_MAX_RETRIES + 1):
+            # Stamp per attempt so the next request paces from the last one
+            # sent, not the stale first.
+            self._last_request_monotonic = loop.time()
             try:
                 response = await self._client.request(
                     method,
@@ -236,7 +257,6 @@ class PolarionClient:
         if last_exception is not None:
             raise last_exception
 
-        # Defensive: should never be reached.
         raise PolarionError(  # pragma: no cover
             "Unexpected retry loop exit",
             status_code=0,

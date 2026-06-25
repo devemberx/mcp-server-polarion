@@ -47,7 +47,7 @@ CI: `ruff check` → `ruff format --check` → `mypy` → `pytest`.
 - JSON:API v1. HTML stored as `{"type": "text/html", "value": "..."}`.
 - Linked-work-item ids = 5 segments — derive targets via `relationships.workItem.data.id`, never parse. Module ids = 3 segments, doc names may contain `/` — use `split_module_id`.
 - Lucene: trailing wildcards OK, leading 400. `module`/`description` not indexed — use `query="SQL:(...)"`; recipes via `get_sql_query_recipes`.
-- Server limits: ≤3 req/s, no concurrency. Client retries 429/5xx, does NOT serialize client-side.
+- Server limits: ≤3 req/s, no concurrency. Client serializes via lock + paces every request to ≤3 req/s (start-based min-interval, so slow requests add no extra wait); writes also add a 1.5s post-delay; retries 429/5xx.
 - Sparse fieldset drops `relationships` block — list relationship names explicitly. To-many need `include=`; nested dot-path drops intermediate resource (`module,module.author`, not `module.author` alone).
 - `/backlinkedworkitems` unsupported — back direction via `query=linkedWorkItems:{wi}`, so back results have `role=None`.
 - Polarion validates neither custom-field ids (unknown keys persist; wrong-type 400), nor enum values, nor link targets/roles — `guard.py` validates pre-write. `getAvailableOptions` = only key→enum-options API (non-enum/unknown → 404). Link/hyperlink roles not there — use `GET /projects/{p}/enumerations/~/{enumName}/~` (`data` is dict, not list).
