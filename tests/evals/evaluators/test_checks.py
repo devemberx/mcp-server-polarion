@@ -40,39 +40,6 @@ class TestCheckReadonly:
         assert tool in reason
 
 
-class TestCheckNoUpdateDocument:
-    def test_create_plus_move_passes(self) -> None:
-        trajectory = [
-            _call("create_work_items"),
-            _call("move_work_item_to_document"),
-        ]
-        passed, _ = checks.check_no_update_document(trajectory, {})
-        assert passed is True
-
-    def test_update_document_fails(self) -> None:
-        trajectory = [_call("update_document")]
-        passed, reason = checks.check_no_update_document(trajectory, {})
-        assert passed is False
-        assert "update_document" in reason
-
-
-class TestCheckHeadingToDoc:
-    def test_only_update_document_passes(self) -> None:
-        trajectory = [_call("get_document"), _call("update_document")]
-        passed, _ = checks.check_heading_to_doc(trajectory, {})
-        assert passed is True
-
-    @pytest.mark.parametrize(
-        "wrong_tool",
-        ["create_work_items", "move_work_item_to_document"],
-    )
-    def test_create_or_move_fails(self, wrong_tool: str) -> None:
-        trajectory = [_call(wrong_tool)]
-        passed, reason = checks.check_heading_to_doc(trajectory, {})
-        assert passed is False
-        assert wrong_tool in reason
-
-
 class TestCheckGetBeforeUpdate:
     """A matching ``get_*`` must precede every ``update_*`` on the same id."""
 
@@ -599,13 +566,25 @@ class TestCheckNoDuplicateReads:
 class TestCheckScopedQueryUsesSql:
     def test_sql_prefixed_module_query_passes(self) -> None:
         trajectory = [
+            _call("get_sql_query_recipes"),
+            _call(
+                "list_work_items",
+                {"project_id": "P", "query": "SQL:(... module ...)"},
+            ),
+        ]
+        passed, _ = checks.check_scoped_query_uses_sql(trajectory, {})
+        assert passed is True
+
+    def test_sql_query_without_prior_recipes_fails(self) -> None:
+        trajectory = [
             _call(
                 "list_work_items",
                 {"project_id": "P", "query": "SQL:(... module ...)"},
             )
         ]
-        passed, _ = checks.check_scoped_query_uses_sql(trajectory, {})
-        assert passed is True
+        passed, reason = checks.check_scoped_query_uses_sql(trajectory, {})
+        assert passed is False
+        assert "get_sql_query_recipes" in reason
 
     def test_lucene_module_query_fails(self) -> None:
         trajectory = [

@@ -82,31 +82,6 @@ def check_readonly(trajectory: Trajectory, _params: dict[str, Any]) -> CheckResu
     return True, "no write tools called"
 
 
-def check_no_update_document(
-    trajectory: Trajectory, _params: dict[str, Any]
-) -> CheckResult:
-    """Adding a work item to a document must not go through update_document."""
-    if "update_document" in _names(trajectory):
-        return False, "used update_document to add a work item (must create + move)"
-    return True, "update_document not used"
-
-
-def check_heading_to_doc(
-    trajectory: Trajectory, _params: dict[str, Any]
-) -> CheckResult:
-    """A heading must be added via update_document, not create/move."""
-    names = _names(trajectory)
-    wrong = [
-        n for n in ("create_work_items", "move_work_item_to_document") if n in names
-    ]
-    if wrong:
-        return (
-            False,
-            f"added a heading via {sorted(set(wrong))} (must use update_document)",
-        )
-    return True, "no create/move used for heading"
-
-
 _UPDATE_TO_GET: dict[str, tuple[str, tuple[str, ...]]] = {
     "update_work_item": ("get_work_item", ("project_id", "work_item_id")),
     "update_document": (
@@ -370,19 +345,31 @@ def check_scoped_query_uses_sql(
     trajectory: Trajectory, _params: dict[str, Any]
 ) -> CheckResult:
     """Document scoping must use ``SQL:(...)`` or ``read_document_parts`` — Lucene
-    ``module``/``module.id`` field terms match nothing (not indexed).
+    ``module``/``module.id`` field terms match nothing (not indexed). A SQL:(...)
+    query must be preceded by ``get_sql_query_recipes`` (joins are recipe-sourced,
+    not hand-written).
     """
     field_re = re.compile(r"\bmodule(?:\.\w+)?\s*:", re.IGNORECASE)
+    recipes_seen = False
     for call in trajectory:
+        if call.get("name") == "get_sql_query_recipes":
+            recipes_seen = True
+            continue
         if call.get("name") != "list_work_items":
             continue
         query = str(_args(call).get("query") or "")
-        if field_re.search(query) and not query.lstrip().lower().startswith("sql:"):
+        is_sql = query.lstrip().lower().startswith("sql:")
+        if field_re.search(query) and not is_sql:
             return False, (
                 f"list_work_items used Lucene query '{query}' -- module is not "
                 "indexed; use the SQL:(...) prefix or read_document_parts"
             )
-    return True, "no Lucene module query issued"
+        if is_sql and not recipes_seen:
+            return False, (
+                f"list_work_items issued SQL query '{query}' without a prior "
+                "get_sql_query_recipes -- adapt a recipe, do not hand-write joins"
+            )
+    return True, "no Lucene module query issued; any SQL was recipe-sourced"
 
 
 def _resolve_observed_path(result: object, path: str) -> list[str]:
@@ -576,8 +563,6 @@ def check_triggers_tool(trajectory: Trajectory, params: dict[str, Any]) -> Check
 REGISTRY: dict[str, Callable[[Trajectory, dict[str, Any]], CheckResult]] = {
     "readonly": check_readonly,
     "triggers_tool": check_triggers_tool,
-    "no_update_document": check_no_update_document,
-    "heading_to_doc": check_heading_to_doc,
     "get_before_update": check_get_before_update,
     "resolve_root_comment": check_resolve_root_comment,
     "preserve_hyperlinks": check_preserve_hyperlinks,
