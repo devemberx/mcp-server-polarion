@@ -263,7 +263,7 @@ class TestMutations:
         assert fake.mutations == []
 
 
-class TestTier3Seeding:
+class TestOrchestrationSeeding:
     def test_parent_document_resolves(self) -> None:
         response = _get(
             FakePolarion(),
