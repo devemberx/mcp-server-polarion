@@ -14,13 +14,14 @@ pytest.importorskip("strands_evals")
 from strands_evals import Case
 
 from evals import run
-from evals.cases.tier1_prohibitions import CASES as TIER1_CASES
-from evals.cases.tier2_efficiency import CASES as TIER2_CASES
-from evals.cases.tier3_orchestration import CASES as TIER3_CASES
+from evals.cases.efficiency import CASES as EFFICIENCY_CASES
+from evals.cases.orchestration import CASES as ORCHESTRATION_CASES
+from evals.cases.safety import CASES as SAFETY_CASES
+from evals.cases.triggers import CASES as TRIGGER_CASES
 from evals.harness.runner import AGENT_ERROR_PREFIX
 
 
-def _case(name: str = "T1-X", min_rate: float = 1.0) -> Case:
+def _case(name: str = "GATE-X", min_rate: float = 1.0) -> Case:
     return Case(
         name=name,
         input="do a thing",
@@ -90,10 +91,10 @@ class TestGitSha:
 
 class TestMain:
     def test_unknown_case_returns_2(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("sys.argv", ["run", "--case", "T1-DOES-NOT-EXIST"])
+        monkeypatch.setattr("sys.argv", ["run", "--case", "DOES-NOT-EXIST"])
         assert run.main() == 2
 
-    def test_tier_flag_runs_only_that_tier(
+    def test_category_flag_runs_only_that_category(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
     ) -> None:
         seen: list[str] = []
@@ -113,19 +114,41 @@ class TestMain:
         monkeypatch.setattr(run, "_run_case_n_times", _stub)
         monkeypatch.setattr(run, "resolve_model_id", lambda: "test/model")
         monkeypatch.setattr(run, "_REPORT_DIR", tmp_path)
-        monkeypatch.setattr("sys.argv", ["run", "--tier", "2", "--runs", "1"])
+        monkeypatch.setattr(
+            "sys.argv", ["run", "--category", "efficiency", "--runs", "1"]
+        )
 
         assert run.main() == 0
-        assert seen == [c.name for c in TIER2_CASES]
+        assert seen == [c.name for c in EFFICIENCY_CASES]
+
+    def test_list_flag_prints_catalog_without_running(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _boom(case: Case, runs: int, evaluator: Any) -> dict[str, Any]:
+            raise AssertionError("--list must not run any case")
+
+        monkeypatch.setattr(run, "_run_case_n_times", _boom)
+        monkeypatch.setattr("sys.argv", ["run", "--list", "--category", "safety"])
+        assert run.main() == 0
 
 
 class TestAllCases:
-    def test_gate_loads_all_tiers(self) -> None:
-        expected = [*TIER1_CASES, *TIER2_CASES, *TIER3_CASES]
+    def test_gate_loads_all_categories(self) -> None:
+        expected = [
+            *TRIGGER_CASES,
+            *SAFETY_CASES,
+            *EFFICIENCY_CASES,
+            *ORCHESTRATION_CASES,
+        ]
         assert expected == run.ALL_CASES
 
-    def test_tiers_map_to_expected_case_lists(self) -> None:
-        assert run.TIERS["1"] == TIER1_CASES
-        assert run.TIERS["2"] == TIER2_CASES
-        assert run.TIERS["3"] == TIER3_CASES
-        assert run.TIERS["all"] == run.ALL_CASES
+    def test_categories_map_to_expected_case_lists(self) -> None:
+        assert run.CATEGORIES["triggers"] == TRIGGER_CASES
+        assert run.CATEGORIES["safety"] == SAFETY_CASES
+        assert run.CATEGORIES["efficiency"] == EFFICIENCY_CASES
+        assert run.CATEGORIES["orchestration"] == ORCHESTRATION_CASES
+        assert run.CATEGORIES["all"] == run.ALL_CASES
+
+    def test_all_case_names_unique(self) -> None:
+        names = [c.name for c in run.ALL_CASES]
+        assert len(names) == len(set(names))

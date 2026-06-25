@@ -116,8 +116,8 @@ For each param, confirm the schema description text matches what you intend to e
 uv run python -m evals.run --runs 1
 uv run pytest tests/mcp_server_polarion/test_mcp_transport.py -q
 ```
-- The gate runs **both tiers**: Tier-1 prohibitions (`min_pass_rate=1.0`) **and** Tier-2 efficiency (`0.8`). Docstring cuts regress **both** — a too-terse trigger can make the agent take a wasteful path (T2) even when it never does the forbidden action (T1). Read the gate summary, not just the exit code.
-- During diagnosis target one case: `uv run python -m evals.run --case <NAME> --runs 1` (case names in `evals/cases/tier1_prohibitions.py` and `tier2_efficiency.py`).
+- The gate runs **all behaviour categories**: `triggers`/`safety` (`min_pass_rate=1.0`) **and** `efficiency`/`orchestration` (`0.8`). Docstring cuts regress **both kinds** — a too-terse description can make the agent take a wasteful path (efficiency) even when it never does the forbidden action (safety). Read the gate summary, not just the exit code.
+- During diagnosis target one case: `uv run python -m evals.run --case <NAME> --runs 1` (browse case names + intents with `uv run python -m evals.run --list`).
 
 **Confirm gate** (before committing/locking a baseline — kills variance + overfit):
 ```bash
@@ -135,7 +135,7 @@ Trigger/when line · one sibling-boundary line when a near-duplicate tool exists
 ## Absolute rules
 
 1. **Final submission = the last GREEN baseline, with all 3 green:**
-   - `uv run python -m evals.run` (Tier-1 all pass at 1.0; Tier-2 at 0.8)
+   - `uv run python -m evals.run` (triggers/safety all pass at 1.0; efficiency/orchestration at 0.8)
    - `uv run pytest` (esp. `tests/mcp_server_polarion/test_mcp_transport.py` and `tests/evals/`)
    - `uv run ruff check . && uv run ruff format . && uv run mypy src/`
 2. **Scope A: docstring only.** Scope B (opt-in): only the `description=` string of `Field(...)`; never type/default/constraint/logic. Signatures, return types, behavior unchanged in both.

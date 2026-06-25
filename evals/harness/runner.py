@@ -32,7 +32,7 @@ _CASE_TIMEOUT_SECONDS: float = max(
     1.0, float(os.environ.get("EVAL_CASE_TIMEOUT", "120"))
 )
 
-# Deliberately generic: must NOT teach the Tier-1 rules, else the eval tests
+# Deliberately generic: must NOT teach the case rules, else the eval tests
 # the prompt instead of the tool docstrings (the only guard).
 SYSTEM_PROMPT = (
     "You are an assistant with read/write access to a Polarion ALM instance "

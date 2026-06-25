@@ -5,23 +5,33 @@ Drives an LLM agent through the **real** in-memory MCP server against a
 behaviour. Runs as a hard gate ahead of the PyPI publish jobs in
 [`.github/workflows/publish.yml`](../.github/workflows/publish.yml).
 
-Three tiers, same harness and evaluator, different tolerance:
+Cases are organised by the **behaviour** they test (one file per category),
+sharing the same harness and the one evaluator; `min_pass_rate` is a per-case
+property, not a per-category one:
 
-- **Tier 1 — prohibitions** ([`cases/tier1_prohibitions.py`](cases/tier1_prohibitions.py)):
-  destructive / corrupting / footgun actions. `min_pass_rate = 1.0` — a single
-  forbidden action across the N runs blocks the release.
-- **Tier 2 — efficiency** ([`cases/tier2_efficiency.py`](cases/tier2_efficiency.py)):
-  the agent succeeds, but must take the short, correct path (one bulk call,
-  direct get by known id, no redundant identical reads, right query
-  mechanism). `min_pass_rate = 0.8` — occasional wasteful runs tolerated,
-  systematic waste blocks.
-- **Tier 3 — orchestration** ([`cases/tier3_orchestration.py`](cases/tier3_orchestration.py)):
-  multi-step tasks where the agent must walk the correct ordered tool sequence
-  and thread ids between steps (e.g. `create_work_items → read_document_parts →
+- **triggers** ([`cases/triggers.py`](cases/triggers.py)): the request must route
+  to the **correct tool / path** — did the right tool fire (and the tempting
+  wrong one not)? `min_pass_rate = 1.0` — a single mis-trigger blocks release, so
+  each prompt admits exactly one correct tool family.
+- **safety** ([`cases/safety.py`](cases/safety.py)): a destructive / corrupting /
+  data-loss **footgun must never happen** (read-before-write, read-only intent,
+  REPLACE-list preservation, round-trip sourcing, right comment target).
+  `min_pass_rate = 1.0`.
+- **efficiency** ([`cases/efficiency.py`](cases/efficiency.py)): the correct answer
+  must be reached **without waste** (one bulk call, direct get by known id, no
+  redundant identical reads, right query mechanism). `min_pass_rate = 0.8` —
+  occasional waste tolerated, systematic waste blocks.
+- **orchestration** ([`cases/orchestration.py`](cases/orchestration.py)):
+  multi-step tasks must walk the correct ordered tool sequence and thread ids
+  between steps (e.g. `create_work_items → read_document_parts →
   move_work_item_to_document` with the move's part-id observed from the read).
   One generic `ordered_trajectory` check; cases are data. `min_pass_rate = 0.8`.
 
-No tier needs an **LLM judge**: every verdict is a pure function of the
+Every case carries an `intent` (one line: what passes vs. fails) and a `covers`
+list (the tools it exercises) in its metadata; `uv run python -m evals.run
+--list` prints the catalog.
+
+No category needs an **LLM judge**: every verdict is a pure function of the
 tool-call trajectory. The only model cost is the agent under test.
 
 ## How it works
@@ -43,6 +53,8 @@ The agent's tool calls are captured by `TrajectoryRecorder`; the
 `CheckDispatchEvaluator` dispatches on `Case.metadata["check"]` to a pure
 check in [`evaluators/checks.py`](evaluators/checks.py) plus cross-cutting global
 checks (e.g. every `update_document` body block must carry a non-empty `id`).
+All categories share this one evaluator — there is deliberately no per-category
+evaluator (the check, named in case metadata, is what varies).
 
 ## Running
 
@@ -53,13 +65,18 @@ uv sync --group evals
 uv run python -m evals.run
 uv run python evals/run.py        # equivalent
 
+# Print the case catalog (name/category/check/covers/intent); no model cost
+uv run python -m evals.run --list
+uv run python -m evals.run --category triggers --list
+
 # One case, once (fast smoke)
-uv run python -m evals.run --case T1-READONLY --runs 1
+uv run python -m evals.run --case SAFE-READONLY --runs 1
 ```
 
-Each case runs N times and passes only at its `min_pass_rate` (Tier 1: 1.0,
-Tier 2: 0.8). The gate fails (exit 1) if any case falls short. A JSON report
-is written to `evals/reports/gate-<sha>-<model>.json` (gitignored).
+Each case runs N times and passes only at its `min_pass_rate`
+(triggers/safety: 1.0, efficiency/orchestration: 0.8). The gate fails (exit 1)
+if any case falls short. A JSON report is written to
+`evals/reports/gate-<sha>-<model>.json` (gitignored).
 
 ## Choosing the model
 
@@ -110,9 +127,9 @@ EVAL_MAX_CYCLES=10 EVAL_CASE_TIMEOUT=600 \
 
 - **Hard gate** — the `gate` job in
   [`publish.yml`](../.github/workflows/publish.yml) calls the reusable
-  [`publish-gate.yml`](../.github/workflows/publish-gate.yml) (tier1 -> tier2 ->
-  tier3) on tag push, and every later publish job depends on it, so a failing
-  gate blocks the release.
+  [`publish-gate.yml`](../.github/workflows/publish-gate.yml) (triggers ->
+  safety -> efficiency -> orchestration) on tag push, and every later publish
+  job depends on it, so a failing gate blocks the release.
 - **On-demand run** — the
   [`Evals (on-demand)`](../.github/workflows/evals-on-demand.yml) workflow is
   `workflow_dispatch`: trigger it from the Actions tab with a chosen `model`
@@ -126,12 +143,13 @@ first tagged release.
 
 1. Add a pure check to `evaluators/checks.py` and register it in `REGISTRY`
    (or reuse an existing one). Keep it a function of the trajectory only.
-2. Add a `Case` to `cases/tier1_prohibitions.py` (prohibition,
-   `min_pass_rate: 1.0`), `cases/tier2_efficiency.py` (efficiency,
-   `min_pass_rate: 0.8`), or `cases/tier3_orchestration.py` (multi-step
-   orchestration, `min_pass_rate: 0.8`); `run.py` loads all three lists. A
-   Tier-3 case usually reuses the `ordered_trajectory` check and just declares
-   its step sequence in `params` — no new check needed.
+2. Add a `Case` to the file for the behaviour it tests — `cases/triggers.py`
+   (right tool fires, `1.0`), `cases/safety.py` (footgun avoided, `1.0`),
+   `cases/efficiency.py` (no waste, `0.8`), or `cases/orchestration.py`
+   (multi-step, `0.8`); `run.py` loads all four lists. Give every case an
+   `intent` (one line) and a `covers` list (tools it exercises) — an
+   orchestration case derives `covers` from its steps and usually reuses the
+   `ordered_trajectory` check, just declaring its step sequence in `params`.
 3. Phrase the task neutrally — never state the rule, or you test the prompt
    instead of the tool docstrings (the only guard).
 
@@ -145,7 +163,7 @@ hyperlink, `MCPT-201` heading, `MCPT-202` ghost-typed task, comment thread
 real server's *structure* there; keep all content synthetic. Bulk POSTs echo one
 id per submitted entry, so bulk cases exercise the tools' count-match rule.
 
-Tier-3 adds: a second document `FakeParentDoc`; requirements `MCPT-300` (in
+Orchestration adds: a second document `FakeParentDoc`; requirements `MCPT-300` (in
 `FakeDoc`, links `satisfies`→`MCPT-400` and `verifies`→`MCPT-500`), `MCPT-301`
 (in `FakeDoc`, no test-case link — coverage-gap signal), `MCPT-400` (parent, in
 `FakeParentDoc`), test case `MCPT-500`; a `FakeDoc` `/parts` response with the

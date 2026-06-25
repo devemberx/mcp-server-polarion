@@ -1,21 +1,19 @@
-"""Tier-3 case-definition invariants: registered check, ``min_pass_rate ==
-0.8``, names unique across all tiers, and a well-formed step DSL (each step
-names a tool; every ``observed_in`` references a tool that appears earlier in
-the same case's steps, so the threaded id can actually have been produced).
+"""Orchestration case-definition invariants: the ``ordered_trajectory`` check,
+``min_pass_rate == 0.8``, documented intent, auto-derived covers, and a
+well-formed step DSL (each step names a tool; every ``observed_in`` references a
+tool that appears earlier in the same case's steps, so the threaded id can
+actually have been produced).
 """
 
 from __future__ import annotations
 
 import pytest
 
-# The CASES list pulls in ``strands_evals.Case``, only present when the optional
-# ``evals`` dependency group is installed; skip on the bare dev install.
 pytest.importorskip("strands_evals")
 
-from evals.cases.tier1_prohibitions import CASES as TIER1_CASES
-from evals.cases.tier2_efficiency import CASES as TIER2_CASES
-from evals.cases.tier3_orchestration import CASES, _case
+from evals.cases.orchestration import CASES, _case
 from evals.evaluators import checks
+from tests.mcp_server_polarion.test_mcp_transport import EXPECTED_TOOL_NAMES
 
 
 def _params(case: object) -> dict[str, object]:
@@ -49,9 +47,18 @@ class TestCases:
         for case in CASES:
             assert (case.metadata or {}).get("min_pass_rate") == 0.8
 
-    def test_case_names_are_unique_across_tiers(self) -> None:
-        names = [c.name for c in [*TIER1_CASES, *TIER2_CASES, *CASES]]
-        assert len(names) == len(set(names))
+    def test_every_case_documents_intent(self) -> None:
+        for case in CASES:
+            intent = (case.metadata or {}).get("intent")
+            assert isinstance(intent, str) and intent.strip(), case.name
+
+    def test_covers_is_derived_from_steps_and_real(self) -> None:
+        for case in CASES:
+            covers = (case.metadata or {}).get("covers")
+            assert isinstance(covers, list) and covers, case.name
+            assert set(covers) <= EXPECTED_TOOL_NAMES, case.name
+            derived = {t for step in _params(case)["steps"] for t in _tools(step)}
+            assert set(covers) == derived, case.name
 
     def test_every_case_declares_at_least_one_step(self) -> None:
         for case in CASES:
@@ -97,11 +104,18 @@ class TestCases:
                 seen_tools.update(_single_tool(step))
 
     def test_helper_builds_expected_metadata_shape(self) -> None:
-        case = _case("T3-X", "do a thing", steps=[{"tool": "get_document"}])
-        assert case.name == "T3-X"
+        case = _case(
+            "ORCH-X",
+            "do a thing",
+            intent="walk the path",
+            steps=[{"tool": "get_document"}],
+        )
+        assert case.name == "ORCH-X"
         assert case.input == "do a thing"
         assert case.metadata == {
             "check": "ordered_trajectory",
             "params": {"steps": [{"tool": "get_document"}]},
             "min_pass_rate": 0.8,
+            "intent": "walk the path",
+            "covers": ["get_document"],
         }

@@ -26,18 +26,18 @@ FLOATING_TASK_ID = "MCPT-200"
 FLOATING_HEADING_ID = "MCPT-201"
 FLOATING_GHOST_ID = "MCPT-202"
 
-# Reply comment id (parent == root "1") used by T1-REPLY-RESOLVE.
+# Reply comment id (parent == root "1") used by SAFE-REPLY-RESOLVE.
 ROOT_COMMENT_ID = "1"
 REPLY_COMMENT_ID = "2"
 
-# Pre-existing hyperlink on the floating task; T1-HYPERLINK-PRESERVE asserts
+# Pre-existing hyperlink on the floating task; SAFE-HYPERLINK-PRESERVE asserts
 # an update keeps it (Polarion REPLACES the whole list).
 FLOATING_TASK_HYPERLINK_URI = "https://specs.example.com/fake-spec"
 
-# Anchored intro paragraph in the doc body; T1-ROUNDTRIP-SOURCE edits it.
+# Anchored intro paragraph in the doc body; SAFE-ROUNDTRIP-SOURCE edits it.
 DOC_INTRO_PARAGRAPH_ID = "p-1"
 
-# Second document + requirement traceability seeds (Tier-3 orchestration).
+# Second document + requirement traceability seeds (orchestration cases).
 PARENT_DOC = "FakeParentDoc"
 PARENT_MODULE_ID = f"{PROJECT}/{SPACE}/{PARENT_DOC}"
 CHILD_REQ_ID = (

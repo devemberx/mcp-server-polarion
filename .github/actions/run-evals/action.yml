@@ -1,13 +1,13 @@
 name: Run evals
 description: >-
   Set up uv + Python 3.13, install the eval dependency group, drive the eval
-  gate for one tier (or all), and upload the JSON report as an artifact. Shared
-  by the publish gate (`publish-gate.yml`) and the on-demand workflow
-  (`evals-on-demand.yml`) so they cannot drift on setup steps.
+  gate for one behaviour category (or all), and upload the JSON report as an
+  artifact. Shared by the publish gate (`publish-gate.yml`) and the on-demand
+  workflow (`evals-on-demand.yml`) so they cannot drift on setup steps.
 
 inputs:
-  tier:
-    description: Tier to run (1, 2, 3, or all).
+  category:
+    description: Behaviour category to run (triggers, safety, efficiency, orchestration, or all).
     required: false
     default: all
   model:
@@ -36,17 +36,17 @@ runs:
       shell: bash
       run: uv sync --group evals
 
-    - name: Run eval gate (tier ${{ inputs.tier }})
+    - name: Run eval gate (category ${{ inputs.category }})
       shell: bash
       env:
         OPENAI_API_KEY: ${{ inputs.openai-api-key }}
         EVAL_MODEL: ${{ inputs.model }}
         EVAL_RUNS: ${{ inputs.runs }}
-      run: uv run python -m evals.run --tier "${{ inputs.tier }}"
+      run: uv run python -m evals.run --category "${{ inputs.category }}"
 
     - name: Upload eval report
       if: always()
       uses: actions/upload-artifact@v7
       with:
-        name: eval-report-tier-${{ inputs.tier }}
+        name: eval-report-${{ inputs.category }}
         path: evals/reports/
