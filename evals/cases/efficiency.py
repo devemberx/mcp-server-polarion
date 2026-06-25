@@ -1,9 +1,8 @@
 """Efficiency cases: the correct answer must be reached without waste.
 
-The behaviour under test is economy — the short, correct path (one bulk call,
-direct lookup by known id, no redundant identical reads, the right query
-mechanism). ``min_pass_rate = 0.8``: occasional waste tolerated, systematic
-waste blocks.
+The short path: one bulk call, direct id lookup, no redundant reads, right
+query mechanism. ``min_pass_rate = 0.8`` — occasional waste tolerated,
+systematic waste blocks.
 """
 
 from __future__ import annotations
@@ -67,8 +66,8 @@ CASES: list[Case] = [
         "Create two tasks: 'Fake delta' with severity must_have and "
         "'Fake epsilon' with severity nice_to_have.",
         "no_duplicate_reads",
-        intent="Stable enum options are fetched once; re-fetching the same "
-        "options fails.",
+        intent="If enum options are fetched, they are fetched once; re-fetching "
+        "identical options fails.",
         covers=["list_work_item_enum_options", "create_work_items"],
     ),
     _case(
@@ -77,8 +76,9 @@ CASES: list[Case] = [
         f"in space '{SPACE}'.",
         "scoped_query_uses_sql",
         intent="Document scoping uses SQL:(...) or read_document_parts; a Lucene "
-        "module term fails.",
-        covers=["list_work_items"],
+        "module term fails. A SQL query must be recipe-sourced (get_sql_query_recipes "
+        "first).",
+        covers=["list_work_items", "get_sql_query_recipes"],
     ),
     _case(
         "EFF-DETACH-NOOP",
