@@ -7,6 +7,8 @@ MCP server: AI read/write access to Polarion ALM. FastMCP 3.0, strict async, ful
 ```bash
 uv sync --dev                                            # install deps
 uv run pytest                                            # all tests
+uv run pytest --cov --cov-report=term-missing            # tests + uncovered lines
+uv run pytest --cov --cov-report=html                    # htmlcov/index.html (visual)
 uv run ruff check . && uv run ruff format . && uv run mypy src/  # lint + format + types
 uv run mcp-server-polarion                               # run server (stdio)
 ```

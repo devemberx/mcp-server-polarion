@@ -25,6 +25,7 @@ build/
 .ruff_cache/
 .pytest_cache/
 .coverage
+coverage.xml
 htmlcov/
 
 # Eval gate reports (generated per run)

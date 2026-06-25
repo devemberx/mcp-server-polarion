@@ -36,6 +36,8 @@ mcp-server-polarion = "mcp_server_polarion.__main__:main"
 dev = [
     "pytest>=9.0",
     "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "diff-cover>=9.0",
     "respx>=0.22",
     "ruff>=0.15",
     "mypy>=2.0",
@@ -94,3 +96,17 @@ files = ["src/mcp_server_polarion"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["src/mcp_server_polarion", "evals"]
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@overload",
+    '\.\.\.',
+]

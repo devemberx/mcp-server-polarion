@@ -76,6 +76,8 @@ git config core.hooksPath .githooks
 
 3. **Add tests.** `tests/` mirrors the source tree one-to-one. For write tools, verify the
    `dry_run=True` path. New `@mcp.tool`s also need their name added to `EXPECTED_TOOL_NAMES`.
+   CI checks test coverage (target 80%); new code should be covered — run `uv run pytest --cov` to
+   see what's missing.
 
 4. **Run the checks locally** — the same gate CI runs:
 
