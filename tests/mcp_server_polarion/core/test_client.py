@@ -41,7 +41,9 @@ class TestAuthentication:
                 return_value=httpx.Response(200, json={"data": []}),
             )
 
-            async with PolarionClient(_config(), write_delay=0) as client:
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
                 await client.get("/projects")
 
             assert route.called
@@ -55,7 +57,9 @@ class TestAuthentication:
                 return_value=httpx.Response(200, json={"data": []}),
             )
 
-            async with PolarionClient(_config(), write_delay=0) as client:
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
                 await client.get("/projects")
 
             request = route.calls.last.request
@@ -77,7 +81,9 @@ class TestSuccessfulResponses:
                 ),
             )
 
-            async with PolarionClient(_config(), write_delay=0) as client:
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
                 result = await client.get("/projects")
 
             assert result["data"] == [{"id": "proj1"}]
@@ -88,7 +94,9 @@ class TestSuccessfulResponses:
                 return_value=httpx.Response(200, json={"data": []}),
             )
 
-            async with PolarionClient(_config(), write_delay=0) as client:
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
                 await client.get(
                     "/projects/P1/workitems",
                     params={"fields[workitems]": "title", "page[size]": 10},
@@ -106,7 +114,9 @@ class TestSuccessfulResponses:
                 ),
             )
 
-            async with PolarionClient(_config(), write_delay=0) as client:
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
                 result = await client.post(
                     "/projects/P1/workitems",
                     json={
@@ -125,7 +135,9 @@ class TestSuccessfulResponses:
                 return_value=httpx.Response(204),
             )
 
-            async with PolarionClient(_config(), write_delay=0) as client:
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
                 result = await client.patch(
                     "/projects/P1/workitems/WI-001",
                     json={"data": {"attributes": {"title": "Updated"}}},
@@ -140,7 +152,9 @@ class TestSuccessfulResponses:
                 return_value=httpx.Response(204),
             )
 
-            async with PolarionClient(_config(), write_delay=0) as client:
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
                 result = await client.delete(
                     "/projects/P1/workitems/WI-001/linkedworkitems",
                     json={
@@ -163,7 +177,9 @@ class TestSuccessfulResponses:
                 return_value=httpx.Response(204)
             )
 
-            async with PolarionClient(_config(), write_delay=0) as client:
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
                 await client.delete(
                     "/projects/P1/workitems/WI-001/linkedworkitems",
                     json={
@@ -194,7 +210,9 @@ class TestSuccessfulResponses:
                 return_value=httpx.Response(200, json=[1, 2, 3]),
             )
 
-            async with PolarionClient(_config(), write_delay=0) as client:
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
                 result = await client.get("/some/list")
 
             assert result == {"data": [1, 2, 3]}
@@ -212,7 +230,9 @@ class TestErrorMapping:
                 ),
             )
 
-            async with PolarionClient(_config(), write_delay=0) as client:
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
                 with pytest.raises(PolarionAuthError) as exc_info:
                     await client.get("/projects")
 
@@ -227,7 +247,9 @@ class TestErrorMapping:
                 ),
             )
 
-            async with PolarionClient(_config(), write_delay=0) as client:
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
                 with pytest.raises(PolarionAuthError) as exc_info:
                     await client.get("/projects")
 
@@ -242,7 +264,9 @@ class TestErrorMapping:
                 ),
             )
 
-            async with PolarionClient(_config(), write_delay=0) as client:
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
                 with pytest.raises(PolarionNotFoundError) as exc_info:
                     await client.get("/projects/MISSING/workitems/WI-999")
 
@@ -257,7 +281,9 @@ class TestErrorMapping:
                 ),
             )
 
-            async with PolarionClient(_config(), write_delay=0) as client:
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
                 with pytest.raises(PolarionNotFoundError) as exc_info:
                     await client.delete(
                         "/projects/P1/workitems/WI-001/linkedworkitems",
@@ -282,7 +308,9 @@ class TestErrorMapping:
                 ),
             )
 
-            async with PolarionClient(_config(), write_delay=0) as client:
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
                 with pytest.raises(PolarionError) as exc_info:
                     await client.post(
                         "/projects/P1/workitems",
@@ -302,7 +330,9 @@ class TestErrorMapping:
                 ),
             )
 
-            async with PolarionClient(_config(), write_delay=0) as client:
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
                 with pytest.raises(PolarionError, match="Internal"):
                     await client.get("/projects")
 
@@ -316,7 +346,9 @@ class TestErrorMapping:
                 ),
             )
 
-            async with PolarionClient(_config(), write_delay=0) as client:
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
                 with pytest.raises(PolarionAuthError, match="Unauthorized"):
                     await client.get("/projects")
 
@@ -330,7 +362,9 @@ class TestErrorMapping:
                 ),
             )
 
-            async with PolarionClient(_config(), write_delay=0) as client:
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
                 with pytest.raises(PolarionError) as exc_info:
                     await client.get("/projects")
 
@@ -349,7 +383,9 @@ class TestErrorMapping:
                 ),
             )
 
-            async with PolarionClient(_config(), write_delay=0) as client:
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
                 with pytest.raises(PolarionError) as exc_info:
                     await client.get("/projects")
 
@@ -368,7 +404,9 @@ class TestTransportErrors:
                 side_effect=httpx.ConnectError("refused"),
             )
 
-            async with PolarionClient(_config(), write_delay=0) as client:
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
                 with pytest.raises(PolarionError, match="transport error"):
                     await client.get("/projects")
 
@@ -378,7 +416,9 @@ class TestTransportErrors:
                 side_effect=httpx.ReadTimeout("timed out"),
             )
 
-            async with PolarionClient(_config(), write_delay=0) as client:
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
                 with pytest.raises(PolarionError, match="transport error"):
                     await client.get("/projects")
 
@@ -396,7 +436,9 @@ class TestRetry:
                 ],
             )
 
-            async with PolarionClient(_config(), write_delay=0) as client:
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
                 result = await client.get("/projects")
 
             assert result == {"data": []}
@@ -411,7 +453,9 @@ class TestRetry:
                 ],
             )
 
-            async with PolarionClient(_config(), write_delay=0) as client:
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
                 result = await client.get("/projects")
 
             assert result == {"data": ["ok"]}
@@ -428,7 +472,9 @@ class TestRetry:
                 ],
             )
 
-            async with PolarionClient(_config(), write_delay=0) as client:
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
                 with pytest.raises(PolarionError) as exc_info:
                     await client.get("/projects")
 
@@ -445,7 +491,9 @@ class TestRetry:
                 ),
             )
 
-            async with PolarionClient(_config(), write_delay=0) as client:
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
                 with pytest.raises(PolarionError):
                     await client.get("/projects")
 
@@ -461,7 +509,9 @@ class TestRetry:
                 ),
             )
 
-            async with PolarionClient(_config(), write_delay=0) as client:
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
                 with pytest.raises(PolarionAuthError):
                     await client.get("/projects")
 
@@ -478,7 +528,9 @@ class TestRetry:
                 ],
             )
 
-            async with PolarionClient(_config(), write_delay=0) as client:
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
                 result = await client.get("/projects")
 
             assert result == {"data": "ok"}
@@ -505,7 +557,9 @@ class TestSerialization:
         with respx.mock(base_url=BASE) as mock:
             route = mock.get("/projects").mock(side_effect=_record)
 
-            async with PolarionClient(_config(), write_delay=0) as client:
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
                 await asyncio.gather(
                     client.get("/projects"),
                     client.get("/projects"),
@@ -535,7 +589,9 @@ class TestSerialization:
             mock.post("/projects/p/workitems").mock(side_effect=_on_post)
             mock.get("/projects").mock(side_effect=_on_get)
 
-            async with PolarionClient(_config(), write_delay=write_delay) as client:
+            async with PolarionClient(
+                _config(), write_delay=write_delay, min_interval=0
+            ) as client:
                 await asyncio.gather(
                     client.post("/projects/p/workitems", json={}),
                     client.get("/projects"),
@@ -548,13 +604,78 @@ class TestSerialization:
             f"expected ≥ {write_delay * 0.9:.3f}s (write_delay held by lock)."
         )
 
+    async def test_read_requests_paced_to_min_interval(self) -> None:
+        """Two back-to-back GETs are spaced by at least ``min_interval`` — the
+        ≤3 req/s cap applies to reads, not just writes.
+        """
+        get_start: list[float] = []
+
+        async def _on_get(request: httpx.Request) -> httpx.Response:
+            get_start.append(asyncio.get_running_loop().time())
+            return httpx.Response(200, json={"data": []})
+
+        min_interval = 0.2
+
+        with respx.mock(base_url=BASE) as mock:
+            mock.get("/projects").mock(side_effect=_on_get)
+
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=min_interval
+            ) as client:
+                await client.get("/projects")
+                await client.get("/projects")
+
+        assert len(get_start) == 2
+        # 0.9 slack absorbs scheduler jitter (sleep may wake slightly early).
+        assert get_start[1] - get_start[0] >= min_interval * 0.9, (
+            f"second GET started {get_start[1] - get_start[0]:.3f}s after first; "
+            f"expected ≥ {min_interval * 0.9:.3f}s (read pacing)."
+        )
+
+    async def test_slow_request_adds_no_extra_pacing(self) -> None:
+        """A request slower than ``min_interval`` consumes the interval itself, so
+        the next request issues immediately — pacing is start-based, not additive.
+        """
+        request_time = 0.4
+        min_interval = 0.2
+        first_end: list[float] = []
+        second_start: list[float] = []
+        call = 0
+
+        async def _on_get(request: httpx.Request) -> httpx.Response:
+            nonlocal call
+            call += 1
+            if call == 1:
+                await asyncio.sleep(request_time)
+                first_end.append(asyncio.get_running_loop().time())
+            else:
+                second_start.append(asyncio.get_running_loop().time())
+            return httpx.Response(200, json={"data": []})
+
+        with respx.mock(base_url=BASE) as mock:
+            mock.get("/projects").mock(side_effect=_on_get)
+
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=min_interval
+            ) as client:
+                await client.get("/projects")
+                await client.get("/projects")
+
+        assert first_end and second_start
+        # request_time (0.4s) already exceeds min_interval, so the second GET
+        # starts right after the first ends — no added pacing sleep.
+        assert second_start[0] - first_end[0] < min_interval, (
+            f"second GET started {second_start[0] - first_end[0]:.3f}s after the "
+            f"first ended; expected < {min_interval:.3f}s (no extra pacing)."
+        )
+
 
 class TestContextManager:
     """Verify async context-manager protocol."""
 
     async def test_context_manager_closes_client(self) -> None:
         """``async with`` should call ``close()`` on exit."""
-        async with PolarionClient(_config(), write_delay=0) as client:
+        async with PolarionClient(_config(), write_delay=0, min_interval=0) as client:
             assert client.base_url.endswith("/polarion/rest/v1")
 
         # After closing, the underlying httpx client is closed.
@@ -562,7 +683,7 @@ class TestContextManager:
 
     async def test_manual_close(self) -> None:
         """Calling ``close()`` directly also shuts down the client."""
-        client = PolarionClient(_config(), write_delay=0)
+        client = PolarionClient(_config(), write_delay=0, min_interval=0)
         await client.close()
         assert client.is_closed
 

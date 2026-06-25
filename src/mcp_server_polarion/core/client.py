@@ -32,6 +32,9 @@ _RETRYABLE_STATUS_CODES: Final[frozenset[int]] = frozenset({429, 500, 502, 503, 
 
 # Pause after each mutation (Polarion forbids concurrent writes).
 _WRITE_DELAY_SECONDS: Final[float] = 1.5
+# Min gap between request starts → ≤3 req/s cap; start-based, so a slow
+# request's own latency counts and adds no extra wait.
+_MIN_REQUEST_INTERVAL_SECONDS: Final[float] = 1.0 / 3.0
 _DEFAULT_TIMEOUT_SECONDS: Final[float] = 30.0
 
 _HTTP_NO_CONTENT: Final[int] = 204
@@ -80,9 +83,13 @@ class PolarionClient:
         config: PolarionConfig,
         *,
         write_delay: float = _WRITE_DELAY_SECONDS,
+        min_interval: float = _MIN_REQUEST_INTERVAL_SECONDS,
     ) -> None:
         self.base_url: str = config.base_api_url
         self._write_delay = write_delay
+        self._min_interval = min_interval
+        # -inf so the first request never waits, whatever the monotonic clock's epoch.
+        self._last_request_monotonic: float = float("-inf")
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
             headers={
@@ -101,6 +108,18 @@ class PolarionClient:
         if self._request_lock is None:
             self._request_lock = asyncio.Lock()
         return self._request_lock
+
+    async def _pace(self) -> None:
+        """Sleep until ``_min_interval`` has elapsed since the previous request
+        was issued, then stamp this request's issue time. Caller holds the lock.
+        """
+        loop = asyncio.get_running_loop()
+        wait = self._min_interval - (loop.time() - self._last_request_monotonic)
+        if wait > 0:
+            await asyncio.sleep(wait)
+        # Stamp after the sleep: the real issue time the next request spaces from.
+        # Before the sleep would under-space (a fast follower reads a stale value).
+        self._last_request_monotonic = loop.time()
 
     async def __aenter__(self) -> PolarionClient:
         return self
@@ -188,6 +207,8 @@ class PolarionClient:
         """
         # Lock held across retries — releasing mid-backoff would let another
         # caller slip in and hit the same 429.
+        # Pace to ≤3 req/s before the first attempt; retry backoffs only widen the gap.
+        await self._pace()
         last_exception: PolarionError | None = None
         backoff = _INITIAL_BACKOFF_SECONDS
 
