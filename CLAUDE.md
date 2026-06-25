@@ -80,7 +80,7 @@ Applies to ALL comments/docstrings incl. CLAUDE.md.
 
 ## Evals — deploy gate
 
-`evals/` drives real LLM through in-memory server against mocked Polarion; deterministic checks, no judge. Hard gate before PyPI publish. Cases grouped by behaviour (file = category): `triggers`/`safety` (`min_pass_rate=1.0`), `efficiency`/`orchestration` (`0.8`); one `CheckDispatchEvaluator` dispatches `metadata["check"]` to a pure check. New case: check in `evals/evaluators/checks.py::REGISTRY` + `Case` in the matching `cases/<category>.py` with `intent` + `covers`; phrase task neutrally. Detail: [evals/README.md](evals/README.md).
+`evals/` drives real LLM through in-memory server against mocked Polarion; deterministic checks, no judge. Hard gate before PyPI publish. Cases grouped by behaviour (file = category): `triggers`/`safety` (`min_pass_rate=1.0`), `efficiency`/`orchestration` (`0.8`); one `CheckDispatchEvaluator` dispatches `metadata["check"]` to a pure check. New case: check in `evals/evaluators/checks.py::REGISTRY` + `Case` in the matching `cases/<category>.py` with `intent` + `covers`; phrase task neutrally. `tests/evals/test_coverage.py` enforces every tool is covered or deferred. Detail: [evals/README.md](evals/README.md).
 
 ## Repo Conventions
 

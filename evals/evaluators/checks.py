@@ -547,8 +547,35 @@ def check_ordered_trajectory(
     return True, "orchestration satisfied"
 
 
+def check_triggers_tool(trajectory: Trajectory, params: dict[str, Any]) -> CheckResult:
+    """The request must route to an expected tool; rejected tools must not fire.
+
+    ``params``: ``expect`` (one tool name or a list of acceptable ones),
+    ``reject`` (tools that must not be called, optional), ``match`` (arg
+    constraint on an expected call, optional). A rejected call fails immediately;
+    otherwise an errored expected call does not count as a trigger.
+    """
+    raw = params.get("expect", [])
+    expect = [raw] if isinstance(raw, str) else list(raw)
+    reject = list(params.get("reject", []))
+    match = params.get("match", {})
+
+    wrong = [n for n in _names(trajectory) if n in reject]
+    if wrong:
+        return False, f"called wrong tool(s) for this request: {sorted(set(wrong))}"
+    for call in trajectory:
+        if (
+            call.get("name") in expect
+            and not _errored(call)
+            and _args_match(_args(call), match)
+        ):
+            return True, f"triggered expected tool {call.get('name')}"
+    return False, f"never called an expected tool: {sorted(expect)}"
+
+
 REGISTRY: dict[str, Callable[[Trajectory, dict[str, Any]], CheckResult]] = {
     "readonly": check_readonly,
+    "triggers_tool": check_triggers_tool,
     "no_update_document": check_no_update_document,
     "heading_to_doc": check_heading_to_doc,
     "get_before_update": check_get_before_update,

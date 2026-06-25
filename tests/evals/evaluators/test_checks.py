@@ -868,3 +868,72 @@ class TestCheckOrderedTrajectory:
             {"steps": [{"tool": "list_work_items"}], "scoped_sql": True},
         )
         assert passed is False
+
+
+class TestCheckTriggersTool:
+    def test_expected_single_tool_passes(self) -> None:
+        trajectory = [_call("list_projects", {})]
+        passed, _ = checks.check_triggers_tool(trajectory, {"expect": "list_projects"})
+        assert passed is True
+
+    def test_expected_from_alternatives_passes(self) -> None:
+        trajectory = [_call("read_work_item", {"work_item_id": "MCPT-1"})]
+        passed, _ = checks.check_triggers_tool(
+            trajectory, {"expect": ["get_work_item", "read_work_item"]}
+        )
+        assert passed is True
+
+    def test_never_calling_expected_fails(self) -> None:
+        trajectory = [_call("list_work_items", {})]
+        passed, reason = checks.check_triggers_tool(
+            trajectory, {"expect": "list_projects"}
+        )
+        assert passed is False
+        assert "list_projects" in reason
+
+    def test_rejected_tool_fails(self) -> None:
+        trajectory = [
+            _call("create_document", {"title": "x"}),
+            _call("update_document", {"title": "x"}),
+        ]
+        passed, reason = checks.check_triggers_tool(
+            trajectory, {"expect": "create_document", "reject": ["update_document"]}
+        )
+        assert passed is False
+        assert "update_document" in reason
+
+    def test_errored_expected_call_does_not_count(self) -> None:
+        trajectory = [
+            _call(
+                "delete_work_item_links",
+                {"work_item_id": "MCPT-300"},
+                result={"error": "ToolError: bad link id"},
+            )
+        ]
+        passed, _ = checks.check_triggers_tool(
+            trajectory, {"expect": "delete_work_item_links"}
+        )
+        assert passed is False
+
+    def test_match_constraint_honored(self) -> None:
+        trajectory = [
+            _call("create_work_item_comments", {"work_item_id": "MCPT-999"}),
+            _call("create_work_item_comments", {"work_item_id": "MCPT-200"}),
+        ]
+        passed, _ = checks.check_triggers_tool(
+            trajectory,
+            {
+                "expect": "create_work_item_comments",
+                "match": {"work_item_id": "MCPT-200"},
+            },
+        )
+        assert passed is True
+
+        passed, _ = checks.check_triggers_tool(
+            trajectory,
+            {
+                "expect": "create_work_item_comments",
+                "match": {"work_item_id": "MCPT-7"},
+            },
+        )
+        assert passed is False
