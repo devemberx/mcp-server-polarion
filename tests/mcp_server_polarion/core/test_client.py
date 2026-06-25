@@ -143,7 +143,6 @@ class TestSuccessfulResponses:
                     json={"data": {"attributes": {"title": "Updated"}}},
                 )
 
-            # 204 No Content → empty dict
             assert result == {}
 
     async def test_delete_returns_empty_on_204(self) -> None:
@@ -167,7 +166,6 @@ class TestSuccessfulResponses:
                     },
                 )
 
-            # 204 No Content → empty dict
             assert result == {}
 
     async def test_delete_sends_json_body(self) -> None:
@@ -389,7 +387,6 @@ class TestErrorMapping:
                 with pytest.raises(PolarionError) as exc_info:
                     await client.get("/projects")
 
-        # The error detail portion must not exceed the configured limit.
         status_prefix = "Polarion API error 400 Bad Request: "
         detail_part = str(exc_info.value)[len(status_prefix) :]
         assert len(detail_part) <= _MAX_ERROR_DETAIL_LEN
@@ -605,9 +602,7 @@ class TestSerialization:
         )
 
     async def test_read_requests_paced_to_min_interval(self) -> None:
-        """Two back-to-back GETs are spaced by at least ``min_interval`` — the
-        ≤3 req/s cap applies to reads, not just writes.
-        """
+        """Reads obey the ≤3 req/s cap: two GETs spaced by ``min_interval``."""
         get_start: list[float] = []
 
         async def _on_get(request: httpx.Request) -> httpx.Response:
@@ -633,9 +628,7 @@ class TestSerialization:
         )
 
     async def test_slow_request_adds_no_extra_pacing(self) -> None:
-        """A request slower than ``min_interval`` consumes the interval itself, so
-        the next request issues immediately — pacing is start-based, not additive.
-        """
+        """Start-based pacing: a request slower than ``min_interval`` adds no wait."""
         request_time = 0.4
         min_interval = 0.2
         first_end: list[float] = []
@@ -662,17 +655,14 @@ class TestSerialization:
                 await client.get("/projects")
 
         assert first_end and second_start
-        # request_time (0.4s) already exceeds min_interval, so the second GET
-        # starts right after the first ends — no added pacing sleep.
+        # request_time > min_interval, so the second GET adds no extra sleep.
         assert second_start[0] - first_end[0] < min_interval, (
             f"second GET started {second_start[0] - first_end[0]:.3f}s after the "
             f"first ended; expected < {min_interval:.3f}s (no extra pacing)."
         )
 
     async def test_retry_restamps_pacing(self) -> None:
-        """A retried request stamps each attempt, so the next request paces from
-        the last attempt sent — not from the original (now-stale) start time.
-        """
+        """After a retry, pacing tracks the last attempt sent, not the stale start."""
         starts: list[float] = []
 
         async def _on_get(request: httpx.Request) -> httpx.Response:
@@ -686,19 +676,16 @@ class TestSerialization:
         with respx.mock(base_url=BASE) as mock:
             mock.get("/projects").mock(side_effect=_on_get)
 
-            # Small but non-zero backoff so the retry attempt lands measurably
-            # after the first — exposing pacing that spaces from the stale start.
+            # Non-zero backoff so the retry attempt lands measurably after the first.
             with patch("mcp_server_polarion.core.client._INITIAL_BACKOFF_SECONDS", 0.1):
                 async with PolarionClient(
                     _config(), write_delay=0, min_interval=min_interval
                 ) as client:
                     await client.get("/projects")  # 429 → retried → 200
-                    await client.get("/projects")  # follow-up
+                    await client.get("/projects")
 
-        # Attempts: first 429, retry 200, follow-up 200.
-        assert len(starts) == 3
-        # The follow-up must space from the retry attempt (starts[1]), not the
-        # original start (starts[0]); 0.9 slack absorbs scheduler jitter.
+        assert len(starts) == 3  # first 429, retry 200, follow-up 200
+        # Follow-up spaces from the retry attempt (starts[1]), not stale starts[0].
         assert starts[2] - starts[1] >= min_interval * 0.9, (
             f"follow-up GET started {starts[2] - starts[1]:.3f}s after the retry "
             f"attempt; expected ≥ {min_interval * 0.9:.3f}s (re-stamped pacing)."
@@ -713,7 +700,6 @@ class TestContextManager:
         async with PolarionClient(_config(), write_delay=0, min_interval=0) as client:
             assert client.base_url.endswith("/polarion/rest/v1")
 
-        # After closing, the underlying httpx client is closed.
         assert client.is_closed
 
     async def test_manual_close(self) -> None:
