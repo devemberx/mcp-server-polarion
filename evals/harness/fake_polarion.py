@@ -83,6 +83,38 @@ class FakePolarion:
             },
         }
 
+    def _discovery_document_resource(self, name: str) -> dict[str, Any]:
+        """Module-form ``documents`` resource for the list_documents discovery scan
+        (id = full module id; ``_discover_documents`` splits it for space/name).
+        """
+        doc = self.seeds.documents[name]
+        author_ref = {"data": {"type": "users", "id": f"{PROJECT}/{AUTHOR}"}}
+        return {
+            "type": "documents",
+            "id": f"{PROJECT}/{SPACE}/{name}",
+            "attributes": {"type": doc.type, "status": doc.status, "updated": TS},
+            "relationships": {"author": author_ref, "updatedBy": author_ref},
+        }
+
+    def _document_discovery_response(self) -> dict[str, Any]:
+        """list_documents scan: one heading per document carrying its ``module``,
+        with the module documents in ``included``. Only docs with a seeded heading
+        surface (mirrors the production GROUP-BY-heading discovery).
+        """
+        headings = [
+            wi
+            for wi in self.seeds.work_items.values()
+            if wi.type == "heading" and wi.module_id
+        ]
+        data = [self._work_item_resource(wi) for wi in headings]
+        names: list[str] = []
+        for wi in headings:
+            name = wi.module_id.rsplit("/", maxsplit=1)[-1]
+            if name in self.seeds.documents and name not in names:
+                names.append(name)
+        included = [self._discovery_document_resource(n) for n in names]
+        return {"data": data, "included": included, "meta": {"totalCount": len(data)}}
+
     def _document_parts_response(self, name: str) -> dict[str, Any]:
         """A document's ``parts`` from its seed: each part chained to the next via
         ``nextPart``; ``include=workItem`` resources supply titles so
@@ -292,6 +324,10 @@ class FakePolarion:
         # Work item list / discovery: query=type:heading narrows to headings;
         # query=linkedWorkItems:{wi} is the back-link fallback (sources -> target).
         if path.endswith("/workitems"):
+            # list_documents discovery names fields[documents]; serve the module
+            # scan with included document resources rather than the plain list.
+            if params.get("fields[documents]"):
+                return httpx.Response(200, json=self._document_discovery_response())
             query = params.get("query", "")
             if query == "type:heading":
                 items = [

@@ -1,16 +1,13 @@
 """Orchestration cases: a multi-step task must walk the correct ordered tool
 sequence and thread ids between steps.
 
-Each case asserts an ordered tool subsequence (other calls may interleave) plus
-id threading via the single ``ordered_trajectory`` check; the sequence lives in
-``metadata["params"]["steps"]``. ``min_pass_rate = 0.8`` — ordered + observed-id
-is flaky on weak models, so occasional waste is tolerated, systematic
-mis-orchestration fails.
+``ordered_trajectory`` asserts an ordered tool subsequence (interleaving OK) plus
+id threading; the sequence lives in ``metadata["params"]["steps"]``.
+``min_pass_rate = 0.8`` — ordered + observed-id is flaky on weak models.
 
-Groups: W = document authoring (write), R = traceability/analysis (read-only),
-M = read-then-write (gated). Design principle: enumerating a document's work
-items uses ``list_work_items`` (SQL), never ``read_document_parts`` — the latter
-appears only to fetch a part-id anchor for a positional move.
+Groups: W = authoring (write), R = traceability (read-only), M = read-then-write
+(gated). Enumerating a doc's work items uses ``list_work_items`` (SQL), never
+``read_document_parts`` — the latter only fetches a part-id anchor for a move.
 """
 
 from __future__ import annotations
@@ -26,9 +23,8 @@ from evals.harness.fixtures import (
 
 MIN_PASS_RATE = 0.8
 
-# Reused step fragments. The move must run after the create (needs the new id)
-# and after read_document_parts (the anchor) -- the latter is enforced by the
-# observed-id source, the former by ``after``.
+# Reused step fragments. Move runs after create (new id, via ``after``) and
+# after read_document_parts (anchor, via observed-id source).
 _READ_PARTS = {"tool": "read_document_parts", "match": {"document_name": DOC}}
 _MOVE_ANCHORED = {
     "tool": "move_work_item_to_document",
@@ -67,7 +63,7 @@ def _case(name: str, prompt: str, *, intent: str, **params: object) -> Case:
 
 
 CASES: list[Case] = [
-    # --- W: document authoring ----------------------------------------------
+    # W: document authoring
     _case(
         "ORCH-SPEC-INTO-DOC",
         f"In the document '{DOC}' in space '{SPACE}', add a new requirement work "
@@ -86,9 +82,7 @@ CASES: list[Case] = [
         f"In the document '{DOC}' in space '{SPACE}', first add a new 'Performance' "
         f"section heading with a one-sentence intro. Then add a requirement work "
         f"item titled 'p95 latency under 200ms' into the document under that heading.",
-        # Crux is the split: prose/heading via update_document, the spec via
-        # create + move (not everything through one tool). No anchored move --
-        # the fresh heading isn't in the static fake parts.
+        # No anchored move -- the fresh heading isn't in the static fake parts.
         intent="Prose/heading via update_document, spec via create + move — the "
         "two write paths must not collapse into one tool.",
         steps=[
@@ -133,15 +127,14 @@ CASES: list[Case] = [
             },
         ],
     ),
-    # --- R: traceability / analysis (read-only) -----------------------------
+    # R: traceability / analysis (read-only)
     _case(
         "ORCH-CONSISTENCY",
         f"Check the consistency between the document '{DOC}' in space '{SPACE}' and "
         f"its parent document: for a requirement in '{DOC}' that links to a parent "
         f"requirement, compare their contents.",
-        # Enumerate the doc's reqs, follow a link, read the linked parent's
-        # content. Enumeration and the target read each accept the equivalent
-        # tools the model picks; "SQL vs read_document_parts" is owned by efficiency.
+        # Enumeration and target read accept equivalent tools; SQL-vs-parts
+        # choice is owned by efficiency.
         intent="Enumerate doc reqs -> follow a link -> read the linked parent "
         "(target id observed from the link); read-only.",
         steps=[
@@ -160,8 +153,8 @@ CASES: list[Case] = [
         "ORCH-IMPACT-ANALYSIS",
         f"For each work item linked to {CHILD_REQ_ID}, give a short summary of its "
         f"description.",
-        # The link summary already carries title/type/status, so a description
-        # summary forces a follow-up read of each linked target.
+        # Link summary carries title/type/status, so a description summary forces
+        # a follow-up read of each target.
         intent="List links from a known req -> read each linked target (ids "
         "observed from the link list); read-only.",
         steps=[
@@ -182,8 +175,7 @@ CASES: list[Case] = [
         "ORCH-COVERAGE-GAP",
         f"Which requirements in the document '{DOC}' in space '{SPACE}' have no "
         f"linked test case?",
-        # Enumerate the doc's reqs, then inspect each one's links. Enumeration
-        # accepts the equivalent tools the model picks.
+        # Enumeration accepts the equivalent tools the model picks.
         intent="Enumerate doc reqs -> inspect each req's links; read-only.",
         steps=[
             {"tool": ["list_work_items", "read_document_parts"]},
@@ -191,11 +183,32 @@ CASES: list[Case] = [
         ],
         read_only=True,
     ),
-    # --- M: read -> decide -> write (gated) ---------------------------------
+    _case(
+        "ORCH-DOC-COMMENT-DISCOVERY",
+        "I don't remember the exact name of our requirements specification "
+        "document in this project -- list all comments on it.",
+        # Only the one spec doc is surfaced by the heading-scan; no project step
+        # (project id is ambient).
+        intent="Discover the spec doc via list_documents -> read its comments "
+        "(document_name observed from the listing); read-only.",
+        steps=[
+            {"tool": "list_documents"},
+            {
+                "tool": "list_document_comments",
+                "observed_arg": "document_name",
+                "observed_in": "list_documents",
+                "observed_path": "items[].document_name",
+            },
+        ],
+        read_only=True,
+    ),
+    # M: read -> decide -> write (gated)
     _case(
         "ORCH-CONDITIONAL-UPDATE",
         f"If work item {FLOATING_TASK_ID} is still open, raise its priority by one "
         f"level.",
+        # Seed-dependent: FLOATING_TASK status=open so the update branch fires; if
+        # the fixture flips to closed, a correct skip fails this case spuriously.
         intent="Read status first, then update only after that get (conditional "
         "write gated on the read).",
         steps=[
@@ -212,6 +225,8 @@ CASES: list[Case] = [
         f"Add a requirement work item titled 'Cache eviction policy' to the document "
         f"'{DOC}' in space '{SPACE}' after 'Section A', but only if no work item "
         f"with that title already exists.",
+        # Seed-dependent: no item titled 'Cache eviction policy' exists so the
+        # create branch fires; adding that title would fail this case spuriously.
         intent="Check for an existing item first, then create -> read_parts -> "
         "anchored move.",
         steps=[
