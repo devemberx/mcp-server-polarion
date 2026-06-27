@@ -9,9 +9,12 @@ exponential-backoff retry, and a post-mutation delay.
 from __future__ import annotations
 
 import asyncio
+import getpass
 import logging
 import re
+import tempfile
 import types
+from pathlib import Path
 from typing import Final
 
 import httpx
@@ -22,8 +25,25 @@ from mcp_server_polarion.core.exceptions import (
     PolarionError,
     PolarionNotFoundError,
 )
+from mcp_server_polarion.core.global_pace import GlobalPacer
 
 logger: Final = logging.getLogger("mcp_server_polarion.core.client")
+
+
+def _default_pace_lock_path() -> str:
+    """Fixed host-shared lock path so every local server process paces together.
+
+    ``gettempdir()`` resolves to the same dir for all processes; the username
+    scopes it per user on shared hosts.
+    """
+    try:
+        user = getpass.getuser()
+    except OSError:
+        user = "default"
+    return str(Path(tempfile.gettempdir()) / f"mcp-server-polarion-pace-{user}.lock")
+
+
+_DEFAULT_PACE_LOCK_PATH: Final[str] = _default_pace_lock_path()
 
 _MAX_RETRIES: Final[int] = 2
 _INITIAL_BACKOFF_SECONDS: Final[float] = 1.0
@@ -84,10 +104,14 @@ class PolarionClient:
         *,
         write_delay: float = _WRITE_DELAY_SECONDS,
         min_interval: float = _MIN_REQUEST_INTERVAL_SECONDS,
+        pace_lock_path: str | None = _DEFAULT_PACE_LOCK_PATH,
     ) -> None:
         self.base_url: str = config.base_api_url
         self._write_delay = write_delay
         self._min_interval = min_interval
+        # Host-global pacing across server processes via a shared lock path.
+        # ``None`` (or min_interval=0) keeps it a no-op for unit tests.
+        self._global_pacer = GlobalPacer(pace_lock_path, min_interval)
         # -inf: first request never waits, whatever the clock epoch.
         self._last_request_monotonic: float = float("-inf")
         self._client = httpx.AsyncClient(
@@ -147,7 +171,7 @@ class PolarionClient:
         """``GET``; raises ``PolarionAuthError`` (401/403),
         ``PolarionNotFoundError`` (404), ``PolarionError`` (other non-2xx).
         """
-        async with self._get_request_lock():
+        async with self._get_request_lock(), self._global_pacer.hold():
             return await self._request("GET", path, params=params)
 
     async def post(
@@ -159,7 +183,7 @@ class PolarionClient:
         """``POST``; sleeps ``_write_delay`` after success, inside the lock,
         for cluster propagation before the next call.
         """
-        async with self._get_request_lock():
+        async with self._get_request_lock(), self._global_pacer.hold():
             result = await self._request("POST", path, json=json)
             await asyncio.sleep(self._write_delay)
             return result
@@ -171,7 +195,7 @@ class PolarionClient:
         json: dict[str, object] | None = None,
     ) -> dict[str, object]:
         """``PATCH``; same post-success delay contract as :meth:`post`."""
-        async with self._get_request_lock():
+        async with self._get_request_lock(), self._global_pacer.hold():
             result = await self._request("PATCH", path, json=json)
             await asyncio.sleep(self._write_delay)
             return result
@@ -186,7 +210,7 @@ class PolarionClient:
         bulk-delete ids — non-standard for DELETE, but httpx and Polarion's
         gateway both accept it. ``{}`` for 204 No Content.
         """
-        async with self._get_request_lock():
+        async with self._get_request_lock(), self._global_pacer.hold():
             result = await self._request("DELETE", path, json=json)
             await asyncio.sleep(self._write_delay)
             return result
