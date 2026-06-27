@@ -1,7 +1,7 @@
 # Google-Style Comment Compression — Worked Examples
 
-Reference for the six principles in SKILL.md. Each shows a before → after on Python.
-"Keep" = the comment earns its line. "Cut" = delete entirely.
+Reference for six principles in SKILL.md. Each show before → after on Python.
+"Keep" = comment earn line. "Cut" = delete entirely.
 
 ## 1. Density — narrative → keyword fragments
 
@@ -18,7 +18,7 @@ await asyncio.sleep(POST_MUTATION_DELAY)
 await asyncio.sleep(POST_MUTATION_DELAY)
 ```
 
-Drop "We need to", "here", "because", "in order to". Lead with the noun phrase.
+Drop "We need to", "here", "because", "in order to". Lead with noun phrase.
 
 ## 2. Why, not what — delete code-restating comments
 
@@ -36,7 +36,7 @@ if user is None:         # anonymous comment author resolves to None here
     return
 ```
 
-If deleting the comment loses nothing a reader couldn't get from the line, delete it.
+Deleting comment lose nothing reader couldn't get from line? Delete it.
 
 ## 3. No step-by-step narration — lift one summary line
 
@@ -57,23 +57,26 @@ def _build_payload(item):
     return {"data": {"type": "workitems", "attributes": attrs}}
 ```
 
-The envelope line and the copy line were "what" — gone. The one non-obvious fact
-(why None is filtered) survives as a single line.
+Envelope line and copy line were "what" — gone. One non-obvious fact (why None
+filtered) survive as single line.
 
 ## 4. One line per point — no paragraphs, no banner prefixes
 
 ```python
 # Before
-# NOTE: This is important!!! The link id is composite. It is made up of five
-# segments joined by slashes. Do NOT try to parse it yourself. Always derive
-# the target from the relationships block instead. This has bitten us before.
+# ============================================================
+# WARNING: IMPORTANT!!! READ BEFORE TOUCHING THE LINK ID
+# ============================================================
+# The link id is composite. It is made up of five segments joined by
+# slashes. Do NOT try to parse it yourself. Always derive the target from
+# the relationships block instead. This has bitten us before.
 
 # After
 # Link id is composite (5 slash-joined segments) — derive target from
 # relationships, never parse.
 ```
 
-No `NOTE:`/`WARNING:`, no "this has bitten us before" dev-narrative, no `!!!`.
+No banner dividers (`# ====` or `# ----`), no `NOTE:`/`WARNING:`, no "this has bitten us before" dev-narrative, no `!!!`.
 
 ## 5. TODOs — Google format
 
@@ -82,11 +85,13 @@ No `NOTE:`/`WARNING:`, no "this has bitten us before" dev-narrative, no `!!!`.
 # todo: this is kind of hacky, should probably fix the retry logic at some point
 
 # After
-# TODO(devemberx): replace ad-hoc retry with backoff helper
+# TODO: replace ad-hoc retry with a backoff helper
 ```
 
-Concrete action, owner if context names one. Never invent an owner — ownerless is
-fine if still concrete: `# TODO: drop after Polarion 2410 ships`.
+Before name no owner, so don't invent one — keep ownerless with concrete action.
+Use `# TODO(owner):` or `# TODO(#142):` only when context actually supply owner
+or issue. Ownerless fine if still concrete: `# TODO: drop after
+Polarion 2410 ships`.
 
 ## 6. Dev docstrings — one line per field, drop the obvious
 
@@ -108,15 +113,45 @@ def _split_module_id(module_id):
     """Split a module id (project/space/name); document name may contain '/'."""
 ```
 
-The one fact worth keeping (the name can contain `/`, so you can't naive-split) is
-now the whole docstring. The rest restated the signature.
+One fact worth keeping (name can contain `/`, so can't naive-split) now whole
+docstring. Rest restated signature.
 
 ## What NOT to cut
 
-- Anything explaining a workaround, a gotcha, or a non-obvious constraint.
+- Anything explaining workaround, gotcha, or non-obvious constraint.
 - Functional pseudo-comments: `# noqa`, `# type: ignore[...]`, `# pragma: no cover`,
   `# fmt: off`, shebangs, encoding lines. These drive tooling — preserve verbatim.
 - `@mcp.tool` docstrings and `Field(description=...)` — owned by
   shrink-mcp-tool-docs; out of scope here.
 
-When unsure whether a comment is load-bearing, keep it. Goal is density, not amnesia.
+Unsure if comment load-bearing? Keep it. Goal density, not amnesia.
+
+## Boundary in practice — cut the body comment, preserve everything protected
+
+Inside `@mcp.tool` function you may still tidy `#` comments in body — but
+docstring, every `Field(description=...)`, and functional pseudo-comments stay
+byte-identical. Gate fails if any move.
+
+```python
+# Before
+@mcp.tool
+async def get_work_item(
+    work_item_id: str = Field(description="Verbose id description shipped to the LLM."),
+) -> WorkItem:
+    """Long verbose tool docstring that ships to the client LLM."""
+    raw = await client.get(url)  # noqa: E501
+    # First we parse the raw json into our model object and then we return it
+    # back to the calling function for further processing.
+    return parse(raw)
+
+# After
+@mcp.tool
+async def get_work_item(
+    work_item_id: str = Field(description="Verbose id description shipped to the LLM."),
+) -> WorkItem:
+    """Long verbose tool docstring that ships to the client LLM."""
+    raw = await client.get(url)  # noqa: E501
+    return parse(raw)
+```
+
+Only body "what"-comment cut. Docstring, `Field(...)`, and `# noqa: E501` untouched.
