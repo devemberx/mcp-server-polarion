@@ -1,11 +1,11 @@
 ---
 name: deploy
-description: Deployment skill for mcp-server-polarion. Automates version bump, tag creation, and PyPI publish. Triggers on `/deploy` or any release/version bump/tag request.
+description: Deploy skill for mcp-server-polarion. Automate version bump, tag create, PyPI publish. Triggers on `/deploy` or any release/version bump/tag request.
 ---
 
 # Deploy Skill
 
-You are orchestrating a production release. Be deliberate. Never skip hooks. Never push without explicit user confirmation.
+Orchestrate production release. Be deliberate. Never skip hooks. Never push without explicit user confirm.
 
 ## Step 1 — Pre-flight checks (abort on any failure)
 
@@ -18,11 +18,11 @@ git rev-list --count origin/main..HEAD  # MUST be 0
 git config core.hooksPath               # SHOULD be '.githooks'
 ```
 
-- Dirty tree → list offending files and stop. Do NOT auto-stash.
-- Branch != main → ask user to switch manually. Do NOT switch.
-- Behind origin → tell user to `git pull --ff-only`.
-- Ahead of origin → tell user to push or reset; release commit must sit on synced main.
-- `core.hooksPath` ≠ `.githooks` → WARN, ask user to run `git config core.hooksPath .githooks`. Step 4 only *prints* the 50/120 lengths for you to check by eye; with the hook missing nothing enforces them automatically, so restore the hook (the repo-wide net for every commit, not just this one) before committing.
+- Dirty tree → list offending files, stop. Do NOT auto-stash.
+- Branch != main → ask user switch manually. Do NOT switch.
+- Behind origin → tell user run `git pull --ff-only`.
+- Ahead of origin → tell user push or reset; release commit must sit on synced main.
+- `core.hooksPath` ≠ `.githooks` → WARN, ask user run `git config core.hooksPath .githooks`. Step 4 only *prints* 50/120 lengths for eye-check; with hook missing nothing enforces them, so restore hook (repo-wide net for every commit, not just this one) before commit.
 
 ## Step 2 — Determine new version (interactive)
 
@@ -37,19 +37,19 @@ Analyze commits since `$PREV_TAG`:
 - any `feat:` → recommend **minor**
 - only `fix:` / `chore:` / `docs:` → recommend **patch**
 
-Call **AskUserQuestion** with options `patch` / `minor` / `major` / `custom`, noting the recommendation in the question text. For `custom`, prompt for exact `X.Y.Z`.
+Call **AskUserQuestion** with options `patch` / `minor` / `major` / `custom`, note recommendation in question text. For `custom`, prompt exact `X.Y.Z`.
 
-Verify the tag does not already exist (Step 1's `--tags` fetch means this catches remote tags too, not just local):
+Verify tag does not already exist (Step 1's `--tags` fetch catches remote tags too, not just local):
 
 ```bash
 git rev-parse "v${NEW_VERSION}" 2>/dev/null && abort "tag exists" || true
 ```
 
-If it exists, abort and tell the user to pick a different version. A remote tag means that version already shipped (or is mid-publish) — never reuse it. A local-only tag is likely a stale leftover from an aborted prior run; the user can delete it manually (`git tag -d v${NEW_VERSION}`) after confirming it never reached origin.
+If exists, abort, tell user pick different version. Remote tag means version already shipped (or mid-publish) — never reuse. Local-only tag likely stale leftover from aborted prior run; user can delete manually (`git tag -d v${NEW_VERSION}`) after confirming it never reached origin.
 
 ## Step 3 — Bump version
 
-Edit the `^version = "..."` line near the top of `pyproject.toml` to `version = "X.Y.Z"` using the Edit tool (replace only that line).
+Edit `^version = "..."` line near top of `pyproject.toml` to `version = "X.Y.Z"` using Edit tool (replace only that line).
 
 ```bash
 uv lock                          # syncs uv.lock self-entry
@@ -62,7 +62,7 @@ Draft two body bullets:
 - **Bullet 1** (motivation/themes, ≤120 chars) — derive from commits since `$PREV_TAG`.
 - **Bullet 2** (mechanical, fixed) — "Bump project version from PREV to NEW in pyproject.toml and uv.lock."
 
-Show both bullets to the user via AskUserQuestion (`approve` / `edit` / `cancel`). On `edit`, accept replacement text and re-validate.
+Show both bullets to user via AskUserQuestion (`approve` / `edit` / `cancel`). On `edit`, accept replacement text, re-validate.
 
 Validate lengths before invoking git:
 
@@ -72,7 +72,7 @@ awk '{print length}' <<<"- ${BULLET1}"                                  # ≤120
 awk '{print length}' <<<"- ${BULLET2}"                                  # ≤120
 ```
 
-Commit (never `--no-verify`). For the co-author trailer use the model running this deploy session — substitute its name (e.g. `Opus 4.8`) for `<model>` below; never hardcode a fixed version, it goes stale as the model changes:
+Commit (never `--no-verify`). For co-author trailer use model running this deploy session — substitute its name (e.g. `Opus 4.8`) for `<model>` below; never hardcode fixed version, goes stale as model changes:
 
 ```bash
 git add pyproject.toml uv.lock
@@ -87,7 +87,7 @@ EOF
 )"
 ```
 
-On commit-msg hook rejection: surface the hook output, redo `git commit` with corrected message. **Never `--amend`** — hook rejection means no commit was made, so amending would mutate the previous (unrelated) commit and silently corrupt history.
+On commit-msg hook rejection: surface hook output, redo `git commit` with corrected message. **Never `--amend`** — hook rejection means no commit made, so amend would mutate previous (unrelated) commit and silently corrupt history.
 
 ## Step 5 — Push commit (confirm #1)
 
@@ -97,22 +97,22 @@ AskUserQuestion: "Push commit to origin/main? Makes the bump public but does NOT
 git push origin main
 ```
 
-No auto-retry on failure — surface error and let the user decide.
+No auto-retry on failure — surface error, let user decide.
 
 ## Step 6 — Create annotated tag with curated highlights (interactive)
 
-The tag message is the single source of truth for this release's curated highlights — kept in the tag itself, not a committed file, so the repo never accumulates per-release notes. Line 1 is the dated marker; everything after it is the curated bullet list that `build_release_notes.py` reads back from the tag object on push, wraps under a `## Highlights` heading, and prepends above GitHub's categorized PR list. (The full categorized list is generated by the workflow — never hand-write it into the tag.)
+Tag message = single source of truth for this release's curated highlights — kept in tag itself, not a committed file, so repo never accumulates per-release notes. Line 1 = dated marker; rest = curated bullet list that `build_release_notes.py` reads back from tag object on push, wraps under a `## Highlights` heading, prepends above GitHub's categorized PR list. (Full categorized list generated by workflow — never hand-write into tag.)
 
-From the commits since `$PREV_TAG`, draft a curated summary of what *matters* to a user — a few plain-language bullets (or short prose), not a restatement of PR titles. Show it via AskUserQuestion (`approve` / `edit` / `skip`). English only.
+From commits since `$PREV_TAG`, draft curated summary of what *matters* to user — few plain-language bullets (or short prose), not restatement of PR titles. Show via AskUserQuestion (`approve` / `edit` / `skip`). English only.
 
-On `skip`, create a date-only tag (release ships the category list alone):
+On `skip`, create date-only tag (release ships category list alone):
 
 ```bash
 RELEASE_DATE=$(date +%F)  # UTC release date
 git tag -a "v${NEW_VERSION}" -m "Release v${NEW_VERSION} (${RELEASE_DATE})"
 ```
 
-Otherwise compose the message as a curated **bullet list only** — no `## Highlights` heading in the tag (`build_release_notes.py` wraps the bullets under that heading when it renders the GitHub Release). Create the tag with `-F`:
+Otherwise compose message as curated **bullet list only** — no `## Highlights` heading in tag (`build_release_notes.py` wraps bullets under that heading when it renders GitHub Release). Create tag with `-F`:
 
 ```bash
 RELEASE_DATE=$(date +%F)
@@ -141,9 +141,9 @@ git push origin "v${NEW_VERSION}"
 
 On failure: local tag still exists; user can retry with `git push origin v${NEW_VERSION}` or delete locally via `git tag -d v${NEW_VERSION}`.
 
-On `cancel`: the version-bump commit is already on `main` (pushed in Step 5) and the tag exists locally, but no release ships — `main` sits one commit ahead of the last release. Nothing to clean up; finish later by pushing the tag (`git push origin v${NEW_VERSION}`), or just let the next deploy carry it forward.
+On `cancel`: version-bump commit already on `main` (pushed in Step 5) and tag exists locally, but no release ships — `main` sits one commit ahead of last release. Nothing to clean up; finish later by pushing tag (`git push origin v${NEW_VERSION}`), or let next deploy carry it forward.
 
-The GitHub Release is created automatically by the `release` job in `publish.yml` after PyPI succeeds: `build_release_notes.py` reads the Step 6 highlights back from the tag object and prepends them to GitHub's categorized notes, grouped per `.github/release.yml`. Do NOT create a release by hand here; a manual `gh release create` would collide with the workflow (`release already exists`). Categorization quality depends on each merged PR carrying the right label, which `.github/workflows/label-pr.yml` stamps from the PR's conventional-commit title.
+GitHub Release created automatically by `release` job in `publish.yml` after PyPI succeeds: `build_release_notes.py` reads Step 6 highlights back from tag object, prepends to GitHub's categorized notes, grouped per `.github/release.yml`. Do NOT create release by hand here; manual `gh release create` collides with workflow (`release already exists`). Categorization quality depends on each merged PR carrying right label, which `.github/workflows/label-pr.yml` stamps from PR's conventional-commit title.
 
 ## Step 8 — Post-push summary
 
@@ -162,5 +162,5 @@ echo "Watch: https://github.com/${OWNER_REPO}/actions"
 - NEVER `git commit --amend` after a hook rejection.
 - ALWAYS confirm before commit push AND tag push (2 separate confirms).
 - ALWAYS show diff / draft to user before destructive ops.
-- NEVER hand-write the categorized PR list into the tag — `publish.yml` generates that; the tag body holds only the dated marker (line 1) plus curated highlight bullets, no `## Highlights` heading (the release renderer adds it).
-- NEVER run `gh release create` by hand during deploy — the workflow owns it; a manual release collides with the workflow's `release` job.
+- NEVER hand-write categorized PR list into tag — `publish.yml` generates that; tag body holds only dated marker (line 1) plus curated highlight bullets, no `## Highlights` heading (release renderer adds it).
+- NEVER run `gh release create` by hand during deploy — workflow owns it; manual release collides with workflow's `release` job.

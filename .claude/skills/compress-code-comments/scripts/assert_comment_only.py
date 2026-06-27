@@ -9,13 +9,14 @@ fails the gate, enforcing the shrink-mcp-tool-docs boundary.
 Usage: assert_comment_only.py <path.py> [--against REF]
 
 Exit 0 = comment/docstring-only (or new file, no baseline). 1 = code/protected
-literal changed. 2 = usage error or unparseable source/baseline.
+literal changed. 2 = usage error, unparseable source/baseline, or not a git repo.
 """
 
 from __future__ import annotations
 
 import argparse
 import ast
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -60,14 +61,31 @@ def _dump(src: str) -> str:
 
 
 def _git_show(ref: str, path: str) -> str:
+    # git resolves <ref>:<path> from repo root (not CWD); normalize to repo-root-
+    # relative so subdir/absolute paths hit the right blob, not a false "new file".
+    root = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if root.returncode != 0:
+        raise RuntimeError(root.stderr.strip() or "not a git repository")
+    rel = os.path.relpath(Path(path).resolve(), root.stdout.strip()).replace(
+        os.sep, "/"
+    )
+    # Outside the repo: git show would 404 and look like a "new file" pass — the
+    # masquerade this whole path-normalization exists to stop. Make it a usage error.
+    if rel == ".." or rel.startswith("../"):
+        raise RuntimeError(f"{path} is outside the repo at {root.stdout.strip()}")
     out = subprocess.run(
-        ["git", "show", f"{ref}:{path}"],
+        ["git", "show", f"{ref}:{rel}"],
         capture_output=True,
         text=True,
         check=False,
     )
     if out.returncode != 0:
-        raise FileNotFoundError(out.stderr.strip() or f"{ref}:{path} not in git")
+        raise FileNotFoundError(out.stderr.strip() or f"{ref}:{rel} not in git")
     return out.stdout
 
 
@@ -77,8 +95,8 @@ def main() -> int:
     ap.add_argument("--against", default="HEAD")
     args = ap.parse_args()
 
-    # Read working file first so a bad path is a usage error (exit 2), not a
-    # silent "new file" pass; only then does a ref miss below mean a real new file.
+    # Read working file first: bad path → usage error (exit 2), not a silent
+    # "new file" pass; only then is a below ref-miss a genuine new file.
     try:
         with Path(args.path).open(encoding="utf-8") as fh:
             new = _dump(fh.read())
@@ -90,6 +108,9 @@ def main() -> int:
     except FileNotFoundError as exc:
         print(f"skip: new file, no baseline ({exc})", file=sys.stderr)
         return 0
+    except RuntimeError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     except SyntaxError as exc:
         print(f"error: baseline does not parse: {exc}", file=sys.stderr)
         return 2
