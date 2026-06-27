@@ -61,9 +61,8 @@ def _dump(src: str) -> str:
 
 
 def _git_show(ref: str, path: str) -> str:
-    # git resolves <ref>:<path> from the repo root, not CWD — normalize to a
-    # repo-root-relative path so a subdir or absolute path still hits the right
-    # blob. A path mismatch must not masquerade as "new file" and pass the gate.
+    # git resolves <ref>:<path> from repo root (not CWD); normalize to repo-root-
+    # relative so subdir/absolute paths hit the right blob, not a false "new file".
     root = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"],
         capture_output=True,
@@ -75,6 +74,10 @@ def _git_show(ref: str, path: str) -> str:
     rel = os.path.relpath(Path(path).resolve(), root.stdout.strip()).replace(
         os.sep, "/"
     )
+    # Outside the repo: git show would 404 and look like a "new file" pass — the
+    # masquerade this whole path-normalization exists to stop. Make it a usage error.
+    if rel == ".." or rel.startswith("../"):
+        raise RuntimeError(f"{path} is outside the repo at {root.stdout.strip()}")
     out = subprocess.run(
         ["git", "show", f"{ref}:{rel}"],
         capture_output=True,
@@ -92,8 +95,8 @@ def main() -> int:
     ap.add_argument("--against", default="HEAD")
     args = ap.parse_args()
 
-    # Read working file first so a bad path is a usage error (exit 2), not a
-    # silent "new file" pass; only then does a ref miss below mean a real new file.
+    # Read working file first: bad path → usage error (exit 2), not a silent
+    # "new file" pass; only then is a below ref-miss a genuine new file.
     try:
         with Path(args.path).open(encoding="utf-8") as fh:
             new = _dump(fh.read())
