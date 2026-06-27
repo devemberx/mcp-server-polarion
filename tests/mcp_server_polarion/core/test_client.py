@@ -33,7 +33,7 @@ def _config() -> PolarionConfig:
 
 
 class TestDefaultPaceLockPath:
-    """The host-shared pacing lock path is derived once per host/user."""
+    """Host-shared pacing lock path, derived per host/user."""
 
     def test_includes_username(self) -> None:
         assert _default_pace_lock_path().endswith(".lock")
@@ -41,7 +41,7 @@ class TestDefaultPaceLockPath:
     def test_falls_back_when_user_undeterminable(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """An ``OSError`` from ``getuser`` falls back to a ``default`` scope."""
+        """getuser OSError → 'default' scope."""
 
         def _boom() -> str:
             raise OSError("cannot determine user")

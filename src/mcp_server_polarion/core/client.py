@@ -31,10 +31,9 @@ logger: Final = logging.getLogger("mcp_server_polarion.core.client")
 
 
 def _default_pace_lock_path() -> str:
-    """Fixed host-shared lock path so every local server process paces together.
+    """Host-shared lock path so every local server process paces together.
 
-    ``gettempdir()`` resolves to the same dir for all processes; the username
-    scopes it per user on shared hosts.
+    Shared ``gettempdir()`` + username scope it per user on shared hosts.
     """
     try:
         user = getpass.getuser()
@@ -109,8 +108,7 @@ class PolarionClient:
         self.base_url: str = config.base_api_url
         self._write_delay = write_delay
         self._min_interval = min_interval
-        # Host-global pacing across server processes via a shared lock path.
-        # ``None`` (or min_interval=0) keeps it a no-op for unit tests.
+        # None (or min_interval=0) keeps host-global pacing a no-op for tests.
         self._global_pacer = GlobalPacer(pace_lock_path, min_interval)
         # -inf: first request never waits, whatever the clock epoch.
         self._last_request_monotonic: float = float("-inf")

@@ -12,24 +12,24 @@ from mcp_server_polarion.core.global_pace import GlobalPacer
 
 
 class TestEnabled:
-    """When the pacer is active versus a no-op."""
+    """Enabled vs no-op construction."""
 
     def test_disabled_when_min_interval_zero(self, tmp_path: Path) -> None:
-        """``min_interval <= 0`` disables pacing regardless of path."""
+        """min_interval <= 0 disables, even with a path."""
         pacer = GlobalPacer(str(tmp_path / "pace.lock"), 0.0)
         assert pacer.enabled is False
 
     def test_disabled_when_path_none(self) -> None:
-        """A ``None`` lock path disables pacing."""
+        """None path disables."""
         assert GlobalPacer(None, 0.33).enabled is False
 
     def test_enabled_with_path_and_interval(self, tmp_path: Path) -> None:
-        """A real path plus positive interval enables pacing."""
+        """Path + positive interval enables."""
         assert GlobalPacer(str(tmp_path / "pace.lock"), 0.33).enabled is True
 
 
 class TestDisabledNoOp:
-    """A disabled pacer must never touch disk."""
+    """Disabled pacer never touches disk."""
 
     async def test_hold_creates_no_files(self, tmp_path: Path) -> None:
         lock_path = tmp_path / "pace.lock"
@@ -42,10 +42,10 @@ class TestDisabledNoOp:
 
 
 class TestPacing:
-    """Request starts are spaced via the shared timestamp file."""
+    """Starts spaced via the shared timestamp file."""
 
     async def test_second_acquirer_waits_min_interval(self, tmp_path: Path) -> None:
-        """A second pacer on the same path paces from the first's recorded start."""
+        """Second pacer on the same path paces from the first's start."""
         lock_path = str(tmp_path / "pace.lock")
         min_interval = 0.2
         first = GlobalPacer(lock_path, min_interval)
@@ -57,14 +57,14 @@ class TestPacing:
         async with second.hold():
             elapsed = time.monotonic() - start
 
-        # 0.9 slack absorbs scheduler jitter (sleep may wake slightly early).
+        # 0.9 slack: sleep may wake slightly early.
         assert elapsed >= min_interval * 0.9, (
             f"second hold started {elapsed:.3f}s after the first; "
             f"expected ≥ {min_interval * 0.9:.3f}s (shared-clock pacing)."
         )
 
     async def test_first_acquirer_does_not_wait(self, tmp_path: Path) -> None:
-        """With no prior timestamp, the first hold returns promptly."""
+        """No prior timestamp → first hold returns promptly."""
         pacer = GlobalPacer(str(tmp_path / "pace.lock"), 0.5)
 
         start = time.monotonic()
@@ -73,8 +73,23 @@ class TestPacing:
 
         assert time.monotonic() - start < 0.5
 
+    async def test_backward_clock_step_caps_wait(self, tmp_path: Path) -> None:
+        """Future timestamp (backward clock step) caps wait at min_interval."""
+        lock_path = tmp_path / "pace.lock"
+        min_interval = 0.2
+        pacer = GlobalPacer(str(lock_path), min_interval)
+        # Future stamp → now - last hugely negative.
+        Path(f"{lock_path}.state").write_text(str(time.time() + 3600))
+
+        start = time.monotonic()
+        async with pacer.hold():
+            pass
+
+        # Unclamped: ~3600s sleep; clamped stays near min_interval.
+        assert time.monotonic() - start <= min_interval + 0.5
+
     async def test_state_file_stays_bounded(self, tmp_path: Path) -> None:
-        """The timestamp file is overwritten in place, never grows."""
+        """Timestamp file overwritten in place, never grows."""
         lock_path = tmp_path / "pace.lock"
         pacer = GlobalPacer(str(lock_path), 0.0001)
         state_path = Path(f"{lock_path}.state")
@@ -87,10 +102,10 @@ class TestPacing:
 
 
 class TestMutualExclusion:
-    """The file lock serializes concurrent holders within and across processes."""
+    """File lock serializes holders within and across processes."""
 
     async def test_holds_do_not_overlap(self, tmp_path: Path) -> None:
-        """Two pacers on one path never run their critical sections concurrently."""
+        """Two pacers on one path never overlap critical sections."""
         lock_path = str(tmp_path / "pace.lock")
         in_flight = 0
         max_in_flight = 0
@@ -112,7 +127,7 @@ class TestMutualExclusion:
 
 
 class TestCrashSafety:
-    """A leftover lock file must not deadlock the next acquire."""
+    """Leftover lock file must not deadlock next acquire."""
 
     async def test_stale_lock_file_does_not_deadlock(self, tmp_path: Path) -> None:
         lock_path = tmp_path / "pace.lock"
@@ -124,12 +139,12 @@ class TestCrashSafety:
 
 
 class TestErrorHandling:
-    """Filesystem failures degrade gracefully instead of hanging or crashing."""
+    """Filesystem failures degrade gracefully, no hang/crash."""
 
     async def test_acquire_failure_degrades_to_noop(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A lock-acquire OSError disables pacing and still runs the body."""
+        """Lock-acquire OSError disables pacing, still runs body."""
         pacer = GlobalPacer(str(tmp_path / "pace.lock"), 0.1)
 
         def _boom() -> None:
@@ -145,9 +160,9 @@ class TestErrorHandling:
         assert pacer.enabled is False
 
     async def test_stamp_failure_is_swallowed(self, tmp_path: Path) -> None:
-        """A failed timestamp write does not break the held request."""
+        """Failed timestamp write doesn't break the held request."""
         pacer = GlobalPacer(str(tmp_path / "pace.lock"), 0.1)
-        # Parent dir absent → write_text raises OSError, must be swallowed.
+        # Parent dir absent → write_text OSError, must be swallowed.
         pacer._state_path = tmp_path / "missing" / "pace.lock.state"
 
         async with pacer.hold():
