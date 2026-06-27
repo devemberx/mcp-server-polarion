@@ -9,13 +9,14 @@ fails the gate, enforcing the shrink-mcp-tool-docs boundary.
 Usage: assert_comment_only.py <path.py> [--against REF]
 
 Exit 0 = comment/docstring-only (or new file, no baseline). 1 = code/protected
-literal changed. 2 = usage error or unparseable source/baseline.
+literal changed. 2 = usage error, unparseable source/baseline, or not a git repo.
 """
 
 from __future__ import annotations
 
 import argparse
 import ast
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -60,14 +61,28 @@ def _dump(src: str) -> str:
 
 
 def _git_show(ref: str, path: str) -> str:
+    # git resolves <ref>:<path> from the repo root, not CWD — normalize to a
+    # repo-root-relative path so a subdir or absolute path still hits the right
+    # blob. A path mismatch must not masquerade as "new file" and pass the gate.
+    root = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if root.returncode != 0:
+        raise RuntimeError(root.stderr.strip() or "not a git repository")
+    rel = os.path.relpath(Path(path).resolve(), root.stdout.strip()).replace(
+        os.sep, "/"
+    )
     out = subprocess.run(
-        ["git", "show", f"{ref}:{path}"],
+        ["git", "show", f"{ref}:{rel}"],
         capture_output=True,
         text=True,
         check=False,
     )
     if out.returncode != 0:
-        raise FileNotFoundError(out.stderr.strip() or f"{ref}:{path} not in git")
+        raise FileNotFoundError(out.stderr.strip() or f"{ref}:{rel} not in git")
     return out.stdout
 
 
@@ -90,6 +105,9 @@ def main() -> int:
     except FileNotFoundError as exc:
         print(f"skip: new file, no baseline ({exc})", file=sys.stderr)
         return 0
+    except RuntimeError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     except SyntaxError as exc:
         print(f"error: baseline does not parse: {exc}", file=sys.stderr)
         return 2
