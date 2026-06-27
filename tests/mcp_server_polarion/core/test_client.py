@@ -13,6 +13,7 @@ import respx
 from mcp_server_polarion.core.client import (
     _MAX_ERROR_DETAIL_LEN,
     PolarionClient,
+    _default_pace_lock_path,
 )
 from mcp_server_polarion.core.config import PolarionConfig
 from mcp_server_polarion.core.exceptions import (
@@ -29,6 +30,26 @@ def _config() -> PolarionConfig:
         polarion_url="https://polarion.example.com",
         polarion_token="test-token",
     )
+
+
+class TestDefaultPaceLockPath:
+    """The host-shared pacing lock path is derived once per host/user."""
+
+    def test_includes_username(self) -> None:
+        assert _default_pace_lock_path().endswith(".lock")
+
+    def test_falls_back_when_user_undeterminable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An ``OSError`` from ``getuser`` falls back to a ``default`` scope."""
+
+        def _boom() -> str:
+            raise OSError("cannot determine user")
+
+        monkeypatch.setattr("mcp_server_polarion.core.client.getpass.getuser", _boom)
+        assert _default_pace_lock_path().endswith(
+            "mcp-server-polarion-pace-default.lock"
+        )
 
 
 class TestAuthentication:
@@ -615,7 +636,7 @@ class TestSerialization:
             mock.get("/projects").mock(side_effect=_on_get)
 
             async with PolarionClient(
-                _config(), write_delay=0, min_interval=min_interval
+                _config(), write_delay=0, min_interval=min_interval, pace_lock_path=None
             ) as client:
                 await client.get("/projects")
                 await client.get("/projects")
@@ -649,7 +670,7 @@ class TestSerialization:
             mock.get("/projects").mock(side_effect=_on_get)
 
             async with PolarionClient(
-                _config(), write_delay=0, min_interval=min_interval
+                _config(), write_delay=0, min_interval=min_interval, pace_lock_path=None
             ) as client:
                 await client.get("/projects")
                 await client.get("/projects")
@@ -679,7 +700,10 @@ class TestSerialization:
             # Non-zero backoff so the retry attempt lands measurably after the first.
             with patch("mcp_server_polarion.core.client._INITIAL_BACKOFF_SECONDS", 0.1):
                 async with PolarionClient(
-                    _config(), write_delay=0, min_interval=min_interval
+                    _config(),
+                    write_delay=0,
+                    min_interval=min_interval,
+                    pace_lock_path=None,
                 ) as client:
                     await client.get("/projects")  # 429 → retried → 200
                     await client.get("/projects")
