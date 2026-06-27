@@ -23,6 +23,7 @@ dependencies = [
     "pydantic-settings>=2.0",
     "markdownify>=1.2.2",
     "markdown-it-py>=4.0.0",
+    "filelock>=3.13",
 ]
 
 [project.urls]
