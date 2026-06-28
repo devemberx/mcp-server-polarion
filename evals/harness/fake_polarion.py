@@ -27,6 +27,7 @@ from .fixtures import (
     TS,
     Comment,
     Seeds,
+    TestRun,
     WorkItem,
 )
 
@@ -65,6 +66,23 @@ class FakePolarion:
                 **wi.custom_fields,
             },
             "relationships": relationships,
+        }
+
+    def _test_run_resource(self, tr: TestRun) -> dict[str, Any]:
+        return {
+            "type": "testruns",
+            "id": f"{PROJECT}/{tr.short_id}",
+            "attributes": {
+                "title": tr.title,
+                "type": tr.type,
+                "status": tr.status,
+                "finishedOn": tr.finished_on,
+                "updated": TS,
+                "isTemplate": tr.is_template,
+            },
+            "relationships": {
+                "author": {"data": {"type": "users", "id": f"{PROJECT}/{AUTHOR}"}},
+            },
         }
 
     def _document_resource(self, name: str) -> dict[str, Any]:
@@ -345,6 +363,36 @@ class FakePolarion:
             data = [self._work_item_resource(w) for w in items]
             return httpx.Response(
                 200, json={"data": data, "meta": {"totalCount": len(data)}}
+            )
+
+        # Test runs: templates=true returns blueprints, else actual instances.
+        # author resolves to a display name via the included users resource.
+        if path.endswith("/testruns"):
+            want_templates = params.get("templates", "").lower() == "true"
+            runs = [
+                tr
+                for tr in self.seeds.test_runs.values()
+                if tr.is_template == want_templates
+            ]
+            data = [self._test_run_resource(tr) for tr in runs]
+            included = (
+                [
+                    {
+                        "type": "users",
+                        "id": f"{PROJECT}/{AUTHOR}",
+                        "attributes": {"name": "Fake Author"},
+                    }
+                ]
+                if data
+                else []
+            )
+            return httpx.Response(
+                200,
+                json={
+                    "data": data,
+                    "included": included,
+                    "meta": {"totalCount": len(data)},
+                },
             )
 
         # Parts derive from the document's seed; unseeded/absent docs stay empty.

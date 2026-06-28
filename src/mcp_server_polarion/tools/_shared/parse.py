@@ -12,6 +12,7 @@ from mcp_server_polarion.models import (
     EnumOption,
     Hyperlink,
     PaginatedResult,
+    TestRunSummary,
     WorkItemDetail,
     WorkItemLink,
     WorkItemSummary,
@@ -244,6 +245,64 @@ def parse_work_item_summaries(
         if not isinstance(item, dict):
             continue
         items.append(WorkItemSummary(**parse_work_item_summary_kwargs(item)))
+    return items
+
+
+class TestRunSummaryKwargs(TypedDict):
+    """Kwargs shape produced by ``parse_test_run_summary_kwargs``."""
+
+    id: str
+    title: str
+    type: str
+    status: str
+    finished_on: str
+    updated: str
+    author_name: str
+    is_template: bool
+
+
+def parse_test_run_summary_kwargs(
+    item: dict[str, object],
+    user_names: dict[str, str],
+) -> TestRunSummaryKwargs:
+    """``TestRunSummary`` kwargs from a JSON:API resource; ``user_names`` maps the
+    full author id to a display name (from the response's included ``users``).
+    """
+    attributes = item.get("attributes", {})
+    if not isinstance(attributes, dict):
+        attributes = {}
+    relationships = item.get("relationships", {})
+    if not isinstance(relationships, dict):
+        relationships = {}
+
+    author_id = extract_relationship_id(relationships, "author")
+    return {
+        "id": extract_short_id(safe_str(item.get("id", ""))),
+        "title": safe_str(attributes.get("title", "")),
+        "type": safe_str(attributes.get("type", "")),
+        "status": safe_str(attributes.get("status", "")),
+        "finished_on": safe_str(attributes.get("finishedOn", "")),
+        "updated": safe_str(attributes.get("updated", "")),
+        "author_name": user_names.get(author_id, ""),
+        "is_template": bool(attributes.get("isTemplate", False)),
+    }
+
+
+def parse_test_run_summaries(response: dict[str, object]) -> list[TestRunSummary]:
+    """Parse a test-runs list response into ``TestRunSummary`` models. Takes the
+    whole response (not just ``data``) to resolve author display names from the
+    included ``users`` resources.
+    """
+    user_names = parse_included_user_name_map(response)
+    data = response.get("data", [])
+    items: list[TestRunSummary] = []
+    if not isinstance(data, list):
+        return items
+
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        items.append(TestRunSummary(**parse_test_run_summary_kwargs(item, user_names)))
     return items
 
 
