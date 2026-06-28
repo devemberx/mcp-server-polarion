@@ -157,7 +157,7 @@ claude mcp add mcp-server-polarion \
 |---|---|
 | `list_projects` | List accessible projects |
 | `list_documents` | List documents in a project |
-| `list_work_items` | Search work items with Lucene or SQL queries |
+| `list_work_items` | List work items in a project (Lucene/SQL query) |
 | `list_test_runs` | List test runs in a project (Lucene/SQL query, templates filter) |
 | `get_sql_query_recipes` | Fetch copy-paste SQL recipes for advanced queries |
 | `get_document` | Get document metadata, optionally with the raw body HTML |
