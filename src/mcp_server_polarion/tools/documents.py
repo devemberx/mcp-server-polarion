@@ -593,8 +593,7 @@ async def get_document(
 ) -> DocumentDetail:
     """Get a document's metadata: title/type/status/editors/custom fields.
 
-    Also returns auto_suspect, uses_outline_numbering, and
-    outline_numbering_prefix (round-trip via update_document).
+    Also returns outline numbering + autoSuspect (round-trip via update_document).
     author / last_updated_by are display names (creator, last editor); updated
     is the last-modified timestamp.
 
