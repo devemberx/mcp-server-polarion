@@ -10,10 +10,12 @@ uv run pytest                                            # all tests
 uv run pytest --cov --cov-report=term-missing            # tests + uncovered lines
 uv run pytest --cov --cov-report=html                    # htmlcov/index.html (visual)
 uv run ruff check . && uv run ruff format . && uv run mypy src/  # lint + format + types
+uv run pytest --cov=src/mcp_server_polarion --cov=evals --cov-report=xml \
+  && uv run diff-cover coverage.xml --compare-branch=origin/main --fail-under=90  # changed-line gate
 uv run mcp-server-polarion                               # run server (stdio)
 ```
 
-CI: `ruff check` → `ruff format --check` → `mypy` → `pytest`.
+CI: `ruff check` → `ruff format --check` → `mypy` → `pytest` (`--cov-fail-under=90`) → `diff-cover` (every changed line ≥90%). Each PR line needs a test — incl. parser defensive branches and `evals/harness` request handlers, not only `src/`. Run the `diff-cover` command above before pushing.
 
 ## Architecture
 
