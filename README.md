@@ -2,7 +2,7 @@
 
 <!-- mcp-name: io.github.devemberx/mcp-server-polarion -->
 
-A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for **Polarion ALM**. Lets AI assistants read documents, work items, and traceability links — and create, update, and reorganize work items — directly from your Polarion instance.
+A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for **Polarion ALM**. Lets AI assistants read and write Polarion content — documents, work items, test runs, traceability links, and comments — directly from your Polarion instance.
 
 [![CI](https://github.com/devemberx/mcp-server-polarion/actions/workflows/ci.yml/badge.svg)](https://github.com/devemberx/mcp-server-polarion/actions/workflows/ci.yml)
 [![Publish](https://github.com/devemberx/mcp-server-polarion/actions/workflows/publish.yml/badge.svg?event=push)](https://github.com/devemberx/mcp-server-polarion/actions/workflows/publish.yml)
