@@ -16,6 +16,8 @@ from mcp_server_polarion.tools._shared.parse import (
     parse_hyperlinks,
     parse_included_user_name_map,
     parse_included_work_item_map,
+    parse_test_run_summaries,
+    parse_test_run_summary_kwargs,
     parse_work_item_detail,
     parse_work_item_summaries,
     parse_work_item_summary_kwargs,
@@ -259,6 +261,34 @@ class TestParseWorkItemSummaries:
             },
         ]
         assert [s.id for s in parse_work_item_summaries(data)] == ["MCPT-1"]
+
+
+class TestParseTestRunSummaries:
+    """Tests for `parse_test_run_summaries` and its kwargs helper."""
+
+    def test_non_dict_attributes_and_relationships_default_empty(self) -> None:
+        kwargs = parse_test_run_summary_kwargs(
+            {"id": "proj/TR-1", "attributes": [], "relationships": "nope"},
+            user_names={},
+        )
+        assert kwargs["id"] == "TR-1"
+        assert kwargs["title"] == ""
+        assert kwargs["author_name"] == ""
+
+    def test_non_list_data_is_empty(self) -> None:
+        assert parse_test_run_summaries({"data": None}) == []
+
+    def test_skips_non_dict_entries(self) -> None:
+        response = {
+            "data": [
+                "nope",
+                {
+                    "id": "proj/TR-2",
+                    "attributes": {"title": "A", "type": "t", "status": "s"},
+                },
+            ]
+        }
+        assert [s.id for s in parse_test_run_summaries(response)] == ["TR-2"]
 
 
 class TestParseComment:

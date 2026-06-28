@@ -26,6 +26,7 @@ from evals.harness.fixtures import (
     SECTION_A_PART_ID,
     SEEDS,
     SPACE,
+    TEST_RUN_ID,
     TESTCASE_ID,
 )
 
@@ -172,6 +173,26 @@ class TestReadRouting:
             f"/projects/{PROJECT}/enumerations/~/not-a-real-enum/~",
         )
         assert response.status_code == 404
+
+
+class TestTestRunRouting:
+    def test_instances_carry_resource_and_author(self) -> None:
+        response = _get(FakePolarion(), f"/projects/{PROJECT}/testruns")
+        assert response.status_code == 200
+        payload = _json(response)
+        run = payload["data"][0]
+        assert run["type"] == "testruns"
+        assert run["id"].rsplit("/", 1)[-1] == TEST_RUN_ID
+        assert run["attributes"]["isTemplate"] is False
+        assert payload["included"][0]["attributes"]["name"] == "Fake Author"
+
+    def test_templates_filter_excludes_instances(self) -> None:
+        response = _get(
+            FakePolarion(), f"/projects/{PROJECT}/testruns", templates="true"
+        )
+        payload = _json(response)
+        assert payload["meta"]["totalCount"] == 0
+        assert payload["included"] == []
 
 
 class TestWorkItemResource:

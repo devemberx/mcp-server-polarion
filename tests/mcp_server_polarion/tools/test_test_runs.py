@@ -1,4 +1,6 @@
-"""Tests for the ``list_test_runs`` tool."""
+"""Tests for the ``list_test_runs`` tool — response parsing, param forwarding,
+error mapping, and page-size field bounds.
+"""
 
 from __future__ import annotations
 
