@@ -686,7 +686,6 @@ class TestGetDocument:
                     "status": "draft",
                     "autoSuspect": True,
                     "usesOutlineNumbering": True,
-                    "outlineNumbering": {"prefix": "REQ"},
                 },
             },
         }
@@ -697,14 +696,13 @@ class TestGetDocument:
 
         assert result.auto_suspect is True
         assert result.uses_outline_numbering is True
-        assert result.outline_numbering_prefix == "REQ"
         # Standard attrs never leak into custom_fields.
         assert result.custom_fields == {}
 
     async def test_outline_and_autosuspect_default_when_absent(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Missing outlineNumbering / autoSuspect → safe defaults."""
+        """Missing usesOutlineNumbering / autoSuspect → safe defaults."""
         mock_client.get.return_value = {
             "data": {"attributes": {"title": "Doc", "type": "generic"}},
         }
@@ -715,7 +713,6 @@ class TestGetDocument:
 
         assert result.auto_suspect is False
         assert result.uses_outline_numbering is False
-        assert result.outline_numbering_prefix == ""
 
     async def test_include_homepage_content_html_false_omits_content(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -2204,7 +2201,6 @@ class TestBuildUpdateDocumentPayload:
             type=None,
             auto_suspect=True,
             uses_outline_numbering=True,
-            outline_numbering_prefix="ABC",
         )
 
         data = cast(dict[str, object], payload["data"])
@@ -2212,7 +2208,6 @@ class TestBuildUpdateDocumentPayload:
         assert attributes == {
             "autoSuspect": True,
             "usesOutlineNumbering": True,
-            "outlineNumbering": {"prefix": "ABC"},
         }
 
     def test_outline_and_autosuspect_omitted_when_none(self) -> None:
@@ -2227,10 +2222,9 @@ class TestBuildUpdateDocumentPayload:
         body_str = repr(payload)
         assert "autoSuspect" not in body_str
         assert "usesOutlineNumbering" not in body_str
-        assert "outlineNumbering" not in body_str
 
-    def test_false_and_empty_prefix_are_serialised(self) -> None:
-        # False bool and "" prefix (unlike None) clear the values server-side.
+    def test_false_autosuspect_and_outline_are_serialised(self) -> None:
+        # False (unlike None) clears the values server-side.
         payload = _build_update_document_payload(
             project_id="MyProj",
             space_id="S",
@@ -2240,7 +2234,6 @@ class TestBuildUpdateDocumentPayload:
             type=None,
             auto_suspect=False,
             uses_outline_numbering=False,
-            outline_numbering_prefix="",
         )
 
         data = cast(dict[str, object], payload["data"])
@@ -2248,7 +2241,6 @@ class TestBuildUpdateDocumentPayload:
         assert attributes == {
             "autoSuspect": False,
             "usesOutlineNumbering": False,
-            "outlineNumbering": {"prefix": ""},
         }
 
 
@@ -2270,7 +2262,6 @@ class TestUpdateDocumentValidation:
                 home_page_content_html=None,
                 auto_suspect=None,
                 uses_outline_numbering=None,
-                outline_numbering_prefix=None,
                 custom_fields=None,
                 workflow_action=None,
                 dry_run=True,
@@ -2292,7 +2283,6 @@ class TestUpdateDocumentValidation:
                 home_page_content_html=None,
                 auto_suspect=None,
                 uses_outline_numbering=None,
-                outline_numbering_prefix=None,
                 custom_fields=None,
                 workflow_action="approve",
                 dry_run=True,
@@ -2485,7 +2475,6 @@ class TestUpdateDocumentDryRun:
             home_page_content_html=None,
             auto_suspect=None,
             uses_outline_numbering=None,
-            outline_numbering_prefix=None,
             custom_fields=None,
             workflow_action=None,
             dry_run=True,
@@ -2545,7 +2534,6 @@ class TestUpdateDocumentHappyPath:
             home_page_content_html=None,
             auto_suspect=None,
             uses_outline_numbering=None,
-            outline_numbering_prefix=None,
             custom_fields=None,
             workflow_action=None,
             dry_run=False,
@@ -2604,7 +2592,6 @@ class TestUpdateDocumentHappyPath:
             home_page_content_html=raw,
             auto_suspect=None,
             uses_outline_numbering=None,
-            outline_numbering_prefix=None,
             custom_fields=None,
             workflow_action=None,
             dry_run=False,
@@ -2718,7 +2705,6 @@ class TestUpdateDocumentHappyPath:
             home_page_content_html=None,
             auto_suspect=None,
             uses_outline_numbering=True,
-            outline_numbering_prefix=None,
             custom_fields=None,
             workflow_action=None,
             dry_run=True,
@@ -2745,7 +2731,6 @@ class TestUpdateDocumentHappyPath:
             home_page_content_html=None,
             auto_suspect=None,
             uses_outline_numbering=None,
-            outline_numbering_prefix=None,
             custom_fields=None,
             workflow_action=None,
             dry_run=False,
@@ -3037,14 +3022,12 @@ class TestBuildCreateDocumentPayload:
             status=None,
             auto_suspect=True,
             uses_outline_numbering=True,
-            outline_numbering_prefix="X",
         )
 
         item = cast(list[dict[str, object]], payload["data"])[0]
         attributes = cast(dict[str, object], item["attributes"])
         assert attributes["autoSuspect"] is True
         assert attributes["usesOutlineNumbering"] is True
-        assert attributes["outlineNumbering"] == {"prefix": "X"}
 
     def test_outline_and_autosuspect_omitted_when_none(self) -> None:
         payload = _build_create_document_payload(
@@ -3059,7 +3042,7 @@ class TestBuildCreateDocumentPayload:
         attributes = cast(dict[str, object], item["attributes"])
         assert set(attributes.keys()) == {"moduleName", "title", "type"}
 
-    def test_false_and_empty_prefix_serialised(self) -> None:
+    def test_false_autosuspect_and_outline_serialised(self) -> None:
         payload = _build_create_document_payload(
             module_name="MySpec",
             title="t",
@@ -3068,14 +3051,12 @@ class TestBuildCreateDocumentPayload:
             status=None,
             auto_suspect=False,
             uses_outline_numbering=False,
-            outline_numbering_prefix="",
         )
 
         item = cast(list[dict[str, object]], payload["data"])[0]
         attributes = cast(dict[str, object], item["attributes"])
         assert attributes["autoSuspect"] is False
         assert attributes["usesOutlineNumbering"] is False
-        assert attributes["outlineNumbering"] == {"prefix": ""}
 
 
 class TestCreateDocumentDryRun:
@@ -3095,7 +3076,6 @@ class TestCreateDocumentDryRun:
             home_page_content=None,
             auto_suspect=None,
             uses_outline_numbering=None,
-            outline_numbering_prefix=None,
             custom_fields=None,
             dry_run=True,
         )

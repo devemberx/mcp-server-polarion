@@ -32,7 +32,6 @@ class DocumentDetail(BaseModel):
     content_html: str = ""
     auto_suspect: bool = False
     uses_outline_numbering: bool = False
-    outline_numbering_prefix: str = ""
     custom_fields: dict[str, object] = Field(default_factory=dict)
 
 
