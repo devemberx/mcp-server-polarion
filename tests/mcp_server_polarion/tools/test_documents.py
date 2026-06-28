@@ -675,6 +675,45 @@ class TestGetDocument:
         assert result.author == ""
         assert result.last_updated_by == ""
 
+    async def test_outline_and_autosuspect_parsed(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": {
+                "attributes": {
+                    "title": "Doc",
+                    "type": "generic",
+                    "status": "draft",
+                    "autoSuspect": True,
+                    "usesOutlineNumbering": True,
+                },
+            },
+        }
+
+        result = await get_document(
+            mock_ctx, project_id="proj1", space_id="_default", document_name="Doc"
+        )
+
+        assert result.auto_suspect is True
+        assert result.uses_outline_numbering is True
+        # Standard attrs never leak into custom_fields.
+        assert result.custom_fields == {}
+
+    async def test_outline_and_autosuspect_default_when_absent(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Missing usesOutlineNumbering / autoSuspect → safe defaults."""
+        mock_client.get.return_value = {
+            "data": {"attributes": {"title": "Doc", "type": "generic"}},
+        }
+
+        result = await get_document(
+            mock_ctx, project_id="proj1", space_id="_default", document_name="Doc"
+        )
+
+        assert result.auto_suspect is False
+        assert result.uses_outline_numbering is False
+
     async def test_include_homepage_content_html_false_omits_content(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
@@ -2152,6 +2191,58 @@ class TestBuildUpdateDocumentPayload:
                 custom_fields={"moduleFolder": "Other"},
             )
 
+    def test_outline_and_autosuspect_serialised_when_set(self) -> None:
+        payload = _build_update_document_payload(
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title=None,
+            status=None,
+            type=None,
+            auto_suspect=True,
+            uses_outline_numbering=True,
+        )
+
+        data = cast(dict[str, object], payload["data"])
+        attributes = cast(dict[str, object], data["attributes"])
+        assert attributes == {
+            "autoSuspect": True,
+            "usesOutlineNumbering": True,
+        }
+
+    def test_outline_and_autosuspect_omitted_when_none(self) -> None:
+        payload = _build_update_document_payload(
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title="T",
+            status=None,
+            type=None,
+        )
+        body_str = repr(payload)
+        assert "autoSuspect" not in body_str
+        assert "usesOutlineNumbering" not in body_str
+
+    def test_false_autosuspect_and_outline_are_serialised(self) -> None:
+        # False (unlike None) clears the values server-side.
+        payload = _build_update_document_payload(
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title=None,
+            status=None,
+            type=None,
+            auto_suspect=False,
+            uses_outline_numbering=False,
+        )
+
+        data = cast(dict[str, object], payload["data"])
+        attributes = cast(dict[str, object], data["attributes"])
+        assert attributes == {
+            "autoSuspect": False,
+            "usesOutlineNumbering": False,
+        }
+
 
 class TestUpdateDocumentValidation:
     """Tool-layer validation that protects against empty / no-op PATCHes."""
@@ -2169,6 +2260,8 @@ class TestUpdateDocumentValidation:
                 status=None,
                 type=None,
                 home_page_content_html=None,
+                auto_suspect=None,
+                uses_outline_numbering=None,
                 custom_fields=None,
                 workflow_action=None,
                 dry_run=True,
@@ -2188,6 +2281,8 @@ class TestUpdateDocumentValidation:
                 status=None,
                 type=None,
                 home_page_content_html=None,
+                auto_suspect=None,
+                uses_outline_numbering=None,
                 custom_fields=None,
                 workflow_action="approve",
                 dry_run=True,
@@ -2378,6 +2473,8 @@ class TestUpdateDocumentDryRun:
             status=None,
             type=None,
             home_page_content_html=None,
+            auto_suspect=None,
+            uses_outline_numbering=None,
             custom_fields=None,
             workflow_action=None,
             dry_run=True,
@@ -2435,6 +2532,8 @@ class TestUpdateDocumentHappyPath:
             status=None,
             type=None,
             home_page_content_html=None,
+            auto_suspect=None,
+            uses_outline_numbering=None,
             custom_fields=None,
             workflow_action=None,
             dry_run=False,
@@ -2491,6 +2590,8 @@ class TestUpdateDocumentHappyPath:
             status=None,
             type=None,
             home_page_content_html=raw,
+            auto_suspect=None,
+            uses_outline_numbering=None,
             custom_fields=None,
             workflow_action=None,
             dry_run=False,
@@ -2589,6 +2690,30 @@ class TestUpdateDocumentHappyPath:
         )
         assert result.dry_run is True
 
+    async def test_outline_param_alone_passes_has_attrs_guard(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """An outline/suspect param alone satisfies the has_attrs guard."""
+        result = await update_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title=None,
+            status=None,
+            type=None,
+            home_page_content_html=None,
+            auto_suspect=None,
+            uses_outline_numbering=True,
+            custom_fields=None,
+            workflow_action=None,
+            dry_run=True,
+        )
+        assert result.dry_run is True
+        data = cast(dict[str, object], result.payload_preview["data"])  # type: ignore[index]
+        attributes = cast(dict[str, object], data["attributes"])
+        assert attributes == {"usesOutlineNumbering": True}
+
     async def test_explicit_empty_title_is_serialized(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
@@ -2604,6 +2729,8 @@ class TestUpdateDocumentHappyPath:
             status=None,
             type=None,
             home_page_content_html=None,
+            auto_suspect=None,
+            uses_outline_numbering=None,
             custom_fields=None,
             workflow_action=None,
             dry_run=False,
@@ -2886,6 +3013,51 @@ class TestBuildCreateDocumentPayload:
                 custom_fields={"title": "duplicate"},
             )
 
+    def test_outline_and_autosuspect_attached_when_set(self) -> None:
+        payload = _build_create_document_payload(
+            module_name="MySpec",
+            title="t",
+            type="generic",
+            home_page_content_html="",
+            status=None,
+            auto_suspect=True,
+            uses_outline_numbering=True,
+        )
+
+        item = cast(list[dict[str, object]], payload["data"])[0]
+        attributes = cast(dict[str, object], item["attributes"])
+        assert attributes["autoSuspect"] is True
+        assert attributes["usesOutlineNumbering"] is True
+
+    def test_outline_and_autosuspect_omitted_when_none(self) -> None:
+        payload = _build_create_document_payload(
+            module_name="MySpec",
+            title="t",
+            type="generic",
+            home_page_content_html="",
+            status=None,
+        )
+
+        item = cast(list[dict[str, object]], payload["data"])[0]
+        attributes = cast(dict[str, object], item["attributes"])
+        assert set(attributes.keys()) == {"moduleName", "title", "type"}
+
+    def test_false_autosuspect_and_outline_serialised(self) -> None:
+        payload = _build_create_document_payload(
+            module_name="MySpec",
+            title="t",
+            type="generic",
+            home_page_content_html="",
+            status=None,
+            auto_suspect=False,
+            uses_outline_numbering=False,
+        )
+
+        item = cast(list[dict[str, object]], payload["data"])[0]
+        attributes = cast(dict[str, object], item["attributes"])
+        assert attributes["autoSuspect"] is False
+        assert attributes["usesOutlineNumbering"] is False
+
 
 class TestCreateDocumentDryRun:
     """Tests for ``create_document`` with ``dry_run=True``."""
@@ -2902,6 +3074,8 @@ class TestCreateDocumentDryRun:
             type="req_specification",
             status=None,
             home_page_content=None,
+            auto_suspect=None,
+            uses_outline_numbering=None,
             custom_fields=None,
             dry_run=True,
         )

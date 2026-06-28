@@ -431,6 +431,8 @@ def _build_update_document_payload(  # noqa: PLR0913
     status: str | None,
     type: str | None,
     home_page_content_html: str | None = None,
+    auto_suspect: bool | None = None,
+    uses_outline_numbering: bool | None = None,
     custom_fields: dict[str, object] | None = None,
 ) -> dict[str, JsonValue]:
     """JSON:API PATCH body for ``.../documents/{d}``; skips unset.
@@ -448,6 +450,10 @@ def _build_update_document_payload(  # noqa: PLR0913
             "type": "text/html",
             "value": home_page_content_html,
         }
+    if auto_suspect is not None:
+        attributes["autoSuspect"] = auto_suspect
+    if uses_outline_numbering is not None:
+        attributes["usesOutlineNumbering"] = uses_outline_numbering
     merge_custom_fields(attributes, custom_fields, STANDARD_DOCUMENT_ATTRIBUTES)
 
     item: dict[str, JsonValue] = {
@@ -467,6 +473,8 @@ def _build_create_document_payload(  # noqa: PLR0913
     type: str,
     home_page_content_html: str,
     status: str | None,
+    auto_suspect: bool | None = None,
+    uses_outline_numbering: bool | None = None,
     custom_fields: dict[str, object] | None = None,
 ) -> dict[str, JsonValue]:
     """JSON:API POST body for ``.../spaces/{s}/documents``; skips unset."""
@@ -482,6 +490,10 @@ def _build_create_document_payload(  # noqa: PLR0913
             "type": "text/html",
             "value": home_page_content_html,
         }
+    if auto_suspect is not None:
+        attributes["autoSuspect"] = auto_suspect
+    if uses_outline_numbering is not None:
+        attributes["usesOutlineNumbering"] = uses_outline_numbering
     merge_custom_fields(attributes, custom_fields, STANDARD_DOCUMENT_ATTRIBUTES)
 
     item: dict[str, JsonValue] = {
@@ -575,6 +587,7 @@ async def get_document(
 ) -> DocumentDetail:
     """Get a document's metadata: title/type/status/editors/custom fields.
 
+    Also returns outline numbering + autoSuspect (round-trip via update_document).
     author / last_updated_by are display names (creator, last editor); updated
     is the last-modified timestamp.
 
@@ -645,6 +658,8 @@ async def get_document(
             extract_relationship_id(relationships, "updatedBy"), ""
         ),
         content_html=content_html,
+        auto_suspect=bool(attributes.get("autoSuspect", False)),
+        uses_outline_numbering=bool(attributes.get("usesOutlineNumbering", False)),
         custom_fields=extract_custom_fields(attributes, STANDARD_DOCUMENT_ATTRIBUTES),
     )
     return detail
@@ -834,6 +849,14 @@ async def update_document(  # noqa: PLR0913
             "anchorless blocks get id= auto-stamped."
         ),
     ),
+    auto_suspect: bool | None = Field(
+        default=None,
+        description="Flag linked work items suspect on change.",
+    ),
+    uses_outline_numbering: bool | None = Field(
+        default=None,
+        description="Enable auto outline numbers (1, 1.1, ...).",
+    ),
     custom_fields: dict[str, object] | None = Field(  # noqa: B008
         default=None,
         description="Partial; rich-text values as {'type':'text/html','value':...}.",
@@ -889,20 +912,22 @@ async def update_document(  # noqa: PLR0913
         or status is not None
         or type is not None
         or home_page_content_html is not None
+        or auto_suspect is not None
+        or uses_outline_numbering is not None
         or bool(custom_fields)
     )
     if not has_attrs and not workflow_action:
         raise ValueError(
             "update_document requires at least one of: title, status, "
-            "type, home_page_content_html, custom_fields, or "
-            "workflow_action."
+            "type, home_page_content_html, auto_suspect, "
+            "uses_outline_numbering, custom_fields, or workflow_action."
         )
     if not has_attrs and workflow_action:
         raise ValueError(
             "workflow_action alone is not supported -- Polarion rejects "
             "PATCH bodies with no attributes. Pair workflow_action with "
             "at least one of title, status, type, home_page_content_html, "
-            "or custom_fields."
+            "auto_suspect, uses_outline_numbering, or custom_fields."
         )
 
     client = get_client(ctx)
@@ -924,6 +949,8 @@ async def update_document(  # noqa: PLR0913
         status=status,
         type=type,
         home_page_content_html=home_page_content_html,
+        auto_suspect=auto_suspect,
+        uses_outline_numbering=uses_outline_numbering,
         custom_fields=custom_fields,
     )
     # A type change keys the custom-field schema on the new type, else current.
@@ -1016,6 +1043,14 @@ async def create_document(  # noqa: PLR0913
         max_length=MAX_BODY_HTML_LEN,
         description="Markdown body; converted to sanitized HTML.",
     ),
+    auto_suspect: bool | None = Field(
+        default=None,
+        description="Flag linked work items suspect on change.",
+    ),
+    uses_outline_numbering: bool | None = Field(
+        default=None,
+        description="Enable auto outline numbers (1, 1.1, ...).",
+    ),
     custom_fields: dict[str, object] | None = Field(  # noqa: B008
         default=None,
         description=(
@@ -1066,6 +1101,8 @@ async def create_document(  # noqa: PLR0913
         type=type,
         home_page_content_html=home_page_content_html,
         status=status,
+        auto_suspect=auto_suspect,
+        uses_outline_numbering=uses_outline_numbering,
         custom_fields=custom_fields,
     )
 

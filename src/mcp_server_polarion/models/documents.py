@@ -30,6 +30,8 @@ class DocumentDetail(BaseModel):
     author: str = ""
     last_updated_by: str = ""
     content_html: str = ""
+    auto_suspect: bool = False
+    uses_outline_numbering: bool = False
     custom_fields: dict[str, object] = Field(default_factory=dict)
 
 
