@@ -594,7 +594,7 @@ async def get_document(
     """Get a document's metadata: title/type/status/editors/custom fields.
 
     Also returns auto_suspect, uses_outline_numbering, and
-    outline_numbering_prefix (feed back to update_document to round-trip).
+    outline_numbering_prefix (round-trip via update_document).
     author / last_updated_by are display names (creator, last editor); updated
     is the last-modified timestamp.
 
@@ -904,8 +904,6 @@ async def update_document(  # noqa: PLR0913
     - A polarion_wiki macro name=module-workitem <div> leaves the work item's
       module unset — attach via move_work_item_to_document.
 
-    outline_numbering_prefix only renders when uses_outline_numbering=True.
-
     workflow_action must pair with ≥1 attribute (else 400). Unknown status/type
     raise ValueError; custom_fields keys outside the document type's schema are
     rejected, values NOT validated — resolve via list_document_enum_options
@@ -1100,8 +1098,6 @@ async def create_document(  # noqa: PLR0913
     unique ids. Post-create edits round-trip raw HTML via
     get_document(include_homepage_content_html=True) ↔ update_document; add work
     items via move_work_item_to_document.
-
-    outline_numbering_prefix only renders when uses_outline_numbering=True.
     """
     client = get_client(ctx)
     await guard_document_enums(
