@@ -14,6 +14,7 @@ from evals.harness.fixtures import (
     DOC,
     FLOATING_TASK_ID,
     PARENT_REQ_ID,
+    PROJECT,
     SPACE,
 )
 
@@ -173,5 +174,14 @@ CASES: list[Case] = [
         covers=["delete_work_item_links"],
         expect="delete_work_item_links",
         reject=["update_work_item_link"],
+    ),
+    _case(
+        "TRIG-LIST-TEST-RUNS",
+        f"List the test runs in project '{PROJECT}'.",
+        "triggers_tool",
+        intent="Listing test runs must call list_test_runs, not list_work_items.",
+        covers=["list_test_runs"],
+        expect="list_test_runs",
+        reject=["list_work_items"],
     ),
 ]

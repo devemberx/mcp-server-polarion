@@ -50,6 +50,9 @@ TESTCASE_ID = "MCPT-500"  # test case linked from CHILD_REQ_ID
 # Section A heading part id served by read_document_parts; anchors positional moves.
 SECTION_A_PART_ID = f"heading_{DOC_HEADING_ID}"
 
+# Test run instance served by list_test_runs (TRIG-LIST-TEST-RUNS).
+TEST_RUN_ID = "Fake-TR-001"
+
 TS = "2026-01-01T00:00:00.000Z"
 
 
@@ -96,6 +99,20 @@ class Comment:
 
 
 @dataclass
+class TestRun:
+    """A test run. ``is_template`` splits template blueprints from actual run
+    instances (the ``templates`` query param filters on it).
+    """
+
+    short_id: str
+    title: str
+    type: str = "manual"
+    status: str = "open"
+    finished_on: str = ""
+    is_template: bool = False
+
+
+@dataclass
 class Document:
     name: str
     title: str
@@ -116,6 +133,7 @@ class Seeds:
 
     work_items: dict[str, WorkItem]
     documents: dict[str, Document]
+    test_runs: dict[str, TestRun]
     links: dict[str, list[tuple[str, str]]]
     enums: dict[tuple[str, str], list[tuple[str, bool]]]
     project_enums: dict[str, list[str]]
@@ -187,6 +205,15 @@ SEEDS = Seeds(
             name=PARENT_DOC,
             title="Fake Parent Doc",
             body_html='<h1 id="ph-1">Fake Parent Doc</h1>',
+        ),
+    },
+    test_runs={
+        TEST_RUN_ID: TestRun(
+            TEST_RUN_ID,
+            "Fake Regression Run",
+            type="manual",
+            status="open",
+            finished_on=TS,
         ),
     },
     # Forward (outgoing) work-item links: source short id -> [(role, target short
