@@ -395,6 +395,19 @@ class TestCheckRoundTripSource:
         passed, _ = checks.check_round_trip_source(trajectory, {})
         assert passed is True
 
+    def test_metadata_only_work_item_batch_not_constrained(self) -> None:
+        trajectory = [
+            _call(
+                "update_work_items",
+                {
+                    "project_id": "P",
+                    "items": [{"work_item_id": "MCPT-200", "title": "new"}],
+                },
+            )
+        ]
+        passed, _ = checks.check_round_trip_source(trajectory, {})
+        assert passed is True
+
     def test_work_item_body_write_needs_flagged_get(self) -> None:
         trajectory = [
             _call("get_work_item", {"project_id": "P", "work_item_id": "MCPT-200"}),
