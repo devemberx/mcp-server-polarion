@@ -47,12 +47,15 @@ class TestCheckGetBeforeUpdate:
         passed, _ = checks.check_get_before_update([], {})
         assert passed is True
 
-    def test_get_then_update_work_item_passes(self) -> None:
+    def test_get_then_update_work_items_passes(self) -> None:
         trajectory = [
             _call("get_work_item", {"project_id": "P", "work_item_id": "MCPT-1"}),
             _call(
-                "update_work_item",
-                {"project_id": "P", "work_item_id": "MCPT-1", "priority": "50.0"},
+                "update_work_items",
+                {
+                    "project_id": "P",
+                    "items": [{"work_item_id": "MCPT-1", "priority": "50.0"}],
+                },
             ),
         ]
         passed, _ = checks.check_get_before_update(trajectory, {})
@@ -61,26 +64,51 @@ class TestCheckGetBeforeUpdate:
     def test_update_without_prior_get_fails(self) -> None:
         trajectory = [
             _call(
-                "update_work_item",
-                {"project_id": "P", "work_item_id": "MCPT-1", "priority": "50.0"},
+                "update_work_items",
+                {
+                    "project_id": "P",
+                    "items": [{"work_item_id": "MCPT-1", "priority": "50.0"}],
+                },
             )
         ]
         passed, reason = checks.check_get_before_update(trajectory, {})
         assert passed is False
-        assert "update_work_item" in reason
+        assert "update_work_items" in reason
         assert "get_work_item" in reason
 
     def test_get_on_different_id_does_not_count(self) -> None:
         trajectory = [
             _call("get_work_item", {"project_id": "P", "work_item_id": "MCPT-99"}),
             _call(
-                "update_work_item",
-                {"project_id": "P", "work_item_id": "MCPT-1", "priority": "50.0"},
+                "update_work_items",
+                {
+                    "project_id": "P",
+                    "items": [{"work_item_id": "MCPT-1", "priority": "50.0"}],
+                },
             ),
         ]
         passed, reason = checks.check_get_before_update(trajectory, {})
         assert passed is False
         assert "MCPT-1" in reason
+
+    def test_every_item_in_batch_needs_its_own_get(self) -> None:
+        # One get covers one item; the second batched item was never observed.
+        trajectory = [
+            _call("get_work_item", {"project_id": "P", "work_item_id": "MCPT-1"}),
+            _call(
+                "update_work_items",
+                {
+                    "project_id": "P",
+                    "items": [
+                        {"work_item_id": "MCPT-1", "title": "x"},
+                        {"work_item_id": "MCPT-2", "title": "y"},
+                    ],
+                },
+            ),
+        ]
+        passed, reason = checks.check_get_before_update(trajectory, {})
+        assert passed is False
+        assert "MCPT-2" in reason
 
     def test_qualified_and_short_work_item_ids_match(self) -> None:
         # A project-qualified id in the get and a short id in the update
@@ -88,8 +116,11 @@ class TestCheckGetBeforeUpdate:
         trajectory = [
             _call("get_work_item", {"project_id": "P", "work_item_id": "P/MCPT-1"}),
             _call(
-                "update_work_item",
-                {"project_id": "P", "work_item_id": "MCPT-1", "title": "x"},
+                "update_work_items",
+                {
+                    "project_id": "P",
+                    "items": [{"work_item_id": "MCPT-1", "title": "x"}],
+                },
             ),
         ]
         passed, _ = checks.check_get_before_update(trajectory, {})
@@ -98,8 +129,11 @@ class TestCheckGetBeforeUpdate:
     def test_get_after_update_does_not_satisfy(self) -> None:
         trajectory = [
             _call(
-                "update_work_item",
-                {"project_id": "P", "work_item_id": "MCPT-1", "priority": "50.0"},
+                "update_work_items",
+                {
+                    "project_id": "P",
+                    "items": [{"work_item_id": "MCPT-1", "priority": "50.0"}],
+                },
             ),
             _call("get_work_item", {"project_id": "P", "work_item_id": "MCPT-1"}),
         ]
@@ -242,16 +276,20 @@ class TestCheckPreserveHyperlinks:
     def test_full_list_update_passes(self) -> None:
         trajectory = [
             _call(
-                "update_work_item",
+                "update_work_items",
                 {
                     "project_id": "P",
-                    "work_item_id": "MCPT-200",
-                    "hyperlinks": [
+                    "items": [
                         {
-                            "role": "ref_ext",
-                            "uri": "https://specs.example.com/fake-spec",
-                        },
-                        {"role": "ref_ext", "uri": "https://example.com/new"},
+                            "work_item_id": "MCPT-200",
+                            "hyperlinks": [
+                                {
+                                    "role": "ref_ext",
+                                    "uri": "https://specs.example.com/fake-spec",
+                                },
+                                {"role": "ref_ext", "uri": "https://example.com/new"},
+                            ],
+                        }
                     ],
                 },
             )
@@ -262,12 +300,16 @@ class TestCheckPreserveHyperlinks:
     def test_dropping_existing_uri_fails(self) -> None:
         trajectory = [
             _call(
-                "update_work_item",
+                "update_work_items",
                 {
                     "project_id": "P",
-                    "work_item_id": "MCPT-200",
-                    "hyperlinks": [
-                        {"role": "ref_ext", "uri": "https://example.com/new"}
+                    "items": [
+                        {
+                            "work_item_id": "MCPT-200",
+                            "hyperlinks": [
+                                {"role": "ref_ext", "uri": "https://example.com/new"}
+                            ],
+                        }
                     ],
                 },
             )
@@ -279,8 +321,11 @@ class TestCheckPreserveHyperlinks:
     def test_update_not_touching_hyperlinks_passes(self) -> None:
         trajectory = [
             _call(
-                "update_work_item",
-                {"project_id": "P", "work_item_id": "MCPT-200", "title": "x"},
+                "update_work_items",
+                {
+                    "project_id": "P",
+                    "items": [{"work_item_id": "MCPT-200", "title": "x"}],
+                },
             )
         ]
         passed, _ = checks.check_preserve_hyperlinks(trajectory, self._PARAMS)
@@ -289,11 +334,17 @@ class TestCheckPreserveHyperlinks:
     def test_other_work_item_not_constrained(self) -> None:
         trajectory = [
             _call(
-                "update_work_item",
+                "update_work_items",
                 {
                     "project_id": "P",
-                    "work_item_id": "MCPT-999",
-                    "hyperlinks": [{"role": "ref_ext", "uri": "https://x.example"}],
+                    "items": [
+                        {
+                            "work_item_id": "MCPT-999",
+                            "hyperlinks": [
+                                {"role": "ref_ext", "uri": "https://x.example"}
+                            ],
+                        }
+                    ],
                 },
             )
         ]
@@ -348,11 +399,12 @@ class TestCheckRoundTripSource:
         trajectory = [
             _call("get_work_item", {"project_id": "P", "work_item_id": "MCPT-200"}),
             _call(
-                "update_work_item",
+                "update_work_items",
                 {
                     "project_id": "P",
-                    "work_item_id": "MCPT-200",
-                    "description_html": "<p>x</p>",
+                    "items": [
+                        {"work_item_id": "MCPT-200", "description_html": "<p>x</p>"}
+                    ],
                 },
             ),
         ]
@@ -362,6 +414,32 @@ class TestCheckRoundTripSource:
         trajectory[0]["args"]["include_description_html"] = True
         passed, _ = checks.check_round_trip_source(trajectory, {})
         assert passed is True
+
+    def test_each_body_item_in_batch_needs_its_own_flagged_get(self) -> None:
+        # Item 1 is sourced; item 2's body write is not.
+        trajectory = [
+            _call(
+                "get_work_item",
+                {
+                    "project_id": "P",
+                    "work_item_id": "MCPT-200",
+                    "include_description_html": True,
+                },
+            ),
+            _call(
+                "update_work_items",
+                {
+                    "project_id": "P",
+                    "items": [
+                        {"work_item_id": "MCPT-200", "description_html": "<p>x</p>"},
+                        {"work_item_id": "MCPT-201", "description_html": "<p>y</p>"},
+                    ],
+                },
+            ),
+        ]
+        passed, reason = checks.check_round_trip_source(trajectory, {})
+        assert passed is False
+        assert "MCPT-201" in reason
 
     def test_qualified_get_id_satisfies_short_id_write(self) -> None:
         trajectory = [
@@ -374,11 +452,12 @@ class TestCheckRoundTripSource:
                 },
             ),
             _call(
-                "update_work_item",
+                "update_work_items",
                 {
                     "project_id": "P",
-                    "work_item_id": "MCPT-200",
-                    "description_html": "<p>x</p>",
+                    "items": [
+                        {"work_item_id": "MCPT-200", "description_html": "<p>x</p>"}
+                    ],
                 },
             ),
         ]
@@ -706,22 +785,47 @@ class TestCheckOrderedTrajectory:
         assert passed is True
 
     def test_after_dependency_violation_fails(self) -> None:
-        # update_work_item before its required get_work_item.
+        # update_work_items before its required get_work_item; the step's
+        # work_item_id match reaches into the bulk items list.
         steps = [
             {"tool": "get_work_item", "match": {"work_item_id": "MCPT-1"}},
             {
-                "tool": "update_work_item",
+                "tool": "update_work_items",
                 "match": {"work_item_id": "MCPT-1"},
                 "after": ["get_work_item"],
             },
         ]
         trajectory = [
-            _call("update_work_item", {"work_item_id": "MCPT-1"}),
+            _call("update_work_items", {"items": [{"work_item_id": "MCPT-1"}]}),
             _call("get_work_item", {"work_item_id": "MCPT-1"}),
         ]
         passed, reason = checks.check_ordered_trajectory(trajectory, {"steps": steps})
         assert passed is False
         assert "get_work_item" in reason
+
+    def test_work_item_id_match_reaches_into_bulk_items(self) -> None:
+        # get -> bulk update containing the matched id satisfies the steps.
+        steps = [
+            {"tool": "get_work_item", "match": {"work_item_id": "MCPT-1"}},
+            {
+                "tool": "update_work_items",
+                "match": {"work_item_id": "MCPT-1"},
+                "after": ["get_work_item"],
+            },
+        ]
+        trajectory = [
+            _call("get_work_item", {"work_item_id": "MCPT-1"}),
+            _call("update_work_items", {"items": [{"work_item_id": "MCPT-1"}]}),
+        ]
+        passed, _ = checks.check_ordered_trajectory(trajectory, {"steps": steps})
+        assert passed is True
+
+        # A batch not containing the id must not match.
+        trajectory[1] = _call(
+            "update_work_items", {"items": [{"work_item_id": "MCPT-9"}]}
+        )
+        passed, _ = checks.check_ordered_trajectory(trajectory, {"steps": steps})
+        assert passed is False
 
     def test_out_of_order_move_before_read_fails(self) -> None:
         trajectory = [
@@ -821,7 +925,7 @@ class TestCheckOrderedTrajectory:
     def test_read_only_flag_fails_on_write(self) -> None:
         trajectory = [
             _call("list_work_items", {"query": "SQL:(...)"}),
-            _call("update_work_item", {"work_item_id": "MCPT-1"}),
+            _call("update_work_items", {"items": [{"work_item_id": "MCPT-1"}]}),
         ]
         passed, _ = checks.check_ordered_trajectory(
             trajectory,

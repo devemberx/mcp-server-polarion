@@ -15,7 +15,7 @@ CheckResult = tuple[bool, str]
 WRITE_TOOLS: frozenset[str] = frozenset(
     {
         "create_work_items",
-        "update_work_item",
+        "update_work_items",
         "move_work_item_to_document",
         "move_work_item_from_document",
         "create_work_item_links",
@@ -74,6 +74,12 @@ def _errored(call: dict[str, Any]) -> bool:
     return isinstance(result, dict) and "error" in result
 
 
+def _update_items(call: dict[str, Any]) -> list[dict[str, Any]]:
+    """Per-item specs of a bulk ``update_work_items`` call (non-dicts dropped)."""
+    items = _args(call).get("items") or []
+    return [item for item in items if isinstance(item, dict)]
+
+
 def check_readonly(trajectory: Trajectory, _params: dict[str, Any]) -> CheckResult:
     """No write tool may be called on a read-only task."""
     used = [n for n in _names(trajectory) if n in WRITE_TOOLS]
@@ -83,7 +89,6 @@ def check_readonly(trajectory: Trajectory, _params: dict[str, Any]) -> CheckResu
 
 
 _UPDATE_TO_GET: dict[str, tuple[str, tuple[str, ...]]] = {
-    "update_work_item": ("get_work_item", ("project_id", "work_item_id")),
     "update_document": (
         "get_document",
         ("project_id", "space_id", "document_name"),
@@ -104,14 +109,40 @@ def _target_key(call: dict[str, Any], keys: tuple[str, ...]) -> tuple[object, ..
     )
 
 
+def _got_work_item_before(
+    trajectory: Trajectory, index: int, target: tuple[object, ...], *, flag: str = ""
+) -> bool:
+    """True when a ``get_work_item`` on ``target`` precedes ``trajectory[index]``
+    (with ``flag`` set truthy, when given)."""
+    id_keys = ("project_id", "work_item_id")
+    return any(
+        earlier.get("name") == "get_work_item"
+        and _target_key(earlier, id_keys) == target
+        and (not flag or bool(_args(earlier).get(flag)))
+        for earlier in trajectory[:index]
+    )
+
+
 def check_get_before_update(
     trajectory: Trajectory, _params: dict[str, Any]
 ) -> CheckResult:
     """Every ``update_*`` needs an earlier matching ``get_*`` — REPLACE-list and
-    partial-PATCH semantics make blind writes clobber silently.
+    partial-PATCH semantics make blind writes clobber silently. A bulk
+    ``update_work_items`` needs a prior ``get_work_item`` per targeted item.
     """
     for i, call in enumerate(trajectory):
         name = call.get("name", "")
+        if name == "update_work_items":
+            project = _args(call).get("project_id")
+            for item in _update_items(call):
+                target = (project, _short_id(item.get("work_item_id", "")))
+                if not _got_work_item_before(trajectory, i, target):
+                    return False, (
+                        f"called {name}({target}) without a prior "
+                        f"get_work_item({target}) -- update must observe "
+                        f"current state first"
+                    )
+            continue
         spec = _UPDATE_TO_GET.get(name)
         if spec is None:
             continue
@@ -182,21 +213,21 @@ def check_preserve_hyperlinks(
     target = _short_id(params.get("work_item_id", ""))
     required = [str(u) for u in params.get("required_uris", [])]
     for call in trajectory:
-        if call.get("name") != "update_work_item":
+        if call.get("name") != "update_work_items":
             continue
-        args = _args(call)
-        if _short_id(args.get("work_item_id", "")) != target:
-            continue
-        hyperlinks = args.get("hyperlinks")
-        if not hyperlinks:
-            continue
-        uris = {str(h.get("uri", "")) for h in hyperlinks if isinstance(h, dict)}
-        missing = [u for u in required if u not in uris]
-        if missing:
-            return False, (
-                f"update_work_item replaced hyperlinks on {target} without "
-                f"pre-existing URI(s) {missing} -- the full list must be passed"
-            )
+        for item in _update_items(call):
+            if _short_id(item.get("work_item_id", "")) != target:
+                continue
+            hyperlinks = item.get("hyperlinks")
+            if not hyperlinks:
+                continue
+            uris = {str(h.get("uri", "")) for h in hyperlinks if isinstance(h, dict)}
+            missing = [u for u in required if u not in uris]
+            if missing:
+                return False, (
+                    f"update_work_items replaced hyperlinks on {target} without "
+                    f"pre-existing URI(s) {missing} -- the full list must be passed"
+                )
     return True, "no hyperlink update dropped a pre-existing URI"
 
 
@@ -207,12 +238,6 @@ _BODY_WRITE_TO_SOURCE: dict[str, tuple[str, str, str, tuple[str, ...]]] = {
         "include_homepage_content_html",
         ("project_id", "space_id", "document_name"),
     ),
-    "update_work_item": (
-        "description_html",
-        "get_work_item",
-        "include_description_html",
-        ("project_id", "work_item_id"),
-    ),
 }
 
 
@@ -220,10 +245,28 @@ def check_round_trip_source(
     trajectory: Trajectory, _params: dict[str, Any]
 ) -> CheckResult:
     """Body writes must source from ``get_*(include_*_html=True)`` on the same
-    target — ``read_*`` synthesis Markdown collapses Polarion anchors.
+    target — ``read_*`` synthesis Markdown collapses Polarion anchors. For a
+    bulk ``update_work_items``, every item carrying ``description_html`` needs
+    its own flagged ``get_work_item``.
     """
     for i, call in enumerate(trajectory):
-        spec = _BODY_WRITE_TO_SOURCE.get(call.get("name", ""))
+        name = call.get("name", "")
+        if name == "update_work_items":
+            project = _args(call).get("project_id")
+            for item in _update_items(call):
+                if not item.get("description_html"):
+                    continue
+                target = (project, _short_id(item.get("work_item_id", "")))
+                if not _got_work_item_before(
+                    trajectory, i, target, flag="include_description_html"
+                ):
+                    return False, (
+                        f"{name}({target}) wrote description_html without a "
+                        f"prior get_work_item(include_description_html=True) "
+                        f"-- body was not round-trip sourced"
+                    )
+            continue
+        spec = _BODY_WRITE_TO_SOURCE.get(name)
         if spec is None:
             continue
         body_arg, get_name, flag_arg, id_keys = spec
@@ -398,10 +441,25 @@ def _resolve_observed_path(result: object, path: str) -> list[str]:
 
 
 def _args_match(args: dict[str, Any], match: dict[str, Any]) -> bool:
-    """All ``match`` entries equal the call's args (``*_id`` via ``_short_id``)."""
+    """All ``match`` entries equal the call's args (``*_id`` via ``_short_id``).
+
+    A ``work_item_id`` constraint on a bulk call (flat arg absent, ``items``
+    present) matches when any per-item id matches.
+    """
     for key, expected in match.items():
         actual = args.get(key)
-        if key.endswith("_id"):
+        if (
+            key == "work_item_id"
+            and actual is None
+            and isinstance(args.get("items"), list)
+        ):
+            if not any(
+                isinstance(item, dict)
+                and _short_id(item.get("work_item_id", "")) == _short_id(expected)
+                for item in args["items"]
+            ):
+                return False
+        elif key.endswith("_id"):
             if _short_id(actual) != _short_id(expected):
                 return False
         elif actual != expected:

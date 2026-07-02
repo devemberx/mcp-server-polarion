@@ -214,7 +214,7 @@ CASES: list[Case] = [
         steps=[
             {"tool": "get_work_item", "match": {"work_item_id": FLOATING_TASK_ID}},
             {
-                "tool": "update_work_item",
+                "tool": "update_work_items",
                 "match": {"work_item_id": FLOATING_TASK_ID},
                 "after": ["get_work_item"],
             },
