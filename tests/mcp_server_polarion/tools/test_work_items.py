@@ -21,19 +21,21 @@ from mcp_server_polarion.models import (
     WorkItemDetail,
     WorkItemRead,
     WorkItemsCreateResult,
-    WorkItemUpdateResult,
+    WorkItemsUpdateResult,
+    WorkItemUpdateSpec,
 )
 from mcp_server_polarion.tools._shared import cache as _cache_mod
 from mcp_server_polarion.tools.work_items import (
     _build_create_work_items_payload,
-    _build_update_work_item_payload,
+    _build_update_work_item_resource,
+    _build_update_work_items_payload,
     _build_work_item_resource,
     _extract_created_work_item_ids,
     create_work_items,
     get_work_item,
     list_work_items,
     read_work_item,
-    update_work_item,
+    update_work_items,
 )
 
 
@@ -50,33 +52,28 @@ def _project_enum_get_response(enum_name: str, ids: list[str]) -> dict[str, obje
 
 async def _call_update(
     mock_ctx: MagicMock, **overrides: object
-) -> WorkItemUpdateResult:
-    """Call update_work_item with all params explicit.
+) -> WorkItemsUpdateResult:
+    """Invoke ``update_work_items`` with a single-spec default batch.
 
-    Field(...) defaults stay FieldInfo objects outside FastMCP, so every
-    param must be passed; tests override only what they care about.
+    ``project_id`` / ``workflow_action`` / ``change_type_to`` / ``dry_run``
+    are top-level tool params; all other overrides are per-item and fold
+    into one ``WorkItemUpdateSpec``.
     """
-    defaults: dict[str, object] = {
-        "project_id": "MyProj",
-        "work_item_id": "MCPT-1",
-        "title": None,
-        "description_html": None,
-        "status": None,
-        "priority": None,
-        "severity": None,
-        "due_date": None,
-        "initial_estimate": None,
-        "resolution": None,
-        "hyperlinks": None,
-        "assignee_ids": None,
-        "custom_fields": None,
-        "workflow_action": None,
-        "change_type_to": None,
-        "include_current_description_html": False,
-        "dry_run": False,
-    }
-    defaults.update(overrides)
-    return await update_work_item(mock_ctx, **defaults)
+    project_id = cast(str, overrides.pop("project_id", "MyProj"))
+    workflow_action = cast("str | None", overrides.pop("workflow_action", None))
+    change_type_to = cast("str | None", overrides.pop("change_type_to", None))
+    dry_run = cast(bool, overrides.pop("dry_run", False))
+    spec_fields: dict[str, object] = {"work_item_id": "MCPT-1"}
+    spec_fields.update(overrides)
+    spec = WorkItemUpdateSpec(**spec_fields)  # type: ignore[arg-type]
+    return await update_work_items(
+        mock_ctx,
+        project_id=project_id,
+        items=[spec],
+        workflow_action=workflow_action,
+        change_type_to=change_type_to,
+        dry_run=dry_run,
+    )
 
 
 def _make_get_response(
@@ -738,116 +735,72 @@ class TestCreateWorkItemsFieldValidation:
             )
 
 
-class TestBuildUpdateWorkItemPayload:
-    """Tests for the private ``_build_update_work_item_payload`` helper."""
+class TestBuildUpdateWorkItemResource:
+    """Tests for the private ``_build_update_work_item_resource`` helper."""
 
-    def test_minimal_payload_with_only_title(self) -> None:
-        payload = _build_update_work_item_payload(
+    def test_minimal_resource_with_only_title(self) -> None:
+        resource = _build_update_work_item_resource(
             project_id="MyProj",
-            work_item_id="MCPT-1",
-            title="New title",
-            description_html=None,
-            status=None,
-            priority=None,
-            severity=None,
-            due_date=None,
-            initial_estimate=None,
-            resolution=None,
-            hyperlinks=None,
-            assignee_ids=None,
+            spec=WorkItemUpdateSpec(work_item_id="MCPT-1", title="New title"),
         )
 
-        # PATCH body wraps `data` as a single object, not a list.
-        assert payload == {
-            "data": {
-                "type": "workitems",
-                "id": "MyProj/MCPT-1",
-                "attributes": {"title": "New title"},
-            }
+        assert resource == {
+            "type": "workitems",
+            "id": "MyProj/MCPT-1",
+            "attributes": {"title": "New title"},
         }
-        item = cast(dict[str, object], payload["data"])
-        assert "relationships" not in item
 
     def test_id_is_project_slash_work_item_id(self) -> None:
-        payload = _build_update_work_item_payload(
+        resource = _build_update_work_item_resource(
             project_id="proj",
-            work_item_id="MCPT-99",
-            title="x",
-            description_html=None,
-            status=None,
-            priority=None,
-            severity=None,
-            due_date=None,
-            initial_estimate=None,
-            resolution=None,
-            hyperlinks=None,
-            assignee_ids=None,
+            spec=WorkItemUpdateSpec(work_item_id="MCPT-99", title="x"),
         )
 
-        item = cast(dict[str, object], payload["data"])
-        assert item["id"] == "proj/MCPT-99"
+        assert resource["id"] == "proj/MCPT-99"
 
     def test_skips_none_and_empty_string_fields(self) -> None:
-        payload = _build_update_work_item_payload(
+        resource = _build_update_work_item_resource(
             project_id="MyProj",
-            work_item_id="MCPT-1",
-            title=None,
-            description_html="",
-            status="",
-            priority=None,
-            severity="",
-            due_date="",
-            initial_estimate=None,
-            resolution="",
-            hyperlinks=[],
-            assignee_ids=[],
+            spec=WorkItemUpdateSpec(
+                work_item_id="MCPT-1",
+                title="t",
+                description_html="",
+                status="",
+                severity="",
+                due_date="",
+                resolution="",
+                hyperlinks=[],
+                assignee_ids=[],
+            ),
         )
 
-        # No attributes, no relationships — just the resource header.
-        item = cast(dict[str, object], payload["data"])
-        assert item == {"type": "workitems", "id": "MyProj/MCPT-1"}
+        # Falsy fields drop from the body so the update never blanks them.
+        assert resource["attributes"] == {"title": "t"}
+        assert "relationships" not in resource
 
     def test_includes_description_block(self) -> None:
-        payload = _build_update_work_item_payload(
+        resource = _build_update_work_item_resource(
             project_id="MyProj",
-            work_item_id="MCPT-1",
-            title=None,
-            description_html="<p>hi</p>",
-            status=None,
-            priority=None,
-            severity=None,
-            due_date=None,
-            initial_estimate=None,
-            resolution=None,
-            hyperlinks=None,
-            assignee_ids=None,
+            spec=WorkItemUpdateSpec(
+                work_item_id="MCPT-1", description_html="<p>hi</p>"
+            ),
         )
 
-        item = cast(dict[str, object], payload["data"])
-        attributes = cast(dict[str, object], item["attributes"])
+        attributes = cast(dict[str, object], resource["attributes"])
         assert attributes["description"] == {
             "type": "text/html",
             "value": "<p>hi</p>",
         }
 
     def test_assignee_ids_become_to_many_users_relationship(self) -> None:
-        payload = _build_update_work_item_payload(
+        resource = _build_update_work_item_resource(
             project_id="MyProj",
-            work_item_id="MCPT-1",
-            title=None,
-            description_html=None,
-            status=None,
-            priority=None,
-            severity=None,
-            due_date=None,
-            initial_estimate=None,
-            resolution=None,
-            hyperlinks=None,
-            assignee_ids=["alice", "bob"],
+            spec=WorkItemUpdateSpec(
+                work_item_id="MCPT-1", assignee_ids=["alice", "bob"]
+            ),
         )
 
-        item = cast(dict[str, object], payload["data"])
-        relationships = cast(dict[str, object], item["relationships"])
+        relationships = cast(dict[str, object], resource["relationships"])
         assert relationships["assignee"] == {
             "data": [
                 {"type": "users", "id": "alice"},
@@ -856,47 +809,37 @@ class TestBuildUpdateWorkItemPayload:
         }
 
     def test_hyperlinks_serialise_role_title_uri(self) -> None:
-        payload = _build_update_work_item_payload(
+        resource = _build_update_work_item_resource(
             project_id="MyProj",
-            work_item_id="MCPT-1",
-            title=None,
-            description_html=None,
-            status=None,
-            priority=None,
-            severity=None,
-            due_date=None,
-            initial_estimate=None,
-            resolution=None,
-            hyperlinks=[
-                Hyperlink(role="ref_ext", title="Spec", uri="https://example.com"),
-            ],
-            assignee_ids=None,
+            spec=WorkItemUpdateSpec(
+                work_item_id="MCPT-1",
+                hyperlinks=[
+                    Hyperlink(role="ref_ext", title="Spec", uri="https://example.com"),
+                ],
+            ),
         )
 
-        item = cast(dict[str, object], payload["data"])
-        attributes = cast(dict[str, object], item["attributes"])
+        attributes = cast(dict[str, object], resource["attributes"])
         assert attributes["hyperlinks"] == [
             {"role": "ref_ext", "title": "Spec", "uri": "https://example.com"},
         ]
 
     def test_all_optional_attrs_included_when_set(self) -> None:
-        payload = _build_update_work_item_payload(
+        resource = _build_update_work_item_resource(
             project_id="MyProj",
-            work_item_id="MCPT-1",
-            title="t",
-            description_html=None,
-            status="open",
-            priority="50.0",
-            severity="major",
-            due_date="2026-05-31",
-            initial_estimate="5 1/2d",
-            resolution="fixed",
-            hyperlinks=None,
-            assignee_ids=None,
+            spec=WorkItemUpdateSpec(
+                work_item_id="MCPT-1",
+                title="t",
+                status="open",
+                priority="50.0",
+                severity="major",
+                due_date="2026-05-31",
+                initial_estimate="5 1/2d",
+                resolution="fixed",
+            ),
         )
 
-        item = cast(dict[str, object], payload["data"])
-        attributes = cast(dict[str, object], item["attributes"])
+        attributes = cast(dict[str, object], resource["attributes"])
         assert attributes["title"] == "t"
         assert attributes["status"] == "open"
         assert attributes["priority"] == "50.0"
@@ -905,86 +848,79 @@ class TestBuildUpdateWorkItemPayload:
         assert attributes["initialEstimate"] == "5 1/2d"
         assert attributes["resolution"] == "fixed"
 
-    def test_custom_fields_inlined_in_patch_attributes(self) -> None:
-        rich = {"type": "text/html", "value": "<p>note</p>"}
-        payload = _build_update_work_item_payload(
+    def test_custom_fields_inlined_in_attributes(self) -> None:
+        rich: dict[str, object] = {"type": "text/html", "value": "<p>note</p>"}
+        resource = _build_update_work_item_resource(
             project_id="MyProj",
-            work_item_id="MCPT-1",
-            title=None,
-            description_html=None,
-            status=None,
-            priority=None,
-            severity=None,
-            due_date=None,
-            initial_estimate=None,
-            resolution=None,
-            hyperlinks=None,
-            assignee_ids=None,
-            custom_fields={"riskLevel": "low", "reviewerNote": rich},
+            spec=WorkItemUpdateSpec(
+                work_item_id="MCPT-1",
+                custom_fields={"riskLevel": "low", "reviewerNote": rich},
+            ),
         )
 
-        item = cast(dict[str, object], payload["data"])
-        attributes = cast(dict[str, object], item["attributes"])
+        attributes = cast(dict[str, object], resource["attributes"])
         assert attributes == {"riskLevel": "low", "reviewerNote": rich}
-
-    def test_custom_fields_alone_keeps_attributes_dict(self) -> None:
-        # custom_fields alone must still emit an attributes block, else PATCH 400s.
-        payload = _build_update_work_item_payload(
-            project_id="MyProj",
-            work_item_id="MCPT-1",
-            title=None,
-            description_html=None,
-            status=None,
-            priority=None,
-            severity=None,
-            due_date=None,
-            initial_estimate=None,
-            resolution=None,
-            hyperlinks=None,
-            assignee_ids=None,
-            custom_fields={"riskLevel": "high"},
-        )
-        item = cast(dict[str, object], payload["data"])
-        assert "attributes" in item
 
     def test_custom_fields_collision_raises(self) -> None:
         with pytest.raises(ValueError, match="custom_fields keys collide"):
-            _build_update_work_item_payload(
+            _build_update_work_item_resource(
                 project_id="MyProj",
-                work_item_id="MCPT-1",
-                title=None,
-                description_html=None,
-                status=None,
-                priority=None,
-                severity=None,
-                due_date=None,
-                initial_estimate=None,
-                resolution=None,
-                hyperlinks=None,
-                assignee_ids=None,
-                custom_fields={"status": "open"},
+                spec=WorkItemUpdateSpec(
+                    work_item_id="MCPT-1", custom_fields={"status": "open"}
+                ),
             )
 
 
-class TestUpdateWorkItemValidation:
-    """Tests for the at-least-one-field guard in ``update_work_item``."""
+class TestBuildUpdateWorkItemsPayload:
+    """Tests for the private ``_build_update_work_items_payload`` helper."""
 
-    async def test_no_fields_raises_value_error(
+    def test_single_spec_wraps_in_data_list(self) -> None:
+        payload = _build_update_work_items_payload(
+            project_id="MyProj",
+            specs=[WorkItemUpdateSpec(work_item_id="MCPT-1", title="a")],
+        )
+
+        data = cast(list[dict[str, object]], payload["data"])
+        assert len(data) == 1
+        assert data[0]["id"] == "MyProj/MCPT-1"
+
+    def test_multiple_specs_preserve_order(self) -> None:
+        payload = _build_update_work_items_payload(
+            project_id="MyProj",
+            specs=[
+                WorkItemUpdateSpec(work_item_id="MCPT-1", title="a"),
+                WorkItemUpdateSpec(work_item_id="MCPT-2", status="open"),
+            ],
+        )
+
+        data = cast(list[dict[str, object]], payload["data"])
+        assert [item["id"] for item in data] == ["MyProj/MCPT-1", "MyProj/MCPT-2"]
+        attributes_last = cast(dict[str, object], data[1]["attributes"])
+        assert attributes_last == {"status": "open"}
+
+
+class TestUpdateWorkItemsValidation:
+    """Spec- and batch-level rejection paths for ``update_work_items``."""
+
+    async def test_empty_spec_rejected_before_any_request(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        with pytest.raises(ValueError, match="Nothing to update"):
-            await _call_update(mock_ctx)
+        # Polarion 400s on a body-less resource even with workflowAction /
+        # changeTypeTo, so an action-only update is unrepresentable: the spec
+        # itself raises before the tool can issue a request.
+        with pytest.raises(ValidationError, match="Nothing to update"):
+            await _call_update(mock_ctx, workflow_action="close")
         mock_client.patch.assert_not_called()
         mock_client.get.assert_not_called()
 
     async def test_empty_description_html_is_noop(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """``description_html=''`` = leave unchanged (never PATCHes) — asymmetric vs
-        update_document, where '' RAISES: a wiped document body orphans every heading,
-        a cleared description is recoverable.
+        """``description_html=''`` = leave unchanged — asymmetric vs
+        update_document, where '' RAISES: a wiped document body orphans every
+        heading, a cleared description is recoverable.
         """
-        with pytest.raises(ValueError, match="Nothing to update"):
+        with pytest.raises(ValidationError, match="Nothing to update"):
             await _call_update(mock_ctx, description_html="")
         mock_client.patch.assert_not_called()
         mock_client.get.assert_not_called()
@@ -1001,15 +937,12 @@ class TestUpdateWorkItemValidation:
             description_html="",
             dry_run=True,
         )
-        # Empty description_html drops from both changes and the wire payload.
-        assert result.changes == {"title": "new title"}
         assert result.payload_preview is not None
-        item = cast(dict[str, object], result.payload_preview["data"])
-        attributes = cast(dict[str, object], item["attributes"])
-        assert "description" not in attributes
+        data = cast(list[dict[str, object]], result.payload_preview["data"])
+        attributes = cast(dict[str, object], data[0]["attributes"])
         assert attributes == {"title": "new title"}
 
-    async def test_custom_fields_alone_satisfies_at_least_one_check(
+    async def test_custom_fields_alone_satisfies_spec(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         # custom_fields counts as a body field.
@@ -1025,66 +958,14 @@ class TestUpdateWorkItemValidation:
             dry_run=True,
         )
         assert result.dry_run is True
-        assert result.changes == {"custom_fields": {"riskLevel": "high"}}
-
-    async def test_collision_raises_value_error(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        # A custom key matching a standard param would shadow it.
-        with pytest.raises(ValueError, match="custom_fields keys collide"):
-            await _call_update(
-                mock_ctx,
-                title="x",
-                custom_fields={"title": "y"},
-                dry_run=True,
-            )
-        mock_client.patch.assert_not_called()
-
-    async def test_workflow_action_alone_raises_value_error(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        # Polarion 400s on attribute-less PATCH, so an action needs a body field.
-        with pytest.raises(ValueError, match="at least one body field"):
-            await _call_update(mock_ctx, workflow_action="close")
-        mock_client.patch.assert_not_called()
-        mock_client.get.assert_not_called()
-
-    async def test_change_type_to_alone_raises_value_error(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        with pytest.raises(ValueError, match="at least one body field"):
-            await _call_update(mock_ctx, change_type_to="defect")
-        mock_client.patch.assert_not_called()
-
-    async def test_workflow_action_alone_dry_run_also_rejected(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        # Dry-run is rejected too: the would-be payload is invalid.
-        with pytest.raises(ValueError, match="at least one body field"):
-            await _call_update(mock_ctx, workflow_action="close", dry_run=True)
-
-    async def test_workflow_action_with_title_passes(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        # Pairing the action with any body field satisfies Polarion.
-        mock_client.patch.return_value = {}
-        mock_client.get.return_value = _make_get_response()
-
-        result = await _call_update(
-            mock_ctx,
-            workflow_action="close",
-            title="closing this work item",
-        )
-
-        assert result.updated is True
-        patch_path = mock_client.patch.call_args.args[0]
-        assert patch_path == "/projects/MyProj/workitems/MCPT-1?workflowAction=close"
-        body = mock_client.patch.call_args.kwargs["json"]
-        assert body["data"]["attributes"]["title"] == "closing this work item"
+        assert result.payload_preview is not None
+        data = cast(list[dict[str, object]], result.payload_preview["data"])
+        attributes = cast(dict[str, object], data[0]["attributes"])
+        assert attributes == {"riskLevel": "high"}
 
 
-class TestUpdateWorkItemHyperlinkRoleGuard:
-    """``update_work_item`` validates hyperlink roles before the PATCH."""
+class TestUpdateWorkItemsHyperlinkRoleGuard:
+    """``update_work_items`` validates hyperlink roles before the PATCH."""
 
     async def test_unknown_hyperlink_role_raises_without_patch(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1103,9 +984,37 @@ class TestUpdateWorkItemHyperlinkRoleGuard:
         assert "ref_ext" in str(exc.value)
         mock_client.patch.assert_not_called()
 
+    async def test_roles_pooled_across_items_in_one_probe(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # One project-enum probe covers every item's roles (as in create).
+        mock_client.get.return_value = _project_enum_get_response(
+            "hyperlink-role", ["ref_int", "ref_ext"]
+        )
 
-class TestUpdateWorkItemDryRun:
-    """Tests for ``update_work_item`` with ``dry_run=True``."""
+        with pytest.raises(ValueError, match="ghost"):
+            await update_work_items(
+                mock_ctx,
+                project_id="MyProj",
+                items=[
+                    WorkItemUpdateSpec(
+                        work_item_id="MCPT-1",
+                        hyperlinks=[Hyperlink(role="ref_ext", uri="https://a.com")],
+                    ),
+                    WorkItemUpdateSpec(
+                        work_item_id="MCPT-2",
+                        hyperlinks=[Hyperlink(role="ghost", uri="https://b.com")],
+                    ),
+                ],
+                workflow_action=None,
+                change_type_to=None,
+                dry_run=True,
+            )
+        mock_client.patch.assert_not_called()
+
+
+class TestUpdateWorkItemsDryRun:
+    """Tests for ``update_work_items`` with ``dry_run=True``."""
 
     async def test_dry_run_does_not_call_polarion(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1118,22 +1027,20 @@ class TestUpdateWorkItemDryRun:
 
         mock_client.patch.assert_not_called()
         mock_client.get.assert_not_called()
-        assert isinstance(result, WorkItemUpdateResult)
+        assert isinstance(result, WorkItemsUpdateResult)
         assert result.updated is False
         assert result.dry_run is True
-        assert result.current is None
-        assert result.changes == {"title": "New title"}
-        # payload_preview is populated on dry-run (mirrors create_work_items).
+        assert result.work_item_ids == []
         assert result.payload_preview is not None
-        item = cast(dict[str, object], result.payload_preview["data"])
-        assert item["id"] == "MyProj/MCPT-1"
-        attributes = cast(dict[str, object], item["attributes"])
+        data = cast(list[dict[str, object]], result.payload_preview["data"])
+        assert data[0]["id"] == "MyProj/MCPT-1"
+        attributes = cast(dict[str, object], data[0]["attributes"])
         assert attributes == {"title": "New title"}
 
-    async def test_changes_uses_python_typed_values_not_json_api_shape(
+    async def test_dry_run_preview_wraps_html_verbatim(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # changes holds raw caller values; {type,value} wrapping is preview-only.
+        # Preview wraps the caller's HTML verbatim, no sanitize/convert.
         result = await _call_update(
             mock_ctx,
             description_html="<p>bold</p>",
@@ -1141,207 +1048,13 @@ class TestUpdateWorkItemDryRun:
             dry_run=True,
         )
 
-        assert result.changes == {
-            "description_html": "<p>bold</p>",
-            "assignee_ids": ["alice"],
-        }
-        # Preview wraps the same HTML verbatim, no sanitize/convert.
         assert result.payload_preview is not None
-        item = cast(dict[str, object], result.payload_preview["data"])
-        attributes = cast(dict[str, object], item["attributes"])
+        data = cast(list[dict[str, object]], result.payload_preview["data"])
+        attributes = cast(dict[str, object], data[0]["attributes"])
         desc = cast(dict[str, object], attributes["description"])
         assert desc == {"type": "text/html", "value": "<p>bold</p>"}
-
-
-class TestUpdateWorkItemHappyPath:
-    """Tests for a successful ``update_work_item`` call."""
-
-    async def test_returns_updated_with_post_update_state(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        # PATCH returns {} on 204; GET returns the post-update detail.
-        mock_client.patch.return_value = {}
-        mock_client.get.return_value = _make_get_response(title="after")
-
-        result = await _call_update(mock_ctx, title="after")
-
-        assert isinstance(result, WorkItemUpdateResult)
-        assert result.updated is True
-        assert result.dry_run is False
-        assert result.current is not None
-        assert result.current.title == "after"
-        assert result.changes == {"title": "after"}
-        assert result.payload_preview is None
-
-    async def test_current_description_html_blanked_by_default(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        """Default blanks current.description_html — body still travels (``@all`` needed
-        for customs); tool strips it to spare LLM context.
-        """
-        mock_client.patch.return_value = {}
-        mock_client.get.return_value = _make_get_response(
-            description_html="<p>large body that should be hidden</p>",
-        )
-
-        result = await _call_update(mock_ctx, status="approved")
-
-        assert result.current is not None
-        assert result.current.description_html == ""
-        # Other metadata is unaffected.
-        assert result.current.status == "open"  # _make_get_response default
-
-    async def test_current_description_html_kept_when_flag_true(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        """include_current_description_html=True → raw HTML in current."""
-        mock_client.patch.return_value = {}
-        raw = "<p>verified body <strong>after</strong></p>"
-        mock_client.get.return_value = _make_get_response(description_html=raw)
-
-        result = await _call_update(
-            mock_ctx,
-            description_html=raw,
-            include_current_description_html=True,
-        )
-
-        assert result.current is not None
-        assert result.current.description_html == raw
-
-    async def test_patch_called_with_correct_path_and_body(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.patch.return_value = {}
-        mock_client.get.return_value = _make_get_response()
-
-        await _call_update(
-            mock_ctx,
-            work_item_id="MCPT-42",
-            status="open",
-            assignee_ids=["alice"],
-        )
-
-        args, kwargs = mock_client.patch.call_args
-        assert args == ("/projects/MyProj/workitems/MCPT-42",)
-        body = kwargs["json"]
-        item = body["data"]
-        assert item["type"] == "workitems"
-        assert item["id"] == "MyProj/MCPT-42"
-        assert item["attributes"]["status"] == "open"
-        assert item["relationships"]["assignee"]["data"] == [
-            {"type": "users", "id": "alice"}
-        ]
-
-    async def test_followup_get_called_with_detail_fields(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.patch.return_value = {}
-        mock_client.get.return_value = _make_get_response()
-
-        await _call_update(mock_ctx, title="t")
-
-        args, kwargs = mock_client.get.call_args
-        assert args == ("/projects/MyProj/workitems/MCPT-1",)
-        params = kwargs["params"]
-        assert params["include"] == "assignee"
-        # Bare @all so inline customs surface; narrowing would drop them.
-        assert params["fields[workitems]"] == "@all"
-
-    async def test_current_carries_custom_fields_from_post_patch_get(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        # Inlined customs from the post-PATCH GET surface on current.custom_fields.
-        mock_client.patch.return_value = {}
-        get_response = _make_get_response(title="after")
-        data = cast(dict[str, object], get_response["data"])
-        attributes = cast(dict[str, object], data["attributes"])
-        attributes["riskLevel"] = "high"
-        attributes["effortHours"] = 12.0
-        mock_client.get.return_value = get_response
-
-        result = await _call_update(mock_ctx, title="after")
-
-        assert result.current is not None
-        assert result.current.custom_fields == {
-            "riskLevel": "high",
-            "effortHours": 12.0,
-        }
-
-    async def test_custom_fields_inlined_into_patch_body(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        # Customs ride top-level in attributes; a customFields container is dropped.
-        mock_client.patch.return_value = {}
-        rich = {"type": "text/html", "value": "<p>note</p>"}
-        _cache_mod.store_work_item_custom_keys(
-            "MyProj", "task", frozenset({"riskLevel", "reviewerNote"})
-        )
-        mock_client.get.return_value = _make_get_response(
-            custom_fields={"riskLevel": "high", "reviewerNote": rich}
-        )
-
-        await _call_update(
-            mock_ctx,
-            custom_fields={"riskLevel": "low", "reviewerNote": rich},
-        )
-
-        _, kwargs = mock_client.patch.call_args
-        body = kwargs["json"]
-        item = body["data"]
-        attributes = item["attributes"]
-        assert attributes["riskLevel"] == "low"
-        assert attributes["reviewerNote"] == rich
-        assert "customFields" not in attributes
-
-    async def test_changes_summary_records_custom_fields(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        # changes mirrors what was sent so callers can confirm intent.
-        mock_client.patch.return_value = {}
-        _cache_mod.store_work_item_custom_keys(
-            "MyProj", "task", frozenset({"riskLevel"})
-        )
-        mock_client.get.return_value = _make_get_response(
-            custom_fields={"riskLevel": "low"}
-        )
-
-        result = await _call_update(
-            mock_ctx,
-            title="t",
-            custom_fields={"riskLevel": "high"},
-        )
-
-        assert result.changes["title"] == "t"
-        assert result.changes["custom_fields"] == {"riskLevel": "high"}
-
-    async def test_changes_custom_fields_is_independent_of_input(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        # Post-call mutation of the caller's dict must not bleed into changes.
-        mock_client.patch.return_value = {}
-        _cache_mod.store_work_item_custom_keys(
-            "MyProj", "task", frozenset({"reviewerNote", "riskLevel"})
-        )
-        mock_client.get.return_value = _make_get_response(
-            custom_fields={"reviewerNote": "x", "riskLevel": "low"}
-        )
-
-        rich = {"type": "text/html", "value": "<p>original</p>"}
-        customs: dict[str, object] = {"reviewerNote": rich, "riskLevel": "high"}
-
-        result = await _call_update(
-            mock_ctx,
-            title="t",
-            custom_fields=customs,
-        )
-
-        customs["riskLevel"] = "low"
-        rich["value"] = "<p>mutated</p>"
-
-        recorded = cast(dict[str, object], result.changes["custom_fields"])
-        assert recorded["riskLevel"] == "high"
-        recorded_note = cast(dict[str, object], recorded["reviewerNote"])
-        assert recorded_note["value"] == "<p>original</p>"
+        relationships = cast(dict[str, object], data[0]["relationships"])
+        assert relationships["assignee"] == {"data": [{"type": "users", "id": "alice"}]}
 
     async def test_dry_run_preview_includes_custom_fields(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1362,10 +1075,109 @@ class TestUpdateWorkItemHappyPath:
 
         mock_client.patch.assert_not_called()
         assert result.payload_preview is not None
-        item = cast(dict[str, object], result.payload_preview["data"])
-        attributes = cast(dict[str, object], item["attributes"])
+        data = cast(list[dict[str, object]], result.payload_preview["data"])
+        attributes = cast(dict[str, object], data[0]["attributes"])
         assert attributes["title"] == "t"
         assert attributes["riskLevel"] == "high"
+
+
+class TestUpdateWorkItemsHappyPath:
+    """Tests for a successful ``update_work_items`` call."""
+
+    async def test_returns_updated_with_target_ids(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # PATCH returns {} on 204; the result echoes the submitted ids.
+        mock_client.patch.return_value = {}
+
+        result = await _call_update(mock_ctx, title="after")
+
+        assert isinstance(result, WorkItemsUpdateResult)
+        assert result.updated is True
+        assert result.dry_run is False
+        assert result.work_item_ids == ["MCPT-1"]
+        assert result.payload_preview is None
+
+    async def test_no_follow_up_get_after_patch(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Bulk PATCH is 204; the tool must not re-GET items afterwards.
+        mock_client.patch.return_value = {}
+
+        await _call_update(mock_ctx, title="after")
+
+        mock_client.get.assert_not_called()
+
+    async def test_patch_called_with_correct_path_and_body(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.return_value = {}
+
+        await _call_update(
+            mock_ctx,
+            work_item_id="MCPT-42",
+            title="t",
+            assignee_ids=["alice"],
+        )
+
+        args, kwargs = mock_client.patch.call_args
+        assert args == ("/projects/MyProj/workitems",)
+        body = kwargs["json"]
+        data = body["data"]
+        assert isinstance(data, list)
+        item = data[0]
+        assert item["type"] == "workitems"
+        assert item["id"] == "MyProj/MCPT-42"
+        assert item["attributes"]["title"] == "t"
+        assert item["relationships"]["assignee"]["data"] == [
+            {"type": "users", "id": "alice"}
+        ]
+
+    async def test_multiple_items_updated_in_one_patch(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.return_value = {}
+
+        result = await update_work_items(
+            mock_ctx,
+            project_id="MyProj",
+            items=[
+                WorkItemUpdateSpec(work_item_id="MCPT-1", title="a"),
+                WorkItemUpdateSpec(work_item_id="MCPT-2", due_date="2026-07-31"),
+            ],
+            workflow_action=None,
+            change_type_to=None,
+            dry_run=False,
+        )
+
+        mock_client.patch.assert_awaited_once()
+        data = mock_client.patch.call_args.kwargs["json"]["data"]
+        assert [item["id"] for item in data] == ["MyProj/MCPT-1", "MyProj/MCPT-2"]
+        assert result.work_item_ids == ["MCPT-1", "MCPT-2"]
+
+    async def test_custom_fields_inlined_into_patch_body(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Customs ride top-level in attributes; a customFields container is dropped.
+        mock_client.patch.return_value = {}
+        rich = {"type": "text/html", "value": "<p>note</p>"}
+        _cache_mod.store_work_item_custom_keys(
+            "MyProj", "task", frozenset({"riskLevel", "reviewerNote"})
+        )
+        mock_client.get.return_value = _make_get_response(
+            custom_fields={"riskLevel": "high", "reviewerNote": rich}
+        )
+
+        await _call_update(
+            mock_ctx,
+            custom_fields={"riskLevel": "low", "reviewerNote": rich},
+        )
+
+        _, kwargs = mock_client.patch.call_args
+        attributes = kwargs["json"]["data"][0]["attributes"]
+        assert attributes["riskLevel"] == "low"
+        assert attributes["reviewerNote"] == rich
+        assert "customFields" not in attributes
 
     async def test_round_trip_read_response_can_be_written_back(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1385,7 +1197,7 @@ class TestUpdateWorkItemHappyPath:
         result = await _call_update(mock_ctx, custom_fields=read_customs)
 
         _, kwargs = mock_client.patch.call_args
-        attributes = kwargs["json"]["data"]["attributes"]
+        attributes = kwargs["json"]["data"][0]["attributes"]
         for key, value in read_customs.items():
             assert attributes[key] == value
         assert result.updated is True
@@ -1393,28 +1205,31 @@ class TestUpdateWorkItemHappyPath:
     async def test_workflow_action_appended_as_query_param(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # workflow_action needs a paired body field, so add a title.
+        # workflow_action rides the batch endpoint as a query param.
         mock_client.patch.return_value = {}
-        mock_client.get.return_value = _make_get_response()
 
         await _call_update(mock_ctx, workflow_action="close", title="t")
 
         patch_path = mock_client.patch.call_args.args[0]
-        assert patch_path == "/projects/MyProj/workitems/MCPT-1?workflowAction=close"
-        # Follow-up GET drops the query to read the canonical detail.
-        get_path = mock_client.get.call_args.args[0]
-        assert get_path == "/projects/MyProj/workitems/MCPT-1"
+        assert patch_path == "/projects/MyProj/workitems?workflowAction=close"
 
     async def test_change_type_to_appended_as_query_param(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
     ) -> None:
+        # change_type_to triggers the type guard: prefetch + type options.
         mock_client.patch.return_value = {}
-        mock_client.get.return_value = _make_get_response()
+        mock_client.get.side_effect = [
+            _make_get_response(),
+            _enum_get_response(["task"]),
+        ]
 
         await _call_update(mock_ctx, change_type_to="task", title="t")
 
         patch_path = mock_client.patch.call_args.args[0]
-        assert patch_path == "/projects/MyProj/workitems/MCPT-1?changeTypeTo=task"
+        assert patch_path == "/projects/MyProj/workitems?changeTypeTo=task"
 
     async def test_description_html_is_sent_verbatim(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1423,7 +1238,6 @@ class TestUpdateWorkItemHappyPath:
         no markdownify.
         """
         mock_client.patch.return_value = {}
-        mock_client.get.return_value = _make_get_response()
 
         raw = (
             '<p>See <span class="polarion-rte-link" '
@@ -1432,24 +1246,20 @@ class TestUpdateWorkItemHappyPath:
         await _call_update(mock_ctx, description_html=raw)
 
         body = mock_client.patch.call_args.kwargs["json"]
-        desc = body["data"]["attributes"]["description"]
+        desc = body["data"][0]["attributes"]["description"]
         assert desc == {"type": "text/html", "value": raw}
 
     async def test_path_url_encodes_special_chars(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.patch.return_value = {}
-        mock_client.get.return_value = _make_get_response()
 
         await _call_update(mock_ctx, project_id="My Proj", title="t")
 
-        assert (
-            mock_client.patch.call_args.args[0]
-            == "/projects/My%20Proj/workitems/MCPT-1"
-        )
+        assert mock_client.patch.call_args.args[0] == "/projects/My%20Proj/workitems"
 
 
-class TestUpdateWorkItemErrorMapping:
+class TestUpdateWorkItemsErrorMapping:
     """Tests that domain exceptions are mapped at the tool layer."""
 
     async def test_patch_401_raises_permission_error(
@@ -1459,7 +1269,6 @@ class TestUpdateWorkItemErrorMapping:
 
         with pytest.raises(PermissionError):
             await _call_update(mock_ctx, title="t")
-        mock_client.get.assert_not_called()
 
     async def test_patch_404_raises_value_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1479,27 +1288,51 @@ class TestUpdateWorkItemErrorMapping:
         with pytest.raises(RuntimeError, match="boom"):
             await _call_update(mock_ctx, title="t")
 
-    async def test_followup_get_404_raises_value_error(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    async def test_prefetch_404_raises_value_error(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
     ) -> None:
-        # PATCH succeeds, but the follow-up GET 404s — surface it the
-        # same way (very rare race; mostly defensive).
-        mock_client.patch.return_value = {}
-        mock_client.get.side_effect = PolarionNotFoundError(
-            "not found", status_code=404
-        )
+        # The guard prefetch names the missing item; nothing is PATCHed.
+        mock_client.get.side_effect = PolarionNotFoundError("nf", status_code=404)
 
-        with pytest.raises(ValueError, match="not found"):
-            await _call_update(mock_ctx, title="t")
+        with pytest.raises(ValueError, match="ghost"):
+            await _call_update(mock_ctx, work_item_id="ghost", status="open")
+        mock_client.patch.assert_not_called()
+
+    async def test_prefetch_401_raises_permission_error(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError("auth", status_code=401)
+
+        with pytest.raises(PermissionError):
+            await _call_update(mock_ctx, status="open")
+        mock_client.patch.assert_not_called()
+
+    async def test_prefetch_other_error_raises_runtime_error(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        mock_client.get.side_effect = PolarionError("boom", status_code=500)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            await _call_update(mock_ctx, status="open")
+        mock_client.patch.assert_not_called()
 
 
-class TestUpdateWorkItemFieldValidation:
-    """Verify ``min_length=1`` constraints attached to required parameters."""
+class TestUpdateWorkItemsFieldValidation:
+    """Verify constraints attached to the tool's top-level parameters."""
 
     @staticmethod
     def _adapter_for(param_name: str) -> TypeAdapter[object]:
-        hints = get_type_hints(update_work_item)
-        sig = inspect.signature(update_work_item)
+        hints = get_type_hints(update_work_items)
+        sig = inspect.signature(update_work_items)
         field_info = sig.parameters[param_name].default
         return TypeAdapter(Annotated[hints[param_name], field_info])
 
@@ -1507,39 +1340,39 @@ class TestUpdateWorkItemFieldValidation:
         with pytest.raises(ValidationError):
             self._adapter_for("project_id").validate_python("")
 
-    def test_work_item_id_rejects_empty_string(self) -> None:
-        with pytest.raises(ValidationError):
-            self._adapter_for("work_item_id").validate_python("")
-
     def test_project_id_accepts_non_empty(self) -> None:
         assert self._adapter_for("project_id").validate_python("p") == "p"
 
-    def test_work_item_id_accepts_non_empty(self) -> None:
-        assert self._adapter_for("work_item_id").validate_python("MCPT-1") == "MCPT-1"
-
-    def test_description_html_rejects_overlong_input(self) -> None:
-        """max_length=MAX_BODY_HTML_LEN caps runaway HTML.
-
-        Re-proven here so a docstring rewrite cannot silently drop it.
-        """
-        adapter = self._adapter_for("description_html")
-        assert adapter.validate_python("<p>ok</p>") == "<p>ok</p>"
-        # 2 MiB + 1 char is rejected.
+    def test_items_rejects_empty_list(self) -> None:
         with pytest.raises(ValidationError):
-            adapter.validate_python("x" * (2_000_000 + 1))
+            self._adapter_for("items").validate_python([])
+
+    def test_items_rejects_more_than_max_bulk(self) -> None:
+        specs = [
+            WorkItemUpdateSpec(work_item_id=f"MCPT-{i}", title="t") for i in range(51)
+        ]
+        with pytest.raises(ValidationError):
+            self._adapter_for("items").validate_python(specs)
+
+    def test_items_accepts_single_spec(self) -> None:
+        validated = self._adapter_for("items").validate_python(
+            [WorkItemUpdateSpec(work_item_id="MCPT-1", title="t")]
+        )
+        assert isinstance(validated, list)
+        assert len(validated) == 1
 
 
-class TestUpdateWorkItemDocstringGuidance:
+class TestUpdateWorkItemsDocstringGuidance:
     """Lock the read-before-update steer into the public docstring."""
 
     def test_docstring_directs_get_before_update(self) -> None:
-        document = update_work_item.__doc__ or ""
+        document = update_work_items.__doc__ or ""
         assert "get_work_item" in document, (
-            "update_work_item docstring must direct callers to read the "
+            "update_work_items docstring must direct callers to read the "
             "work item before patching it"
         )
         assert "BEFORE" in document, (
-            "update_work_item docstring must state the read happens BEFORE the update"
+            "update_work_items docstring must state the read happens BEFORE the update"
         )
 
 
@@ -1685,8 +1518,36 @@ class TestEnumGuardCreateWorkItem:
         mock_client.post.assert_not_called()
 
 
-class TestEnumGuardUpdateWorkItem:
-    """Integration: ``update_work_item`` pre-fetches type then guards."""
+class TestEnumGuardUpdateWorkItems:
+    """Integration: ``update_work_items`` pre-fetches each item's type then guards."""
+
+    async def test_bad_enum_on_later_item_aborts_whole_batch(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        # Per-item guard runs before the PATCH; item 2's ghost status aborts
+        # the batch (status options cached from item 1's probe).
+        mock_client.get.side_effect = [
+            _make_get_response(),
+            _enum_get_response(["open", "closed"]),
+            _make_get_response(work_item_id="MCPT-2"),
+        ]
+
+        with pytest.raises(ValueError, match="status='ghost'"):
+            await update_work_items(
+                mock_ctx,
+                project_id="MyProj",
+                items=[
+                    WorkItemUpdateSpec(work_item_id="MCPT-1", status="open"),
+                    WorkItemUpdateSpec(work_item_id="MCPT-2", status="ghost"),
+                ],
+                workflow_action=None,
+                change_type_to=None,
+                dry_run=False,
+            )
+        mock_client.patch.assert_not_called()
 
     async def test_unlisted_priority_raises_after_prefetch(
         self,

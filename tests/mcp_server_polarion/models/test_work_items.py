@@ -10,7 +10,8 @@ from mcp_server_polarion.models import (
     WorkItemDetail,
     WorkItemsCreateResult,
     WorkItemSummary,
-    WorkItemUpdateResult,
+    WorkItemsUpdateResult,
+    WorkItemUpdateSpec,
 )
 
 
@@ -247,43 +248,68 @@ class TestWorkItemsCreateResult:
         assert result.payload_preview is not None
 
 
-class TestWorkItemUpdateResult:
-    def test_successful_update(self):
-        current = WorkItemDetail(
-            id="MCPT-001",
-            title="Old Title",
-            type="requirement",
-            status="draft",
-            description_html="<p>Old desc</p>",
-            project_id="proj1",
+class TestWorkItemUpdateSpec:
+    def test_single_field_is_enough(self):
+        spec = WorkItemUpdateSpec(work_item_id="MCPT-001", title="New Title")
+        assert spec.work_item_id == "MCPT-001"
+        assert spec.title == "New Title"
+
+    def test_no_updatable_field_raises(self):
+        # Polarion 400s on a body-less resource; the spec fails closed instead.
+        with pytest.raises(ValidationError, match="Nothing to update"):
+            WorkItemUpdateSpec(work_item_id="MCPT-001")
+
+    def test_empty_strings_do_not_count_as_fields(self):
+        with pytest.raises(ValidationError, match="Nothing to update"):
+            WorkItemUpdateSpec(work_item_id="MCPT-001", title="", status="")
+
+    def test_empty_work_item_id_rejected(self):
+        with pytest.raises(ValidationError):
+            WorkItemUpdateSpec(work_item_id="", title="t")
+
+    def test_description_html_rejects_overlong_input(self):
+        # max_length=MAX_BODY_HTML_LEN caps runaway HTML (2 MiB + 1 rejected).
+        with pytest.raises(ValidationError):
+            WorkItemUpdateSpec(
+                work_item_id="MCPT-001",
+                description_html="x" * (2_000_000 + 1),
+            )
+
+    def test_custom_fields_alone_satisfies_validator(self):
+        spec = WorkItemUpdateSpec(
+            work_item_id="MCPT-001", custom_fields={"riskLevel": "high"}
         )
-        result = WorkItemUpdateResult(
+        assert spec.custom_fields == {"riskLevel": "high"}
+
+
+class TestWorkItemsUpdateResult:
+    def test_successful_update(self):
+        result = WorkItemsUpdateResult(
             updated=True,
             dry_run=False,
-            current=current,
-            changes={"title": "New Title"},
+            work_item_ids=["MCPT-001", "MCPT-002"],
             payload_preview=None,
         )
         assert result.updated is True
-        assert result.current is not None
-        assert result.current.title == "Old Title"
-        assert result.changes["title"] == "New Title"
+        assert result.work_item_ids == ["MCPT-001", "MCPT-002"]
         assert result.payload_preview is None
 
     def test_dry_run(self):
-        result = WorkItemUpdateResult(
+        result = WorkItemsUpdateResult(
             updated=False,
             dry_run=True,
-            current=None,
-            changes={"status": "approved"},
+            work_item_ids=[],
             payload_preview={
-                "data": {
-                    "type": "workitems",
-                    "id": "proj1/MCPT-001",
-                    "attributes": {"status": "approved"},
-                }
+                "data": [
+                    {
+                        "type": "workitems",
+                        "id": "proj1/MCPT-001",
+                        "attributes": {"status": "approved"},
+                    }
+                ]
             },
         )
         assert result.updated is False
         assert result.dry_run is True
+        assert result.work_item_ids == []
         assert result.payload_preview is not None
