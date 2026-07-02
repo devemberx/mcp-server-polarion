@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from mcp_server_polarion.models.common import MAX_BODY_HTML_LEN
 
@@ -90,14 +90,47 @@ class WorkItemsCreateResult(BaseModel):
     payload_preview: Mapping[str, object] | None = None
 
 
-class WorkItemUpdateResult(BaseModel):
-    """Result of an ``update_work_item`` operation."""
+class WorkItemUpdateSpec(BaseModel):
+    """One work item to update via ``update_work_items``."""
+
+    work_item_id: str = Field(min_length=1)
+    title: str | None = None
+    description_html: str | None = Field(default=None, max_length=MAX_BODY_HTML_LEN)
+    status: str | None = None
+    priority: str | None = None
+    severity: str | None = None
+    due_date: str | None = None
+    initial_estimate: str | None = None
+    resolution: str | None = None
+    hyperlinks: list[Hyperlink] | None = None
+    assignee_ids: list[str] | None = None
+    custom_fields: dict[str, object] | None = None
+
+    @model_validator(mode="after")
+    def _at_least_one_field(self) -> WorkItemUpdateSpec:
+        # Polarion 400s on a body-less resource even with workflowAction /
+        # changeTypeTo query params, so every item must carry >=1 field.
+        if not any(
+            getattr(self, name)
+            for name in type(self).model_fields
+            if name != "work_item_id"
+        ):
+            raise ValueError(
+                "Nothing to update -- each item needs at least one of title, "
+                "description_html, status, priority, severity, due_date, "
+                "initial_estimate, resolution, hyperlinks, assignee_ids, "
+                "or custom_fields."
+            )
+        return self
+
+
+class WorkItemsUpdateResult(BaseModel):
+    """Result of an ``update_work_items`` operation."""
 
     updated: bool
     dry_run: bool
-    current: WorkItemDetail | None
-    changes: Mapping[str, object]
-    payload_preview: Mapping[str, object] | None
+    work_item_ids: list[str] = Field(default_factory=list)
+    payload_preview: Mapping[str, object] | None = None
 
 
 class WorkItemMoveResult(BaseModel):
