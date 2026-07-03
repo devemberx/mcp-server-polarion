@@ -1,6 +1,9 @@
 """In-process TTL caches for near-static project facts, sparing the server's
 tight budget (<=3 req/s, no concurrency). Owns ALL cache state; tool logic
 reaches it only through the typed get / store wrappers.
+
+Layout: the ``TTLCache`` primitive and shared types first, then one block per
+cache — its module-level instance immediately followed by its wrappers.
 """
 
 from __future__ import annotations
@@ -76,28 +79,11 @@ _ENUM_NOT_FOUND_TTL_SECONDS: Final[float] = 600.0
 # New documents must surface within ~1 min (create also invalidates on write).
 _DOCUMENT_LIST_TTL_SECONDS: Final[float] = 60.0
 
+
 # project_id -> discovered documents in display order.
 _document_list_cache: TTLCache[str, tuple[DiscoveredDocument, ...]] = TTLCache(
     _DOCUMENT_LIST_TTL_SECONDS
 )
-# (project, resource, field, type) -> valid option ids.
-_enum_option_cache: TTLCache[tuple[str, Resource, str, str], frozenset[str]] = TTLCache(
-    _GUARD_TTL_SECONDS
-)
-# (project, enum_name) -> project-level enum option ids (no type axis).
-_project_enum_cache: TTLCache[tuple[str, str], frozenset[str]] = TTLCache(
-    _GUARD_TTL_SECONDS
-)
-# (project, work_item_type) -> full custom-field key schema (MIN-per-key sample).
-_work_item_custom_key_cache: TTLCache[tuple[str, str], frozenset[str]] = TTLCache(
-    _GUARD_TTL_SECONDS
-)
-# (project, document_type) -> custom-field key schema; document-side mirror.
-_document_type_custom_key_cache: TTLCache[tuple[str, str], frozenset[str]] = TTLCache(
-    _GUARD_TTL_SECONDS
-)
-# project -> testrun custom-field key schema (project config, no type axis).
-_test_run_custom_key_cache: TTLCache[str, frozenset[str]] = TTLCache(_GUARD_TTL_SECONDS)
 
 
 def get_cached_documents(project_id: str) -> list[DiscoveredDocument] | None:
@@ -117,6 +103,12 @@ def store_cached_documents(
 def invalidate_documents_cache(project_id: str) -> None:
     """Drop the cached document list for *project_id*, if any."""
     _document_list_cache.invalidate(project_id)
+
+
+# (project, resource, field, type) -> valid option ids.
+_enum_option_cache: TTLCache[tuple[str, Resource, str, str], frozenset[str]] = TTLCache(
+    _GUARD_TTL_SECONDS
+)
 
 
 def get_cached_enum_options(
@@ -148,6 +140,12 @@ def store_cached_enum_options(  # noqa: PLR0913
     )
 
 
+# (project, enum_name) -> project-level enum option ids (no type axis).
+_project_enum_cache: TTLCache[tuple[str, str], frozenset[str]] = TTLCache(
+    _GUARD_TTL_SECONDS
+)
+
+
 def get_cached_project_enum(
     project_id: str,
     enum_name: str,
@@ -163,6 +161,12 @@ def store_cached_project_enum(
 ) -> None:
     """Cache the valid option ids for the project enum for ``_GUARD_TTL_SECONDS``."""
     _project_enum_cache.set((project_id, enum_name), option_ids)
+
+
+# (project, work_item_type) -> full custom-field key schema (MIN-per-key sample).
+_work_item_custom_key_cache: TTLCache[tuple[str, str], frozenset[str]] = TTLCache(
+    _GUARD_TTL_SECONDS
+)
 
 
 def get_work_item_custom_keys(
@@ -189,6 +193,12 @@ def invalidate_work_item_custom_keys(project_id: str, work_item_type: str) -> No
     _work_item_custom_key_cache.invalidate((project_id, work_item_type))
 
 
+# (project, document_type) -> custom-field key schema; document-side mirror.
+_document_type_custom_key_cache: TTLCache[tuple[str, str], frozenset[str]] = TTLCache(
+    _GUARD_TTL_SECONDS
+)
+
+
 def get_document_type_custom_keys(
     project_id: str,
     document_type: str,
@@ -211,6 +221,10 @@ def store_document_type_custom_keys(
 def invalidate_document_type_custom_keys(project_id: str, document_type: str) -> None:
     """Drop the cached schema for ``(project, document_type)`` (bypass-retry)."""
     _document_type_custom_key_cache.invalidate((project_id, document_type))
+
+
+# project -> testrun custom-field key schema (project config, no type axis).
+_test_run_custom_key_cache: TTLCache[str, frozenset[str]] = TTLCache(_GUARD_TTL_SECONDS)
 
 
 def get_test_run_custom_keys(project_id: str) -> frozenset[str] | None:

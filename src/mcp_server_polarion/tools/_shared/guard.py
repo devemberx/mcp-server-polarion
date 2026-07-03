@@ -4,6 +4,9 @@ real options and raises before the write. Fail-closed — validation error block
 the write (auth → ``PermissionError``, else ``RuntimeError``); only a
 *successful* empty option set and a 404 defer to Polarion. Caching in
 :mod:`...tools._shared.cache`.
+
+Layout: shared fail-closed helpers and option fetchers first, then the guards
+grouped by domain — work items, documents, test runs, links.
 """
 
 from __future__ import annotations
@@ -182,57 +185,92 @@ async def _check_enum(  # noqa: PLR0913
     )
 
 
-async def guard_work_item_enums(  # noqa: PLR0913
+async def fetch_project_enum_option_ids(
     client: PolarionClient,
     project_id: str,
-    work_item_type: str,
-    *,
-    type: str | None = None,
-    status: str | None = None,
-    severity: str | None = None,
-    priority: str | None = None,
-    resolution: str | None = None,
-) -> None:
-    """Validate supplied work-item enum args against ``getAvailableOptions``.
-
-    ``work_item_type`` scopes status/severity/resolution/priority (``'~'`` =
-    type-agnostic); ``type`` checked first so an invalid type raises before
-    being reused as the scoping axis.
+    enum_name: str,
+    context: str = "~",
+) -> frozenset[str]:
+    """Valid option ids for a project-level enum not in ``getAvailableOptions``
+    (link/hyperlink role, testrun type/status). ``context`` is the enumeration
+    context path segment (``testing`` for testrun enums; ``~`` does NOT
+    resolve them). Response ``data`` is a dict (not list), options at
+    ``data.attributes.options[].id``. Cached; fail-closed like
+    :func:`fetch_enum_option_ids`.
     """
-    if type is not None and type != "":
-        await _check_enum(client, project_id, "workitems", "type", "~", type)
-    if status is not None and status != "":
-        await _check_enum(
-            client, project_id, "workitems", "status", work_item_type, status
+    cache_key = f"{context}/{enum_name}"
+    cached = get_cached_project_enum(project_id, cache_key)
+    if cached is not None:
+        return cached
+
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/enumerations/{encode_path_segment(context)}"
+        f"/{encode_path_segment(enum_name)}/~"
+    )
+    try:
+        response = await client.get(path, params={"fields[enumerations]": "@all"})
+    except PolarionNotFoundError:
+        logger.warning(
+            "enumeration '%s' returned 404 for project=%s; skipping role "
+            "validation -- the enumeration is unsupported here, so there is "
+            "nothing to validate against.",
+            enum_name,
+            project_id,
         )
-    if severity is not None and severity != "":
-        await _check_enum(
-            client, project_id, "workitems", "severity", work_item_type, severity
-        )
-    if priority is not None and priority != "":
-        await _check_enum(
-            client, project_id, "workitems", "priority", work_item_type, priority
-        )
-    if resolution is not None and resolution != "":
-        await _check_enum(
-            client, project_id, "workitems", "resolution", work_item_type, resolution
-        )
+        store_cached_project_enum(project_id, cache_key, frozenset())
+        return frozenset()
+    except PolarionAuthError as exc:
+        raise _unauthorized_write_block(f"{enum_name} options", project_id) from exc
+    except PolarionError as exc:
+        raise _unreachable_write_block(f"{enum_name} options", project_id, exc) from exc
+
+    ids: set[str] = set()
+    data = response.get("data", {})
+    if isinstance(data, dict):
+        attributes = data.get("attributes")
+        options = attributes.get("options") if isinstance(attributes, dict) else None
+        if isinstance(options, list):
+            for entry in options:
+                if not isinstance(entry, dict):
+                    continue
+                opt_id = entry.get("id")
+                if isinstance(opt_id, str) and opt_id:
+                    ids.add(opt_id)
+
+    option_ids = frozenset(ids)
+    store_cached_project_enum(project_id, cache_key, option_ids)
+    return option_ids
 
 
-async def guard_document_enums(
+async def _check_project_enum_roles(  # noqa: PLR0913
     client: PolarionClient,
     project_id: str,
-    document_type: str,
+    enum_name: str,
+    roles: Iterable[str],
     *,
-    type: str | None = None,
-    status: str | None = None,
+    field_label: str,
+    discovery_hint: str,
+    context: str = "~",
 ) -> None:
-    """Validate every supplied document enum arg against ``getAvailableOptions``."""
-    if type is not None and type != "":
-        await _check_enum(client, project_id, "documents", "type", "~", type)
-    if status is not None and status != "":
-        await _check_enum(
-            client, project_id, "documents", "status", document_type, status
+    requested = {role for role in roles if role}
+    if not requested:
+        return
+
+    option_ids = await fetch_project_enum_option_ids(
+        client, project_id, enum_name, context
+    )
+    # Empty set = no options / enum unsupported; defer.
+    if not option_ids:
+        return
+
+    unknown = sorted(requested - option_ids)
+    if unknown:
+        raise ValueError(
+            f"{field_label} id(s) {unknown} are not valid in project "
+            f"'{project_id}'. Valid options: {format_option_list(option_ids)}. "
+            f"An unknown {field_label} ghosts silently (never matches Lucene) "
+            f"-- {discovery_hint}"
         )
 
 
@@ -347,6 +385,43 @@ def _custom_keys_from_data_list(
     return frozenset(keys)
 
 
+async def guard_work_item_enums(  # noqa: PLR0913
+    client: PolarionClient,
+    project_id: str,
+    work_item_type: str,
+    *,
+    type: str | None = None,
+    status: str | None = None,
+    severity: str | None = None,
+    priority: str | None = None,
+    resolution: str | None = None,
+) -> None:
+    """Validate supplied work-item enum args against ``getAvailableOptions``.
+
+    ``work_item_type`` scopes status/severity/resolution/priority (``'~'`` =
+    type-agnostic); ``type`` checked first so an invalid type raises before
+    being reused as the scoping axis.
+    """
+    if type is not None and type != "":
+        await _check_enum(client, project_id, "workitems", "type", "~", type)
+    if status is not None and status != "":
+        await _check_enum(
+            client, project_id, "workitems", "status", work_item_type, status
+        )
+    if severity is not None and severity != "":
+        await _check_enum(
+            client, project_id, "workitems", "severity", work_item_type, severity
+        )
+    if priority is not None and priority != "":
+        await _check_enum(
+            client, project_id, "workitems", "priority", work_item_type, priority
+        )
+    if resolution is not None and resolution != "":
+        await _check_enum(
+            client, project_id, "workitems", "resolution", work_item_type, resolution
+        )
+
+
 async def _fetch_work_item_type_custom_keys(
     client: PolarionClient,
     project_id: str,
@@ -458,6 +533,23 @@ async def guard_work_item_custom_fields(
     await _check_custom_field_enum_values(
         client, project_id, "workitems", work_item_type, custom_fields
     )
+
+
+async def guard_document_enums(
+    client: PolarionClient,
+    project_id: str,
+    document_type: str,
+    *,
+    type: str | None = None,
+    status: str | None = None,
+) -> None:
+    """Validate every supplied document enum arg against ``getAvailableOptions``."""
+    if type is not None and type != "":
+        await _check_enum(client, project_id, "documents", "type", "~", type)
+    if status is not None and status != "":
+        await _check_enum(
+            client, project_id, "documents", "status", document_type, status
+        )
 
 
 async def _fetch_document_type_custom_keys(
@@ -578,201 +670,6 @@ async def guard_document_custom_fields(
     await _check_document_custom_keys(client, project_id, document_type, custom_fields)
     await _check_custom_field_enum_values(
         client, project_id, "documents", document_type, custom_fields
-    )
-
-
-async def _existing_target_ids(
-    client: PolarionClient,
-    project_id: str,
-    target_ids: frozenset[str],
-) -> frozenset[str]:
-    """Subset of *target_ids* that exist in *project_id*, via chunked
-    ``id:(...)`` queries. 404 (project missing) propagates to caller.
-    """
-    ordered = sorted(target_ids)
-    found: set[str] = set()
-    for start in range(0, len(ordered), _GUARD_PAGE_SIZE):
-        chunk = ordered[start : start + _GUARD_PAGE_SIZE]
-        params: dict[str, str | int] = {
-            "query": f"id:({' '.join(chunk)})",
-            "fields[workitems]": "id",
-            "page[size]": _GUARD_PAGE_SIZE,
-            "page[number]": 1,
-        }
-        path = f"/projects/{encode_path_segment(project_id)}/workitems"
-        response = await client.get(path, params=params)
-        data = response.get("data", [])
-        if isinstance(data, list):
-            for entry in data:
-                if isinstance(entry, dict):
-                    found.add(extract_short_id(safe_str(entry.get("id", ""))))
-    return frozenset(found)
-
-
-async def guard_work_item_link_targets(
-    client: PolarionClient,
-    source_project_id: str,
-    links: list[WorkItemLinkSpec],
-) -> None:
-    """Reject links whose target work item does not exist — Polarion stores a
-    nonexistent target as a silent dangling link (HTTP 201, empty
-    title/type/status). One ``id:(...)`` query per target project.
-    """
-    by_project: dict[str, set[str]] = {}
-    for spec in links:
-        target_project = spec.target_project_id or source_project_id
-        by_project.setdefault(target_project, set()).add(spec.target_work_item_id)
-
-    missing: list[str] = []
-    for project_id, requested in by_project.items():
-        try:
-            existing = await _existing_target_ids(
-                client, project_id, frozenset(requested)
-            )
-        except PolarionNotFoundError:
-            missing.extend(f"{project_id}/{wi}" for wi in sorted(requested))
-            continue
-        except PolarionAuthError as exc:
-            raise _unauthorized_write_block("link targets", project_id) from exc
-        except PolarionError as exc:
-            raise _unreachable_write_block("link targets", project_id, exc) from exc
-        missing.extend(f"{project_id}/{wi}" for wi in sorted(requested - existing))
-
-    if missing:
-        raise ValueError(
-            f"Link target work item(s) {format_option_list(missing)} do not exist. "
-            f"A nonexistent target stores as a silent dangling link (HTTP 201, empty "
-            f"title/type/status) -- use list_work_items to find valid target ids first."
-        )
-
-
-async def fetch_project_enum_option_ids(
-    client: PolarionClient,
-    project_id: str,
-    enum_name: str,
-    context: str = "~",
-) -> frozenset[str]:
-    """Valid option ids for a project-level enum not in ``getAvailableOptions``
-    (link/hyperlink role, testrun type/status). ``context`` is the enumeration
-    context path segment (``testing`` for testrun enums; ``~`` does NOT
-    resolve them). Response ``data`` is a dict (not list), options at
-    ``data.attributes.options[].id``. Cached; fail-closed like
-    :func:`fetch_enum_option_ids`.
-    """
-    cache_key = f"{context}/{enum_name}"
-    cached = get_cached_project_enum(project_id, cache_key)
-    if cached is not None:
-        return cached
-
-    path = (
-        f"/projects/{encode_path_segment(project_id)}"
-        f"/enumerations/{encode_path_segment(context)}"
-        f"/{encode_path_segment(enum_name)}/~"
-    )
-    try:
-        response = await client.get(path, params={"fields[enumerations]": "@all"})
-    except PolarionNotFoundError:
-        logger.warning(
-            "enumeration '%s' returned 404 for project=%s; skipping role "
-            "validation -- the enumeration is unsupported here, so there is "
-            "nothing to validate against.",
-            enum_name,
-            project_id,
-        )
-        store_cached_project_enum(project_id, cache_key, frozenset())
-        return frozenset()
-    except PolarionAuthError as exc:
-        raise _unauthorized_write_block(f"{enum_name} options", project_id) from exc
-    except PolarionError as exc:
-        raise _unreachable_write_block(f"{enum_name} options", project_id, exc) from exc
-
-    ids: set[str] = set()
-    data = response.get("data", {})
-    if isinstance(data, dict):
-        attributes = data.get("attributes")
-        options = attributes.get("options") if isinstance(attributes, dict) else None
-        if isinstance(options, list):
-            for entry in options:
-                if not isinstance(entry, dict):
-                    continue
-                opt_id = entry.get("id")
-                if isinstance(opt_id, str) and opt_id:
-                    ids.add(opt_id)
-
-    option_ids = frozenset(ids)
-    store_cached_project_enum(project_id, cache_key, option_ids)
-    return option_ids
-
-
-async def _check_project_enum_roles(  # noqa: PLR0913
-    client: PolarionClient,
-    project_id: str,
-    enum_name: str,
-    roles: Iterable[str],
-    *,
-    field_label: str,
-    discovery_hint: str,
-    context: str = "~",
-) -> None:
-    requested = {role for role in roles if role}
-    if not requested:
-        return
-
-    option_ids = await fetch_project_enum_option_ids(
-        client, project_id, enum_name, context
-    )
-    # Empty set = no options / enum unsupported; defer.
-    if not option_ids:
-        return
-
-    unknown = sorted(requested - option_ids)
-    if unknown:
-        raise ValueError(
-            f"{field_label} id(s) {unknown} are not valid in project "
-            f"'{project_id}'. Valid options: {format_option_list(option_ids)}. "
-            f"An unknown {field_label} ghosts silently (never matches Lucene) "
-            f"-- {discovery_hint}"
-        )
-
-
-async def guard_work_item_link_roles(
-    client: PolarionClient,
-    project_id: str,
-    roles: Iterable[str],
-) -> None:
-    """Reject link roles not in ``workitem-link-role`` — an unknown role stores
-    verbatim (HTTP 201) as a ghost link.
-    """
-    await _check_project_enum_roles(
-        client,
-        project_id,
-        "workitem-link-role",
-        roles,
-        field_label="role",
-        discovery_hint=(
-            "read an existing link with list_work_item_links to see the "
-            "project's configured roles."
-        ),
-    )
-
-
-async def guard_hyperlink_roles(
-    client: PolarionClient,
-    project_id: str,
-    roles: Iterable[str],
-) -> None:
-    """Reject hyperlink roles not in the project's ``hyperlink-role`` enum
-    (typically ``ref_int``/``ref_ext``) — unknown roles ghost silently.
-    """
-    await _check_project_enum_roles(
-        client,
-        project_id,
-        "hyperlink-role",
-        roles,
-        field_label="hyperlink role",
-        discovery_hint=(
-            "use a configured id such as 'ref_int' (internal) or 'ref_ext' (external)."
-        ),
     )
 
 
@@ -946,6 +843,112 @@ async def guard_test_run_custom_fields(
     if not custom_fields:
         return
     await _check_test_run_custom_keys(client, project_id, custom_fields)
+
+
+async def guard_work_item_link_roles(
+    client: PolarionClient,
+    project_id: str,
+    roles: Iterable[str],
+) -> None:
+    """Reject link roles not in ``workitem-link-role`` — an unknown role stores
+    verbatim (HTTP 201) as a ghost link.
+    """
+    await _check_project_enum_roles(
+        client,
+        project_id,
+        "workitem-link-role",
+        roles,
+        field_label="role",
+        discovery_hint=(
+            "read an existing link with list_work_item_links to see the "
+            "project's configured roles."
+        ),
+    )
+
+
+async def guard_hyperlink_roles(
+    client: PolarionClient,
+    project_id: str,
+    roles: Iterable[str],
+) -> None:
+    """Reject hyperlink roles not in the project's ``hyperlink-role`` enum
+    (typically ``ref_int``/``ref_ext``) — unknown roles ghost silently.
+    """
+    await _check_project_enum_roles(
+        client,
+        project_id,
+        "hyperlink-role",
+        roles,
+        field_label="hyperlink role",
+        discovery_hint=(
+            "use a configured id such as 'ref_int' (internal) or 'ref_ext' (external)."
+        ),
+    )
+
+
+async def _existing_target_ids(
+    client: PolarionClient,
+    project_id: str,
+    target_ids: frozenset[str],
+) -> frozenset[str]:
+    """Subset of *target_ids* that exist in *project_id*, via chunked
+    ``id:(...)`` queries. 404 (project missing) propagates to caller.
+    """
+    ordered = sorted(target_ids)
+    found: set[str] = set()
+    for start in range(0, len(ordered), _GUARD_PAGE_SIZE):
+        chunk = ordered[start : start + _GUARD_PAGE_SIZE]
+        params: dict[str, str | int] = {
+            "query": f"id:({' '.join(chunk)})",
+            "fields[workitems]": "id",
+            "page[size]": _GUARD_PAGE_SIZE,
+            "page[number]": 1,
+        }
+        path = f"/projects/{encode_path_segment(project_id)}/workitems"
+        response = await client.get(path, params=params)
+        data = response.get("data", [])
+        if isinstance(data, list):
+            for entry in data:
+                if isinstance(entry, dict):
+                    found.add(extract_short_id(safe_str(entry.get("id", ""))))
+    return frozenset(found)
+
+
+async def guard_work_item_link_targets(
+    client: PolarionClient,
+    source_project_id: str,
+    links: list[WorkItemLinkSpec],
+) -> None:
+    """Reject links whose target work item does not exist — Polarion stores a
+    nonexistent target as a silent dangling link (HTTP 201, empty
+    title/type/status). One ``id:(...)`` query per target project.
+    """
+    by_project: dict[str, set[str]] = {}
+    for spec in links:
+        target_project = spec.target_project_id or source_project_id
+        by_project.setdefault(target_project, set()).add(spec.target_work_item_id)
+
+    missing: list[str] = []
+    for project_id, requested in by_project.items():
+        try:
+            existing = await _existing_target_ids(
+                client, project_id, frozenset(requested)
+            )
+        except PolarionNotFoundError:
+            missing.extend(f"{project_id}/{wi}" for wi in sorted(requested))
+            continue
+        except PolarionAuthError as exc:
+            raise _unauthorized_write_block("link targets", project_id) from exc
+        except PolarionError as exc:
+            raise _unreachable_write_block("link targets", project_id, exc) from exc
+        missing.extend(f"{project_id}/{wi}" for wi in sorted(requested - existing))
+
+    if missing:
+        raise ValueError(
+            f"Link target work item(s) {format_option_list(missing)} do not exist. "
+            f"A nonexistent target stores as a silent dangling link (HTTP 201, empty "
+            f"title/type/status) -- use list_work_items to find valid target ids first."
+        )
 
 
 async def _existing_forward_link_ids(
