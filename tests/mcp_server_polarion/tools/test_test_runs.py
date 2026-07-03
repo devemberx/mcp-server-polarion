@@ -1,5 +1,5 @@
-"""Tests for the ``list_test_runs`` tool — response parsing, param forwarding,
-error mapping, and page-size field bounds.
+"""Tests for the test run tools — list parsing/param forwarding, bulk create
+payloads and guards, error mapping, and field bounds.
 """
 
 from __future__ import annotations
@@ -16,8 +16,26 @@ from mcp_server_polarion.core.exceptions import (
     PolarionError,
     PolarionNotFoundError,
 )
-from mcp_server_polarion.models import PaginatedResult
-from mcp_server_polarion.tools.test_runs import list_test_runs
+from mcp_server_polarion.models import PaginatedResult, TestRunCreateSpec
+from mcp_server_polarion.tools.test_runs import (
+    _build_create_test_runs_payload,
+    create_test_runs,
+    list_test_runs,
+)
+
+# Pydantic model, not a test case — silence pytest's collection attempt.
+TestRunCreateSpec.__test__ = False  # type: ignore[attr-defined]
+
+
+def _template_response(run_id: str) -> dict[str, object]:
+    """Single-testrun GET body the template guard accepts."""
+    return {
+        "data": {
+            "type": "testruns",
+            "id": f"proj1/{run_id}",
+            "attributes": {"id": run_id, "isTemplate": True},
+        }
+    }
 
 
 class TestListTestRuns:
@@ -308,6 +326,283 @@ class TestListTestRuns:
                 page_size=100,
                 page_number=1,
             )
+
+
+class TestBuildCreateTestRunsPayload:
+    """Direct payload-builder unit tests."""
+
+    def test_full_spec_builds_attributes_and_template(self) -> None:
+        payload = _build_create_test_runs_payload(
+            project_id="proj1",
+            specs=[
+                TestRunCreateSpec(
+                    id="TR-100",
+                    title="Sprint 9 Regression",
+                    type="manual",
+                    status="open",
+                    template_id="Empty",
+                    custom_fields={"goal": "verify release"},
+                )
+            ],
+        )
+
+        assert payload == {
+            "data": [
+                {
+                    "type": "testruns",
+                    "attributes": {
+                        "id": "TR-100",
+                        "title": "Sprint 9 Regression",
+                        "type": "manual",
+                        "status": "open",
+                        "goal": "verify release",
+                    },
+                    "relationships": {
+                        "template": {"data": {"type": "testruns", "id": "proj1/Empty"}}
+                    },
+                }
+            ]
+        }
+
+    def test_minimal_spec_sends_only_id(self) -> None:
+        payload = _build_create_test_runs_payload(
+            project_id="proj1", specs=[TestRunCreateSpec(id="TR-1")]
+        )
+
+        data = payload["data"]
+        assert isinstance(data, list)
+        resource = data[0]
+        assert isinstance(resource, dict)
+        assert resource["attributes"] == {"id": "TR-1"}
+        assert "relationships" not in resource
+
+    def test_multiple_specs_keep_order(self) -> None:
+        payload = _build_create_test_runs_payload(
+            project_id="proj1",
+            specs=[TestRunCreateSpec(id="TR-1"), TestRunCreateSpec(id="TR-2")],
+        )
+
+        data = payload["data"]
+        assert isinstance(data, list)
+        ids = [
+            r["attributes"]["id"]  # type: ignore[call-overload, index]
+            for r in data
+        ]
+        assert ids == ["TR-1", "TR-2"]
+
+    def test_custom_field_shadowing_standard_attribute_raises(self) -> None:
+        with pytest.raises(ValueError, match="standard Polarion attributes"):
+            _build_create_test_runs_payload(
+                project_id="proj1",
+                specs=[TestRunCreateSpec(id="TR-1", custom_fields={"title": "x"})],
+            )
+
+
+class TestCreateTestRuns:
+    """Tests for the ``create_test_runs`` tool."""
+
+    async def test_minimal_create_posts_and_returns_ids(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {
+            "data": [{"type": "testruns", "id": "proj1/TR-1"}]
+        }
+
+        result = await create_test_runs(
+            mock_ctx,
+            project_id="proj1",
+            items=[TestRunCreateSpec(id="TR-1")],
+            dry_run=False,
+        )
+
+        assert result.created is True
+        assert result.dry_run is False
+        assert result.test_run_ids == ["TR-1"]
+        assert result.payload_preview is None
+        # No enums / template / custom fields supplied -> no guard traffic.
+        mock_client.get.assert_not_awaited()
+        path = mock_client.post.await_args.args[0]
+        assert path == "/projects/proj1/testruns"
+
+    async def test_create_with_template_resolves_it_first(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _template_response("Empty")
+        mock_client.post.return_value = {
+            "data": [{"type": "testruns", "id": "proj1/TR-2"}]
+        }
+
+        result = await create_test_runs(
+            mock_ctx,
+            project_id="proj1",
+            items=[TestRunCreateSpec(id="TR-2", template_id="Empty")],
+            dry_run=False,
+        )
+
+        assert result.test_run_ids == ["TR-2"]
+        assert mock_client.get.await_args.args[0] == "/projects/proj1/testruns/Empty"
+        payload = mock_client.post.await_args.kwargs["json"]
+        assert payload["data"][0]["relationships"]["template"]["data"] == {
+            "type": "testruns",
+            "id": "proj1/Empty",
+        }
+
+    async def test_dry_run_returns_payload_without_posting(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        result = await create_test_runs(
+            mock_ctx,
+            project_id="proj1",
+            items=[TestRunCreateSpec(id="TR-3", title="Preview")],
+            dry_run=True,
+        )
+
+        assert result.created is False
+        assert result.dry_run is True
+        assert result.test_run_ids == []
+        assert result.payload_preview is not None
+        data = result.payload_preview["data"]
+        assert isinstance(data, list)
+        mock_client.post.assert_not_awaited()
+
+    async def test_unknown_type_blocks_before_post(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": {
+                "type": "enumerations",
+                "id": "testrun-type",
+                "attributes": {"options": [{"id": "manual"}, {"id": "automated"}]},
+            }
+        }
+
+        with pytest.raises(ValueError, match="test run type"):
+            await create_test_runs(
+                mock_ctx,
+                project_id="proj1",
+                items=[TestRunCreateSpec(id="TR-4", type="ghost")],
+                dry_run=False,
+            )
+
+        mock_client.post.assert_not_awaited()
+
+    async def test_custom_fields_guarded_against_sample(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = [
+            {
+                "data": [
+                    {
+                        "type": "testruns",
+                        "id": "proj1/R1",
+                        "attributes": {"id": "R1", "goal": "g"},
+                    }
+                ]
+            },
+            {"data": []},
+        ]
+        mock_client.post.return_value = {
+            "data": [{"type": "testruns", "id": "proj1/TR-5"}]
+        }
+
+        result = await create_test_runs(
+            mock_ctx,
+            project_id="proj1",
+            items=[TestRunCreateSpec(id="TR-5", custom_fields={"goal": "x"})],
+            dry_run=False,
+        )
+
+        assert result.test_run_ids == ["TR-5"]
+        # Sampled instances then templates before the POST.
+        assert mock_client.get.await_count == 2
+
+    async def test_project_not_found_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.side_effect = PolarionNotFoundError(
+            "Not found", status_code=404
+        )
+
+        with pytest.raises(ValueError, match="not found"):
+            await create_test_runs(
+                mock_ctx,
+                project_id="missing",
+                items=[TestRunCreateSpec(id="TR-6")],
+                dry_run=False,
+            )
+
+    async def test_auth_error_raises_permission_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.side_effect = PolarionAuthError("auth", status_code=401)
+
+        with pytest.raises(PermissionError):
+            await create_test_runs(
+                mock_ctx,
+                project_id="proj1",
+                items=[TestRunCreateSpec(id="TR-7")],
+                dry_run=False,
+            )
+
+    async def test_other_error_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.side_effect = PolarionError("boom", status_code=500)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            await create_test_runs(
+                mock_ctx,
+                project_id="proj1",
+                items=[TestRunCreateSpec(id="TR-8")],
+                dry_run=False,
+            )
+
+    async def test_id_count_mismatch_raises(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {"data": []}
+
+        with pytest.raises(RuntimeError, match="list_test_runs"):
+            await create_test_runs(
+                mock_ctx,
+                project_id="proj1",
+                items=[TestRunCreateSpec(id="TR-9")],
+                dry_run=False,
+            )
+
+
+class TestCreateTestRunsFieldValidation:
+    """Bulk bounds + spec constraints via ``TypeAdapter`` rebuild."""
+
+    @staticmethod
+    def _adapter(param_name: str) -> TypeAdapter[object]:
+        hints = get_type_hints(create_test_runs)
+        sig = inspect.signature(create_test_runs)
+        field_info = sig.parameters[param_name].default
+        return TypeAdapter(Annotated[hints[param_name], field_info])
+
+    def test_empty_items_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter("items").validate_python([])
+
+    def test_items_above_max_rejected(self) -> None:
+        specs = [{"id": f"TR-{i}"} for i in range(51)]
+        with pytest.raises(ValidationError):
+            self._adapter("items").validate_python(specs)
+
+    def test_items_at_max_accepted(self) -> None:
+        specs = [{"id": f"TR-{i}"} for i in range(50)]
+        validated = self._adapter("items").validate_python(specs)
+        assert isinstance(validated, list)
+        assert len(validated) == 50
+
+    def test_empty_project_id_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter("project_id").validate_python("")
+
+    def test_spec_requires_non_empty_id(self) -> None:
+        with pytest.raises(ValidationError):
+            TestRunCreateSpec(id="")
 
 
 class TestListTestRunsFieldValidation:

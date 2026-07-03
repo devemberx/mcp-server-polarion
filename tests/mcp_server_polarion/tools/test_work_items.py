@@ -28,7 +28,6 @@ from mcp_server_polarion.tools.work_items import (
     _build_create_work_items_payload,
     _build_update_work_item_payload,
     _build_work_item_resource,
-    _extract_created_work_item_ids,
     create_work_items,
     get_work_item,
     list_work_items,
@@ -354,35 +353,6 @@ class TestBuildCreateWorkItemsPayload:
                 specs=[WorkItemCreateSpec(title="a", type="task")],
                 descriptions_html=[],
             )
-
-
-class TestExtractCreatedWorkItemIds:
-    """Tests for the private ``_extract_created_work_item_ids`` helper."""
-
-    def test_extracts_short_ids_in_order(self) -> None:
-        response: dict[str, object] = {
-            "data": [
-                {"type": "workitems", "id": "MyProj/MCPT-042"},
-                {"type": "workitems", "id": "MyProj/MCPT-043"},
-            ]
-        }
-        assert _extract_created_work_item_ids(response) == ["MCPT-042", "MCPT-043"]
-
-    def test_returns_empty_when_data_missing(self) -> None:
-        assert _extract_created_work_item_ids({}) == []
-
-    def test_returns_empty_when_data_not_a_list(self) -> None:
-        assert _extract_created_work_item_ids({"data": {"id": "MyProj/MCPT-1"}}) == []
-
-    def test_skips_entries_missing_id_or_not_dict(self) -> None:
-        response: dict[str, object] = {
-            "data": [
-                {"type": "workitems", "id": "MyProj/MCPT-1"},
-                {"type": "workitems"},
-                "not a dict",
-            ]
-        }
-        assert _extract_created_work_item_ids(response) == ["MCPT-1"]
 
 
 class TestCreateWorkItemsDryRun:
