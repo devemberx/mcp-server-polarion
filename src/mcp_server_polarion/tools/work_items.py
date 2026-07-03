@@ -339,7 +339,10 @@ async def update_work_items(  # noqa: PLR0912, PLR0913
     items: list[WorkItemUpdateSpec] = Field(  # noqa: B008
         min_length=1,
         max_length=MAX_BULK_ITEMS,
-        description="Work items to update in one request (1-50).",
+        description=(
+            "Work items to update in one request (1-50); call get_work_item "
+            "on each target first."
+        ),
     ),
     workflow_action: str | None = Field(
         default=None,
@@ -356,13 +359,13 @@ async def update_work_items(  # noqa: PLR0912, PLR0913
 ) -> WorkItemsUpdateResult:
     """Update fields on 1-50 existing work items in one bulk request.
 
-    Fetch current state with get_work_item BEFORE updating. Per item, unset
-    fields stay unchanged. description_html is raw Polarion HTML, sent verbatim
-    — source from get_work_item(include_description_html=True); greenfield
-    bodies use create_work_items Markdown, formats never mix.
+    Call get_work_item on EACH target BEFORE updating: per-item hyperlinks/
+    assignee_ids REPLACE the stored list — resubmit every existing entry plus
+    the change, or omissions are silently deleted. Unset fields stay unchanged.
 
-    hyperlinks/assignee_ids REPLACE the stored list — resubmit every existing
-    entry plus the change or omissions are deleted. custom_fields is partial,
+    description_html is raw Polarion HTML, sent verbatim — source from
+    get_work_item(include_description_html=True); greenfield bodies use
+    create_work_items Markdown, formats never mix. custom_fields is partial,
     keys outside the type schema rejected, values NOT validated — resolve via
     list_work_item_enum_options first.
 
