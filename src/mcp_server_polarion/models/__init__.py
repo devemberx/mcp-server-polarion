@@ -36,7 +36,11 @@ from mcp_server_polarion.models.links import (
     WorkItemLinkUpdateSpec,
 )
 from mcp_server_polarion.models.projects import ProjectSummary
-from mcp_server_polarion.models.test_runs import TestRunSummary
+from mcp_server_polarion.models.test_runs import (
+    TestRunCreateSpec,
+    TestRunsCreateResult,
+    TestRunSummary,
+)
 from mcp_server_polarion.models.work_items import (
     Hyperlink,
     SqlRecipeGallery,
@@ -67,7 +71,9 @@ __all__: list[str] = [
     "PaginatedResult",
     "ProjectSummary",
     "SqlRecipeGallery",
+    "TestRunCreateSpec",
     "TestRunSummary",
+    "TestRunsCreateResult",
     "WorkItemCommentSpec",
     "WorkItemCreateSpec",
     "WorkItemDetail",

@@ -60,6 +60,29 @@ STANDARD_DOCUMENT_ATTRIBUTES: Final[frozenset[str]] = frozenset(
 )
 
 
+# Test-run mirror; testrun custom fields (e.g. rich-text description/goal on
+# default projects) sit inline under attributes just like work items.
+STANDARD_TEST_RUN_ATTRIBUTES: Final[frozenset[str]] = frozenset(
+    {
+        "id",
+        "type",
+        "title",
+        "status",
+        "created",
+        "updated",
+        "finishedOn",
+        "groupId",
+        "homePageContent",
+        "idPrefix",
+        "isTemplate",
+        "keepInHistory",
+        "query",
+        "selectTestCasesBy",
+        "useReportFromTemplate",
+    }
+)
+
+
 def extract_custom_fields(
     attributes: dict[str, object],
     standard: frozenset[str],
@@ -99,6 +122,7 @@ def merge_custom_fields(
 
 __all__: list[str] = [
     "STANDARD_DOCUMENT_ATTRIBUTES",
+    "STANDARD_TEST_RUN_ATTRIBUTES",
     "STANDARD_WORK_ITEM_ATTRIBUTES",
     "extract_custom_fields",
     "merge_custom_fields",

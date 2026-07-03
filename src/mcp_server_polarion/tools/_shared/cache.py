@@ -96,6 +96,8 @@ _work_item_custom_key_cache: TTLCache[tuple[str, str], frozenset[str]] = TTLCach
 _document_type_custom_key_cache: TTLCache[tuple[str, str], frozenset[str]] = TTLCache(
     _GUARD_TTL_SECONDS
 )
+# project -> testrun custom-field key schema (project config, no type axis).
+_test_run_custom_key_cache: TTLCache[str, frozenset[str]] = TTLCache(_GUARD_TTL_SECONDS)
 
 
 def get_cached_documents(project_id: str) -> list[DiscoveredDocument] | None:
@@ -211,6 +213,23 @@ def invalidate_document_type_custom_keys(project_id: str, document_type: str) ->
     _document_type_custom_key_cache.invalidate((project_id, document_type))
 
 
+def get_test_run_custom_keys(project_id: str) -> frozenset[str] | None:
+    """Return the cached testrun custom-field key schema, or ``None`` on miss."""
+    return _test_run_custom_key_cache.get(project_id)
+
+
+def store_test_run_custom_keys(project_id: str, keys: frozenset[str]) -> None:
+    """Replace any prior set — each sample is the full key set, so an admin
+    removal shrinks the schema on expiry.
+    """
+    _test_run_custom_key_cache.set(project_id, keys)
+
+
+def invalidate_test_run_custom_keys(project_id: str) -> None:
+    """Drop the cached testrun schema for *project_id* (used by the bypass-retry)."""
+    _test_run_custom_key_cache.invalidate(project_id)
+
+
 __all__ = [
     "DiscoveredDocument",
     "Resource",
@@ -219,13 +238,16 @@ __all__ = [
     "get_cached_enum_options",
     "get_cached_project_enum",
     "get_document_type_custom_keys",
+    "get_test_run_custom_keys",
     "get_work_item_custom_keys",
     "invalidate_document_type_custom_keys",
     "invalidate_documents_cache",
+    "invalidate_test_run_custom_keys",
     "invalidate_work_item_custom_keys",
     "store_cached_documents",
     "store_cached_enum_options",
     "store_cached_project_enum",
     "store_document_type_custom_keys",
+    "store_test_run_custom_keys",
     "store_work_item_custom_keys",
 ]
