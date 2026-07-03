@@ -10,6 +10,10 @@ from pydantic import BaseModel, Field
 class TestRunSummary(BaseModel):
     """Compact test-run representation for list results."""
 
+    # Test*-named models look like test classes to pytest when imported into
+    # a test module; __test__ = False opts every importer out at the source.
+    __test__ = False
+
     id: str
     title: str
     type: str
@@ -22,6 +26,8 @@ class TestRunSummary(BaseModel):
 
 class TestRunCreateSpec(BaseModel):
     """One test run to create via ``create_test_runs``."""
+
+    __test__ = False
 
     id: str = Field(min_length=1)
     title: str | None = None
@@ -36,6 +42,8 @@ class TestRunCreateSpec(BaseModel):
 
 class TestRunsCreateResult(BaseModel):
     """Result of a ``create_test_runs`` operation."""
+
+    __test__ = False
 
     created: bool
     dry_run: bool

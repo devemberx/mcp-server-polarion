@@ -23,9 +23,6 @@ from mcp_server_polarion.tools.test_runs import (
     list_test_runs,
 )
 
-# Pydantic model, not a test case — silence pytest's collection attempt.
-TestRunCreateSpec.__test__ = False  # type: ignore[attr-defined]
-
 
 def _template_response(run_id: str) -> dict[str, object]:
     """Single-testrun GET body the template guard accepts."""
