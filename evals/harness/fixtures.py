@@ -53,6 +53,9 @@ SECTION_A_PART_ID = f"heading_{DOC_HEADING_ID}"
 # Test run instance served by list_test_runs (TRIG-LIST-TEST-RUNS).
 TEST_RUN_ID = "Fake-TR-001"
 
+# Template blueprint; create_test_runs resolves it via the template guard.
+TEST_RUN_TEMPLATE_ID = "Fake-TR-Template"
+
 TS = "2026-01-01T00:00:00.000Z"
 
 
@@ -215,6 +218,13 @@ SEEDS = Seeds(
             status="open",
             finished_on=TS,
         ),
+        TEST_RUN_TEMPLATE_ID: TestRun(
+            TEST_RUN_TEMPLATE_ID,
+            "Fake Run Template",
+            type="manual",
+            status="open",
+            is_template=True,
+        ),
     },
     # Forward (outgoing) work-item links: source short id -> [(role, target short
     # id)]. CHILD_REQ has a parent + a test case; UNCOVERED_REQ deliberately none.
@@ -264,10 +274,14 @@ SEEDS = Seeds(
             ("approved", False),
         ],
     },
-    # Project-level enums (``/enumerations/~/{name}/~``) -- dict-shaped ``data``
-    # with ``attributes.options[].id``, unlike getAvailableOptions' list.
+    # Project-level enums (``/enumerations/{context}/{name}/~``) -- dict-shaped
+    # ``data`` with ``attributes.options[].id``, unlike getAvailableOptions'
+    # list. Bare keys live in the ``~`` context; testrun enums only resolve
+    # under ``testing`` (mirrors live 404 on the wildcard context).
     project_enums={
         "hyperlink-role": ["ref_int", "ref_ext"],
         "workitem-link-role": ["relates_to", "parent", "satisfies", "verifies"],
+        "testing/testrun-type": ["manual", "automated"],
+        "testing/testrun-status": ["open", "inProgress", "finished"],
     },
 )
