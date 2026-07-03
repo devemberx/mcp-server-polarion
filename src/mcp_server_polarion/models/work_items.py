@@ -93,18 +93,44 @@ class WorkItemsCreateResult(BaseModel):
 class WorkItemUpdateSpec(BaseModel):
     """One work item to update via ``update_work_items``."""
 
-    work_item_id: str = Field(min_length=1)
+    work_item_id: str = Field(
+        min_length=1, description="Work item ID (e.g. 'MCPT-042')."
+    )
     title: str | None = None
-    description_html: str | None = Field(default=None, max_length=MAX_BODY_HTML_LEN)
-    status: str | None = None
-    priority: str | None = None
+    description_html: str | None = Field(
+        default=None,
+        max_length=MAX_BODY_HTML_LEN,
+        description=(
+            "Raw HTML from get_work_item(include_description_html=True); verbatim."
+        ),
+    )
+    status: str | None = Field(
+        default=None,
+        description="New status; prefer workflow_action for real transitions.",
+    )
+    priority: str | None = Field(default=None, description="e.g. '50.0'.")
     severity: str | None = None
-    due_date: str | None = None
-    initial_estimate: str | None = None
-    resolution: str | None = None
-    hyperlinks: list[Hyperlink] | None = None
-    assignee_ids: list[str] | None = None
-    custom_fields: dict[str, object] | None = None
+    due_date: str | None = Field(default=None, description="'YYYY-MM-DD'.")
+    initial_estimate: str | None = Field(
+        default=None,
+        description="Polarion duration (e.g. '5 1/2d', '1w 2d').",
+    )
+    resolution: str | None = Field(
+        default=None,
+        description="Prefer workflow_action so workflow rules apply.",
+    )
+    hyperlinks: list[Hyperlink] | None = Field(
+        default=None,
+        description="REPLACES the hyperlink list — pass the full list, not a delta.",
+    )
+    assignee_ids: list[str] | None = Field(
+        default=None,
+        description="REPLACES the assignee list — pass the full list, not a delta.",
+    )
+    custom_fields: dict[str, object] | None = Field(
+        default=None,
+        description="Partial; rich-text values as {'type':'text/html','value':...}.",
+    )
 
     @model_validator(mode="after")
     def _at_least_one_field(self) -> WorkItemUpdateSpec:
