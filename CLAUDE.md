@@ -34,7 +34,7 @@ CI: `ruff check` → `ruff format --check` → `mypy` → `pytest` (`--cov-fail-
   - Round-trip: `get_*(include_*_html=True)` return raw Polarion HTML; `update_*(*_html=...)` accept verbatim — no sanitize/convert.
   - Greenfield create (Markdown): `markdown_to_html` + `sanitize_html`. Post-create edits = raw-HTML round-trip; formats never mix.
   - Synthesis (READ-ONLY): `read_*` convert HTML→Markdown; feed output back to writes lose Polarion markup.
-- Write payloads skip `None`/empty (Polarion read empty as "clear default"). Resource POSTs wrap in `{"data": [...]}`; action endpoints (`.../actions/<name>`) take flat object.
+- Write payloads skip `None`/empty (Polarion read empty as "clear default"). Resource POSTs + bulk PATCH `/workitems` wrap in `{"data": [...]}`; action endpoints (`.../actions/<name>`) take flat object.
 - Every list tool: `page_size` (max 100) + `page_number` → `PaginatedResult[T]` with `has_more`.
 - Every write tool: `dry_run: bool = False` — return payload, no hit Polarion.
 - Error mapping: `PolarionNotFoundError`→`ValueError`, `PolarionAuthError`→`PermissionError`, `PolarionError`→`RuntimeError`.
