@@ -184,4 +184,15 @@ CASES: list[Case] = [
         expect="list_test_runs",
         reject=["list_work_items"],
     ),
+    _case(
+        "TRIG-CREATE-TEST-RUN",
+        f"Create a new manual test run with id 'Fake-TR-Sprint9' in project "
+        f"'{PROJECT}'.",
+        "triggers_tool",
+        intent="Creating a test run must call create_test_runs, not "
+        "create_work_items (a run is not a work item).",
+        covers=["create_test_runs"],
+        expect="create_test_runs",
+        reject=["create_work_items"],
+    ),
 ]

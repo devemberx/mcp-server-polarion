@@ -34,6 +34,15 @@ class TestWriteToolAnnotations:
                 },
             ),
             (
+                "create_test_runs",
+                {
+                    "readOnlyHint": False,
+                    "destructiveHint": False,
+                    "idempotentHint": False,
+                    "openWorldHint": True,
+                },
+            ),
+            (
                 "update_work_items",
                 {
                     "readOnlyHint": False,

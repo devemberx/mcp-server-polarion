@@ -8,6 +8,7 @@ from __future__ import annotations
 from mcp_server_polarion.models import Comment, WorkItemSummary
 from mcp_server_polarion.tools._shared.parse import (
     _parse_comment,
+    extract_created_short_ids,
     extract_relationship_id,
     extract_relationship_ids,
     extract_short_id,
@@ -91,6 +92,35 @@ class TestExtractShortId:
 
     def test_no_slash_returns_input(self) -> None:
         assert extract_short_id("MCPT-001") == "MCPT-001"
+
+
+class TestExtractCreatedShortIds:
+    """Tests for `extract_created_short_ids` (bulk-create 201 echo)."""
+
+    def test_extracts_short_ids_in_order(self) -> None:
+        response: dict[str, object] = {
+            "data": [
+                {"type": "workitems", "id": "MyProj/MCPT-042"},
+                {"type": "testruns", "id": "MyProj/TR-043"},
+            ]
+        }
+        assert extract_created_short_ids(response) == ["MCPT-042", "TR-043"]
+
+    def test_returns_empty_when_data_missing(self) -> None:
+        assert extract_created_short_ids({}) == []
+
+    def test_returns_empty_when_data_not_a_list(self) -> None:
+        assert extract_created_short_ids({"data": {"id": "MyProj/MCPT-1"}}) == []
+
+    def test_skips_entries_missing_id_or_not_dict(self) -> None:
+        response: dict[str, object] = {
+            "data": [
+                {"type": "workitems", "id": "MyProj/MCPT-1"},
+                {"type": "workitems"},
+                "not a dict",
+            ]
+        }
+        assert extract_created_short_ids(response) == ["MCPT-1"]
 
 
 class TestParseIncludedWorkItemMap:

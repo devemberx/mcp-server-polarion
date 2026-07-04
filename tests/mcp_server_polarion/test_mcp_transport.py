@@ -43,6 +43,7 @@ _READ_TOOL_NAMES: frozenset[str] = frozenset(
 _WRITE_TOOL_NAMES: frozenset[str] = frozenset(
     {
         "create_work_items",
+        "create_test_runs",
         "update_work_items",
         "move_work_item_to_document",
         "move_work_item_from_document",

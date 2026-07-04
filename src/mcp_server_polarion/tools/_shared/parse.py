@@ -92,6 +92,23 @@ def extract_short_id(full_id: str) -> str:
     return full_id.rsplit("/", maxsplit=1)[-1]
 
 
+def extract_created_short_ids(response: dict[str, object]) -> list[str]:
+    """Short resource ids from a bulk 201 response, relying on Polarion echoing
+    ``data`` in submission order (call-site count check catches missing ids,
+    not reordered ones).
+    """
+    data = response.get("data")
+    if not isinstance(data, list):
+        return []
+    ids: list[str] = []
+    for item in data:
+        if isinstance(item, dict):
+            full_id = safe_str(item.get("id", ""))
+            if full_id:
+                ids.append(extract_short_id(full_id))
+    return ids
+
+
 def parse_included_work_item_map(
     response: dict[str, object],
 ) -> dict[str, dict[str, object]]:
@@ -377,6 +394,7 @@ def parse_enum_option(entry: dict[str, object]) -> EnumOption:
 
 __all__: list[str] = [
     "WorkItemSummaryKwargs",
+    "extract_created_short_ids",
     "extract_relationship_id",
     "extract_relationship_ids",
     "extract_short_id",
