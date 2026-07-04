@@ -126,7 +126,7 @@ def _build_create_work_items_payload(
     return {"data": data}
 
 
-def _build_update_work_item_resource(
+def _build_update_work_item_resource(  # noqa: PLR0912
     *,
     project_id: str,
     spec: WorkItemUpdateSpec,
@@ -175,6 +175,14 @@ def _build_update_work_item_resource(
     if relationships:
         resource["relationships"] = relationships
 
+    # Spec validator can't see this: all-None custom_fields values pass it but
+    # drop in merge, and Polarion 400s the whole batch on a body-less resource.
+    if "attributes" not in resource and "relationships" not in resource:
+        raise ValueError(
+            f"Work item '{spec.work_item_id}' resolves to an empty PATCH "
+            "body (None-valued custom_fields are skipped). Pass at least "
+            "one usable field."
+        )
     return resource
 
 

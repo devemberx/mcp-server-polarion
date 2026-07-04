@@ -840,6 +840,17 @@ class TestBuildUpdateWorkItemResource:
                 ),
             )
 
+    def test_all_none_custom_fields_raise_not_empty_body(self) -> None:
+        # Truthy custom_fields passes the spec validator, but merge drops
+        # None values — the builder must reject the resulting empty body.
+        with pytest.raises(ValueError, match="empty PATCH"):
+            _build_update_work_item_resource(
+                project_id="MyProj",
+                spec=WorkItemUpdateSpec(
+                    work_item_id="MCPT-1", custom_fields={"riskLevel": None}
+                ),
+            )
+
 
 class TestBuildUpdateWorkItemsPayload:
     """Tests for the private ``_build_update_work_items_payload`` helper."""
@@ -909,6 +920,22 @@ class TestUpdateWorkItemsValidation:
         data = cast(list[dict[str, object]], result.payload_preview["data"])
         attributes = cast(dict[str, object], data[0]["attributes"])
         assert attributes == {"title": "new title"}
+
+    async def test_all_none_custom_fields_rejected_before_patch(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        _cache_mod.store_work_item_custom_keys(
+            "MyProj", "task", frozenset({"riskLevel"})
+        )
+        mock_client.get.return_value = _make_get_response()
+
+        with pytest.raises(ValueError, match="empty PATCH"):
+            await _call_update(
+                mock_ctx,
+                custom_fields={"riskLevel": None},
+                dry_run=True,
+            )
+        mock_client.patch.assert_not_called()
 
     async def test_custom_fields_alone_satisfies_spec(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -2047,7 +2074,7 @@ class TestGetWorkItem:
     ) -> None:
         """Polarion spans / data-* attributes survive on read.
 
-        Round-trip guarantee for update_work_item(description_html=).
+        Round-trip guarantee for update_work_items description_html.
         """
         raw = (
             '<p>Refs <span class="polarion-rte-link" '
@@ -2438,7 +2465,7 @@ class TestReadWorkItem:
         assert result.resolution == "fixed"
         assert len(result.hyperlinks) == 1
         assert result.hyperlinks[0].uri == "https://example.com/spec"
-        # Customs stay raw so the dict round-trips through update_work_item.
+        # Customs stay raw so the dict round-trips through update_work_items.
         assert result.custom_fields == {
             "riskLevel": "high",
             "reviewerNote": rich_value,
