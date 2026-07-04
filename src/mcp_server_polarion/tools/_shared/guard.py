@@ -23,16 +23,20 @@ from mcp_server_polarion.tools._shared.cache import (
     get_cached_enum_options,
     get_cached_project_enum,
     get_document_type_custom_keys,
+    get_test_run_custom_keys,
     get_work_item_custom_keys,
     invalidate_document_type_custom_keys,
+    invalidate_test_run_custom_keys,
     invalidate_work_item_custom_keys,
     store_cached_enum_options,
     store_cached_project_enum,
     store_document_type_custom_keys,
+    store_test_run_custom_keys,
     store_work_item_custom_keys,
 )
 from mcp_server_polarion.tools._shared.custom_fields import (
     STANDARD_DOCUMENT_ATTRIBUTES,
+    STANDARD_TEST_RUN_ATTRIBUTES,
     STANDARD_WORK_ITEM_ATTRIBUTES,
 )
 from mcp_server_polarion.tools._shared.fields import (
@@ -178,57 +182,92 @@ async def _check_enum(  # noqa: PLR0913
     )
 
 
-async def guard_work_item_enums(  # noqa: PLR0913
+async def fetch_project_enum_option_ids(
     client: PolarionClient,
     project_id: str,
-    work_item_type: str,
-    *,
-    type: str | None = None,
-    status: str | None = None,
-    severity: str | None = None,
-    priority: str | None = None,
-    resolution: str | None = None,
-) -> None:
-    """Validate supplied work-item enum args against ``getAvailableOptions``.
-
-    ``work_item_type`` scopes status/severity/resolution/priority (``'~'`` =
-    type-agnostic); ``type`` checked first so an invalid type raises before
-    being reused as the scoping axis.
+    enum_name: str,
+    context: str = "~",
+) -> frozenset[str]:
+    """Valid option ids for a project-level enum not in ``getAvailableOptions``
+    (link/hyperlink role, testrun type/status). ``context`` is the enumeration
+    context path segment (``testing`` for testrun enums; ``~`` does NOT
+    resolve them). Response ``data`` is a dict (not list), options at
+    ``data.attributes.options[].id``. Cached; fail-closed like
+    :func:`fetch_enum_option_ids`.
     """
-    if type is not None and type != "":
-        await _check_enum(client, project_id, "workitems", "type", "~", type)
-    if status is not None and status != "":
-        await _check_enum(
-            client, project_id, "workitems", "status", work_item_type, status
+    cache_key = f"{context}/{enum_name}"
+    cached = get_cached_project_enum(project_id, cache_key)
+    if cached is not None:
+        return cached
+
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/enumerations/{encode_path_segment(context)}"
+        f"/{encode_path_segment(enum_name)}/~"
+    )
+    try:
+        response = await client.get(path, params={"fields[enumerations]": "@all"})
+    except PolarionNotFoundError:
+        logger.warning(
+            "enumeration '%s' returned 404 for project=%s; skipping role "
+            "validation -- the enumeration is unsupported here, so there is "
+            "nothing to validate against.",
+            enum_name,
+            project_id,
         )
-    if severity is not None and severity != "":
-        await _check_enum(
-            client, project_id, "workitems", "severity", work_item_type, severity
-        )
-    if priority is not None and priority != "":
-        await _check_enum(
-            client, project_id, "workitems", "priority", work_item_type, priority
-        )
-    if resolution is not None and resolution != "":
-        await _check_enum(
-            client, project_id, "workitems", "resolution", work_item_type, resolution
-        )
+        store_cached_project_enum(project_id, cache_key, frozenset())
+        return frozenset()
+    except PolarionAuthError as exc:
+        raise _unauthorized_write_block(f"{enum_name} options", project_id) from exc
+    except PolarionError as exc:
+        raise _unreachable_write_block(f"{enum_name} options", project_id, exc) from exc
+
+    ids: set[str] = set()
+    data = response.get("data", {})
+    if isinstance(data, dict):
+        attributes = data.get("attributes")
+        options = attributes.get("options") if isinstance(attributes, dict) else None
+        if isinstance(options, list):
+            for entry in options:
+                if not isinstance(entry, dict):
+                    continue
+                opt_id = entry.get("id")
+                if isinstance(opt_id, str) and opt_id:
+                    ids.add(opt_id)
+
+    option_ids = frozenset(ids)
+    store_cached_project_enum(project_id, cache_key, option_ids)
+    return option_ids
 
 
-async def guard_document_enums(
+async def _check_project_enum_roles(  # noqa: PLR0913
     client: PolarionClient,
     project_id: str,
-    document_type: str,
+    enum_name: str,
+    roles: Iterable[str],
     *,
-    type: str | None = None,
-    status: str | None = None,
+    field_label: str,
+    discovery_hint: str,
+    context: str = "~",
 ) -> None:
-    """Validate every supplied document enum arg against ``getAvailableOptions``."""
-    if type is not None and type != "":
-        await _check_enum(client, project_id, "documents", "type", "~", type)
-    if status is not None and status != "":
-        await _check_enum(
-            client, project_id, "documents", "status", document_type, status
+    requested = {role for role in roles if role}
+    if not requested:
+        return
+
+    option_ids = await fetch_project_enum_option_ids(
+        client, project_id, enum_name, context
+    )
+    # Empty set = no options / enum unsupported; defer.
+    if not option_ids:
+        return
+
+    unknown = sorted(requested - option_ids)
+    if unknown:
+        raise ValueError(
+            f"{field_label} id(s) {unknown} are not valid in project "
+            f"'{project_id}'. Valid options: {format_option_list(option_ids)}. "
+            f"An unknown {field_label} ghosts silently (never matches Lucene) "
+            f"-- {discovery_hint}"
         )
 
 
@@ -343,6 +382,43 @@ def _custom_keys_from_data_list(
     return frozenset(keys)
 
 
+async def guard_work_item_enums(  # noqa: PLR0913
+    client: PolarionClient,
+    project_id: str,
+    work_item_type: str,
+    *,
+    type: str | None = None,
+    status: str | None = None,
+    severity: str | None = None,
+    priority: str | None = None,
+    resolution: str | None = None,
+) -> None:
+    """Validate supplied work-item enum args against ``getAvailableOptions``.
+
+    ``work_item_type`` scopes status/severity/resolution/priority (``'~'`` =
+    type-agnostic); ``type`` checked first so an invalid type raises before
+    being reused as the scoping axis.
+    """
+    if type is not None and type != "":
+        await _check_enum(client, project_id, "workitems", "type", "~", type)
+    if status is not None and status != "":
+        await _check_enum(
+            client, project_id, "workitems", "status", work_item_type, status
+        )
+    if severity is not None and severity != "":
+        await _check_enum(
+            client, project_id, "workitems", "severity", work_item_type, severity
+        )
+    if priority is not None and priority != "":
+        await _check_enum(
+            client, project_id, "workitems", "priority", work_item_type, priority
+        )
+    if resolution is not None and resolution != "":
+        await _check_enum(
+            client, project_id, "workitems", "resolution", work_item_type, resolution
+        )
+
+
 async def _fetch_work_item_type_custom_keys(
     client: PolarionClient,
     project_id: str,
@@ -454,6 +530,23 @@ async def guard_work_item_custom_fields(
     await _check_custom_field_enum_values(
         client, project_id, "workitems", work_item_type, custom_fields
     )
+
+
+async def guard_document_enums(
+    client: PolarionClient,
+    project_id: str,
+    document_type: str,
+    *,
+    type: str | None = None,
+    status: str | None = None,
+) -> None:
+    """Validate every supplied document enum arg against ``getAvailableOptions``."""
+    if type is not None and type != "":
+        await _check_enum(client, project_id, "documents", "type", "~", type)
+    if status is not None and status != "":
+        await _check_enum(
+            client, project_id, "documents", "status", document_type, status
+        )
 
 
 async def _fetch_document_type_custom_keys(
@@ -577,6 +670,219 @@ async def guard_document_custom_fields(
     )
 
 
+async def guard_test_run_enums(
+    client: PolarionClient,
+    project_id: str,
+    *,
+    type: str | None = None,
+    status: str | None = None,
+) -> None:
+    """Validate test-run ``type``/``status`` against the ``testing``-context
+    project enumerations — testruns have no ``getAvailableOptions`` endpoint,
+    and the ``~`` wildcard context does not resolve these enums.
+    """
+    await _check_project_enum_roles(
+        client,
+        project_id,
+        "testrun-type",
+        [type] if type else [],
+        field_label="test run type",
+        discovery_hint="use list_test_runs to see values in use.",
+        context="testing",
+    )
+    await _check_project_enum_roles(
+        client,
+        project_id,
+        "testrun-status",
+        [status] if status else [],
+        field_label="test run status",
+        discovery_hint="use list_test_runs to see values in use.",
+        context="testing",
+    )
+
+
+async def guard_test_run_templates(
+    client: PolarionClient,
+    project_id: str,
+    template_ids: Iterable[str],
+) -> None:
+    """Resolve each template id before the write — Polarion doesn't validate
+    relationship targets. Run instances are rejected too: ``isTemplate`` is
+    served only (as ``true``) on templates, absent on instances.
+    """
+    for template_id in sorted({t for t in template_ids if t}):
+        path = (
+            f"/projects/{encode_path_segment(project_id)}"
+            f"/testruns/{encode_path_segment(template_id)}"
+        )
+        try:
+            response = await client.get(
+                path, params={"fields[testruns]": "id,isTemplate"}
+            )
+        except PolarionNotFoundError as exc:
+            raise ValueError(
+                f"Test run template '{template_id}' not found in project "
+                f"'{project_id}'. Use list_test_runs(templates=True) to "
+                f"discover template ids."
+            ) from exc
+        except PolarionAuthError as exc:
+            raise _unauthorized_write_block("test run templates", project_id) from exc
+        except PolarionError as exc:
+            raise _unreachable_write_block(
+                "test run templates", project_id, exc
+            ) from exc
+
+        data = response.get("data", {})
+        attributes = data.get("attributes") if isinstance(data, dict) else None
+        is_template = (
+            attributes.get("isTemplate") if isinstance(attributes, dict) else None
+        )
+        if is_template is not True:
+            raise ValueError(
+                f"Test run '{template_id}' in project '{project_id}' is a run "
+                f"instance, not a template. Use list_test_runs(templates=True) "
+                f"to discover template ids."
+            )
+
+
+async def _fetch_test_run_custom_keys(
+    client: PolarionClient,
+    project_id: str,
+) -> frozenset[str]:
+    """Union of custom-field keys sampled from the project's runs and
+    templates — testrun custom fields are project config (no type axis, no
+    SQL needed). Cached even if empty.
+    """
+    path = f"/projects/{encode_path_segment(project_id)}/testruns"
+    keys: set[str] = set()
+    for templates in (False, True):
+        base_params: dict[str, str | int] = {
+            "fields[testruns]": "@all",
+            "page[size]": _GUARD_PAGE_SIZE,
+        }
+        if templates:
+            base_params["templates"] = "true"
+        page_number = 1
+        while True:
+            try:
+                response = await client.get(
+                    path, params={**base_params, "page[number]": page_number}
+                )
+            except PolarionAuthError as exc:
+                raise _unauthorized_write_block(
+                    "custom_fields keys", project_id
+                ) from exc
+            except PolarionError as exc:
+                raise _unreachable_write_block(
+                    "custom_fields keys", project_id, exc
+                ) from exc
+            data = response.get("data", [])
+            if not isinstance(data, list):
+                break
+            keys.update(
+                _custom_keys_from_data_list(response, STANDARD_TEST_RUN_ATTRIBUTES)
+            )
+            if len(data) < _GUARD_PAGE_SIZE:
+                break
+            page_number += 1
+
+    result = frozenset(keys)
+    store_test_run_custom_keys(project_id, result)
+    return result
+
+
+async def _check_test_run_custom_keys(
+    client: PolarionClient,
+    project_id: str,
+    custom_fields: dict[str, object],
+) -> None:
+    """Test-run mirror of :func:`_check_work_item_custom_keys` (project scope)."""
+    schema = get_test_run_custom_keys(project_id)
+    fetched_fresh = schema is None
+    if schema is None:
+        schema = await _fetch_test_run_custom_keys(client, project_id)
+
+    if all(key in schema for key in custom_fields):
+        return
+
+    # Unknown key may be admin-added since caching; refetch once before rejecting.
+    if not fetched_fresh:
+        invalidate_test_run_custom_keys(project_id)
+        schema = await _fetch_test_run_custom_keys(client, project_id)
+
+    if not schema:
+        raise RuntimeError(
+            f"Cannot verify custom_fields {format_option_list(custom_fields)} for "
+            f"test runs in project '{project_id}': no existing test run has custom "
+            f"fields populated, so the schema can't be sampled. Refusing the write "
+            f"-- an unknown key ghosts silently (invisible to UI/Lucene). Do not "
+            f"create runs to work around this; ask the user to confirm these "
+            f"custom-field ids exist for test runs."
+        )
+
+    _reject_unknown_custom_keys(
+        custom_fields,
+        schema,
+        scope=f"test runs in project '{project_id}'",
+        discovery_tool="sample of existing runs",
+    )
+
+
+async def guard_test_run_custom_fields(
+    client: PolarionClient,
+    project_id: str,
+    custom_fields: dict[str, object],
+) -> None:
+    """Validate ``custom_fields`` keys before a test-run write. Keys only —
+    testruns have no ``getAvailableOptions``, so enum-typed *values* defer to
+    Polarion (wrong option ids there ghost; keys are the guardable axis).
+    """
+    if not custom_fields:
+        return
+    await _check_test_run_custom_keys(client, project_id, custom_fields)
+
+
+async def guard_work_item_link_roles(
+    client: PolarionClient,
+    project_id: str,
+    roles: Iterable[str],
+) -> None:
+    """Reject link roles not in ``workitem-link-role`` — an unknown role stores
+    verbatim (HTTP 201) as a ghost link.
+    """
+    await _check_project_enum_roles(
+        client,
+        project_id,
+        "workitem-link-role",
+        roles,
+        field_label="role",
+        discovery_hint=(
+            "read an existing link with list_work_item_links to see the "
+            "project's configured roles."
+        ),
+    )
+
+
+async def guard_hyperlink_roles(
+    client: PolarionClient,
+    project_id: str,
+    roles: Iterable[str],
+) -> None:
+    """Reject hyperlink roles not in the project's ``hyperlink-role`` enum
+    (typically ``ref_int``/``ref_ext``) — unknown roles ghost silently.
+    """
+    await _check_project_enum_roles(
+        client,
+        project_id,
+        "hyperlink-role",
+        roles,
+        field_label="hyperlink role",
+        discovery_hint=(
+            "use a configured id such as 'ref_int' (internal) or 'ref_ext' (external)."
+        ),
+    )
+
+
 async def _existing_target_ids(
     client: PolarionClient,
     project_id: str,
@@ -640,128 +946,6 @@ async def guard_work_item_link_targets(
             f"A nonexistent target stores as a silent dangling link (HTTP 201, empty "
             f"title/type/status) -- use list_work_items to find valid target ids first."
         )
-
-
-async def fetch_project_enum_option_ids(
-    client: PolarionClient,
-    project_id: str,
-    enum_name: str,
-) -> frozenset[str]:
-    """Valid option ids for a project-level enum not in ``getAvailableOptions``
-    (link/hyperlink role). Response ``data`` is a dict (not list), options at
-    ``data.attributes.options[].id``. Cached; fail-closed like
-    :func:`fetch_enum_option_ids`.
-    """
-    cached = get_cached_project_enum(project_id, enum_name)
-    if cached is not None:
-        return cached
-
-    path = (
-        f"/projects/{encode_path_segment(project_id)}"
-        f"/enumerations/~/{encode_path_segment(enum_name)}/~"
-    )
-    try:
-        response = await client.get(path, params={"fields[enumerations]": "@all"})
-    except PolarionNotFoundError:
-        logger.warning(
-            "enumeration '%s' returned 404 for project=%s; skipping role "
-            "validation -- the enumeration is unsupported here, so there is "
-            "nothing to validate against.",
-            enum_name,
-            project_id,
-        )
-        store_cached_project_enum(project_id, enum_name, frozenset())
-        return frozenset()
-    except PolarionAuthError as exc:
-        raise _unauthorized_write_block(f"{enum_name} options", project_id) from exc
-    except PolarionError as exc:
-        raise _unreachable_write_block(f"{enum_name} options", project_id, exc) from exc
-
-    ids: set[str] = set()
-    data = response.get("data", {})
-    if isinstance(data, dict):
-        attributes = data.get("attributes")
-        options = attributes.get("options") if isinstance(attributes, dict) else None
-        if isinstance(options, list):
-            for entry in options:
-                if not isinstance(entry, dict):
-                    continue
-                opt_id = entry.get("id")
-                if isinstance(opt_id, str) and opt_id:
-                    ids.add(opt_id)
-
-    option_ids = frozenset(ids)
-    store_cached_project_enum(project_id, enum_name, option_ids)
-    return option_ids
-
-
-async def _check_project_enum_roles(  # noqa: PLR0913
-    client: PolarionClient,
-    project_id: str,
-    enum_name: str,
-    roles: Iterable[str],
-    *,
-    field_label: str,
-    discovery_hint: str,
-) -> None:
-    requested = {role for role in roles if role}
-    if not requested:
-        return
-
-    option_ids = await fetch_project_enum_option_ids(client, project_id, enum_name)
-    # Empty set = no options / enum unsupported; defer.
-    if not option_ids:
-        return
-
-    unknown = sorted(requested - option_ids)
-    if unknown:
-        raise ValueError(
-            f"{field_label} id(s) {unknown} are not valid in project "
-            f"'{project_id}'. Valid options: {format_option_list(option_ids)}. "
-            f"An unknown {field_label} ghosts silently (never matches Lucene) "
-            f"-- {discovery_hint}"
-        )
-
-
-async def guard_work_item_link_roles(
-    client: PolarionClient,
-    project_id: str,
-    roles: Iterable[str],
-) -> None:
-    """Reject link roles not in ``workitem-link-role`` — an unknown role stores
-    verbatim (HTTP 201) as a ghost link.
-    """
-    await _check_project_enum_roles(
-        client,
-        project_id,
-        "workitem-link-role",
-        roles,
-        field_label="role",
-        discovery_hint=(
-            "read an existing link with list_work_item_links to see the "
-            "project's configured roles."
-        ),
-    )
-
-
-async def guard_hyperlink_roles(
-    client: PolarionClient,
-    project_id: str,
-    roles: Iterable[str],
-) -> None:
-    """Reject hyperlink roles not in the project's ``hyperlink-role`` enum
-    (typically ``ref_int``/``ref_ext``) — unknown roles ghost silently.
-    """
-    await _check_project_enum_roles(
-        client,
-        project_id,
-        "hyperlink-role",
-        roles,
-        field_label="hyperlink role",
-        discovery_hint=(
-            "use a configured id such as 'ref_int' (internal) or 'ref_ext' (external)."
-        ),
-    )
 
 
 async def _existing_forward_link_ids(
@@ -850,6 +1034,9 @@ __all__ = [
     "guard_document_custom_fields",
     "guard_document_enums",
     "guard_hyperlink_roles",
+    "guard_test_run_custom_fields",
+    "guard_test_run_enums",
+    "guard_test_run_templates",
     "guard_work_item_custom_fields",
     "guard_work_item_enums",
     "guard_work_item_link_roles",

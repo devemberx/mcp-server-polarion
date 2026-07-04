@@ -47,14 +47,13 @@ from mcp_server_polarion.tools._shared.guard import (
 from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
     get_client,
-    safe_str,
 )
 from mcp_server_polarion.tools._shared.pagination import (
     DEFAULT_PAGE_SIZE,
     make_page,
 )
 from mcp_server_polarion.tools._shared.parse import (
-    extract_short_id,
+    extract_created_short_ids,
     parse_work_item_detail,
     parse_work_item_summaries,
 )
@@ -127,23 +126,6 @@ def _build_create_work_items_payload(
         for spec, html in zip(specs, descriptions_html, strict=True)
     ]
     return {"data": data}
-
-
-def _extract_created_work_item_ids(response: dict[str, object]) -> list[str]:
-    """Short work-item ids from a bulk 201 response, relying on Polarion echoing
-    ``data`` in submission order (call-site count check catches missing ids,
-    not reordered ones).
-    """
-    data = response.get("data")
-    if not isinstance(data, list):
-        return []
-    ids: list[str] = []
-    for item in data:
-        if isinstance(item, dict):
-            full_id = safe_str(item.get("id", ""))
-            if full_id:
-                ids.append(extract_short_id(full_id))
-    return ids
 
 
 def _build_update_work_item_payload(  # noqa: PLR0913
@@ -307,7 +289,7 @@ async def create_work_items(
     except PolarionError as exc:
         raise RuntimeError(f"Failed to create work items: {exc.message}") from exc
 
-    new_ids = _extract_created_work_item_ids(response)
+    new_ids = extract_created_short_ids(response)
     if len(new_ids) != len(items):
         raise RuntimeError(
             f"Polarion accepted the bulk create but returned {len(new_ids)} "

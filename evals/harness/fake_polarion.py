@@ -294,10 +294,13 @@ class FakePolarion:
                 200, json=self._enum_response(enum.group(1), enum.group(2))
             )
 
-        project_enum = re.search(r"/enumerations/~/([^/]+)/~$", path)
+        # Context-qualified names ("testing/testrun-type") are separate seed
+        # keys, so wildcard-context probes for them 404 like live Polarion.
+        project_enum = re.search(r"/enumerations/([^/]+)/([^/]+)/~$", path)
         if project_enum:
-            name = project_enum.group(1)
-            options = self.seeds.project_enums.get(name)
+            context, name = project_enum.groups()
+            key = name if context == "~" else f"{context}/{name}"
+            options = self.seeds.project_enums.get(key)
             if options is None:
                 return httpx.Response(404, json={"errors": [{"status": "404"}]})
             return httpx.Response(
@@ -305,7 +308,7 @@ class FakePolarion:
                 json={
                     "data": {
                         "type": "enumerations",
-                        "id": f"~/{name}/~",
+                        "id": f"{context}/{name}/~",
                         "attributes": {"options": [{"id": o} for o in options]},
                     }
                 },
@@ -363,6 +366,27 @@ class FakePolarion:
             data = [self._work_item_resource(w) for w in items]
             return httpx.Response(
                 200, json={"data": data, "meta": {"totalCount": len(data)}}
+            )
+
+        # Single test run (template-guard pre-read); isTemplate is served only
+        # on templates, mirroring live Polarion omitting it on instances.
+        single_tr = re.search(r"/testruns/([^/]+)$", path)
+        if single_tr:
+            tr = self.seeds.test_runs.get(single_tr.group(1))
+            if tr is None:
+                return httpx.Response(404, json={"errors": [{"status": "404"}]})
+            attributes: dict[str, Any] = {"id": tr.short_id}
+            if tr.is_template:
+                attributes["isTemplate"] = True
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "type": "testruns",
+                        "id": f"{PROJECT}/{tr.short_id}",
+                        "attributes": attributes,
+                    }
+                },
             )
 
         # Test runs: templates=true returns blueprints, else actual instances.
@@ -468,6 +492,27 @@ class FakePolarion:
                         "data": [
                             {"type": "workitems", "id": f"{PROJECT}/MCPT-{9001 + i}"}
                             for i in range(submitted)
+                        ]
+                    },
+                )
+            if path.endswith("/testruns"):
+                # Polarion honors the client-supplied id verbatim; echo it back.
+                ids: list[str] = []
+                if isinstance(body, dict) and isinstance(body.get("data"), list):
+                    for i, entry in enumerate(body["data"]):
+                        attrs = (
+                            entry.get("attributes") if isinstance(entry, dict) else None
+                        )
+                        rid = attrs.get("id") if isinstance(attrs, dict) else None
+                        ids.append(str(rid) if rid else f"TR-{9001 + i}")
+                else:
+                    ids = ["TR-9001"]
+                return httpx.Response(
+                    201,
+                    json={
+                        "data": [
+                            {"type": "testruns", "id": f"{PROJECT}/{rid}"}
+                            for rid in ids
                         ]
                     },
                 )

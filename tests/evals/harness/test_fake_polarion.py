@@ -27,6 +27,7 @@ from evals.harness.fixtures import (
     SEEDS,
     SPACE,
     TEST_RUN_ID,
+    TEST_RUN_TEMPLATE_ID,
     TESTCASE_ID,
 )
 
@@ -191,8 +192,46 @@ class TestTestRunRouting:
             FakePolarion(), f"/projects/{PROJECT}/testruns", templates="true"
         )
         payload = _json(response)
-        assert payload["meta"]["totalCount"] == 0
-        assert payload["included"] == []
+        assert payload["meta"]["totalCount"] == 1
+        run = payload["data"][0]
+        assert run["id"].rsplit("/", 1)[-1] == TEST_RUN_TEMPLATE_ID
+        assert run["attributes"]["isTemplate"] is True
+
+    def test_single_template_serves_is_template(self) -> None:
+        response = _get(
+            FakePolarion(), f"/projects/{PROJECT}/testruns/{TEST_RUN_TEMPLATE_ID}"
+        )
+        assert response.status_code == 200
+        attributes = _json(response)["data"]["attributes"]
+        assert attributes["isTemplate"] is True
+
+    def test_single_instance_omits_is_template(self) -> None:
+        # Live Polarion omits isTemplate on run instances; the template guard
+        # relies on the absence to reject instances passed as templates.
+        response = _get(FakePolarion(), f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}")
+        assert response.status_code == 200
+        assert "isTemplate" not in _json(response)["data"]["attributes"]
+
+    def test_single_missing_run_is_404(self) -> None:
+        response = _get(FakePolarion(), f"/projects/{PROJECT}/testruns/Nope")
+        assert response.status_code == 404
+
+    def test_testing_context_enum_resolves(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/enumerations/testing/testrun-type/~",
+        )
+        assert response.status_code == 200
+        ids = [o["id"] for o in _json(response)["data"]["attributes"]["options"]]
+        assert ids == ["manual", "automated"]
+
+    def test_wildcard_context_does_not_resolve_testrun_enum(self) -> None:
+        # Mirrors live Polarion: testrun enums 404 outside the testing context.
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/enumerations/~/testrun-type/~",
+        )
+        assert response.status_code == 404
 
 
 class TestWorkItemResource:
@@ -225,6 +264,38 @@ class TestMutations:
         ids = [entry["id"] for entry in _json(response)["data"]]
         assert len(ids) == 3
         assert len(set(ids)) == 3
+
+    def test_post_testruns_echoes_submitted_ids(self) -> None:
+        fake = FakePolarion()
+        response = _mutate(
+            fake,
+            "POST",
+            f"/projects/{PROJECT}/testruns",
+            {
+                "data": [
+                    {"type": "testruns", "attributes": {"id": "Fake-TR-New"}},
+                    {"type": "testruns", "attributes": {"id": "Fake-TR-New2"}},
+                ]
+            },
+        )
+        assert response.status_code == 201
+        ids = [entry["id"] for entry in _json(response)["data"]]
+        assert ids == [f"{PROJECT}/Fake-TR-New", f"{PROJECT}/Fake-TR-New2"]
+
+    def test_post_testruns_without_ids_still_echoes_entries(self) -> None:
+        fake = FakePolarion()
+        response = _mutate(
+            fake, "POST", f"/projects/{PROJECT}/testruns", {"data": [{}, {}]}
+        )
+        ids = [entry["id"] for entry in _json(response)["data"]]
+        assert len(ids) == 2
+        assert len(set(ids)) == 2
+
+    def test_post_testruns_without_body_falls_back_to_one_id(self) -> None:
+        fake = FakePolarion()
+        response = _mutate(fake, "POST", f"/projects/{PROJECT}/testruns")
+        assert response.status_code == 201
+        assert len(_json(response)["data"]) == 1
 
     def test_post_documents_echoes_module_id(self) -> None:
         fake = FakePolarion()
