@@ -4,9 +4,6 @@ real options and raises before the write. Fail-closed — validation error block
 the write (auth → ``PermissionError``, else ``RuntimeError``); only a
 *successful* empty option set and a 404 defer to Polarion. Caching in
 :mod:`...tools._shared.cache`.
-
-Layout: shared fail-closed helpers and option fetchers first, then the guards
-grouped by domain — work items, documents, test runs, links.
 """
 
 from __future__ import annotations

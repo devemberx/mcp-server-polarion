@@ -1,9 +1,6 @@
 """In-process TTL caches for near-static project facts, sparing the server's
 tight budget (<=3 req/s, no concurrency). Owns ALL cache state; tool logic
 reaches it only through the typed get / store wrappers.
-
-Layout: the ``TTLCache`` primitive and shared types first, then one block per
-cache — its module-level instance immediately followed by its wrappers.
 """
 
 from __future__ import annotations

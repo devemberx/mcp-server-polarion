@@ -10,8 +10,7 @@ from pydantic import BaseModel, Field
 class TestRunSummary(BaseModel):
     """Compact test-run representation for list results."""
 
-    # Test*-named models look like test classes to pytest when imported into
-    # a test module; __test__ = False opts every importer out at the source.
+    # pytest collects Test*-named classes as tests on import; opt out here.
     __test__ = False
 
     id: str

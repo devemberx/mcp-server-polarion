@@ -60,8 +60,7 @@ STANDARD_DOCUMENT_ATTRIBUTES: Final[frozenset[str]] = frozenset(
 )
 
 
-# Test-run mirror; testrun custom fields (e.g. rich-text description/goal on
-# default projects) sit inline under attributes just like work items.
+# Testrun custom fields sit inline under attributes, like work items.
 STANDARD_TEST_RUN_ATTRIBUTES: Final[frozenset[str]] = frozenset(
     {
         "id",

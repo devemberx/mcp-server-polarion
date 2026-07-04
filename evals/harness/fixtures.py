@@ -274,10 +274,8 @@ SEEDS = Seeds(
             ("approved", False),
         ],
     },
-    # Project-level enums (``/enumerations/{context}/{name}/~``) -- dict-shaped
-    # ``data`` with ``attributes.options[].id``, unlike getAvailableOptions'
-    # list. Bare keys live in the ``~`` context; testrun enums only resolve
-    # under ``testing`` (mirrors live 404 on the wildcard context).
+    # Project-level enums served dict-shaped (attributes.options[].id), unlike
+    # getAvailableOptions' list. Key context: bare = "~", testrun = "testing".
     project_enums={
         "hyperlink-role": ["ref_int", "ref_ext"],
         "workitem-link-role": ["relates_to", "parent", "satisfies", "verifies"],
