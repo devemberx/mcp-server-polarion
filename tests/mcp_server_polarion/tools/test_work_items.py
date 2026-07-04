@@ -875,9 +875,7 @@ class TestUpdateWorkItemsValidation:
     async def test_empty_spec_rejected_before_any_request(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # Polarion 400s on a body-less resource even with workflowAction /
-        # changeTypeTo, so an action-only update is unrepresentable: the spec
-        # itself raises before the tool can issue a request.
+        # Action-only update is unrepresentable: the spec raises pre-request.
         with pytest.raises(ValidationError, match="Nothing to update"):
             await _call_update(mock_ctx, workflow_action="close")
         mock_client.patch.assert_not_called()
