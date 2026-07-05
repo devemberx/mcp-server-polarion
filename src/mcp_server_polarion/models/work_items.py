@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from mcp_server_polarion.models.common import MAX_BODY_HTML_LEN
 
@@ -31,6 +31,9 @@ class WorkItemSummary(BaseModel):
 
 class Hyperlink(BaseModel):
     """A single external hyperlink attached to a work item."""
+
+    # LLM input model: reject typo keys instead of silently dropping them.
+    model_config = ConfigDict(extra="forbid")
 
     role: str
     title: str = ""
@@ -67,6 +70,8 @@ class WorkItemRead(WorkItemSummary):
 
 class WorkItemCreateSpec(BaseModel):
     """One work item to create via ``create_work_items``."""
+
+    model_config = ConfigDict(extra="forbid")
 
     title: str = Field(min_length=1)
     type: str = Field(min_length=1)

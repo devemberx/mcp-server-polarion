@@ -7,11 +7,29 @@ from pydantic import ValidationError
 
 from mcp_server_polarion.models import (
     Hyperlink,
+    WorkItemCreateSpec,
     WorkItemDetail,
     WorkItemsCreateResult,
     WorkItemSummary,
     WorkItemUpdateResult,
 )
+
+
+class TestInputSpecsForbidUnknownKeys:
+    """LLM-input models must reject typo keys instead of silently dropping
+    the intended field (extra='forbid')."""
+
+    def test_create_spec_typo_key_rejected(self):
+        with pytest.raises(ValidationError, match="descripion"):
+            WorkItemCreateSpec.model_validate(
+                {"title": "t", "type": "task", "descripion": "oops"}
+            )
+
+    def test_hyperlink_typo_key_rejected(self):
+        with pytest.raises(ValidationError, match="titel"):
+            Hyperlink.model_validate(
+                {"role": "ref_ext", "uri": "https://x", "titel": "oops"}
+            )
 
 
 class TestWorkItemSummary:

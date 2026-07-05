@@ -11,6 +11,7 @@ from mcp_server_polarion.models import (
     WorkItemLinksCreateResult,
     WorkItemLinksDeleteResult,
     WorkItemLinkSpec,
+    WorkItemLinkUpdateSpec,
 )
 
 
@@ -106,6 +107,34 @@ class TestWorkItemLinkSpec:
     def test_target_work_item_id_min_length(self):
         with pytest.raises(ValidationError):
             WorkItemLinkSpec(role="parent", target_work_item_id="")
+
+    def test_typo_key_rejected(self):
+        # extra='forbid': a typo key must error, not silently drop the field.
+        with pytest.raises(ValidationError, match="suspct"):
+            WorkItemLinkSpec.model_validate(
+                {"role": "parent", "target_work_item_id": "MCPT-2", "suspct": True}
+            )
+
+    def test_ref_typo_key_rejected(self):
+        with pytest.raises(ValidationError, match="target_projct_id"):
+            WorkItemLinkRef.model_validate(
+                {
+                    "role": "parent",
+                    "target_work_item_id": "MCPT-2",
+                    "target_projct_id": "P",
+                }
+            )
+
+    def test_update_spec_typo_key_rejected(self):
+        with pytest.raises(ValidationError, match="revison"):
+            WorkItemLinkUpdateSpec.model_validate(
+                {
+                    "role": "parent",
+                    "target_work_item_id": "MCPT-2",
+                    "suspect": True,
+                    "revison": "1234",
+                }
+            )
 
 
 class TestWorkItemLinkRef:

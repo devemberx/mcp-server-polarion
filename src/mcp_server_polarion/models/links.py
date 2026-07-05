@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class WorkItemLink(BaseModel):
@@ -25,6 +25,9 @@ class WorkItemLink(BaseModel):
 class WorkItemLinkSpec(BaseModel):
     """One link to create under a source work item."""
 
+    # LLM input model: reject typo keys instead of silently dropping them.
+    model_config = ConfigDict(extra="forbid")
+
     role: str = Field(min_length=1)
     target_work_item_id: str = Field(min_length=1)
     target_project_id: str | None = None
@@ -34,6 +37,8 @@ class WorkItemLinkSpec(BaseModel):
 
 class WorkItemLinkRef(BaseModel):
     """One existing link identified for deletion."""
+
+    model_config = ConfigDict(extra="forbid")
 
     role: str = Field(min_length=1)
     target_work_item_id: str = Field(min_length=1)
@@ -62,6 +67,8 @@ class WorkItemLinksDeleteResult(BaseModel):
 
 class WorkItemLinkUpdateSpec(BaseModel):
     """One existing link to update; ``suspect``/``revision`` tri-state, ≥1 set."""
+
+    model_config = ConfigDict(extra="forbid")
 
     role: str = Field(min_length=1)
     target_work_item_id: str = Field(min_length=1)
