@@ -33,6 +33,7 @@ _READ_TOOL_NAMES: frozenset[str] = frozenset(
         "list_work_items",
         "list_test_runs",
         "get_sql_query_recipes",
+        "get_html_recipes",
         "get_work_item",
         "read_work_item",
         "list_work_item_links",
@@ -98,6 +99,19 @@ class TestSqlRecipeGallery:
         recipes = body["recipes"]
         assert "list_work_items SQL recipes" in recipes
         assert "POLARION.STRUCT_WORKITEM_LINKEDWORKITEMS" in recipes
+
+
+class TestHtmlRecipeGallery:
+    """The HTML recipe gallery reaches the transport as a callable tool."""
+
+    async def test_get_html_recipes_reads(self, mcp_client: _MCPClient) -> None:
+        # The update tools point the LLM here, so the payload must not be empty.
+        result = await mcp_client.call_tool("get_html_recipes", {})
+        body = result.structured_content
+        assert body is not None
+        recipes = body["recipes"]
+        assert "polarion-Document-table" in recipes
+        assert "polarion-rte-caption" in recipes
 
 
 @pytest.mark.parametrize("tool_name", sorted(EXPECTED_TOOL_NAMES))

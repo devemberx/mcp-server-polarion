@@ -16,6 +16,7 @@ from mcp_server_polarion.core.exceptions import (
     PolarionNotFoundError,
 )
 from mcp_server_polarion.models import (
+    HtmlRecipeGallery,
     JsonValue,
     PaginatedResult,
     SqlRecipeGallery,
@@ -62,6 +63,7 @@ from mcp_server_polarion.tools._shared.parse import (
 from mcp_server_polarion.utils import (
     html_to_markdown,
     markdown_to_html,
+    polarionify_html,
     sanitize_html,
 )
 
@@ -214,6 +216,12 @@ _SQL_QUERY_RECIPES: Final[str] = (
     .read_text(encoding="utf-8")
 )
 
+_HTML_RECIPES: Final[str] = (
+    resources.files("mcp_server_polarion.tools")
+    .joinpath("guides", "html_recipes.md")
+    .read_text(encoding="utf-8")
+)
+
 
 @mcp.tool(
     tags={"write"},
@@ -250,6 +258,8 @@ async def create_work_items(
     move_work_item_to_document (this tool cannot). description is Markdown →
     sanitized HTML; later edits are raw-HTML round-trip via
     get_work_item(include_description_html=True) ↔ update_work_items.
+    Markdown tables get native Polarion styling; a paragraph starting
+    'Table:' directly after a table becomes a numbered caption widget.
     """
     client = get_client(ctx)
     for spec in items:
@@ -274,7 +284,9 @@ async def create_work_items(
             )
 
     descriptions_html = [
-        sanitize_html(markdown_to_html(spec.description)) if spec.description else ""
+        polarionify_html(sanitize_html(markdown_to_html(spec.description)))
+        if spec.description
+        else ""
         for spec in items
     ]
 
@@ -365,7 +377,9 @@ async def update_work_items(  # noqa: PLR0913
 
     description_html is raw Polarion HTML, sent verbatim — source from
     get_work_item(include_description_html=True); greenfield bodies use
-    create_work_items Markdown, formats never mix. custom_fields is partial,
+    create_work_items Markdown, formats never mix. New table, caption, link,
+    or widget HTML must be adapted from get_html_recipes templates, never
+    hand-written. custom_fields is partial,
     keys outside the type schema rejected, values NOT validated — resolve via
     list_work_item_enum_options first.
 
@@ -477,6 +491,22 @@ async def get_sql_query_recipes() -> SqlRecipeGallery:
     table schema.
     """
     return SqlRecipeGallery(recipes=_SQL_QUERY_RECIPES)
+
+
+@mcp.tool(
+    tags={"read"},
+    annotations={"readOnlyHint": True},
+)
+async def get_html_recipes() -> HtmlRecipeGallery:
+    """Fetch the required HTML templates for tables, captions, links, and
+    widgets written via update_work_items / update_document.
+
+    Any new <table>, numbered caption, work-item / cross-reference / wiki-page
+    link, or TOC / Table-of-Figures widget must be adapted from these
+    templates — plain hand-written markup renders unstyled and breaks
+    numbering. Also covers macro-id and metadata-scope caveats.
+    """
+    return HtmlRecipeGallery(recipes=_HTML_RECIPES)
 
 
 @mcp.tool(

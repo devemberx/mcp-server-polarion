@@ -70,6 +70,7 @@ from mcp_server_polarion.utils import (
     first_anchorless_block,
     html_to_markdown,
     markdown_to_html,
+    polarionify_html,
     sanitize_html,
     stamp_block_ids,
 )
@@ -846,7 +847,9 @@ async def update_document(  # noqa: PLR0913
         description=(
             "New body as raw HTML from "
             "get_document(include_homepage_content_html=True); '' rejected; "
-            "anchorless blocks get id= auto-stamped."
+            "anchorless blocks get id= auto-stamped. New tables, captions, or "
+            "other Polarion constructs: call get_html_recipes first and adapt "
+            "a template."
         ),
     ),
     auto_suspect: bool | None = Field(
@@ -886,6 +889,9 @@ async def update_document(  # noqa: PLR0913
       move_work_item_to_document, NOT this tool.
     - A polarion_wiki macro name=module-workitem <div> leaves the work item's
       module unset — attach via move_work_item_to_document.
+    - Polarion-specific constructs (tables, captions, links, TOC/TOF widgets,
+      page breaks) must be adapted from get_html_recipes templates, never
+      hand-written.
 
     workflow_action must pair with ≥1 attribute (else 400). Unknown status/type
     raise ValueError; custom_fields keys outside the document type's schema are
@@ -1070,7 +1076,9 @@ async def create_document(  # noqa: PLR0913
     with options; custom_fields keys validated against the document type schema.
 
     home_page_content is Markdown → sanitized HTML, blocks auto-stamped with
-    unique ids. Post-create edits round-trip raw HTML via
+    unique ids. Markdown tables get native Polarion styling; a paragraph
+    starting 'Table:' directly after a table becomes a numbered caption
+    widget. Post-create edits round-trip raw HTML via
     get_document(include_homepage_content_html=True) ↔ update_document; add work
     items via move_work_item_to_document.
     """
@@ -1086,7 +1094,9 @@ async def create_document(  # noqa: PLR0913
         await guard_document_custom_fields(client, project_id, type, custom_fields)
 
     home_page_content_html = (
-        stamp_block_ids(sanitize_html(markdown_to_html(home_page_content)))
+        stamp_block_ids(
+            polarionify_html(sanitize_html(markdown_to_html(home_page_content)))
+        )
         if home_page_content
         else ""
     )

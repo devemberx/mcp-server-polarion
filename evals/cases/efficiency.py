@@ -107,4 +107,14 @@ CASES: list[Case] = [
         covers=["move_work_item_from_document"],
         floating_ids=[FLOATING_TASK_ID],
     ),
+    _case(
+        "EFF-TABLE-RECIPE-SOURCED",
+        f"Append a two-column table listing the milestones 'M1: design' and "
+        f"'M2: review' to the description of work item {FLOATING_TASK_ID}, "
+        f"with a numbered caption 'Milestones' below it.",
+        "table_html_recipe_sourced",
+        intent="Raw-HTML table edits are template-sourced (get_html_recipes "
+        "before the update); hand-written table markup fails.",
+        covers=["update_work_items", "get_html_recipes"],
+    ),
 ]

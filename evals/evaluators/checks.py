@@ -409,6 +409,42 @@ def check_scoped_query_uses_sql(
     return True, "no Lucene module query issued; any SQL was recipe-sourced"
 
 
+def check_table_html_recipe_sourced(
+    trajectory: Trajectory, _params: dict[str, Any]
+) -> CheckResult:
+    """Table HTML written through an update tool must be recipe-sourced —
+    ``get_html_recipes`` first. The task demands a table, so a trajectory that
+    never writes one fails too (a refusal must not pass vacuously).
+    """
+    recipes_seen = False
+    wrote_table = False
+    for call in trajectory:
+        name = call.get("name")
+        if name == "get_html_recipes":
+            recipes_seen = True
+            continue
+        if name not in {"update_work_items", "update_document"}:
+            continue
+        # update_work_items nests description_html per item; update_document is
+        # flat (_expand_item_calls is identity for it).
+        for sub in _expand_item_calls(call):
+            args = _args(sub)
+            body = str(
+                args.get("description_html") or args.get("home_page_content_html") or ""
+            )
+            if "<table" not in body.lower():
+                continue
+            wrote_table = True
+            if not recipes_seen:
+                return False, (
+                    f"{name} wrote table HTML without a prior get_html_recipes "
+                    "-- adapt a template, do not hand-write table markup"
+                )
+    if not wrote_table:
+        return False, "no update call wrote a <table> -- the task requires one"
+    return True, "table HTML update was recipe-sourced"
+
+
 def _resolve_observed_path(result: object, path: str) -> list[str]:
     """Collect string leaf values at ``path`` from a recorded tool result.
 
@@ -617,5 +653,6 @@ REGISTRY: dict[str, Callable[[Trajectory, dict[str, Any]], CheckResult]] = {
     "direct_read": check_direct_read,
     "no_duplicate_reads": check_no_duplicate_reads,
     "scoped_query_uses_sql": check_scoped_query_uses_sql,
+    "table_html_recipe_sourced": check_table_html_recipe_sourced,
     "ordered_trajectory": check_ordered_trajectory,
 }
