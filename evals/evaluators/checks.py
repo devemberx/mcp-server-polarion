@@ -342,28 +342,54 @@ def check_no_detach_retry_loop(
     return True, "no retry loop against a free-floating item"
 
 
-def check_single_bulk_create(
-    trajectory: Trajectory, params: dict[str, Any]
+def _single_bulk_call(
+    trajectory: Trajectory, tool: str, params: dict[str, Any]
 ) -> CheckResult:
-    """Items creatable in one bulk call must not be split across calls.
-
-    Counts committed ``create_work_items`` calls (``dry_run`` previews and
-    guard-rejected calls excluded). ``params["max_calls"]`` defaults to 1.
+    """Committed ``tool`` calls (``dry_run`` previews and guard-rejected calls
+    excluded) must not exceed ``params["max_calls"]`` (default 1), and their
+    batches must carry ``params["min_items"]`` items in total (default 1) — a
+    zero-commit or partial batch is not an efficient pass, it's undone work.
     """
     max_calls = int(params.get("max_calls", 1))
+    min_items = int(params.get("min_items", 1))
     committed = [
         call
         for call in trajectory
-        if call.get("name") == "create_work_items"
+        if call.get("name") == tool
         and not _args(call).get("dry_run")
         and not _errored(call)
     ]
     if len(committed) > max_calls:
         return False, (
-            f"split creation into {len(committed)} create_work_items calls "
-            f"(max {max_calls}) -- one bulk call accepts up to 50 items"
+            f"split into {len(committed)} {tool} calls (max {max_calls}) "
+            "-- one bulk call handles the whole batch"
         )
-    return True, "creation used a single bulk call"
+    total_items = sum(len(_bulk_items(call, "items")) for call in committed)
+    if total_items < min_items:
+        return False, (
+            f"committed {total_items} item(s) via {tool} (min {min_items}) "
+            "-- the batch left the task undone"
+        )
+    return True, f"used a single bulk {tool} call"
+
+
+def check_single_bulk_create(
+    trajectory: Trajectory, params: dict[str, Any]
+) -> CheckResult:
+    """Items creatable in one bulk call must not be split across calls.
+    ``params``: ``max_calls`` (default 1), ``min_items`` (default 1).
+    """
+    return _single_bulk_call(trajectory, "create_work_items", params)
+
+
+def check_single_bulk_update(
+    trajectory: Trajectory, params: dict[str, Any]
+) -> CheckResult:
+    """Attribute changes to many known items must batch into one
+    ``update_work_items`` call, not one per item. ``params``: ``max_calls``
+    (default 1), ``min_items`` (default 1).
+    """
+    return _single_bulk_call(trajectory, "update_work_items", params)
 
 
 def check_direct_read(trajectory: Trajectory, params: dict[str, Any]) -> CheckResult:
@@ -662,6 +688,7 @@ REGISTRY: dict[str, Callable[[Trajectory, dict[str, Any]], CheckResult]] = {
     "round_trip_source": check_round_trip_source,
     "no_detach_retry_loop": check_no_detach_retry_loop,
     "single_bulk_create": check_single_bulk_create,
+    "single_bulk_update": check_single_bulk_update,
     "direct_read": check_direct_read,
     "no_duplicate_reads": check_no_duplicate_reads,
     "scoped_query_uses_sql": check_scoped_query_uses_sql,

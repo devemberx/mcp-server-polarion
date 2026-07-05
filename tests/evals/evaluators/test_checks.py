@@ -586,6 +586,58 @@ class TestCheckSingleBulkCreate:
         passed, _ = checks.check_single_bulk_create(trajectory, {})
         assert passed is True
 
+    def test_zero_committed_calls_fail(self) -> None:
+        trajectory = [
+            _call("create_work_items", {"items": [{"title": "a"}], "dry_run": True})
+        ]
+        passed, reason = checks.check_single_bulk_create(trajectory, {})
+        assert passed is False
+        assert "0 item(s)" in reason
+
+    def test_partial_batch_fails(self) -> None:
+        trajectory = [_call("create_work_items", {"items": [{"title": "a"}]})]
+        passed, reason = checks.check_single_bulk_create(trajectory, {"min_items": 3})
+        assert passed is False
+        assert "1 item(s)" in reason
+
+
+class TestCheckSingleBulkUpdate:
+    def test_one_bulk_call_passes(self) -> None:
+        trajectory = [
+            _call(
+                "update_work_items",
+                {"items": [{"work_item_id": "A"}, {"work_item_id": "B"}]},
+            )
+        ]
+        passed, _ = checks.check_single_bulk_update(trajectory, {})
+        assert passed is True
+
+    def test_one_call_per_item_fails(self) -> None:
+        trajectory = [
+            _call("update_work_items", {"items": [{"work_item_id": "A"}]}),
+            _call("update_work_items", {"items": [{"work_item_id": "B"}]}),
+        ]
+        passed, reason = checks.check_single_bulk_update(trajectory, {})
+        assert passed is False
+        assert "2" in reason
+
+    def test_zero_committed_calls_fail(self) -> None:
+        trajectory = [
+            _call(
+                "update_work_items",
+                {"items": [{"work_item_id": "A"}], "dry_run": True},
+            )
+        ]
+        passed, reason = checks.check_single_bulk_update(trajectory, {})
+        assert passed is False
+        assert "0 item(s)" in reason
+
+    def test_partial_batch_fails(self) -> None:
+        trajectory = [_call("update_work_items", {"items": [{"work_item_id": "A"}]})]
+        passed, reason = checks.check_single_bulk_update(trajectory, {"min_items": 2})
+        assert passed is False
+        assert "1 item(s)" in reason
+
 
 class TestCheckDirectRead:
     _PARAMS: ClassVar[dict[str, Any]] = {"work_item_id": "MCPT-200"}
