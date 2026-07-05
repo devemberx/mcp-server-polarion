@@ -59,7 +59,7 @@ CASES: list[Case] = [
         "get_before_update",
         intent="An update must be preceded by a get on the same item; a blind "
         "update fails.",
-        covers=["get_work_item", "update_work_item"],
+        covers=["get_work_item", "update_work_items"],
     ),
     _case(
         "SAFE-REPLY-RESOLVE",
@@ -78,7 +78,7 @@ CASES: list[Case] = [
         "preserve_hyperlinks",
         intent="A REPLACE-list update must carry every pre-existing URI; "
         "dropping one fails.",
-        covers=["get_work_item", "update_work_item"],
+        covers=["get_work_item", "update_work_items"],
         work_item_id=FLOATING_TASK_ID,
         required_uris=[FLOATING_TASK_HYPERLINK_URI],
     ),

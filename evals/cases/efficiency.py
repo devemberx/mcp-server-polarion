@@ -9,7 +9,13 @@ from __future__ import annotations
 
 from strands_evals import Case
 
-from evals.harness.fixtures import DOC, FLOATING_TASK_ID, SPACE
+from evals.harness.fixtures import (
+    CHILD_REQ_ID,
+    DOC,
+    FLOATING_TASK_ID,
+    SPACE,
+    UNCOVERED_REQ_ID,
+)
 
 MIN_PASS_RATE = 0.8
 
@@ -44,6 +50,19 @@ CASES: list[Case] = [
         intent="Bulk-creatable items use one create call; splitting across calls "
         "fails.",
         covers=["create_work_items"],
+    ),
+    _case(
+        "EFF-BULK-UPDATE",
+        f"Rename these work items: {CHILD_REQ_ID} to 'Fake child requirement v2', "
+        f"{UNCOVERED_REQ_ID} to 'Fake uncovered requirement v2', and "
+        f"{FLOATING_TASK_ID} to 'Fake floating task v2'.",
+        "single_bulk_write",
+        intent="Metadata changes to several known items use ONE committed "
+        "update_work_items call covering all of them; a per-item split or "
+        "zero commits fails.",
+        covers=["update_work_items"],
+        tool="update_work_items",
+        min_total_items=3,
     ),
     _case(
         "EFF-DIRECT-GET",

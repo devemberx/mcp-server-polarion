@@ -73,7 +73,7 @@ All list tools support pagination via `page_size` (1–100) and `page_number` pa
 | Tool | Description |
 |---|---|
 | `create_work_items` | Create one or more work items in a single request |
-| `update_work_item` | Update a work item's fields, body, or workflow status |
+| `update_work_items` | Update fields, body, or workflow status on one or more work items |
 | `create_document` | Create a new document |
 | `update_document` | Update document metadata, body, or workflow status |
 | `create_test_runs` | Create one or more test runs, optionally from a template |
