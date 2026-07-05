@@ -192,8 +192,8 @@ async def list_test_runs(  # noqa: PLR0913
     query: str | None = Field(
         default=None,
         description=(
-            "Optional Lucene filter (e.g. 'status:open', 'author.id:devemberx') "
-            "OR a 'SQL:(...)' prefix for native SQL."
+            "Optional Lucene filter (e.g. 'status:open', 'author.id:devemberx', "
+            "'HAS_VALUE:<field>' to match runs with that field populated)."
         ),
     ),
     templates: bool = Field(
@@ -207,7 +207,7 @@ async def list_test_runs(  # noqa: PLR0913
 
     Returns actual run instances by default; set templates=True for the reusable
     template blueprints instead. Filter with a Lucene query (status:open,
-    type:manual, author.id:<userid>) or omit for all.
+    type:manual, author.id:<userid>, HAS_VALUE:<field>) or omit for all.
     """
     client = get_client(ctx)
     params: dict[str, str | int] = {

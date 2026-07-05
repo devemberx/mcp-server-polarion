@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from strands_evals import Case
 
+from evals.cases._shared import make_case
 from evals.harness.fixtures import (
     DOC,
     FLOATING_TASK_HYPERLINK_URI,
@@ -31,16 +32,14 @@ def _case(
     covers: list[str],
     **params: object,
 ) -> Case:
-    return Case(
-        name=name,
-        input=prompt,
-        metadata={
-            "check": check,
-            "params": params,
-            "min_pass_rate": MIN_PASS_RATE,
-            "intent": intent,
-            "covers": covers,
-        },
+    return make_case(
+        name,
+        prompt,
+        check,
+        intent=intent,
+        covers=covers,
+        min_pass_rate=MIN_PASS_RATE,
+        **params,
     )
 
 
