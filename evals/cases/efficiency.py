@@ -40,7 +40,7 @@ CASES: list[Case] = [
     _case(
         "EFF-BULK-CREATE",
         "Create three new tasks titled 'Fake alpha', 'Fake beta', and 'Fake gamma'.",
-        "single_bulk_create",
+        "single_bulk_write",
         intent="Bulk-creatable items use one create call; splitting across calls "
         "fails.",
         covers=["create_work_items"],
