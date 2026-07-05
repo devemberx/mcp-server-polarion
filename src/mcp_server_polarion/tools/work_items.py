@@ -18,6 +18,7 @@ from mcp_server_polarion.core.exceptions import (
 )
 from mcp_server_polarion.models import (
     MAX_BODY_HTML_LEN,
+    HtmlRecipeGallery,
     Hyperlink,
     JsonValue,
     PaginatedResult,
@@ -60,6 +61,7 @@ from mcp_server_polarion.tools._shared.parse import (
 from mcp_server_polarion.utils import (
     html_to_markdown,
     markdown_to_html,
+    polarionify_html,
     sanitize_html,
 )
 
@@ -197,6 +199,12 @@ _SQL_QUERY_RECIPES: Final[str] = (
     .read_text(encoding="utf-8")
 )
 
+_HTML_RECIPES: Final[str] = (
+    resources.files("mcp_server_polarion.tools")
+    .joinpath("guides", "html_recipes.md")
+    .read_text(encoding="utf-8")
+)
+
 
 @mcp.tool(
     tags={"write"},
@@ -233,6 +241,8 @@ async def create_work_items(
     move_work_item_to_document (this tool cannot). description is Markdown →
     sanitized HTML; later edits are raw-HTML round-trip via
     get_work_item(include_description_html=True) ↔ update_work_item.
+    Markdown tables get native Polarion styling; a paragraph starting
+    'Table:' directly after a table becomes a numbered caption widget.
     """
     client = get_client(ctx)
     for spec in items:
@@ -257,7 +267,9 @@ async def create_work_items(
             )
 
     descriptions_html = [
-        sanitize_html(markdown_to_html(spec.description)) if spec.description else ""
+        polarionify_html(sanitize_html(markdown_to_html(spec.description)))
+        if spec.description
+        else ""
         for spec in items
     ]
 
@@ -327,7 +339,9 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
         default=None,
         max_length=MAX_BODY_HTML_LEN,
         description=(
-            "Raw HTML from get_work_item(include_description_html=True); verbatim."
+            "Any table or caption in it must come from a get_html_recipes "
+            "template. Raw HTML from get_work_item("
+            "include_description_html=True); verbatim."
         ),
     ),
     status: str | None = Field(
@@ -382,7 +396,8 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     Fetch current state with get_work_item BEFORE updating; PATCHes then GETs.
     description_html is raw Polarion HTML, sent verbatim — source from
     get_work_item(include_description_html=True); greenfield bodies use
-    create_work_items Markdown, formats never mix.
+    create_work_items Markdown, formats never mix. New table/caption HTML must
+    be adapted from get_html_recipes templates, never hand-written.
 
     hyperlinks/assignee_ids REPLACE the stored list — resubmit every existing
     entry plus the change or omissions are deleted. custom_fields is partial,
@@ -593,6 +608,22 @@ async def get_sql_query_recipes() -> SqlRecipeGallery:
     table schema.
     """
     return SqlRecipeGallery(recipes=_SQL_QUERY_RECIPES)
+
+
+@mcp.tool(
+    tags={"read"},
+    annotations={"readOnlyHint": True},
+)
+async def get_html_recipes() -> HtmlRecipeGallery:
+    """Fetch the required HTML templates for tables, captions, links, and
+    widgets written via update_work_item / update_document.
+
+    Any new <table>, numbered caption, work-item / cross-reference / wiki-page
+    link, or TOC / Table-of-Figures widget must be adapted from these
+    templates — plain hand-written markup renders unstyled and breaks
+    numbering. Also covers macro-id and metadata-scope caveats.
+    """
+    return HtmlRecipeGallery(recipes=_HTML_RECIPES)
 
 
 @mcp.tool(

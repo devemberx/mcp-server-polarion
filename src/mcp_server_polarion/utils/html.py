@@ -267,6 +267,120 @@ def markdown_to_html(text: str) -> str:
     return result.strip()
 
 
+# Polarion house style, copied from UI-generated tables (testdrive 2506).
+_POLARION_TABLE_STYLE: Final[str] = (
+    "width: 100%;max-width: 1280px;margin-left: 0px;margin-right: auto;"
+    "border: 1px solid #CCCCCC;empty-cells: show;border-collapse: collapse;"
+)
+_POLARION_TH_STYLE: Final[str] = (
+    "font-weight: bold;background-color: #F0F0F0;text-align: left;"
+    "vertical-align: top;border: 1px solid #CCCCCC;padding: 5px;"
+)
+_POLARION_TD_STYLE: Final[str] = (
+    "text-align: left;vertical-align: top;border: 1px solid #CCCCCC;padding: 5px;"
+)
+
+# Caption prefix → data-sequence value (pandoc-style convention).
+_CAPTION_KINDS: Final[dict[str, str]] = {"Table:": "Table", "Figure:": "Figure"}
+
+
+def polarionify_html(html: str) -> str:
+    """Style class-less tables and convert adjacent ``Table:``/``Figure:``
+    paragraphs into caption widgets. Must run AFTER ``sanitize_html`` (every
+    injected attribute is a fixed constant); unmatched input returned verbatim.
+    """
+    if not html or not html.strip():
+        return ""
+    if "<table" not in html.lower() and "Table:" not in html and "Figure:" not in html:
+        return html
+
+    soup = BeautifulSoup(html, "html.parser")
+    changed = _style_bare_tables(soup)
+    changed = _convert_caption_paragraphs(soup) or changed
+    return str(soup) if changed else html
+
+
+def _style_bare_tables(soup: BeautifulSoup) -> bool:
+    """House-style class-less tables (cells with a ``style`` kept); ``True`` if
+    any changed.
+    """
+    changed = False
+    for table in soup.find_all("table"):
+        if table.attrs.get("class"):
+            continue
+        table["class"] = "polarion-Document-table"
+        table["style"] = _POLARION_TABLE_STYLE
+        changed = True
+        for cell in table.find_all(["th", "td"]):
+            if cell.attrs.get("style"):
+                continue
+            cell["style"] = (
+                _POLARION_TH_STYLE if cell.name == "th" else _POLARION_TD_STYLE
+            )
+    return changed
+
+
+def _convert_caption_paragraphs(soup: BeautifulSoup) -> bool:
+    """Convert caption-candidate paragraphs to widgets; ``True`` if any did."""
+    changed = False
+    for paragraph in soup.find_all("p"):
+        kind = _caption_kind_for(paragraph)
+        if kind is None:
+            continue
+        paragraph.replace_with(_build_caption(soup, paragraph, kind))
+        changed = True
+    return changed
+
+
+def _caption_kind_for(paragraph: Tag) -> str | None:
+    """``data-sequence`` value for a caption candidate, or ``None``. Adjacency
+    required — previous sibling must be a ``<table>`` (Table) or a ``<p>`` with
+    an ``<img>`` (Figure) — so ordinary prose starting ``Table:`` stays prose.
+    """
+    first_text = paragraph.find(string=True)
+    if first_text is None:
+        return None
+    prefix = next(
+        (p for p in _CAPTION_KINDS if str(first_text).lstrip().startswith(p)), None
+    )
+    if prefix is None:
+        return None
+    anchor = paragraph.find_previous_sibling(lambda tag: isinstance(tag, Tag))
+    if anchor is None:
+        return None
+    kind = _CAPTION_KINDS[prefix]
+    if kind == "Table" and anchor.name == "table":
+        return kind
+    if kind == "Figure" and anchor.name == "p" and anchor.find("img") is not None:
+        return kind
+    return None
+
+
+def _build_caption(soup: BeautifulSoup, paragraph: Tag, kind: str) -> Tag:
+    """Caption widget ``<p>``: prefix stripped, inline children preserved."""
+    caption = soup.new_tag(
+        "p",
+        attrs={
+            "class": "polarion-rte-caption-paragraph",
+            "style": "text-align: left;",
+        },
+    )
+    caption.append(f"{kind} ")
+    number = soup.new_tag(
+        "span", attrs={"data-sequence": kind, "class": "polarion-rte-caption"}
+    )
+    number.string = "#"
+    caption.append(number)
+
+    first_text = paragraph.find(string=True)
+    if first_text is not None:
+        stripped = str(first_text).lstrip().removeprefix(f"{kind}:").lstrip()
+        first_text.replace_with(f" {stripped}" if stripped else "")
+    for child in list(paragraph.children):
+        caption.append(child.extract())
+    return caption
+
+
 def sanitize_html(html: str) -> str:
     """Restrict HTML to ``ALLOWED_TAGS``/``ALLOWED_ATTRS``.
 

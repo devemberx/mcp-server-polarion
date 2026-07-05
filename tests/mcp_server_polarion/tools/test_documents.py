@@ -8,6 +8,7 @@ from typing import Annotated, cast, get_type_hints
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from bs4 import BeautifulSoup
 from pydantic import TypeAdapter, ValidationError
 
 from mcp_server_polarion.core.exceptions import (
@@ -3209,6 +3210,39 @@ class TestCreateDocumentHappyPath:
         assert body["type"] == "text/html"
         assert "<strong>bold</strong>" in body["value"]
         assert 'href="https://example.com"' in body["value"]
+
+    async def test_home_page_content_table_and_caption_polarionified(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {
+            "data": [{"type": "documents", "id": "MyProj/_default/MySpec"}]
+        }
+
+        await create_document(
+            mock_ctx,
+            project_id="MyProj",
+            space_id="_default",
+            module_name="MySpec",
+            title="t",
+            type="generic",
+            status=None,
+            home_page_content="| a |\n| --- |\n| 1 |\n\nTable: 표 캡션\n",
+            custom_fields=None,
+            dry_run=False,
+        )
+
+        _, kwargs = mock_client.post.call_args
+        value = kwargs["json"]["data"][0]["attributes"]["homePageContent"]["value"]
+        assert 'class="polarion-Document-table"' in value
+        assert 'data-sequence="Table"' in value
+        soup = BeautifulSoup(value, "html.parser")
+        caption = soup.find("p", class_="polarion-rte-caption-paragraph")
+        assert caption is not None
+        table = soup.find("table")
+        assert table is not None
+        # Stamping runs after polarionify, so both new blocks are anchored.
+        assert str(caption.get("id", "")).strip()
+        assert str(table.get("id", "")).strip()
 
     async def test_home_page_content_stamps_unique_block_ids(
         self, mock_ctx: MagicMock, mock_client: AsyncMock

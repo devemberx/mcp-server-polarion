@@ -15,6 +15,12 @@ class SqlRecipeGallery(BaseModel):
     recipes: str
 
 
+class HtmlRecipeGallery(BaseModel):
+    """Copy-paste Polarion HTML templates returned by ``get_html_recipes``."""
+
+    recipes: str
+
+
 class WorkItemSummary(BaseModel):
     """Compact work-item representation for list and search results."""
 

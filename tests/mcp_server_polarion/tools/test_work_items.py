@@ -15,6 +15,7 @@ from mcp_server_polarion.core.exceptions import (
     PolarionNotFoundError,
 )
 from mcp_server_polarion.models import (
+    HtmlRecipeGallery,
     Hyperlink,
     PaginatedResult,
     WorkItemCreateSpec,
@@ -24,15 +25,22 @@ from mcp_server_polarion.models import (
     WorkItemUpdateResult,
 )
 from mcp_server_polarion.tools._shared import cache as _cache_mod
+from mcp_server_polarion.tools._shared.cache import store_work_item_custom_keys
 from mcp_server_polarion.tools.work_items import (
     _build_create_work_items_payload,
     _build_update_work_item_payload,
     _build_work_item_resource,
     create_work_items,
+    get_html_recipes,
     get_work_item,
     list_work_items,
     read_work_item,
     update_work_item,
+)
+from mcp_server_polarion.utils.html import (
+    _POLARION_TABLE_STYLE,
+    _POLARION_TD_STYLE,
+    _POLARION_TH_STYLE,
 )
 
 
@@ -568,6 +576,102 @@ class TestCreateWorkItemsHappyPath:
         # No usable javascript: href in either quote style.
         assert 'href="javascript:' not in desc_html
         assert "href='javascript:" not in desc_html
+
+    async def test_markdown_table_and_caption_polarionified(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {
+            "data": [{"type": "workitems", "id": "MyProj/MCPT-1"}]
+        }
+
+        await create_work_items(
+            mock_ctx,
+            project_id="MyProj",
+            items=[
+                WorkItemCreateSpec(
+                    title="t",
+                    type="task",
+                    description=(
+                        "| a | b |\n| --- | --- |\n| 1 | 2 |\n\nTable: 캡션\n"
+                    ),
+                )
+            ],
+            dry_run=False,
+        )
+
+        _, kwargs = mock_client.post.call_args
+        desc_html = kwargs["json"]["data"][0]["attributes"]["description"]["value"]
+        assert 'class="polarion-Document-table"' in desc_html
+        assert 'data-sequence="Table"' in desc_html
+        assert "캡션" in desc_html
+
+    async def test_rich_text_custom_field_value_not_polarionified(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # polarionify applies to description only, never custom_fields.
+        store_work_item_custom_keys(
+            "MyProj", "task", frozenset({"verification_criteria"})
+        )
+        mock_client.post.return_value = {
+            "data": [{"type": "workitems", "id": "MyProj/MCPT-1"}]
+        }
+        rich = {"type": "text/html", "value": "<table><tr><td>x</td></tr></table>"}
+
+        await create_work_items(
+            mock_ctx,
+            project_id="MyProj",
+            items=[
+                WorkItemCreateSpec(
+                    title="t",
+                    type="task",
+                    custom_fields={"verification_criteria": rich},
+                )
+            ],
+            dry_run=False,
+        )
+
+        _, kwargs = mock_client.post.call_args
+        attributes = kwargs["json"]["data"][0]["attributes"]
+        assert attributes["verification_criteria"] == rich
+
+
+class TestGetHtmlRecipes:
+    """``get_html_recipes`` serves raw-HTML templates for update tools."""
+
+    async def test_returns_gallery_with_core_templates(self) -> None:
+        result = await get_html_recipes()
+        assert isinstance(result, HtmlRecipeGallery)
+        assert "polarion-Document-table" in result.recipes
+        assert "polarion-rte-caption-paragraph" in result.recipes
+        assert 'data-sequence="Table"' in result.recipes
+        assert 'data-sequence="Figure"' in result.recipes
+
+    async def test_returns_link_and_widget_templates(self) -> None:
+        result = await get_html_recipes()
+        for marker in (
+            'data-type="workItem"',
+            'data-type="crossReference"',
+            'data-type="richPage"',
+            "polarion_wiki macro name=toc",
+            "polarion_wiki macro name=tof",
+            "polarion_wiki macro name=page_break",
+        ):
+            assert marker in result.recipes
+
+    async def test_recipes_warn_about_scope_and_macro_ids(self) -> None:
+        result = await get_html_recipes()
+        assert "custom field" in result.recipes.lower()
+        assert "polarion_wiki" in result.recipes
+
+    async def test_recipes_stay_in_sync_with_pipeline_constants(self) -> None:
+        # Guide must quote the exact styles polarionify_html injects.
+        result = await get_html_recipes()
+        for constant in (
+            _POLARION_TABLE_STYLE,
+            _POLARION_TH_STYLE,
+            _POLARION_TD_STYLE,
+        ):
+            assert constant in result.recipes
 
 
 class TestCreateWorkItemsErrorMapping:
