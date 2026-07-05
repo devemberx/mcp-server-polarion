@@ -6,12 +6,96 @@ import pytest
 from pydantic import ValidationError
 
 from mcp_server_polarion.models import (
+    MAX_BODY_HTML_LEN,
     Hyperlink,
+    WorkItemCreateSpec,
     WorkItemDetail,
     WorkItemsCreateResult,
     WorkItemSummary,
-    WorkItemUpdateResult,
+    WorkItemsUpdateResult,
+    WorkItemUpdateSpec,
 )
+
+
+class TestWorkItemUpdateSpec:
+    def test_minimal_title_change(self):
+        spec = WorkItemUpdateSpec(work_item_id="MCPT-1", title="t")
+        assert spec.work_item_id == "MCPT-1"
+        assert spec.title == "t"
+        assert spec.custom_fields is None
+
+    def test_work_item_id_min_length(self):
+        with pytest.raises(ValidationError):
+            WorkItemUpdateSpec(work_item_id="", title="t")
+
+    def test_all_unset_rejected_naming_id(self):
+        with pytest.raises(ValidationError, match="MCPT-7") as exc:
+            WorkItemUpdateSpec(work_item_id="MCPT-7")
+        assert "no effective change" in str(exc.value)
+
+    def test_none_only_custom_fields_rejected(self):
+        # {"k": None} is truthy but merge_custom_fields drops None values,
+        # which would yield an attribute-less resource that 400s the batch.
+        with pytest.raises(ValidationError, match="no effective change"):
+            WorkItemUpdateSpec(work_item_id="MCPT-1", custom_fields={"risk": None})
+
+    def test_custom_fields_with_one_real_value_pass(self):
+        spec = WorkItemUpdateSpec(
+            work_item_id="MCPT-1", custom_fields={"a": None, "b": "v"}
+        )
+        assert spec.custom_fields == {"a": None, "b": "v"}
+
+    def test_empty_hyperlinks_alone_rejected(self):
+        with pytest.raises(ValidationError, match="no effective change"):
+            WorkItemUpdateSpec(work_item_id="MCPT-1", hyperlinks=[])
+
+    def test_empty_assignee_ids_alone_rejected(self):
+        with pytest.raises(ValidationError, match="no effective change"):
+            WorkItemUpdateSpec(work_item_id="MCPT-1", assignee_ids=[])
+
+    def test_hyperlinks_alone_pass(self):
+        spec = WorkItemUpdateSpec(
+            work_item_id="MCPT-1",
+            hyperlinks=[Hyperlink(role="ref_ext", uri="https://x")],
+        )
+        assert spec.hyperlinks is not None
+
+    def test_typo_key_rejected(self):
+        with pytest.raises(ValidationError, match="titel"):
+            WorkItemUpdateSpec.model_validate(
+                {"work_item_id": "MCPT-1", "titel": "oops"}
+            )
+
+    def test_description_html_max_length(self):
+        with pytest.raises(ValidationError):
+            WorkItemUpdateSpec(
+                work_item_id="MCPT-1",
+                description_html="x" * (MAX_BODY_HTML_LEN + 1),
+            )
+
+
+class TestWorkItemsUpdateResult:
+    def test_defaults(self):
+        result = WorkItemsUpdateResult(updated=True, dry_run=False)
+        assert result.work_item_ids == []
+        assert result.payload_preview is None
+
+
+class TestInputSpecsForbidUnknownKeys:
+    """LLM-input models must reject typo keys instead of silently dropping
+    the intended field (extra='forbid')."""
+
+    def test_create_spec_typo_key_rejected(self):
+        with pytest.raises(ValidationError, match="descripion"):
+            WorkItemCreateSpec.model_validate(
+                {"title": "t", "type": "task", "descripion": "oops"}
+            )
+
+    def test_hyperlink_typo_key_rejected(self):
+        with pytest.raises(ValidationError, match="titel"):
+            Hyperlink.model_validate(
+                {"role": "ref_ext", "uri": "https://x", "titel": "oops"}
+            )
 
 
 class TestWorkItemSummary:
@@ -247,41 +331,20 @@ class TestWorkItemsCreateResult:
         assert result.payload_preview is not None
 
 
-class TestWorkItemUpdateResult:
-    def test_successful_update(self):
-        current = WorkItemDetail(
-            id="MCPT-001",
-            title="Old Title",
-            type="requirement",
-            status="draft",
-            description_html="<p>Old desc</p>",
-            project_id="proj1",
-        )
-        result = WorkItemUpdateResult(
-            updated=True,
-            dry_run=False,
-            current=current,
-            changes={"title": "New Title"},
-            payload_preview=None,
-        )
-        assert result.updated is True
-        assert result.current is not None
-        assert result.current.title == "Old Title"
-        assert result.changes["title"] == "New Title"
-        assert result.payload_preview is None
-
-    def test_dry_run(self):
-        result = WorkItemUpdateResult(
+class TestWorkItemsUpdateResultDryRun:
+    def test_dry_run_preview(self):
+        result = WorkItemsUpdateResult(
             updated=False,
             dry_run=True,
-            current=None,
-            changes={"status": "approved"},
+            work_item_ids=[],
             payload_preview={
-                "data": {
-                    "type": "workitems",
-                    "id": "proj1/MCPT-001",
-                    "attributes": {"status": "approved"},
-                }
+                "data": [
+                    {
+                        "type": "workitems",
+                        "id": "proj1/MCPT-001",
+                        "attributes": {"status": "approved"},
+                    }
+                ]
             },
         )
         assert result.updated is False

@@ -99,7 +99,7 @@ async def list_work_item_enum_options(  # noqa: PLR0913
 ) -> PaginatedResult[EnumOption]:
     """List valid enum option ids for a work item field of a given type.
 
-    Resolve enum ids here before create_work_items / update_work_item — enums
+    Resolve enum ids here before create_work_items / update_work_items — enums
     are validated on write, invalid ids raise with this set. An unknown
     work_item_type silently falls back to ~, so verify the type id first.
     """

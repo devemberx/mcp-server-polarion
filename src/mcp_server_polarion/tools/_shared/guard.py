@@ -911,6 +911,64 @@ async def _existing_target_ids(
     return frozenset(found)
 
 
+async def resolve_work_item_types(
+    client: PolarionClient,
+    project_id: str,
+    work_item_ids: Iterable[str],
+) -> dict[str, str]:
+    """Existence check plus short id -> type map for a bulk batch, via chunked
+    ``id:(...)`` queries (enum guards scope options by type). Fail-closed:
+    raises ``ValueError`` naming every missing id before any write.
+    """
+    requested = sorted({wi for wi in work_item_ids if wi})
+    if not requested:
+        return {}
+
+    resolved: dict[str, str] = {}
+    path = f"/projects/{encode_path_segment(project_id)}/workitems"
+    for start in range(0, len(requested), _GUARD_PAGE_SIZE):
+        chunk = requested[start : start + _GUARD_PAGE_SIZE]
+        params: dict[str, str | int] = {
+            "query": f"id:({' '.join(chunk)})",
+            "fields[workitems]": "id,type",
+            "page[size]": _GUARD_PAGE_SIZE,
+            "page[number]": 1,
+        }
+        try:
+            response = await client.get(path, params=params)
+        except PolarionNotFoundError as exc:
+            raise ValueError(
+                f"Project '{project_id}' not found. Use `list_projects` to "
+                "discover valid project IDs."
+            ) from exc
+        except PolarionAuthError as exc:
+            raise _unauthorized_write_block("work item existence", project_id) from exc
+        except PolarionError as exc:
+            raise _unreachable_write_block(
+                "work item existence", project_id, exc
+            ) from exc
+        data = response.get("data", [])
+        if not isinstance(data, list):
+            continue
+        for entry in data:
+            if not isinstance(entry, dict):
+                continue
+            attributes = entry.get("attributes")
+            resolved[extract_short_id(safe_str(entry.get("id", "")))] = (
+                safe_str(attributes.get("type", ""))
+                if isinstance(attributes, dict)
+                else ""
+            )
+
+    missing = sorted(set(requested) - resolved.keys())
+    if missing:
+        raise ValueError(
+            f"Work item(s) {format_option_list(missing)} not found in project "
+            f"'{project_id}'. Use `list_work_items` to discover valid IDs."
+        )
+    return resolved
+
+
 async def guard_work_item_link_targets(
     client: PolarionClient,
     source_project_id: str,
@@ -1042,4 +1100,5 @@ __all__ = [
     "guard_work_item_link_roles",
     "guard_work_item_link_targets",
     "partition_delete_links",
+    "resolve_work_item_types",
 ]

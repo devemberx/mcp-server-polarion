@@ -12,8 +12,10 @@ import pytest
 from mcp_server_polarion.tools._shared.helpers import (
     OPTION_LIST_LIMIT,
     encode_path_segment,
+    ensure_unique_ids,
     format_option_list,
     get_client,
+    reraise_with_item_context,
     safe_str,
     validate_work_item_id_for_lucene,
 )
@@ -125,3 +127,61 @@ class TestGetClient:
     def test_returns_injected_client(self, mock_ctx: MagicMock) -> None:
         client = mock_ctx.lifespan_context["polarion_client"]
         assert get_client(mock_ctx) is client
+
+
+class TestEnsureUniqueIds:
+    """Tests for `ensure_unique_ids`."""
+
+    def test_unique_ids_pass(self) -> None:
+        assert ensure_unique_ids(["A-1", "A-2"], label="work_item_id") is None
+
+    def test_empty_passes(self) -> None:
+        assert ensure_unique_ids([], label="work_item_id") is None
+
+    def test_duplicates_rejected_naming_each_once_sorted(self) -> None:
+        with pytest.raises(ValueError, match=r"\['A-1', 'B-2'\]") as exc_info:
+            ensure_unique_ids(["B-2", "A-1", "B-2", "A-1", "A-1"], label="work_item_id")
+        message = str(exc_info.value)
+        assert "work_item_id" in message
+        assert "single item" in message
+
+    def test_label_interpolated(self) -> None:
+        with pytest.raises(ValueError, match="test run id"):
+            ensure_unique_ids(["X", "X"], label="test run id")
+
+    def test_accepts_generator(self) -> None:
+        with pytest.raises(ValueError, match=r"\['X'\]"):
+            ensure_unique_ids((i for i in ["X", "X"]), label="id")
+
+
+class TestReraiseWithItemContext:
+    """Tests for `reraise_with_item_context`."""
+
+    def test_value_error_prefixed_with_position_and_id(self) -> None:
+        original = ValueError("unknown status 'ghost'")
+        with (
+            pytest.raises(
+                ValueError, match=r"items\[2\] \('MCPT-9'\): unknown status 'ghost'"
+            ) as exc_info,
+            reraise_with_item_context(2, "MCPT-9"),
+        ):
+            raise original
+        assert exc_info.value.__cause__ is original
+
+    def test_permission_error_passes_through(self) -> None:
+        with (
+            pytest.raises(PermissionError, match=r"^denied$"),
+            reraise_with_item_context(0, "MCPT-1"),
+        ):
+            raise PermissionError("denied")
+
+    def test_runtime_error_passes_through(self) -> None:
+        with (
+            pytest.raises(RuntimeError, match=r"^backend down$"),
+            reraise_with_item_context(0, "MCPT-1"),
+        ):
+            raise RuntimeError("backend down")
+
+    def test_no_exception_is_noop(self) -> None:
+        with reraise_with_item_context(0, "MCPT-1"):
+            pass

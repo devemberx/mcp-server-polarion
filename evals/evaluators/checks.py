@@ -15,7 +15,7 @@ CheckResult = tuple[bool, str]
 WRITE_TOOLS: frozenset[str] = frozenset(
     {
         "create_work_items",
-        "update_work_item",
+        "update_work_items",
         "move_work_item_to_document",
         "move_work_item_from_document",
         "create_work_item_links",
@@ -74,6 +74,20 @@ def _errored(call: dict[str, Any]) -> bool:
     return isinstance(result, dict) and "error" in result
 
 
+def _expand_item_calls(call: dict[str, Any]) -> list[dict[str, Any]]:
+    """Flatten a bulk call into per-item pseudo-calls: each dict entry of
+    ``args["items"]`` merged over the top-level args (batch-level keys like
+    ``project_id`` stay visible); identity for flat calls.
+    """
+    args = _args(call)
+    items = args.get("items")
+    if not isinstance(items, list):
+        return [call]
+    return [
+        {**call, "args": {**args, **item}} for item in items if isinstance(item, dict)
+    ]
+
+
 def check_readonly(trajectory: Trajectory, _params: dict[str, Any]) -> CheckResult:
     """No write tool may be called on a read-only task."""
     used = [n for n in _names(trajectory) if n in WRITE_TOOLS]
@@ -82,11 +96,14 @@ def check_readonly(trajectory: Trajectory, _params: dict[str, Any]) -> CheckResu
     return True, "no write tools called"
 
 
-_UPDATE_TO_GET: dict[str, tuple[str, tuple[str, ...]]] = {
-    "update_work_item": ("get_work_item", ("project_id", "work_item_id")),
+# Last element: True when the tool is a bulk call whose per-item ids live in
+# ``args["items"]`` (checked via ``_expand_item_calls``); False = flat call.
+_UPDATE_TO_GET: dict[str, tuple[str, tuple[str, ...], bool]] = {
+    "update_work_items": ("get_work_item", ("project_id", "work_item_id"), True),
     "update_document": (
         "get_document",
         ("project_id", "space_id", "document_name"),
+        False,
     ),
 }
 
@@ -115,20 +132,24 @@ def check_get_before_update(
         spec = _UPDATE_TO_GET.get(name)
         if spec is None:
             continue
-        get_name, id_keys = spec
-        target = _target_key(call, id_keys)
-        seen = False
-        for earlier in trajectory[:i]:
-            if earlier.get("name") != get_name:
-                continue
-            if _target_key(earlier, id_keys) == target:
-                seen = True
-                break
-        if not seen:
-            return False, (
-                f"called {name}({target}) without a prior {get_name}({target}) "
-                f"-- update must observe current state first"
+        get_name, id_keys, bulk = spec
+        subcalls = _expand_item_calls(call) if bulk else [call]
+        if not subcalls:
+            # Fail closed: a bulk write carrying no per-item dicts is still a
+            # blind write attempt, not a free pass.
+            return False, f"called {name} with no readable items"
+        for sub in subcalls:
+            target = _target_key(sub, id_keys)
+            seen = any(
+                earlier.get("name") == get_name
+                and _target_key(earlier, id_keys) == target
+                for earlier in trajectory[:i]
             )
+            if not seen:
+                return False, (
+                    f"called {name}({target}) without a prior {get_name}({target}) "
+                    f"-- update must observe current state first"
+                )
     return True, "every update_* was preceded by a matching get_*"
 
 
@@ -182,36 +203,40 @@ def check_preserve_hyperlinks(
     target = _short_id(params.get("work_item_id", ""))
     required = [str(u) for u in params.get("required_uris", [])]
     for call in trajectory:
-        if call.get("name") != "update_work_item":
+        if call.get("name") != "update_work_items":
             continue
-        args = _args(call)
-        if _short_id(args.get("work_item_id", "")) != target:
-            continue
-        hyperlinks = args.get("hyperlinks")
-        if not hyperlinks:
-            continue
-        uris = {str(h.get("uri", "")) for h in hyperlinks if isinstance(h, dict)}
-        missing = [u for u in required if u not in uris]
-        if missing:
-            return False, (
-                f"update_work_item replaced hyperlinks on {target} without "
-                f"pre-existing URI(s) {missing} -- the full list must be passed"
-            )
+        for sub in _expand_item_calls(call):
+            args = _args(sub)
+            if _short_id(args.get("work_item_id", "")) != target:
+                continue
+            hyperlinks = args.get("hyperlinks")
+            if not hyperlinks:
+                continue
+            uris = {str(h.get("uri", "")) for h in hyperlinks if isinstance(h, dict)}
+            missing = [u for u in required if u not in uris]
+            if missing:
+                return False, (
+                    f"update_work_items replaced hyperlinks on {target} without "
+                    f"pre-existing URI(s) {missing} -- the full list must be passed"
+                )
     return True, "no hyperlink update dropped a pre-existing URI"
 
 
-_BODY_WRITE_TO_SOURCE: dict[str, tuple[str, str, str, tuple[str, ...]]] = {
+# Last element mirrors _UPDATE_TO_GET: True = bulk items in ``args["items"]``.
+_BODY_WRITE_TO_SOURCE: dict[str, tuple[str, str, str, tuple[str, ...], bool]] = {
     "update_document": (
         "home_page_content_html",
         "get_document",
         "include_homepage_content_html",
         ("project_id", "space_id", "document_name"),
+        False,
     ),
-    "update_work_item": (
+    "update_work_items": (
         "description_html",
         "get_work_item",
         "include_description_html",
         ("project_id", "work_item_id"),
+        True,
     ),
 }
 
@@ -226,21 +251,23 @@ def check_round_trip_source(
         spec = _BODY_WRITE_TO_SOURCE.get(call.get("name", ""))
         if spec is None:
             continue
-        body_arg, get_name, flag_arg, id_keys = spec
-        if not _args(call).get(body_arg):
-            continue
-        target = _target_key(call, id_keys)
-        sourced = any(
-            earlier.get("name") == get_name
-            and _target_key(earlier, id_keys) == target
-            and bool(_args(earlier).get(flag_arg))
-            for earlier in trajectory[:i]
-        )
-        if not sourced:
-            return False, (
-                f"{call.get('name')}({target}) wrote {body_arg} without a prior "
-                f"{get_name}({flag_arg}=True) -- body was not round-trip sourced"
+        body_arg, get_name, flag_arg, id_keys, bulk = spec
+        for sub in _expand_item_calls(call) if bulk else [call]:
+            if not _args(sub).get(body_arg):
+                continue
+            target = _target_key(sub, id_keys)
+            sourced = any(
+                earlier.get("name") == get_name
+                and _target_key(earlier, id_keys) == target
+                and bool(_args(earlier).get(flag_arg))
+                for earlier in trajectory[:i]
             )
+            if not sourced:
+                return False, (
+                    f"{call.get('name')}({target}) wrote {body_arg} without a "
+                    f"prior {get_name}({flag_arg}=True) -- body was not "
+                    "round-trip sourced"
+                )
     return True, "every body write was round-trip sourced"
 
 
@@ -268,28 +295,38 @@ def check_no_detach_retry_loop(
     return True, "no retry loop against a free-floating item"
 
 
-def check_single_bulk_create(
+def check_single_bulk_write(
     trajectory: Trajectory, params: dict[str, Any]
 ) -> CheckResult:
-    """Items creatable in one bulk call must not be split across calls.
-
-    Counts committed ``create_work_items`` calls (``dry_run`` previews and
-    guard-rejected calls excluded). ``params["max_calls"]`` defaults to 1.
+    """Items writable in one bulk call must not be split across calls or left
+    partial. ``params``: ``tool`` (default ``create_work_items``), ``max_calls``
+    (default 1), ``min_total_items`` (optional) — committed (non-``dry_run``,
+    non-errored) batches must carry at least that many items in total; a
+    zero-commit or partial batch is undone work, not an efficient pass.
     """
+    tool = str(params.get("tool", "create_work_items"))
     max_calls = int(params.get("max_calls", 1))
     committed = [
         call
         for call in trajectory
-        if call.get("name") == "create_work_items"
+        if call.get("name") == tool
         and not _args(call).get("dry_run")
         and not _errored(call)
     ]
     if len(committed) > max_calls:
         return False, (
-            f"split creation into {len(committed)} create_work_items calls "
+            f"split the batch into {len(committed)} {tool} calls "
             f"(max {max_calls}) -- one bulk call accepts up to 50 items"
         )
-    return True, "creation used a single bulk call"
+    min_total = params.get("min_total_items")
+    if min_total is not None:
+        total = sum(len(_expand_item_calls(call)) for call in committed)
+        if total < int(min_total):
+            return False, (
+                f"committed {total} item(s) via {tool} (min {min_total}) "
+                "-- the batch left the task undone"
+            )
+    return True, f"used a single bulk {tool} call"
 
 
 def check_direct_read(trajectory: Trajectory, params: dict[str, Any]) -> CheckResult:
@@ -386,20 +423,23 @@ def check_table_html_recipe_sourced(
         if name == "get_html_recipes":
             recipes_seen = True
             continue
-        if name not in {"update_work_item", "update_document"}:
+        if name not in {"update_work_items", "update_document"}:
             continue
-        args = _args(call)
-        body = str(
-            args.get("description_html") or args.get("home_page_content_html") or ""
-        )
-        if "<table" not in body.lower():
-            continue
-        wrote_table = True
-        if not recipes_seen:
-            return False, (
-                f"{name} wrote table HTML without a prior get_html_recipes -- "
-                "adapt a template, do not hand-write table markup"
+        # update_work_items nests description_html per item; update_document is
+        # flat (_expand_item_calls is identity for it).
+        for sub in _expand_item_calls(call):
+            args = _args(sub)
+            body = str(
+                args.get("description_html") or args.get("home_page_content_html") or ""
             )
+            if "<table" not in body.lower():
+                continue
+            wrote_table = True
+            if not recipes_seen:
+                return False, (
+                    f"{name} wrote table HTML without a prior get_html_recipes "
+                    "-- adapt a template, do not hand-write table markup"
+                )
     if not wrote_table:
         return False, "no update call wrote a <table> -- the task requires one"
     return True, "table HTML update was recipe-sourced"
@@ -431,13 +471,21 @@ def _resolve_observed_path(result: object, path: str) -> list[str]:
 
 
 def _args_match(args: dict[str, Any], match: dict[str, Any]) -> bool:
-    """All ``match`` entries equal the call's args (``*_id`` via ``_short_id``)."""
+    """All ``match`` entries equal the call's args (``*_id`` via ``_short_id``).
+    A key absent at the top level may be satisfied by any per-item dict in a
+    bulk call's ``args["items"]``.
+    """
+    items = [i for i in args.get("items") or [] if isinstance(i, dict)]
     for key, expected in match.items():
-        actual = args.get(key)
+        candidates = (
+            [args.get(key)]
+            if key in args
+            else [item.get(key) for item in items if key in item]
+        )
         if key.endswith("_id"):
-            if _short_id(actual) != _short_id(expected):
+            if not any(_short_id(c) == _short_id(expected) for c in candidates):
                 return False
-        elif actual != expected:
+        elif expected not in candidates:
             return False
     return True
 
@@ -480,7 +528,7 @@ def check_ordered_trajectory(
     if (
         params.get("max_create_calls") is not None
         and not (
-            r := check_single_bulk_create(
+            r := check_single_bulk_write(
                 trajectory, {"max_calls": params["max_create_calls"]}
             )
         )[0]
@@ -601,7 +649,7 @@ REGISTRY: dict[str, Callable[[Trajectory, dict[str, Any]], CheckResult]] = {
     "preserve_hyperlinks": check_preserve_hyperlinks,
     "round_trip_source": check_round_trip_source,
     "no_detach_retry_loop": check_no_detach_retry_loop,
-    "single_bulk_create": check_single_bulk_create,
+    "single_bulk_write": check_single_bulk_write,
     "direct_read": check_direct_read,
     "no_duplicate_reads": check_no_duplicate_reads,
     "scoped_query_uses_sql": check_scoped_query_uses_sql,

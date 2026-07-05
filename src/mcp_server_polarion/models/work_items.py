@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from mcp_server_polarion.models.common import MAX_BODY_HTML_LEN
 
@@ -37,6 +37,9 @@ class WorkItemSummary(BaseModel):
 
 class Hyperlink(BaseModel):
     """A single external hyperlink attached to a work item."""
+
+    # LLM input model: reject typo keys instead of silently dropping them.
+    model_config = ConfigDict(extra="forbid")
 
     role: str
     title: str = ""
@@ -74,6 +77,8 @@ class WorkItemRead(WorkItemSummary):
 class WorkItemCreateSpec(BaseModel):
     """One work item to create via ``create_work_items``."""
 
+    model_config = ConfigDict(extra="forbid")
+
     title: str = Field(min_length=1)
     type: str = Field(min_length=1)
     description: str | None = Field(default=None, max_length=MAX_BODY_HTML_LEN)
@@ -96,14 +101,92 @@ class WorkItemsCreateResult(BaseModel):
     payload_preview: Mapping[str, object] | None = None
 
 
-class WorkItemUpdateResult(BaseModel):
-    """Result of an ``update_work_item`` operation."""
+class WorkItemUpdateSpec(BaseModel):
+    """One work item's changes in an ``update_work_items`` batch; unset
+    fields stay unchanged."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    work_item_id: str = Field(
+        min_length=1, description="Work item ID (e.g. 'MCPT-042')."
+    )
+    title: str | None = None
+    description_html: str | None = Field(
+        default=None,
+        max_length=MAX_BODY_HTML_LEN,
+        description=(
+            "Raw HTML from get_work_item(include_description_html=True); verbatim."
+        ),
+    )
+    status: str | None = Field(
+        default=None,
+        description="New status; prefer workflow_action for real transitions.",
+    )
+    priority: str | None = Field(default=None, description="e.g. '50.0'.")
+    severity: str | None = None
+    due_date: str | None = Field(default=None, description="'YYYY-MM-DD'.")
+    initial_estimate: str | None = Field(
+        default=None,
+        description="Polarion duration (e.g. '5 1/2d', '1w 2d').",
+    )
+    resolution: str | None = Field(
+        default=None,
+        description="Prefer workflow_action so workflow rules apply.",
+    )
+    hyperlinks: list[Hyperlink] | None = Field(
+        default=None,
+        description=(
+            "REPLACES the stored hyperlink list — to add one, resubmit every "
+            "existing hyperlink plus the new entry."
+        ),
+    )
+    assignee_ids: list[str] | None = Field(
+        default=None,
+        description="REPLACES the assignee list — pass the full list, not a delta.",
+    )
+    custom_fields: dict[str, object] | None = Field(
+        default=None,
+        description="Partial; rich-text values as {'type':'text/html','value':...}.",
+    )
+
+    @model_validator(mode="after")
+    def _require_effective_change(self) -> WorkItemUpdateSpec:
+        # None-valued custom entries are dropped at payload build; an item
+        # reduced to an attribute-less resource would 400 the whole batch.
+        effective = (
+            self.title
+            or self.description_html
+            or self.status
+            or self.priority
+            or self.severity
+            or self.due_date
+            or self.initial_estimate
+            or self.resolution
+            or self.hyperlinks
+            or self.assignee_ids
+            or (
+                self.custom_fields
+                and any(value is not None for value in self.custom_fields.values())
+            )
+        )
+        if not effective:
+            msg = (
+                f"work item '{self.work_item_id}': no effective change -- set "
+                "at least one field (custom_fields values of None are "
+                "dropped); workflow_action/change_type_to also need >=1 body "
+                "field per item."
+            )
+            raise ValueError(msg)
+        return self
+
+
+class WorkItemsUpdateResult(BaseModel):
+    """Result of an ``update_work_items`` operation."""
 
     updated: bool
     dry_run: bool
-    current: WorkItemDetail | None
-    changes: Mapping[str, object]
-    payload_preview: Mapping[str, object] | None
+    work_item_ids: list[str] = Field(default_factory=list)
+    payload_preview: Mapping[str, object] | None = None
 
 
 class WorkItemMoveResult(BaseModel):

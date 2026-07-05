@@ -35,6 +35,7 @@ from mcp_server_polarion.tools._shared.guard import (
 )
 from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
+    ensure_unique_ids,
     get_client,
 )
 from mcp_server_polarion.tools._shared.pagination import (
@@ -127,6 +128,7 @@ async def create_test_runs(
     mismatch raises — re-query list_test_runs before retrying.
     """
     client = get_client(ctx)
+    ensure_unique_ids((spec.id for spec in items), label="id")
     for spec in items:
         await guard_test_run_enums(
             client, project_id, type=spec.type, status=spec.status

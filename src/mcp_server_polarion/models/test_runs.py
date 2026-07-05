@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class TestRunSummary(BaseModel):
@@ -27,6 +27,9 @@ class TestRunCreateSpec(BaseModel):
     """One test run to create via ``create_test_runs``."""
 
     __test__ = False
+
+    # LLM input model: reject typo keys instead of silently dropping them.
+    model_config = ConfigDict(extra="forbid")
 
     id: str = Field(min_length=1)
     title: str | None = None
