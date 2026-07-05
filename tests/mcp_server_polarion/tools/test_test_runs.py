@@ -223,25 +223,23 @@ class TestListTestRuns:
         _, kwargs = mock_client.get.call_args
         assert "query" not in kwargs["params"]
 
-    async def test_sql_prefix_query_passed_verbatim(
+    async def test_has_value_query_passed_verbatim(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        sql_query = (
-            "SQL:(SELECT tr.* FROM POLARION.TESTRUN tr WHERE tr.C_STATUS = 'open')"
-        )
+        has_value_query = "HAS_VALUE:goal"
         mock_client.get.return_value = {"data": [], "meta": {"totalCount": 0}}
 
         await list_test_runs(
             mock_ctx,
             project_id="proj1",
-            query=sql_query,
+            query=has_value_query,
             templates=False,
             page_size=100,
             page_number=1,
         )
 
         _, kwargs = mock_client.get.call_args
-        assert kwargs["params"]["query"] == sql_query
+        assert kwargs["params"]["query"] == has_value_query
 
     async def test_templates_true_adds_param(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -323,6 +321,26 @@ class TestListTestRuns:
                 page_size=100,
                 page_number=1,
             )
+
+
+class TestListTestRunsQueryDocumentation:
+    """Lock the query docs to Lucene-only — ``SQL:(...)`` on ``/testruns`` 400s
+    on the live server (the endpoint wraps the query verbatim into Lucene), so
+    even a "no SQL" disclaimer must not reintroduce the token an LLM could copy.
+    """
+
+    def test_query_docs_promise_lucene_only(self) -> None:
+        field_info = inspect.signature(list_test_runs).parameters["query"].default
+        assert "SQL" not in field_info.description, (
+            "list_test_runs query description must not mention SQL -- "
+            "/testruns has no SQL support (400 verified live)"
+        )
+        assert "HAS_VALUE" in field_info.description, (
+            "list_test_runs query description must document the HAS_VALUE filter"
+        )
+        assert "SQL" not in (list_test_runs.__doc__ or ""), (
+            "list_test_runs docstring must not mention SQL"
+        )
 
 
 class TestBuildCreateTestRunsPayload:

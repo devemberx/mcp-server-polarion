@@ -29,16 +29,14 @@ def _case(
     covers: list[str],
     **params: object,
 ) -> Case:
-    return Case(
-        name=name,
-        input=prompt,
-        metadata={
-            "check": check,
-            "params": params,
-            "min_pass_rate": MIN_PASS_RATE,
-            "intent": intent,
-            "covers": covers,
-        },
+    return make_case(
+        name,
+        prompt,
+        check,
+        intent=intent,
+        covers=covers,
+        min_pass_rate=MIN_PASS_RATE,
+        **params,
     )
 
 
