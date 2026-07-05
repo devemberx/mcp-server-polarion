@@ -883,32 +883,68 @@ async def guard_hyperlink_roles(
     )
 
 
-async def _existing_target_ids(
+async def _existing_work_item_types(
     client: PolarionClient,
     project_id: str,
-    target_ids: frozenset[str],
-) -> frozenset[str]:
-    """Subset of *target_ids* that exist in *project_id*, via chunked
-    ``id:(...)`` queries. 404 (project missing) propagates to caller.
+    work_item_ids: frozenset[str],
+) -> dict[str, str]:
+    """id -> type for the subset of *work_item_ids* that exist in
+    *project_id*, via chunked ``id:(...)`` queries; type is ``""`` when the
+    attribute is absent. 404 (project missing) propagates to caller.
     """
-    ordered = sorted(target_ids)
-    found: set[str] = set()
+    ordered = sorted(work_item_ids)
+    found: dict[str, str] = {}
+    path = f"/projects/{encode_path_segment(project_id)}/workitems"
     for start in range(0, len(ordered), _GUARD_PAGE_SIZE):
         chunk = ordered[start : start + _GUARD_PAGE_SIZE]
         params: dict[str, str | int] = {
             "query": f"id:({' '.join(chunk)})",
-            "fields[workitems]": "id",
+            "fields[workitems]": "id,type",
             "page[size]": _GUARD_PAGE_SIZE,
             "page[number]": 1,
         }
-        path = f"/projects/{encode_path_segment(project_id)}/workitems"
         response = await client.get(path, params=params)
         data = response.get("data", [])
         if isinstance(data, list):
             for entry in data:
-                if isinstance(entry, dict):
-                    found.add(extract_short_id(safe_str(entry.get("id", ""))))
-    return frozenset(found)
+                if not isinstance(entry, dict):
+                    continue
+                short_id = extract_short_id(safe_str(entry.get("id", "")))
+                if not short_id:
+                    continue
+                attrs = entry.get("attributes")
+                type_id = attrs.get("type") if isinstance(attrs, dict) else None
+                found[short_id] = type_id if isinstance(type_id, str) else ""
+    return found
+
+
+async def guard_work_item_types(
+    client: PolarionClient,
+    project_id: str,
+    work_item_ids: Iterable[str],
+) -> dict[str, str]:
+    """Fail-closed existence check; returns id -> type (enum guards scope by
+    type). Raises ``ValueError`` naming every id that does not exist;
+    ``PolarionNotFoundError`` (bad project) propagates to the caller.
+    """
+    requested = frozenset(wi for wi in work_item_ids if wi)
+    try:
+        resolved = await _existing_work_item_types(client, project_id, requested)
+    except PolarionAuthError as exc:
+        raise _unauthorized_write_block("work item existence", project_id) from exc
+    except PolarionNotFoundError:
+        raise
+    except PolarionError as exc:
+        raise _unreachable_write_block("work item existence", project_id, exc) from exc
+
+    missing = sorted(requested - resolved.keys())
+    if missing:
+        raise ValueError(
+            f"Work item(s) {format_option_list(missing)} not found in "
+            f"project '{project_id}'. Use `list_work_items` to discover "
+            "valid IDs."
+        )
+    return resolved
 
 
 async def guard_work_item_link_targets(
@@ -928,7 +964,7 @@ async def guard_work_item_link_targets(
     missing: list[str] = []
     for project_id, requested in by_project.items():
         try:
-            existing = await _existing_target_ids(
+            existing = await _existing_work_item_types(
                 client, project_id, frozenset(requested)
             )
         except PolarionNotFoundError:
@@ -938,7 +974,9 @@ async def guard_work_item_link_targets(
             raise _unauthorized_write_block("link targets", project_id) from exc
         except PolarionError as exc:
             raise _unreachable_write_block("link targets", project_id, exc) from exc
-        missing.extend(f"{project_id}/{wi}" for wi in sorted(requested - existing))
+        missing.extend(
+            f"{project_id}/{wi}" for wi in sorted(requested - existing.keys())
+        )
 
     if missing:
         raise ValueError(
@@ -1041,5 +1079,6 @@ __all__ = [
     "guard_work_item_enums",
     "guard_work_item_link_roles",
     "guard_work_item_link_targets",
+    "guard_work_item_types",
     "partition_delete_links",
 ]

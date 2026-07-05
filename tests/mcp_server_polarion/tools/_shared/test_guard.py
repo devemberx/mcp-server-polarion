@@ -38,6 +38,7 @@ from mcp_server_polarion.tools._shared.guard import (
     guard_work_item_enums,
     guard_work_item_link_roles,
     guard_work_item_link_targets,
+    guard_work_item_types,
     partition_delete_links,
 )
 
@@ -858,7 +859,7 @@ class TestGuardWorkItemLinkTargets:
         )
         assert path == "/projects/P/workitems"
         assert kwargs["params"]["query"] == "id:(A B)"
-        assert kwargs["params"]["fields[workitems]"] == "id"
+        assert kwargs["params"]["fields[workitems]"] == "id,type"
 
     async def test_missing_target_raises_value_error(
         self, mock_client: AsyncMock
@@ -946,6 +947,124 @@ class TestGuardWorkItemLinkTargets:
 
         with pytest.raises(ValueError, match="P/A"):
             await guard_work_item_link_targets(mock_client, "P", [_link("A")])
+
+
+def _workitems_type_response(
+    project_id: str, entries: list[tuple[str, str]]
+) -> dict[str, object]:
+    """A JSON:API workitems list response with ``id``/``type`` per entry."""
+    return {
+        "data": [
+            {
+                "type": "workitems",
+                "id": f"{project_id}/{short_id}",
+                "attributes": {"type": type_id},
+            }
+            for short_id, type_id in entries
+        ]
+    }
+
+
+class TestGuardWorkItemTypes:
+    """Batched existence guard returning id -> type (uncached)."""
+
+    async def test_all_ids_resolve_one_get(self, mock_client: AsyncMock) -> None:
+        mock_client.get.return_value = _workitems_type_response(
+            "P", [("A", "task"), ("B", "requirement")]
+        )
+
+        result = await guard_work_item_types(mock_client, "P", ["A", "B"])
+
+        assert result == {"A": "task", "B": "requirement"}
+        mock_client.get.assert_awaited_once()
+        path, kwargs = (
+            mock_client.get.call_args.args[0],
+            mock_client.get.call_args.kwargs,
+        )
+        assert path == "/projects/P/workitems"
+        assert kwargs["params"]["query"] == "id:(A B)"
+        assert kwargs["params"]["fields[workitems]"] == "id,type"
+
+    async def test_missing_id_raises_value_error_naming_it(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _workitems_type_response("P", [("A", "task")])
+
+        with pytest.raises(ValueError, match="B") as exc:
+            await guard_work_item_types(mock_client, "P", ["A", "B"])
+
+        assert "not found" in str(exc.value)
+
+    async def test_chunks_above_page_size(self, mock_client: AsyncMock) -> None:
+        ids = sorted(f"WI-{n}" for n in range(150))
+
+        async def fake_get(path: str, **kwargs: object) -> dict[str, object]:
+            query = str(kwargs["params"]["query"])  # type: ignore[index]
+            chunk = query.removeprefix("id:(").removesuffix(")").split()
+            return _workitems_type_response("P", [(i, "task") for i in chunk])
+
+        mock_client.get.side_effect = fake_get
+
+        result = await guard_work_item_types(mock_client, "P", ids)
+
+        assert len(result) == 150
+        assert mock_client.get.await_count == 2
+
+    async def test_duplicate_ids_deduped_into_one_query(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _workitems_type_response("P", [("A", "task")])
+
+        await guard_work_item_types(mock_client, "P", ["A", "A"])
+
+        assert mock_client.get.call_args.kwargs["params"]["query"] == "id:(A)"
+
+    async def test_unreachable_backend_blocks_write(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionError("backend down")
+
+        with pytest.raises(RuntimeError, match="Refusing the write"):
+            await guard_work_item_types(mock_client, "P", ["A"])
+
+    async def test_auth_error_raises_permission_error(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
+
+        with pytest.raises(PermissionError, match="lacks permission"):
+            await guard_work_item_types(mock_client, "P", ["A"])
+
+    async def test_project_not_found_propagates(self, mock_client: AsyncMock) -> None:
+        mock_client.get.side_effect = PolarionNotFoundError("no such project")
+
+        with pytest.raises(PolarionNotFoundError):
+            await guard_work_item_types(mock_client, "P", ["A"])
+
+    async def test_non_dict_entry_in_data_is_skipped(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {"data": ["not-a-dict"]}
+
+        with pytest.raises(ValueError, match="A"):
+            await guard_work_item_types(mock_client, "P", ["A"])
+
+    async def test_entry_without_type_attribute_counts_as_existing(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # Existence comes from the id; a missing type attribute must not
+        # false-flag the item as not found.
+        mock_client.get.return_value = {"data": [{"type": "workitems", "id": "P/A"}]}
+
+        result = await guard_work_item_types(mock_client, "P", ["A"])
+
+        assert result == {"A": ""}
+
+    async def test_entry_with_empty_id_is_skipped(self, mock_client: AsyncMock) -> None:
+        mock_client.get.return_value = {"data": [{"type": "workitems", "id": ""}]}
+
+        with pytest.raises(ValueError, match="A"):
+            await guard_work_item_types(mock_client, "P", ["A"])
 
 
 def _project_enum_response(enum_name: str, ids: list[str]) -> dict[str, object]:

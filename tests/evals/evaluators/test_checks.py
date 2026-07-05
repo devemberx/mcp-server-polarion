@@ -140,6 +140,25 @@ class TestCheckGetBeforeUpdate:
         passed, _ = checks.check_get_before_update(trajectory, {})
         assert passed is False
 
+    @pytest.mark.parametrize(
+        "args",
+        [
+            {"project_id": "P"},
+            {"project_id": "P", "items": []},
+            {"project_id": "P", "items": None},
+            {"project_id": "P", "items": ["not-a-dict"]},
+        ],
+    )
+    def test_bulk_update_without_valid_items_fails_closed(
+        self, args: dict[str, object]
+    ) -> None:
+        # A recorded bulk write with no readable targets (e.g. a call FastMCP
+        # rejected) is still a blind write attempt, never a free pass.
+        trajectory = [_call("update_work_items", args)]
+        passed, reason = checks.check_get_before_update(trajectory, {})
+        assert passed is False
+        assert "no valid entries" in reason
+
     def test_get_then_update_document_passes(self) -> None:
         trajectory = [
             _call(
@@ -744,6 +763,36 @@ class TestResolveObservedPath:
     def test_missing_key_yields_empty(self) -> None:
         assert checks._resolve_observed_path({"items": []}, "items[].id") == []
         assert checks._resolve_observed_path(None, "items[].id") == []
+
+
+class TestArgsMatch:
+    """The items[]-fallback generalizes to any ``*_id`` key, not just
+    ``work_item_id`` -- a future bulk tool with e.g. ``test_run_id`` needs no
+    new special case here.
+    """
+
+    def test_non_work_item_id_key_falls_back_to_items(self) -> None:
+        args = {"items": [{"test_run_id": "TR-1"}, {"test_run_id": "TR-2"}]}
+        assert checks._args_match(args, {"test_run_id": "TR-2"}) is True
+        assert checks._args_match(args, {"test_run_id": "TR-9"}) is False
+
+    def test_flat_id_still_takes_precedence_over_items(self) -> None:
+        args = {"work_item_id": "MCPT-1", "items": [{"work_item_id": "MCPT-9"}]}
+        assert checks._args_match(args, {"work_item_id": "MCPT-1"}) is True
+
+    def test_multiple_id_constraints_must_land_on_one_item(self) -> None:
+        # Two *_id constraints satisfied only across DIFFERENT items must not
+        # match -- a match dict pins down a single target.
+        args = {
+            "items": [
+                {"work_item_id": "MCPT-1", "assignee_id": "bob"},
+                {"work_item_id": "MCPT-2", "assignee_id": "alice"},
+            ]
+        }
+        joint = {"work_item_id": "MCPT-2", "assignee_id": "alice"}
+        stitched = {"work_item_id": "MCPT-1", "assignee_id": "alice"}
+        assert checks._args_match(args, joint) is True
+        assert checks._args_match(args, stitched) is False
 
 
 class TestCheckOrderedTrajectory:

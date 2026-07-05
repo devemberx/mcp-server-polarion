@@ -1,10 +1,12 @@
 """Core cross-cutting helpers for ``tools`` (not public API): client lookup,
-string coercion, path encoding, option-list formatting, lucene-id guarding.
+string coercion, path encoding, option-list formatting, lucene-id and
+bulk-batch id guarding.
 """
 
 from __future__ import annotations
 
 import re
+from collections import Counter
 from collections.abc import Iterable
 from typing import Final
 from urllib.parse import quote
@@ -73,9 +75,23 @@ def validate_work_item_id_for_lucene(work_item_id: str) -> None:
         raise ValueError(msg)
 
 
+def ensure_unique_ids(ids: Iterable[str], *, label: str) -> None:
+    """Reject duplicate ids within one bulk batch -- Polarion would apply
+    them in undefined order (update) or conflict (create).
+    """
+    duplicates = sorted(id_ for id_, count in Counter(ids).items() if count > 1)
+    if duplicates:
+        raise ValueError(
+            f"Duplicate {label}(s) {duplicates} in one batch -- every item "
+            f"needs a distinct {label}; merge duplicate entries into a "
+            "single item instead."
+        )
+
+
 __all__: list[str] = [
     "OPTION_LIST_LIMIT",
     "encode_path_segment",
+    "ensure_unique_ids",
     "format_option_list",
     "get_client",
     "safe_str",

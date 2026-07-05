@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from mcp_server_polarion.models import (
     Hyperlink,
+    WorkItemCreateSpec,
     WorkItemDetail,
     WorkItemsCreateResult,
     WorkItemSummary,
@@ -248,6 +249,13 @@ class TestWorkItemsCreateResult:
         assert result.payload_preview is not None
 
 
+class TestWorkItemCreateSpec:
+    def test_unknown_extra_key_rejected(self):
+        # Unknown keys would otherwise vanish silently (Polarion drops them).
+        with pytest.raises(ValidationError):
+            WorkItemCreateSpec(title="t", type="task", resolution="done")
+
+
 class TestWorkItemUpdateSpec:
     def test_single_field_is_enough(self):
         spec = WorkItemUpdateSpec(work_item_id="MCPT-001", title="New Title")
@@ -280,6 +288,14 @@ class TestWorkItemUpdateSpec:
             work_item_id="MCPT-001", custom_fields={"riskLevel": "high"}
         )
         assert spec.custom_fields == {"riskLevel": "high"}
+
+    def test_unknown_extra_key_rejected(self):
+        # workflow_action/change_type_to are batch-level tool params, not item
+        # fields; a misplaced key here must error, not silently no-op.
+        with pytest.raises(ValidationError):
+            WorkItemUpdateSpec(
+                work_item_id="MCPT-001", title="t", workflow_action="close"
+            )
 
 
 class TestWorkItemsUpdateResult:

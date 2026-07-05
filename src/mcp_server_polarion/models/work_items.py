@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from mcp_server_polarion.models.common import MAX_BODY_HTML_LEN
 
@@ -68,6 +68,9 @@ class WorkItemRead(WorkItemSummary):
 class WorkItemCreateSpec(BaseModel):
     """One work item to create via ``create_work_items``."""
 
+    # Polarion silently drops unknown keys -- forbid so a typo'd field errors.
+    model_config = ConfigDict(extra="forbid")
+
     title: str = Field(min_length=1)
     type: str = Field(min_length=1)
     description: str | None = Field(default=None, max_length=MAX_BODY_HTML_LEN)
@@ -92,6 +95,9 @@ class WorkItemsCreateResult(BaseModel):
 
 class WorkItemUpdateSpec(BaseModel):
     """One work item to update via ``update_work_items``."""
+
+    # Forbid so a misplaced batch-level key (workflow_action, ...) errors.
+    model_config = ConfigDict(extra="forbid")
 
     work_item_id: str = Field(
         min_length=1, description="Work item ID (e.g. 'MCPT-042')."

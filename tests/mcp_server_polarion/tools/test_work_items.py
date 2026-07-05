@@ -75,41 +75,21 @@ async def _call_update(
     )
 
 
-def _make_get_response(
-    *,
-    work_item_id: str = "MCPT-1",
-    project_id: str = "MyProj",
-    title: str = "after",
-    status: str = "open",
-    description_html: str = "",
-    assignee_ids: list[str] | None = None,
-    custom_fields: dict[str, object] | None = None,
+def _existence_response(
+    entries: list[tuple[str, str]], *, project_id: str = "MyProj"
 ) -> dict[str, object]:
-    """Build a minimal JSON:API GET response for the follow-up fetch."""
-    relationships: dict[str, object] = {}
-    if assignee_ids is not None:
-        relationships["assignee"] = {
-            "data": [{"type": "users", "id": uid} for uid in assignee_ids]
-        }
-    attributes: dict[str, object] = {
-        "title": title,
-        "type": "task",
-        "status": status,
-        "priority": "50.0",
-        "updated": "2026-05-04T10:00:00Z",
-    }
-    if description_html:
-        attributes["description"] = {"type": "text/html", "value": description_html}
-    if custom_fields:
-        # Inline (no customFields container); primes the pre-fetch guard cache.
-        attributes.update(custom_fields)
+    """Shape a chunked ``id:(...)`` existence+type query reply: one
+    ``(work_item_id, type)`` pair per matched item.
+    """
     return {
-        "data": {
-            "type": "workitems",
-            "id": f"{project_id}/{work_item_id}",
-            "attributes": attributes,
-            "relationships": relationships,
-        }
+        "data": [
+            {
+                "type": "workitems",
+                "id": f"{project_id}/{work_item_id}",
+                "attributes": {"type": type_id},
+            }
+            for work_item_id, type_id in entries
+        ]
     }
 
 
@@ -921,20 +901,28 @@ class TestUpdateWorkItemsValidation:
         attributes = cast(dict[str, object], data[0]["attributes"])
         assert attributes == {"title": "new title"}
 
-    async def test_all_none_custom_fields_rejected_before_patch(
+    async def test_all_none_custom_fields_rejected_before_any_request(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        _cache_mod.store_work_item_custom_keys(
-            "MyProj", "task", frozenset({"riskLevel"})
-        )
-        mock_client.get.return_value = _make_get_response()
-
+        # Payload builds before the guards run, so the empty-body error
+        # costs zero round-trips against the rate-limited backend.
         with pytest.raises(ValueError, match="empty PATCH"):
             await _call_update(
                 mock_ctx,
                 custom_fields={"riskLevel": None},
                 dry_run=True,
             )
+        mock_client.get.assert_not_called()
+        mock_client.patch.assert_not_called()
+
+    async def test_project_qualified_work_item_id_rejected(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # 'P/MCPT-1' would evade the duplicate check and corrupt both the
+        # id:(...) guard query and the JSON:API resource id.
+        with pytest.raises(ValueError, match="cannot embed safely"):
+            await _call_update(mock_ctx, work_item_id="MyProj/MCPT-1", title="a")
+        mock_client.get.assert_not_called()
         mock_client.patch.assert_not_called()
 
     async def test_custom_fields_alone_satisfies_spec(
@@ -944,9 +932,10 @@ class TestUpdateWorkItemsValidation:
         _cache_mod.store_work_item_custom_keys(
             "MyProj", "task", frozenset({"riskLevel"})
         )
-        mock_client.get.return_value = _make_get_response(
-            custom_fields={"riskLevel": "high"}
-        )
+        mock_client.get.side_effect = [
+            _existence_response([("MCPT-1", "task")]),
+            PolarionNotFoundError("not an Enumeration field", status_code=404),
+        ]
         result = await _call_update(
             mock_ctx,
             custom_fields={"riskLevel": "high"},
@@ -957,6 +946,25 @@ class TestUpdateWorkItemsValidation:
         data = cast(list[dict[str, object]], result.payload_preview["data"])
         attributes = cast(dict[str, object], data[0]["attributes"])
         assert attributes == {"riskLevel": "high"}
+
+    async def test_duplicate_work_item_id_rejected_before_any_request(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Two specs targeting the same id -> undefined PATCH body semantics.
+        with pytest.raises(ValueError, match="Duplicate work_item_id"):
+            await update_work_items(
+                mock_ctx,
+                project_id="MyProj",
+                items=[
+                    WorkItemUpdateSpec(work_item_id="MCPT-1", title="a"),
+                    WorkItemUpdateSpec(work_item_id="MCPT-1", status="open"),
+                ],
+                workflow_action=None,
+                change_type_to=None,
+                dry_run=True,
+            )
+        mock_client.get.assert_not_called()
+        mock_client.patch.assert_not_called()
 
 
 class TestUpdateWorkItemsHyperlinkRoleGuard:
@@ -979,15 +987,16 @@ class TestUpdateWorkItemsHyperlinkRoleGuard:
         assert "ref_ext" in str(exc.value)
         mock_client.patch.assert_not_called()
 
-    async def test_roles_pooled_across_items_in_one_probe(
+    async def test_bad_role_error_names_offending_item_in_one_probe(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # One project-enum probe covers every item's roles (as in create).
+        # Guard runs per item so the error can name the offender; the enum
+        # cache still keeps the whole batch to one project-enum probe.
         mock_client.get.return_value = _project_enum_get_response(
             "hyperlink-role", ["ref_int", "ref_ext"]
         )
 
-        with pytest.raises(ValueError, match="ghost"):
+        with pytest.raises(ValueError, match="Work item 'MCPT-2'") as exc:
             await update_work_items(
                 mock_ctx,
                 project_id="MyProj",
@@ -1005,6 +1014,8 @@ class TestUpdateWorkItemsHyperlinkRoleGuard:
                 change_type_to=None,
                 dry_run=True,
             )
+        assert "ghost" in str(exc.value)
+        assert mock_client.get.await_count == 1
         mock_client.patch.assert_not_called()
 
 
@@ -1058,9 +1069,10 @@ class TestUpdateWorkItemsDryRun:
         _cache_mod.store_work_item_custom_keys(
             "MyProj", "task", frozenset({"riskLevel"})
         )
-        mock_client.get.return_value = _make_get_response(
-            custom_fields={"riskLevel": "high"}
-        )
+        mock_client.get.side_effect = [
+            _existence_response([("MCPT-1", "task")]),
+            PolarionNotFoundError("not an Enumeration field", status_code=404),
+        ]
         result = await _call_update(
             mock_ctx,
             title="t",
@@ -1074,6 +1086,45 @@ class TestUpdateWorkItemsDryRun:
         attributes = cast(dict[str, object], data[0]["attributes"])
         assert attributes["title"] == "t"
         assert attributes["riskLevel"] == "high"
+
+    async def test_dry_run_preview_includes_workflow_action_query_param(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # workflow_action is transport-level: previewed as a query param.
+        result = await _call_update(
+            mock_ctx, workflow_action="close", title="t", dry_run=True
+        )
+
+        assert result.payload_preview is not None
+        query_params = cast(dict[str, object], result.payload_preview["query_params"])
+        assert query_params == {"workflowAction": "close"}
+
+    async def test_dry_run_preview_includes_change_type_to_query_param(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        mock_client.get.side_effect = [
+            _existence_response([("MCPT-1", "task")]),
+            _enum_get_response(["task"]),
+        ]
+
+        result = await _call_update(
+            mock_ctx, change_type_to="task", title="t", dry_run=True
+        )
+
+        assert result.payload_preview is not None
+        query_params = cast(dict[str, object], result.payload_preview["query_params"])
+        assert query_params == {"changeTypeTo": "task"}
+
+    async def test_dry_run_preview_omits_query_params_when_unset(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        result = await _call_update(mock_ctx, title="t", dry_run=True)
+
+        assert result.payload_preview is not None
+        assert "query_params" not in result.payload_preview
 
 
 class TestUpdateWorkItemsHappyPath:
@@ -1159,9 +1210,11 @@ class TestUpdateWorkItemsHappyPath:
         _cache_mod.store_work_item_custom_keys(
             "MyProj", "task", frozenset({"riskLevel", "reviewerNote"})
         )
-        mock_client.get.return_value = _make_get_response(
-            custom_fields={"riskLevel": "high", "reviewerNote": rich}
-        )
+        mock_client.get.side_effect = [
+            _existence_response([("MCPT-1", "task")]),
+            PolarionNotFoundError("not an Enumeration field", status_code=404),
+            PolarionNotFoundError("not an Enumeration field", status_code=404),
+        ]
 
         await _call_update(
             mock_ctx,
@@ -1187,7 +1240,12 @@ class TestUpdateWorkItemsHappyPath:
         _cache_mod.store_work_item_custom_keys(
             "MyProj", "task", frozenset({"riskLevel", "effortHours", "reviewerNote"})
         )
-        mock_client.get.return_value = _make_get_response(custom_fields=read_customs)
+        mock_client.get.side_effect = [
+            _existence_response([("MCPT-1", "task")]),
+            PolarionNotFoundError("not an Enumeration field", status_code=404),
+            PolarionNotFoundError("not an Enumeration field", status_code=404),
+            PolarionNotFoundError("not an Enumeration field", status_code=404),
+        ]
 
         result = await _call_update(mock_ctx, custom_fields=read_customs)
 
@@ -1214,10 +1272,10 @@ class TestUpdateWorkItemsHappyPath:
         mock_client: AsyncMock,
         reset_enum_guard_caches: None,
     ) -> None:
-        # change_type_to triggers the type guard: prefetch + type options.
+        # change_type_to triggers the type guard: existence resolve + type options.
         mock_client.patch.return_value = {}
         mock_client.get.side_effect = [
-            _make_get_response(),
+            _existence_response([("MCPT-1", "task")]),
             _enum_get_response(["task"]),
         ]
 
@@ -1265,14 +1323,16 @@ class TestUpdateWorkItemsErrorMapping:
         with pytest.raises(PermissionError):
             await _call_update(mock_ctx, title="t")
 
-    async def test_patch_404_raises_value_error(
+    async def test_patch_404_raises_value_error_naming_batch_ids(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
+        # Unguarded items skip the existence pre-check, so Polarion's 404 may
+        # not say which id failed -- the error must list the batch ids.
         mock_client.patch.side_effect = PolarionNotFoundError(
             "not found", status_code=404
         )
 
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(ValueError, match="ghost"):
             await _call_update(mock_ctx, work_item_id="ghost", title="t")
 
     async def test_patch_other_error_raises_runtime_error(
@@ -1283,17 +1343,30 @@ class TestUpdateWorkItemsErrorMapping:
         with pytest.raises(RuntimeError, match="boom"):
             await _call_update(mock_ctx, title="t")
 
-    async def test_prefetch_404_raises_value_error(
+    async def test_missing_work_item_raises_value_error_naming_it(
         self,
         mock_ctx: MagicMock,
         mock_client: AsyncMock,
         reset_enum_guard_caches: None,
     ) -> None:
-        # The guard prefetch names the missing item; nothing is PATCHed.
-        mock_client.get.side_effect = PolarionNotFoundError("nf", status_code=404)
+        # The batched existence resolve names the missing item; nothing is PATCHed.
+        mock_client.get.return_value = {"data": []}
 
         with pytest.raises(ValueError, match="ghost"):
             await _call_update(mock_ctx, work_item_id="ghost", status="open")
+        mock_client.patch.assert_not_called()
+
+    async def test_resolve_project_not_found_raises_value_error(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        # A 404 on the existence query itself means the project doesn't exist.
+        mock_client.get.side_effect = PolarionNotFoundError("nf", status_code=404)
+
+        with pytest.raises(ValueError, match="MyProj' not found"):
+            await _call_update(mock_ctx, status="open")
         mock_client.patch.assert_not_called()
 
     async def test_prefetch_401_raises_permission_error(
@@ -1514,7 +1587,9 @@ class TestEnumGuardCreateWorkItem:
 
 
 class TestEnumGuardUpdateWorkItems:
-    """Integration: ``update_work_items`` pre-fetches each item's type then guards."""
+    """Integration: ``update_work_items`` resolves guarded items' types via one
+    batched existence query, then guards.
+    """
 
     async def test_bad_enum_on_later_item_aborts_whole_batch(
         self,
@@ -1525,9 +1600,8 @@ class TestEnumGuardUpdateWorkItems:
         # Per-item guard runs before the PATCH; item 2's ghost status aborts
         # the batch (status options cached from item 1's probe).
         mock_client.get.side_effect = [
-            _make_get_response(),
+            _existence_response([("MCPT-1", "task"), ("MCPT-2", "task")]),
             _enum_get_response(["open", "closed"]),
-            _make_get_response(work_item_id="MCPT-2"),
         ]
 
         with pytest.raises(ValueError, match="status='ghost'"):
@@ -1550,9 +1624,9 @@ class TestEnumGuardUpdateWorkItems:
         mock_client: AsyncMock,
         reset_enum_guard_caches: None,
     ) -> None:
-        # GETs: work-item pre-fetch, then priority options.
+        # GETs: batched existence resolve, then priority options.
         mock_client.get.side_effect = [
-            _make_get_response(),
+            _existence_response([("MCPT-1", "task")]),
             _enum_get_response(["90.0", "50.0", "10.0"]),
         ]
         with pytest.raises(ValueError, match="priority='999'"):
@@ -1565,10 +1639,11 @@ class TestEnumGuardUpdateWorkItems:
         mock_client: AsyncMock,
         reset_enum_guard_caches: None,
     ) -> None:
-        # GETs: prefetch (for type), then the type sample (+ bypass-retry sample).
-        # The sample knows only risk_score, so release_train_id is rejected.
+        # GETs: existence resolve (for type), then the type sample (+
+        # bypass-retry sample). The sample knows only risk_score, so
+        # release_train_id is rejected.
         mock_client.get.side_effect = [
-            _make_get_response(),
+            _existence_response([("MCPT-1", "task")]),
             _wi_sample_response({"risk_score": 5}),
             _wi_sample_response({"risk_score": 5}),
         ]
@@ -1588,7 +1663,7 @@ class TestEnumGuardUpdateWorkItems:
         # Regression: a custom key valid for the type but unset on THIS item was
         # falsely rejected by the old single-item prime. The type sample knows it.
         mock_client.get.side_effect = [
-            _make_get_response(),  # prefetch: no customs on the edited item
+            _existence_response([("MCPT-1", "task")]),  # no customs needed here
             _wi_sample_response({"release_train_id": "RT-1"}),  # type sample knows it
             PolarionNotFoundError("not an Enumeration field", status_code=404),
         ]
@@ -1605,9 +1680,9 @@ class TestEnumGuardUpdateWorkItems:
         mock_client: AsyncMock,
         reset_enum_guard_caches: None,
     ) -> None:
-        # GETs: prefetch (for type), type sample (knows asil), enum probe.
+        # GETs: existence resolve (for type), type sample (knows asil), enum probe.
         mock_client.get.side_effect = [
-            _make_get_response(),
+            _existence_response([("MCPT-1", "task")]),
             _wi_sample_response({"asil": "1"}),
             _enum_get_response(["1", "2", "3", "4"]),
         ]
@@ -1624,10 +1699,10 @@ class TestEnumGuardUpdateWorkItems:
     ) -> None:
         # change_type_to retypes the item in the same PATCH, so custom_fields are
         # validated against the NEW type's schema, not the current ("task").
-        # GETs: prefetch, type options (~ axis for change_type_to), custom
-        # sample, then the enum-value probe for the key (404 = not enum).
+        # GETs: existence resolve, type options (~ axis for change_type_to),
+        # custom sample, then the enum-value probe for the key (404 = not enum).
         mock_client.get.side_effect = [
-            _make_get_response(),
+            _existence_response([("MCPT-1", "task")]),
             _enum_get_response(["requirement"]),
             _wi_sample_response({"release_train_id": "RT-1"}),
             PolarionNotFoundError("not an Enumeration field", status_code=404),
@@ -1657,7 +1732,7 @@ class TestEnumGuardUpdateWorkItems:
     ) -> None:
         # resolution is ghost-prone; an unlisted id must be rejected.
         mock_client.get.side_effect = [
-            _make_get_response(),
+            _existence_response([("MCPT-1", "task")]),
             _enum_get_response(["done", "wontfix", "duplicate"]),
         ]
         with pytest.raises(ValueError, match="resolution='ghost_resolution'"):
@@ -1671,9 +1746,9 @@ class TestEnumGuardUpdateWorkItems:
         reset_enum_guard_caches: None,
     ) -> None:
         # change_type_to scopes the status lookup to the target type.
-        # GETs: work-item pre-fetch, type options (~ axis), status options (target).
+        # GETs: existence resolve, type options (~ axis), status options (target).
         mock_client.get.side_effect = [
-            _make_get_response(),
+            _existence_response([("MCPT-1", "task")]),
             _enum_get_response(["requirement"]),
             _enum_get_response(["draft", "approved"]),
         ]
@@ -1688,6 +1763,23 @@ class TestEnumGuardUpdateWorkItems:
         ]
         assert status_calls, "guard must probe status options"
         assert status_calls[0].kwargs["params"]["type"] == "requirement"
+
+    async def test_bad_change_type_to_not_blamed_on_an_item(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        # change_type_to is a batch-level param -- validated once, and the
+        # error must not carry a per-item "Work item '...'" prefix.
+        mock_client.get.side_effect = [
+            _existence_response([("MCPT-1", "task")]),
+            _enum_get_response(["task", "requirement"]),
+        ]
+        with pytest.raises(ValueError, match="type='bogus'") as exc:
+            await _call_update(mock_ctx, change_type_to="bogus", title="t")
+        assert "Work item '" not in str(exc.value)
+        mock_client.patch.assert_not_called()
 
 
 class TestListWorkItems:

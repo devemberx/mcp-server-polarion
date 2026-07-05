@@ -74,9 +74,9 @@ def _errored(call: dict[str, Any]) -> bool:
     return isinstance(result, dict) and "error" in result
 
 
-def _update_items(call: dict[str, Any]) -> list[dict[str, Any]]:
-    """Per-item specs of a bulk ``update_work_items`` call (non-dicts dropped)."""
-    items = _args(call).get("items") or []
+def _bulk_items(call: dict[str, Any], items_key: str) -> list[dict[str, Any]]:
+    """Per-item dicts of a bulk call's ``args[items_key]`` (non-dicts dropped)."""
+    items = _args(call).get(items_key) or []
     return [item for item in items if isinstance(item, dict)]
 
 
@@ -88,11 +88,15 @@ def check_readonly(trajectory: Trajectory, _params: dict[str, Any]) -> CheckResu
     return True, "no write tools called"
 
 
-_UPDATE_TO_GET: dict[str, tuple[str, tuple[str, ...]]] = {
+# Last element = items_key: bulk tools read id_keys per-item from
+# ``args[items_key]``; ``None`` = flat call.
+_UPDATE_TO_GET: dict[str, tuple[str, tuple[str, ...], str | None]] = {
     "update_document": (
         "get_document",
         ("project_id", "space_id", "document_name"),
+        None,
     ),
+    "update_work_items": ("get_work_item", ("project_id", "work_item_id"), "items"),
 }
 
 
@@ -109,14 +113,42 @@ def _target_key(call: dict[str, Any], keys: tuple[str, ...]) -> tuple[object, ..
     )
 
 
-def _got_work_item_before(
-    trajectory: Trajectory, index: int, target: tuple[object, ...], *, flag: str = ""
+def _item_target_key(
+    args: dict[str, Any], item: dict[str, Any], keys: tuple[str, ...]
+) -> tuple[object, ...]:
+    """Identifier tuple for one bulk item: each key reads from ``item`` (the
+    per-item dict) when present, else falls back to the call's batch-level
+    ``args`` (e.g. ``project_id``); same normalization rule as ``_target_key``
+    so the tuples compare equal.
+    """
+    values = []
+    for k in keys:
+        v = item.get(k) if k in item else args.get(k)
+        values.append(_short_id(v) if k == "work_item_id" and v is not None else v)
+    return tuple(values)
+
+
+def _bulk_targets(
+    call: dict[str, Any], items_key: str, keys: tuple[str, ...]
+) -> list[tuple[object, ...]]:
+    """One target tuple per dict entry in ``call``'s ``args[items_key]`` list."""
+    args = _args(call)
+    return [_item_target_key(args, item, keys) for item in _bulk_items(call, items_key)]
+
+
+def _observed_before(
+    trajectory: Trajectory,
+    index: int,
+    get_name: str,
+    id_keys: tuple[str, ...],
+    target: tuple[object, ...],
+    *,
+    flag: str = "",
 ) -> bool:
-    """True when a ``get_work_item`` on ``target`` precedes ``trajectory[index]``
-    (with ``flag`` set truthy, when given)."""
-    id_keys = ("project_id", "work_item_id")
+    """True when a ``get_name`` call on ``target`` precedes ``trajectory[index]``
+    (with ``flag`` set truthy on that call, when given)."""
     return any(
-        earlier.get("name") == "get_work_item"
+        earlier.get("name") == get_name
         and _target_key(earlier, id_keys) == target
         and (not flag or bool(_args(earlier).get(flag)))
         for earlier in trajectory[:index]
@@ -132,34 +164,27 @@ def check_get_before_update(
     """
     for i, call in enumerate(trajectory):
         name = call.get("name", "")
-        if name == "update_work_items":
-            project = _args(call).get("project_id")
-            for item in _update_items(call):
-                target = (project, _short_id(item.get("work_item_id", "")))
-                if not _got_work_item_before(trajectory, i, target):
-                    return False, (
-                        f"called {name}({target}) without a prior "
-                        f"get_work_item({target}) -- update must observe "
-                        f"current state first"
-                    )
-            continue
         spec = _UPDATE_TO_GET.get(name)
         if spec is None:
             continue
-        get_name, id_keys = spec
-        target = _target_key(call, id_keys)
-        seen = False
-        for earlier in trajectory[:i]:
-            if earlier.get("name") != get_name:
-                continue
-            if _target_key(earlier, id_keys) == target:
-                seen = True
-                break
-        if not seen:
-            return False, (
-                f"called {name}({target}) without a prior {get_name}({target}) "
-                f"-- update must observe current state first"
-            )
+        get_name, id_keys, items_key = spec
+        if items_key:
+            targets = _bulk_targets(call, items_key, id_keys)
+            # Fail closed: a bulk write with no readable targets is still a
+            # blind write attempt, not a free pass.
+            if not targets:
+                return False, (
+                    f"called {name} with no valid entries in '{items_key}' -- "
+                    "cannot verify any target was observed first"
+                )
+        else:
+            targets = [_target_key(call, id_keys)]
+        for target in targets:
+            if not _observed_before(trajectory, i, get_name, id_keys, target):
+                return False, (
+                    f"called {name}({target}) without a prior {get_name}({target}) "
+                    f"-- update must observe current state first"
+                )
     return True, "every update_* was preceded by a matching get_*"
 
 
@@ -215,7 +240,7 @@ def check_preserve_hyperlinks(
     for call in trajectory:
         if call.get("name") != "update_work_items":
             continue
-        for item in _update_items(call):
+        for item in _bulk_items(call, "items"):
             if _short_id(item.get("work_item_id", "")) != target:
                 continue
             hyperlinks = item.get("hyperlinks")
@@ -231,12 +256,21 @@ def check_preserve_hyperlinks(
     return True, "no hyperlink update dropped a pre-existing URI"
 
 
-_BODY_WRITE_TO_SOURCE: dict[str, tuple[str, str, str, tuple[str, ...]]] = {
+# Last element = items_key, same convention as ``_UPDATE_TO_GET``.
+_BODY_WRITE_TO_SOURCE: dict[str, tuple[str, str, str, tuple[str, ...], str | None]] = {
     "update_document": (
         "home_page_content_html",
         "get_document",
         "include_homepage_content_html",
         ("project_id", "space_id", "document_name"),
+        None,
+    ),
+    "update_work_items": (
+        "description_html",
+        "get_work_item",
+        "include_description_html",
+        ("project_id", "work_item_id"),
+        "items",
     ),
 }
 
@@ -251,37 +285,34 @@ def check_round_trip_source(
     """
     for i, call in enumerate(trajectory):
         name = call.get("name", "")
-        if name == "update_work_items":
-            project = _args(call).get("project_id")
-            for item in _update_items(call):
-                if not item.get("description_html"):
-                    continue
-                target = (project, _short_id(item.get("work_item_id", "")))
-                if not _got_work_item_before(
-                    trajectory, i, target, flag="include_description_html"
-                ):
-                    return False, (
-                        f"{name}({target}) wrote description_html without a "
-                        f"prior get_work_item(include_description_html=True) "
-                        f"-- body was not round-trip sourced"
-                    )
-            continue
         spec = _BODY_WRITE_TO_SOURCE.get(name)
         if spec is None:
             continue
-        body_arg, get_name, flag_arg, id_keys = spec
-        if not _args(call).get(body_arg):
+        body_arg, get_name, flag_arg, id_keys, items_key = spec
+        args = _args(call)
+        if items_key:
+            for item in _bulk_items(call, items_key):
+                if not item.get(body_arg):
+                    continue
+                target = _item_target_key(args, item, id_keys)
+                if not _observed_before(
+                    trajectory, i, get_name, id_keys, target, flag=flag_arg
+                ):
+                    return False, (
+                        f"{name}({target}) wrote {body_arg} without a prior "
+                        f"{get_name}({flag_arg}=True) -- body was not "
+                        f"round-trip sourced"
+                    )
+            continue
+        if not args.get(body_arg):
             continue
         target = _target_key(call, id_keys)
-        sourced = any(
-            earlier.get("name") == get_name
-            and _target_key(earlier, id_keys) == target
-            and bool(_args(earlier).get(flag_arg))
-            for earlier in trajectory[:i]
+        sourced = _observed_before(
+            trajectory, i, get_name, id_keys, target, flag=flag_arg
         )
         if not sourced:
             return False, (
-                f"{call.get('name')}({target}) wrote {body_arg} without a prior "
+                f"{name}({target}) wrote {body_arg} without a prior "
                 f"{get_name}({flag_arg}=True) -- body was not round-trip sourced"
             )
     return True, "every body write was round-trip sourced"
@@ -443,27 +474,31 @@ def _resolve_observed_path(result: object, path: str) -> list[str]:
 def _args_match(args: dict[str, Any], match: dict[str, Any]) -> bool:
     """All ``match`` entries equal the call's args (``*_id`` via ``_short_id``).
 
-    A ``work_item_id`` constraint on a bulk call (flat arg absent, ``items``
-    present) matches when any per-item id matches.
+    ``*_id`` constraints missing from the flat args (bulk call, ``items``
+    present) must all be satisfied by ONE per-item dict -- generic over any
+    bulk tool's id field, and never stitched across different items.
     """
+    items = args.get("items")
+    item_keys: dict[str, Any] = {}
     for key, expected in match.items():
         actual = args.get(key)
-        if (
-            key == "work_item_id"
-            and actual is None
-            and isinstance(args.get("items"), list)
-        ):
-            if not any(
-                isinstance(item, dict)
-                and _short_id(item.get("work_item_id", "")) == _short_id(expected)
-                for item in args["items"]
-            ):
-                return False
+        if actual is None and isinstance(items, list) and key.endswith("_id"):
+            item_keys[key] = expected
         elif key.endswith("_id"):
             if _short_id(actual) != _short_id(expected):
                 return False
         elif actual != expected:
             return False
+    if item_keys:
+        # item_keys is only populated when ``items`` is a list.
+        return any(
+            isinstance(item, dict)
+            and all(
+                _short_id(item.get(key, "")) == _short_id(expected)
+                for key, expected in item_keys.items()
+            )
+            for item in items
+        )
     return True
 
 

@@ -41,10 +41,13 @@ from mcp_server_polarion.tools._shared.guard import (
     guard_hyperlink_roles,
     guard_work_item_custom_fields,
     guard_work_item_enums,
+    guard_work_item_types,
 )
 from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
+    ensure_unique_ids,
     get_client,
+    validate_work_item_id_for_lucene,
 )
 from mcp_server_polarion.tools._shared.pagination import (
     DEFAULT_PAGE_SIZE,
@@ -64,6 +67,40 @@ from mcp_server_polarion.utils import (
 logger = logging.getLogger("mcp_server_polarion.tools.work_items")
 
 
+def _merge_shared_attributes(
+    attributes: dict[str, JsonValue],
+    spec: WorkItemCreateSpec | WorkItemUpdateSpec,
+) -> None:
+    """Attribute keys common to create and update resources; skips unset."""
+    if spec.status:
+        attributes["status"] = spec.status
+    if spec.priority:
+        attributes["priority"] = spec.priority
+    if spec.severity:
+        attributes["severity"] = spec.severity
+    if spec.due_date:
+        attributes["dueDate"] = spec.due_date
+    if spec.initial_estimate:
+        attributes["initialEstimate"] = spec.initial_estimate
+    if spec.hyperlinks:
+        attributes["hyperlinks"] = [
+            {"role": h.role, "title": h.title, "uri": h.uri} for h in spec.hyperlinks
+        ]
+
+
+def _build_assignee_relationship(
+    spec: WorkItemCreateSpec | WorkItemUpdateSpec,
+) -> dict[str, JsonValue]:
+    """``assignee`` to-many relationship block; empty dict when unset."""
+    if not spec.assignee_ids:
+        return {}
+    return {
+        "assignee": {
+            "data": [{"type": "users", "id": uid} for uid in spec.assignee_ids]
+        }
+    }
+
+
 def _build_work_item_resource(
     *,
     spec: WorkItemCreateSpec,
@@ -81,27 +118,10 @@ def _build_work_item_resource(
             "type": "text/html",
             "value": description_html,
         }
-    if spec.status:
-        attributes["status"] = spec.status
-    if spec.priority:
-        attributes["priority"] = spec.priority
-    if spec.severity:
-        attributes["severity"] = spec.severity
-    if spec.due_date:
-        attributes["dueDate"] = spec.due_date
-    if spec.initial_estimate:
-        attributes["initialEstimate"] = spec.initial_estimate
-    if spec.hyperlinks:
-        attributes["hyperlinks"] = [
-            {"role": h.role, "title": h.title, "uri": h.uri} for h in spec.hyperlinks
-        ]
+    _merge_shared_attributes(attributes, spec)
     merge_custom_fields(attributes, spec.custom_fields, STANDARD_WORK_ITEM_ATTRIBUTES)
 
-    relationships: dict[str, JsonValue] = {}
-    if spec.assignee_ids:
-        relationships["assignee"] = {
-            "data": [{"type": "users", "id": uid} for uid in spec.assignee_ids]
-        }
+    relationships = _build_assignee_relationship(spec)
 
     resource: dict[str, JsonValue] = {
         "type": "workitems",
@@ -126,7 +146,7 @@ def _build_create_work_items_payload(
     return {"data": data}
 
 
-def _build_update_work_item_resource(  # noqa: PLR0912
+def _build_update_work_item_resource(
     *,
     project_id: str,
     spec: WorkItemUpdateSpec,
@@ -142,29 +162,12 @@ def _build_update_work_item_resource(  # noqa: PLR0912
             "type": "text/html",
             "value": spec.description_html,
         }
-    if spec.status:
-        attributes["status"] = spec.status
-    if spec.priority:
-        attributes["priority"] = spec.priority
-    if spec.severity:
-        attributes["severity"] = spec.severity
-    if spec.due_date:
-        attributes["dueDate"] = spec.due_date
-    if spec.initial_estimate:
-        attributes["initialEstimate"] = spec.initial_estimate
+    _merge_shared_attributes(attributes, spec)
     if spec.resolution:
         attributes["resolution"] = spec.resolution
-    if spec.hyperlinks:
-        attributes["hyperlinks"] = [
-            {"role": h.role, "title": h.title, "uri": h.uri} for h in spec.hyperlinks
-        ]
     merge_custom_fields(attributes, spec.custom_fields, STANDARD_WORK_ITEM_ATTRIBUTES)
 
-    relationships: dict[str, JsonValue] = {}
-    if spec.assignee_ids:
-        relationships["assignee"] = {
-            "data": [{"type": "users", "id": uid} for uid in spec.assignee_ids]
-        }
+    relationships = _build_assignee_relationship(spec)
 
     resource: dict[str, JsonValue] = {
         "type": "workitems",
@@ -368,94 +371,94 @@ async def update_work_items(  # noqa: PLR0912, PLR0913
     client = get_client(ctx)
 
     for spec in items:
-        needs_enum_guard = bool(
-            spec.status
-            or spec.severity
-            or spec.priority
-            or spec.resolution
-            or change_type_to
-            or spec.custom_fields
-        )
-        if not needs_enum_guard:
-            continue
-        # Enum options are type-scoped: one prefetch per item (on dry_run too,
-        # so preview raises the same errors) resolves the type and primes the
-        # custom-key cache.
-        item_path = (
-            f"/projects/{encode_path_segment(project_id)}"
-            f"/workitems/{encode_path_segment(spec.work_item_id)}"
-        )
+        validate_work_item_id_for_lucene(spec.work_item_id)
+    ensure_unique_ids((spec.work_item_id for spec in items), label="work_item_id")
+    # Build before any guard round-trip so an empty-body resource fails fast.
+    payload = _build_update_work_items_payload(project_id=project_id, specs=items)
+
+    guarded_specs = [
+        spec
+        for spec in items
+        if spec.status
+        or spec.severity
+        or spec.priority
+        or spec.resolution
+        or change_type_to
+        or spec.custom_fields
+    ]
+    types_by_id: dict[str, str] = {}
+    if guarded_specs:
+        # Enum options are type-scoped: one batched existence+type query (on
+        # dry_run too, so preview raises the same errors) names every missing
+        # id at once.
         try:
-            prefetch = await client.get(
-                item_path,
-                params={"fields[workitems]": "@all"},
+            types_by_id = await guard_work_item_types(
+                client, project_id, (spec.work_item_id for spec in guarded_specs)
             )
         except PolarionNotFoundError as exc:
             raise ValueError(
-                f"Work item '{spec.work_item_id}' in project '{project_id}' "
-                "not found. Use `list_work_items` to discover valid IDs."
+                f"Project '{project_id}' not found. "
+                "Use `list_projects` to discover valid project IDs."
             ) from exc
-        except PolarionAuthError as exc:
-            raise PermissionError(
-                "Cannot read work item -- check your POLARION_TOKEN permissions."
-            ) from exc
-        except PolarionError as exc:
-            raise RuntimeError(
-                f"Failed to read work item for guard: {exc.message}"
-            ) from exc
-        work_item_type = ""
-        prefetch_data = prefetch.get("data", {})
-        if isinstance(prefetch_data, dict):
-            current_detail = parse_work_item_detail(
-                prefetch_data,
-                project_id=project_id,
-                fallback_id=spec.work_item_id,
-            )
-            work_item_type = current_detail.type
 
-        # Scope enums by target type; guard checks ``type`` first, so an invalid
-        # change_type_to raises before being reused as the scoping axis.
-        effective_type = change_type_to or work_item_type or "~"
+    if change_type_to:
+        # Batch-level param: validate once, unprefixed -- a bad value is not
+        # any single item's fault.
         await guard_work_item_enums(
-            client,
-            project_id,
-            work_item_type=effective_type,
-            type=change_type_to,
-            status=spec.status,
-            severity=spec.severity,
-            priority=spec.priority,
-            resolution=spec.resolution,
+            client, project_id, work_item_type="~", type=change_type_to
         )
-        # change_type_to retypes in the same PATCH — customs belong to the new type.
-        if spec.custom_fields:
-            await guard_work_item_custom_fields(
+
+    for spec in guarded_specs:
+        work_item_type = types_by_id.get(spec.work_item_id, "")
+        # change_type_to retypes in the same PATCH -- enums and customs are
+        # scoped to the new type.
+        effective_type = change_type_to or work_item_type or "~"
+        try:
+            await guard_work_item_enums(
                 client,
                 project_id,
-                change_type_to or work_item_type,
-                spec.custom_fields,
+                work_item_type=effective_type,
+                status=spec.status,
+                severity=spec.severity,
+                priority=spec.priority,
+                resolution=spec.resolution,
             )
+            if spec.custom_fields:
+                await guard_work_item_custom_fields(
+                    client,
+                    project_id,
+                    change_type_to or work_item_type,
+                    spec.custom_fields,
+                )
+        except ValueError as exc:
+            raise ValueError(f"Work item '{spec.work_item_id}': {exc}") from exc
 
-    await guard_hyperlink_roles(
-        client,
-        project_id,
-        [h.role for spec in items for h in (spec.hyperlinks or [])],
-    )
-
-    payload = _build_update_work_items_payload(project_id=project_id, specs=items)
-
-    if dry_run:
-        return WorkItemsUpdateResult(
-            updated=False,
-            dry_run=True,
-            work_item_ids=[],
-            payload_preview=payload,
-        )
+    for spec in items:
+        if spec.hyperlinks:
+            try:
+                await guard_hyperlink_roles(
+                    client, project_id, [h.role for h in spec.hyperlinks]
+                )
+            except ValueError as exc:
+                raise ValueError(f"Work item '{spec.work_item_id}': {exc}") from exc
 
     query_params: dict[str, str] = {}
     if workflow_action:
         query_params["workflowAction"] = workflow_action
     if change_type_to:
         query_params["changeTypeTo"] = change_type_to
+
+    if dry_run:
+        preview: dict[str, JsonValue] = dict(payload)
+        if query_params:
+            preview["query_params"] = cast("dict[str, JsonValue]", query_params)
+        return WorkItemsUpdateResult(
+            updated=False,
+            dry_run=True,
+            work_item_ids=[],
+            payload_preview=preview,
+        )
+
     path = f"/projects/{encode_path_segment(project_id)}/workitems"
     if query_params:
         path = f"{path}?{urlencode(query_params)}"
@@ -467,9 +470,11 @@ async def update_work_items(  # noqa: PLR0912, PLR0913
             "Cannot update work items -- check your POLARION_TOKEN permissions."
         ) from exc
     except PolarionNotFoundError as exc:
+        batch_ids = sorted(spec.work_item_id for spec in items)
         raise ValueError(
-            f"A work item in the batch was not found in project '{project_id}'. "
-            "Use `list_work_items` to discover valid IDs."
+            f"A work item in the batch {batch_ids} was not found in project "
+            f"'{project_id}': {exc.message} Use `list_work_items` to discover "
+            "valid IDs."
         ) from exc
     except PolarionError as exc:
         raise RuntimeError(f"Failed to update work items: {exc.message}") from exc

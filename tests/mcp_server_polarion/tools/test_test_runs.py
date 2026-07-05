@@ -421,6 +421,26 @@ class TestCreateTestRuns:
         path = mock_client.post.await_args.args[0]
         assert path == "/projects/proj1/testruns"
 
+    async def test_duplicate_ids_rejected_before_any_request(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # POST requires an explicit id per item; two items sharing one id
+        # cannot both be created.
+        with pytest.raises(ValueError, match="Duplicate id"):
+            await create_test_runs(
+                mock_ctx,
+                project_id="proj1",
+                items=[TestRunCreateSpec(id="TR-1"), TestRunCreateSpec(id="TR-1")],
+                dry_run=False,
+            )
+        mock_client.get.assert_not_awaited()
+        mock_client.post.assert_not_awaited()
+
+    async def test_unknown_extra_key_rejected(self) -> None:
+        # Unknown keys would otherwise vanish silently (Polarion drops them).
+        with pytest.raises(ValidationError):
+            TestRunCreateSpec(id="TR-1", tittle="typo")  # type: ignore[call-arg]
+
     async def test_create_with_template_resolves_it_first(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
