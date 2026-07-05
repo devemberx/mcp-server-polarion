@@ -18,7 +18,9 @@ from mcp_server_polarion.models import (
     WorkItemRead,
     WorkItemsCreateResult,
     WorkItemSummary,
+    WorkItemsUpdateResult,
     WorkItemUpdateResult,
+    WorkItemUpdateSpec,
 )
 
 
@@ -113,6 +115,8 @@ class TestCrossModelIntegration:
             WorkItemCreateSpec,
             WorkItemsCreateResult,
             WorkItemUpdateResult,
+            WorkItemUpdateSpec,
+            WorkItemsUpdateResult,
             WorkItemLinkSpec,
             WorkItemLinkRef,
             WorkItemLinksCreateResult,

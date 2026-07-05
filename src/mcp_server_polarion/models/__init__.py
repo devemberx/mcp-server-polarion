@@ -50,7 +50,9 @@ from mcp_server_polarion.models.work_items import (
     WorkItemRead,
     WorkItemsCreateResult,
     WorkItemSummary,
+    WorkItemsUpdateResult,
     WorkItemUpdateResult,
+    WorkItemUpdateSpec,
 )
 
 __all__: list[str] = [
@@ -88,5 +90,7 @@ __all__: list[str] = [
     "WorkItemRead",
     "WorkItemSummary",
     "WorkItemUpdateResult",
+    "WorkItemUpdateSpec",
     "WorkItemsCreateResult",
+    "WorkItemsUpdateResult",
 ]
