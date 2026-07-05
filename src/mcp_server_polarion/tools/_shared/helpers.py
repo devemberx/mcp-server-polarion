@@ -5,7 +5,9 @@ string coercion, path encoding, option-list formatting, lucene-id guarding.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections import Counter
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from typing import Final
 from urllib.parse import quote
 
@@ -73,11 +75,39 @@ def validate_work_item_id_for_lucene(work_item_id: str) -> None:
         raise ValueError(msg)
 
 
+def ensure_unique_ids(ids: Iterable[str], *, label: str) -> None:
+    """Reject duplicate ids within one bulk batch — the server's apply order
+    for duplicate resources in a single request is undefined.
+    """
+    duplicates = sorted(id_ for id_, count in Counter(ids).items() if count > 1)
+    if duplicates:
+        msg = (
+            f"Duplicate {label}(s) {duplicates} in one batch; merge the "
+            f"changes for each id into a single item."
+        )
+        raise ValueError(msg)
+
+
+@contextmanager
+def reraise_with_item_context(index: int, item_id: str) -> Iterator[None]:
+    """Prefix a per-item guard ``ValueError`` with the batch position and id so
+    bulk-tool errors name the offending item; other exceptions (project-level
+    auth/backend failures) pass through unwrapped.
+    """
+    try:
+        yield
+    except ValueError as exc:
+        msg = f"items[{index}] ('{item_id}'): {exc}"
+        raise ValueError(msg) from exc
+
+
 __all__: list[str] = [
     "OPTION_LIST_LIMIT",
     "encode_path_segment",
+    "ensure_unique_ids",
     "format_option_list",
     "get_client",
+    "reraise_with_item_context",
     "safe_str",
     "validate_work_item_id_for_lucene",
 ]
