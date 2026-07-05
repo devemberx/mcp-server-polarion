@@ -914,6 +914,15 @@ class TestResolveWorkItemTypes:
 
         assert await resolve_work_item_types(mock_client, "P", ["A"]) == {"A": ""}
 
+    async def test_non_list_data_treated_as_missing(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # Defensive: a malformed reply must not pass the existence check.
+        mock_client.get.return_value = {"data": {"type": "workitems"}}
+
+        with pytest.raises(ValueError, match="not found"):
+            await resolve_work_item_types(mock_client, "P", ["A"])
+
     async def test_project_not_found_raises_value_error(
         self, mock_client: AsyncMock
     ) -> None:
