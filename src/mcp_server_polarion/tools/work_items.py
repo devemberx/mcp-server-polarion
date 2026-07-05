@@ -417,12 +417,12 @@ async def update_work_items(  # noqa: PLR0913
                 await guard_work_item_custom_fields(
                     client, project_id, effective_type, spec.custom_fields
                 )
-
-    await guard_hyperlink_roles(
-        client,
-        project_id,
-        [h.role for spec in items for h in (spec.hyperlinks or [])],
-    )
+            if spec.hyperlinks:
+                # Per item (option cache makes repeats free) so a bad role is
+                # attributed to its batch position like the other guards.
+                await guard_hyperlink_roles(
+                    client, project_id, [h.role for h in spec.hyperlinks]
+                )
 
     query_params = _update_query_params(workflow_action, change_type_to)
 

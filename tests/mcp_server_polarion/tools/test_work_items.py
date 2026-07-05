@@ -888,6 +888,32 @@ class TestUpdateWorkItemsHyperlinkRoleGuard:
         assert "ref_ext" in str(exc.value)
         mock_client.patch.assert_not_called()
 
+    async def test_bad_role_names_offending_item_via_cache(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Item 0's role passes; item 1 reuses the cached options (no second
+        # enum GET) and is rejected with its batch position and id.
+        mock_client.get.side_effect = [
+            _existence_response(("MCPT-1", "task"), ("MCPT-2", "task")),
+            _project_enum_get_response("hyperlink-role", ["ref_int", "ref_ext"]),
+        ]
+
+        with pytest.raises(ValueError, match=r"items\[1\] \('MCPT-2'\)"):
+            await _call_update(
+                mock_ctx,
+                items=[
+                    _spec(hyperlinks=[Hyperlink(role="ref_ext", uri="https://a.com")]),
+                    _spec(
+                        work_item_id="MCPT-2",
+                        hyperlinks=[Hyperlink(role="ghost", uri="https://b.com")],
+                    ),
+                ],
+                dry_run=True,
+            )
+
+        assert mock_client.get.await_count == 2
+        mock_client.patch.assert_not_called()
+
 
 class TestUpdateWorkItemsDryRun:
     """Tests for ``update_work_items`` with ``dry_run=True``."""
