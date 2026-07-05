@@ -396,8 +396,9 @@ async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
     Fetch current state with get_work_item BEFORE updating; PATCHes then GETs.
     description_html is raw Polarion HTML, sent verbatim — source from
     get_work_item(include_description_html=True); greenfield bodies use
-    create_work_items Markdown, formats never mix. New table/caption HTML must
-    be adapted from get_html_recipes templates, never hand-written.
+    create_work_items Markdown, formats never mix. New table, caption, link,
+    or widget HTML must be adapted from get_html_recipes templates, never
+    hand-written.
 
     hyperlinks/assignee_ids REPLACE the stored list — resubmit every existing
     entry plus the change or omissions are deleted. custom_fields is partial,
