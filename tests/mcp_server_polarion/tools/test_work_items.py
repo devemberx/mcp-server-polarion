@@ -1172,6 +1172,20 @@ class TestUpdateWorkItemsFieldValidation:
         validated = self._adapter_for("items").validate_python(items)
         assert len(cast(list[object], validated)) == MAX_BULK_ITEMS
 
+    def test_typo_key_in_one_item_rejects_batch_naming_index(self) -> None:
+        # extra='forbid' smoke: without it, 'descrition' would sail through
+        # to Polarion and persist verbatim as a ghost custom field. The whole
+        # batch must be rejected at parse time, naming the offending index.
+        items: list[dict[str, object]] = [
+            {"work_item_id": f"MCPT-{i}", "title": "t"} for i in range(1, 6)
+        ]
+        items[3] = {"work_item_id": "MCPT-4", "descrition": "<p>x</p>"}
+
+        with pytest.raises(ValidationError, match=r"3\.descrition") as exc:
+            self._adapter_for("items").validate_python(items)
+
+        assert exc.value.errors()[0]["type"] == "extra_forbidden"
+
 
 class TestUpdateWorkItemsDocstringGuidance:
     """Lock the read-before-update and REPLACE steers into the tool docs."""
