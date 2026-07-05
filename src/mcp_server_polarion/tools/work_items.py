@@ -359,9 +359,9 @@ async def update_work_items(  # noqa: PLR0913
 ) -> WorkItemsUpdateResult:
     """Update fields on 1-50 existing work items in one bulk PATCH; unset
     fields stay unchanged. Per-item hyperlinks/assignee_ids REPLACE the
-    stored lists — fetch current state with get_work_item BEFORE updating
-    and resubmit every existing entry plus the change, or omissions are
-    silently deleted.
+    stored lists: even to add ONE entry, call get_work_item on the target
+    BEFORE updating and resubmit every existing entry plus the new one —
+    anything omitted is silently deleted.
 
     description_html is raw Polarion HTML, sent verbatim — source from
     get_work_item(include_description_html=True); greenfield bodies use

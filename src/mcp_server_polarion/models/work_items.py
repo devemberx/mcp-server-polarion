@@ -129,7 +129,10 @@ class WorkItemUpdateSpec(BaseModel):
     )
     hyperlinks: list[Hyperlink] | None = Field(
         default=None,
-        description="REPLACES the hyperlink list — pass the full list, not a delta.",
+        description=(
+            "REPLACES the stored hyperlink list — to add one, resubmit every "
+            "existing hyperlink plus the new entry."
+        ),
     )
     assignee_ids: list[str] | None = Field(
         default=None,
