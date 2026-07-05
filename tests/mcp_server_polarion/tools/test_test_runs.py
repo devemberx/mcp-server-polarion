@@ -398,6 +398,24 @@ class TestBuildCreateTestRunsPayload:
 class TestCreateTestRuns:
     """Tests for the ``create_test_runs`` tool."""
 
+    async def test_duplicate_ids_rejected_before_any_request(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Client-supplied ids can collide; the server would 409 after
+        # partially creating the batch.
+        with pytest.raises(ValueError, match=r"Duplicate id\(s\) \['TR-1'\]"):
+            await create_test_runs(
+                mock_ctx,
+                project_id="proj1",
+                items=[
+                    TestRunCreateSpec(id="TR-1", title="a"),
+                    TestRunCreateSpec(id="TR-1", title="b"),
+                ],
+                dry_run=False,
+            )
+        mock_client.get.assert_not_awaited()
+        mock_client.post.assert_not_awaited()
+
     async def test_minimal_create_posts_and_returns_ids(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
