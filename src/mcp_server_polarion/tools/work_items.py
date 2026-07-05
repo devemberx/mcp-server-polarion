@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import logging
 from importlib import resources
 from typing import Final, cast
@@ -17,8 +16,6 @@ from mcp_server_polarion.core.exceptions import (
     PolarionNotFoundError,
 )
 from mcp_server_polarion.models import (
-    MAX_BODY_HTML_LEN,
-    Hyperlink,
     JsonValue,
     PaginatedResult,
     SqlRecipeGallery,
@@ -27,7 +24,8 @@ from mcp_server_polarion.models import (
     WorkItemRead,
     WorkItemsCreateResult,
     WorkItemSummary,
-    WorkItemUpdateResult,
+    WorkItemsUpdateResult,
+    WorkItemUpdateSpec,
 )
 from mcp_server_polarion.server import mcp
 from mcp_server_polarion.tools._shared.custom_fields import (
@@ -43,10 +41,14 @@ from mcp_server_polarion.tools._shared.guard import (
     guard_hyperlink_roles,
     guard_work_item_custom_fields,
     guard_work_item_enums,
+    resolve_work_item_types,
 )
 from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
+    ensure_unique_ids,
     get_client,
+    reraise_with_item_context,
+    validate_work_item_id_for_lucene,
 )
 from mcp_server_polarion.tools._shared.pagination import (
     DEFAULT_PAGE_SIZE,
@@ -128,67 +130,82 @@ def _build_create_work_items_payload(
     return {"data": data}
 
 
-def _build_update_work_item_payload(  # noqa: PLR0913
+def _build_update_work_item_resource(
     *,
     project_id: str,
-    work_item_id: str,
-    title: str | None,
-    description_html: str | None,
-    status: str | None,
-    priority: str | None,
-    severity: str | None,
-    due_date: str | None,
-    initial_estimate: str | None,
-    resolution: str | None,
-    hyperlinks: list[Hyperlink] | None,
-    assignee_ids: list[str] | None,
-    custom_fields: dict[str, object] | None = None,
+    spec: WorkItemUpdateSpec,
 ) -> dict[str, JsonValue]:
-    """JSON:API PATCH body for ``/projects/{p}/workitems/{work_item}``; skips
-    unset so an update never blanks an existing attribute.
+    """One ``workitems`` resource for the bulk PATCH; skips unset so an
+    update never blanks an existing attribute. The spec validator guarantees
+    at least one attribute or relationship survives.
     """
     attributes: dict[str, JsonValue] = {}
-    if title:
-        attributes["title"] = title
-    if description_html:
+    if spec.title:
+        attributes["title"] = spec.title
+    if spec.description_html:
         attributes["description"] = {
             "type": "text/html",
-            "value": description_html,
+            "value": spec.description_html,
         }
-    if status:
-        attributes["status"] = status
-    if priority:
-        attributes["priority"] = priority
-    if severity:
-        attributes["severity"] = severity
-    if due_date:
-        attributes["dueDate"] = due_date
-    if initial_estimate:
-        attributes["initialEstimate"] = initial_estimate
-    if resolution:
-        attributes["resolution"] = resolution
-    if hyperlinks:
+    if spec.status:
+        attributes["status"] = spec.status
+    if spec.priority:
+        attributes["priority"] = spec.priority
+    if spec.severity:
+        attributes["severity"] = spec.severity
+    if spec.due_date:
+        attributes["dueDate"] = spec.due_date
+    if spec.initial_estimate:
+        attributes["initialEstimate"] = spec.initial_estimate
+    if spec.resolution:
+        attributes["resolution"] = spec.resolution
+    if spec.hyperlinks:
         attributes["hyperlinks"] = [
-            {"role": h.role, "title": h.title, "uri": h.uri} for h in hyperlinks
+            {"role": h.role, "title": h.title, "uri": h.uri} for h in spec.hyperlinks
         ]
-    merge_custom_fields(attributes, custom_fields, STANDARD_WORK_ITEM_ATTRIBUTES)
+    merge_custom_fields(attributes, spec.custom_fields, STANDARD_WORK_ITEM_ATTRIBUTES)
 
     relationships: dict[str, JsonValue] = {}
-    if assignee_ids:
+    if spec.assignee_ids:
         relationships["assignee"] = {
-            "data": [{"type": "users", "id": uid} for uid in assignee_ids]
+            "data": [{"type": "users", "id": uid} for uid in spec.assignee_ids]
         }
 
-    item: dict[str, JsonValue] = {
+    resource: dict[str, JsonValue] = {
         "type": "workitems",
-        "id": f"{project_id}/{work_item_id}",
+        "id": f"{project_id}/{spec.work_item_id}",
     }
     if attributes:
-        item["attributes"] = attributes
+        resource["attributes"] = attributes
     if relationships:
-        item["relationships"] = relationships
+        resource["relationships"] = relationships
 
-    return {"data": item}
+    return resource
+
+
+def _build_update_work_items_payload(
+    *,
+    project_id: str,
+    specs: list[WorkItemUpdateSpec],
+) -> dict[str, JsonValue]:
+    """JSON:API body for bulk ``PATCH /projects/{p}/workitems``."""
+    data: list[JsonValue] = [
+        _build_update_work_item_resource(project_id=project_id, spec=spec)
+        for spec in specs
+    ]
+    return {"data": data}
+
+
+def _update_query_params(
+    workflow_action: str | None, change_type_to: str | None
+) -> dict[str, str]:
+    """Request-wide PATCH query params; both apply to every item in the batch."""
+    params: dict[str, str] = {}
+    if workflow_action:
+        params["workflowAction"] = workflow_action
+    if change_type_to:
+        params["changeTypeTo"] = change_type_to
+    return params
 
 
 _SQL_QUERY_RECIPES: Final[str] = (
@@ -232,7 +249,7 @@ async def create_work_items(
     Items are created free-floating; place into a document with
     move_work_item_to_document (this tool cannot). description is Markdown →
     sanitized HTML; later edits are raw-HTML round-trip via
-    get_work_item(include_description_html=True) ↔ update_work_item.
+    get_work_item(include_description_html=True) ↔ update_work_items.
     """
     client = get_client(ctx)
     for spec in items:
@@ -315,268 +332,135 @@ async def create_work_items(
         "openWorldHint": True,
     },
 )
-async def update_work_item(  # noqa: PLR0912, PLR0913, PLR0915
+async def update_work_items(  # noqa: PLR0913
     ctx: Context,
     project_id: str = Field(min_length=1, description="Polarion project ID."),
-    work_item_id: str = Field(
+    items: list[WorkItemUpdateSpec] = Field(  # noqa: B008
         min_length=1,
-        description="Work item ID (e.g. 'MCPT-042').",
-    ),
-    title: str | None = None,
-    description_html: str | None = Field(
-        default=None,
-        max_length=MAX_BODY_HTML_LEN,
+        max_length=MAX_BULK_ITEMS,
         description=(
-            "Raw HTML from get_work_item(include_description_html=True); verbatim."
+            "Per-item changes (1-50). hyperlinks/assignee_ids REPLACE the "
+            "stored lists — read each item first and pass full lists, not "
+            "deltas."
         ),
-    ),
-    status: str | None = Field(
-        default=None,
-        description="New status; prefer workflow_action for real transitions.",
-    ),
-    priority: str | None = Field(
-        default=None,
-        description="e.g. '50.0'.",
-    ),
-    severity: str | None = None,
-    due_date: str | None = Field(default=None, description="'YYYY-MM-DD'."),
-    initial_estimate: str | None = Field(
-        default=None,
-        description="Polarion duration (e.g. '5 1/2d', '1w 2d').",
-    ),
-    resolution: str | None = Field(
-        default=None,
-        description="Prefer workflow_action so workflow rules apply.",
-    ),
-    hyperlinks: list[Hyperlink] | None = Field(  # noqa: B008
-        default=None,
-        description="REPLACES the hyperlink list — pass the full list, not a delta.",
-    ),
-    assignee_ids: list[str] | None = Field(  # noqa: B008
-        default=None,
-        description="REPLACES the assignee list — pass the full list, not a delta.",
-    ),
-    custom_fields: dict[str, object] | None = Field(  # noqa: B008
-        default=None,
-        description="Partial; rich-text values as {'type':'text/html','value':...}.",
     ),
     workflow_action: str | None = Field(
         default=None,
-        description="Workflow action ID (e.g. 'close').",
+        description="Workflow action ID (e.g. 'close'); applies to EVERY item.",
     ),
     change_type_to: str | None = Field(
         default=None,
-        description="New work-item type; RESETS status.",
-    ),
-    include_current_description_html: bool = Field(
-        default=False,
-        description="Return post-PATCH raw HTML in current.description_html.",
+        description="New work-item type for EVERY item; RESETS status.",
     ),
     dry_run: bool = Field(
         default=False,
         description="Preview payload without writing; guards still query Polarion.",
     ),
-) -> WorkItemUpdateResult:
-    """Update fields on an existing work item; None/empty = leave unchanged.
+) -> WorkItemsUpdateResult:
+    """Update fields on 1-50 existing work items in one bulk PATCH; unset
+    fields stay unchanged. Per-item hyperlinks/assignee_ids REPLACE the
+    stored lists — fetch current state with get_work_item BEFORE updating
+    and resubmit every existing entry plus the change, or omissions are
+    silently deleted.
 
-    Fetch current state with get_work_item BEFORE updating; PATCHes then GETs.
     description_html is raw Polarion HTML, sent verbatim — source from
     get_work_item(include_description_html=True); greenfield bodies use
-    create_work_items Markdown, formats never mix.
-
-    hyperlinks/assignee_ids REPLACE the stored list — resubmit every existing
-    entry plus the change or omissions are deleted. custom_fields is partial,
+    create_work_items Markdown, formats never mix. custom_fields is partial,
     keys outside the type schema rejected, values NOT validated — resolve via
     list_work_item_enum_options first.
 
     module not settable here — use move_work_item_to_document /
-    move_work_item_from_document. workflow_action/change_type_to must pair with
-    ≥1 body field (else 400); unknown enum ids raise ValueError with options;
-    change_type_to scopes status/severity/resolution to the target type and
-    resets status.
+    move_work_item_from_document. workflow_action/change_type_to apply to
+    EVERY item; each item needs ≥1 body field (else 400); change_type_to
+    scopes status/severity/resolution to the target type and resets status.
+    Unknown enum ids and missing/duplicate work_item_ids raise ValueError.
+    Atomic: one bad item rejects the whole batch. Returns ids only — re-read
+    via get_work_item if needed.
     """
-    changes: dict[str, JsonValue] = {}
-    if title:
-        changes["title"] = title
-    if description_html:
-        changes["description_html"] = description_html
-    if status:
-        changes["status"] = status
-    if priority:
-        changes["priority"] = priority
-    if severity:
-        changes["severity"] = severity
-    if due_date:
-        changes["due_date"] = due_date
-    if initial_estimate:
-        changes["initial_estimate"] = initial_estimate
-    if resolution:
-        changes["resolution"] = resolution
-    if hyperlinks:
-        changes["hyperlinks"] = [
-            {"role": h.role, "title": h.title, "uri": h.uri} for h in hyperlinks
-        ]
-    if assignee_ids:
-        changes["assignee_ids"] = list(assignee_ids)
-    if custom_fields:
-        # deepcopy: shallow would alias nested rich-text values into ``changes``.
-        changes["custom_fields"] = cast(JsonValue, copy.deepcopy(custom_fields))
-    if workflow_action:
-        changes["workflow_action"] = workflow_action
-    if change_type_to:
-        changes["change_type_to"] = change_type_to
-
-    if not changes:
-        raise ValueError(
-            "Nothing to update -- pass at least one of title, "
-            "description_html, status, priority, severity, due_date, "
-            "initial_estimate, resolution, hyperlinks, assignee_ids, "
-            "custom_fields, workflow_action, or change_type_to."
-        )
-
-    payload = _build_update_work_item_payload(
-        project_id=project_id,
-        work_item_id=work_item_id,
-        title=title,
-        description_html=description_html,
-        status=status,
-        priority=priority,
-        severity=severity,
-        due_date=due_date,
-        initial_estimate=initial_estimate,
-        resolution=resolution,
-        hyperlinks=hyperlinks,
-        assignee_ids=assignee_ids,
-        custom_fields=custom_fields,
-    )
-
-    # Polarion 400s on an attribute-less PATCH even with workflowAction/changeTypeTo.
-    payload_data = cast(dict[str, JsonValue], payload["data"])
-    if "attributes" not in payload_data and "relationships" not in payload_data:
-        raise ValueError(
-            "Polarion's PATCH endpoint requires at least one body field "
-            "(attribute or relationship) even when triggering "
-            "workflow_action or change_type_to. Pair the action with one "
-            "of: title, description, status, priority, severity, due_date, "
-            "initial_estimate, resolution, hyperlinks, or assignee_ids."
-        )
-
     client = get_client(ctx)
-    base_path = (
-        f"/projects/{encode_path_segment(project_id)}"
-        f"/workitems/{encode_path_segment(work_item_id)}"
+
+    # Ids are embedded into the id:(...) existence query below.
+    for spec in items:
+        validate_work_item_id_for_lucene(spec.work_item_id)
+    ensure_unique_ids((spec.work_item_id for spec in items), label="work_item_id")
+    payload = _build_update_work_items_payload(project_id=project_id, specs=items)
+
+    # One batched query resolves existence + type for every item (on dry_run
+    # too, so preview raises the same errors); enum options are type-scoped.
+    types_by_id = await resolve_work_item_types(
+        client, project_id, (spec.work_item_id for spec in items)
     )
 
-    # Enum options are type-scoped: one prefetch (on dry_run too, so preview
-    # raises the same errors) resolves the type and primes the custom-key cache.
-    work_item_type = ""
-    if status or severity or priority or resolution or change_type_to or custom_fields:
-        try:
-            prefetch = await client.get(
-                base_path,
-                params={"fields[workitems]": "@all"},
-            )
-        except PolarionNotFoundError as exc:
-            raise ValueError(
-                f"Work item '{work_item_id}' in project '{project_id}' not found. "
-                "Use `list_work_items` to discover valid IDs."
-            ) from exc
-        except PolarionAuthError as exc:
-            raise PermissionError(
-                "Cannot read work item -- check your POLARION_TOKEN permissions."
-            ) from exc
-        except PolarionError as exc:
-            raise RuntimeError(
-                f"Failed to read work item for guard: {exc.message}"
-            ) from exc
-        prefetch_data = prefetch.get("data", {})
-        if isinstance(prefetch_data, dict):
-            current_detail = parse_work_item_detail(
-                prefetch_data,
-                project_id=project_id,
-                fallback_id=work_item_id,
-            )
-            work_item_type = current_detail.type
-
-        # Scope enums by target type; guard checks ``type`` first, so an invalid
-        # change_type_to raises before being reused as the scoping axis.
-        effective_type = change_type_to or work_item_type or "~"
+    if change_type_to:
+        # Request-wide param: validate once on its own axis, unprefixed — a
+        # bad value is not any single item's fault.
         await guard_work_item_enums(
-            client,
-            project_id,
-            work_item_type=effective_type,
-            type=change_type_to,
-            status=status,
-            severity=severity,
-            priority=priority,
-            resolution=resolution,
+            client, project_id, work_item_type=change_type_to, type=change_type_to
         )
-        # change_type_to retypes in the same PATCH — customs belong to the new type.
-        if custom_fields:
-            await guard_work_item_custom_fields(
-                client,
-                project_id,
-                change_type_to or work_item_type,
-                custom_fields,
-            )
 
-    if hyperlinks:
-        await guard_hyperlink_roles(client, project_id, [h.role for h in hyperlinks])
+    for index, spec in enumerate(items):
+        # change_type_to retypes in the same PATCH — enums and customs are
+        # scoped to the new type.
+        effective_type = change_type_to or types_by_id.get(spec.work_item_id, "")
+        with reraise_with_item_context(index, spec.work_item_id):
+            if spec.status or spec.severity or spec.priority or spec.resolution:
+                await guard_work_item_enums(
+                    client,
+                    project_id,
+                    work_item_type=effective_type or "~",
+                    status=spec.status,
+                    severity=spec.severity,
+                    priority=spec.priority,
+                    resolution=spec.resolution,
+                )
+            if spec.custom_fields:
+                await guard_work_item_custom_fields(
+                    client, project_id, effective_type, spec.custom_fields
+                )
+
+    await guard_hyperlink_roles(
+        client,
+        project_id,
+        [h.role for spec in items for h in (spec.hyperlinks or [])],
+    )
+
+    query_params = _update_query_params(workflow_action, change_type_to)
 
     if dry_run:
-        return WorkItemUpdateResult(
+        preview: dict[str, JsonValue] = dict(payload)
+        if query_params:
+            preview["query_params"] = cast("dict[str, JsonValue]", dict(query_params))
+        return WorkItemsUpdateResult(
             updated=False,
             dry_run=True,
-            current=None,
-            changes=changes,
-            payload_preview=payload,
+            work_item_ids=[],
+            payload_preview=preview,
         )
 
-    query_params: dict[str, str] = {}
-    if workflow_action:
-        query_params["workflowAction"] = workflow_action
-    if change_type_to:
-        query_params["changeTypeTo"] = change_type_to
-    patch_path = f"{base_path}?{urlencode(query_params)}" if query_params else base_path
+    path = f"/projects/{encode_path_segment(project_id)}/workitems"
+    if query_params:
+        path = f"{path}?{urlencode(query_params)}"
 
     try:
-        await client.patch(patch_path, json=cast(dict[str, object], payload))
-        response = await client.get(
-            base_path,
-            params={
-                "fields[workitems]": WORK_ITEM_DETAIL_FIELDS,
-                "include": "assignee",
-            },
-        )
+        await client.patch(path, json=cast(dict[str, object], payload))
     except PolarionAuthError as exc:
         raise PermissionError(
-            "Cannot update work item -- check your POLARION_TOKEN permissions."
+            "Cannot update work items -- check your POLARION_TOKEN permissions."
         ) from exc
     except PolarionNotFoundError as exc:
+        # Race fallback: existence was verified above, so a PATCH 404 means
+        # the batch changed under us.
         raise ValueError(
-            f"Work item '{work_item_id}' in project '{project_id}' not found. "
-            "Use `list_work_items` to discover valid IDs."
+            f"A work item in the batch was not found in project '{project_id}': "
+            f"{exc.message} Use `list_work_items` to discover valid IDs."
         ) from exc
     except PolarionError as exc:
-        raise RuntimeError(f"Failed to update work item: {exc.message}") from exc
+        raise RuntimeError(f"Failed to update work items: {exc.message}") from exc
 
-    data = response.get("data", {})
-    if not isinstance(data, dict):
-        data = {}
-    current = parse_work_item_detail(
-        data,
-        project_id=project_id,
-        fallback_id=work_item_id,
-    )
-    if not include_current_description_html:
-        # Body still came over the wire; blank it — mirrors get_work_item.
-        current = current.model_copy(update={"description_html": ""})
-
-    return WorkItemUpdateResult(
+    return WorkItemsUpdateResult(
         updated=True,
         dry_run=False,
-        current=current,
-        changes=changes,
+        work_item_ids=[spec.work_item_id for spec in items],
         payload_preview=None,
     )
 
@@ -674,7 +558,7 @@ async def get_work_item(
     """Get full details of one work item by ID.
 
     include_description_html=True fills description_html with raw HTML — the
-    required source for update_work_item(description_html=...). Never feed back
+    required source for update_work_items description_html. Never feed back
     a blanked (flag=False) body.
     """
     client = get_client(ctx)
@@ -733,7 +617,7 @@ async def read_work_item(
     """Read one work item with its body rendered as Markdown.
 
     get_work_item plus description as Markdown. Synthesis output (collapses
-    Polarion anchors) — NEVER feed to update_work_item; round-trip via the HTML
+    Polarion anchors) — NEVER feed to update_work_items; round-trip via the HTML
     pair instead.
     """
     # Pull raw HTML from get_work_item so conversion needs no second round trip.

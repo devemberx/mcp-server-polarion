@@ -1215,7 +1215,7 @@ class TestGuardWorkItemLinkRoles:
 
 
 class TestGuardHyperlinkRoles:
-    """Hyperlink-role guard for ``create_work_items`` / ``update_work_item``."""
+    """Hyperlink-role guard for ``create_work_items`` / ``update_work_items``."""
 
     async def test_valid_role_passes(self, mock_client: AsyncMock) -> None:
         mock_client.get.return_value = _project_enum_response(

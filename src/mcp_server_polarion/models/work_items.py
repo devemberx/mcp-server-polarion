@@ -180,16 +180,6 @@ class WorkItemsUpdateResult(BaseModel):
     payload_preview: Mapping[str, object] | None = None
 
 
-class WorkItemUpdateResult(BaseModel):
-    """Result of an ``update_work_item`` operation."""
-
-    updated: bool
-    dry_run: bool
-    current: WorkItemDetail | None
-    changes: Mapping[str, object]
-    payload_preview: Mapping[str, object] | None
-
-
 class WorkItemMoveResult(BaseModel):
     """Result of a ``move_work_item_to_document`` or sibling move-document call."""
 

@@ -19,7 +19,6 @@ from mcp_server_polarion.models import (
     WorkItemsCreateResult,
     WorkItemSummary,
     WorkItemsUpdateResult,
-    WorkItemUpdateResult,
     WorkItemUpdateSpec,
 )
 
@@ -69,24 +68,15 @@ class TestCrossModelIntegration:
         )
         assert page.items[0].type == "heading"
 
-    def test_update_result_with_nested_detail(self):
-        result = WorkItemUpdateResult(
+    def test_update_result_json_round_trip(self):
+        result = WorkItemsUpdateResult(
             updated=True,
             dry_run=False,
-            current=WorkItemDetail(
-                id="MCPT-001",
-                title="Before",
-                type="requirement",
-                status="draft",
-                description_html="<p>Old description</p>",
-                project_id="proj1",
-            ),
-            changes={"title": "After", "status": "approved"},
+            work_item_ids=["MCPT-001", "MCPT-002"],
             payload_preview=None,
         )
-        dumped = result.model_dump()
-        assert dumped["current"]["title"] == "Before"
-        assert dumped["changes"]["title"] == "After"
+        restored = WorkItemsUpdateResult.model_validate_json(result.model_dump_json())
+        assert restored.work_item_ids == ["MCPT-001", "MCPT-002"]
 
     def test_workitemread_metadata_mirrors_workitemdetail(self):
         """Drift between the two models makes ``read_work_item`` silently
@@ -114,7 +104,6 @@ class TestCrossModelIntegration:
             WorkItemLink,
             WorkItemCreateSpec,
             WorkItemsCreateResult,
-            WorkItemUpdateResult,
             WorkItemUpdateSpec,
             WorkItemsUpdateResult,
             WorkItemLinkSpec,

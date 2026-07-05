@@ -43,7 +43,7 @@ class TestWriteToolAnnotations:
                 },
             ),
             (
-                "update_work_item",
+                "update_work_items",
                 {
                     "readOnlyHint": False,
                     "destructiveHint": True,

@@ -13,7 +13,6 @@ from mcp_server_polarion.models import (
     WorkItemsCreateResult,
     WorkItemSummary,
     WorkItemsUpdateResult,
-    WorkItemUpdateResult,
     WorkItemUpdateSpec,
 )
 
@@ -332,41 +331,20 @@ class TestWorkItemsCreateResult:
         assert result.payload_preview is not None
 
 
-class TestWorkItemUpdateResult:
-    def test_successful_update(self):
-        current = WorkItemDetail(
-            id="MCPT-001",
-            title="Old Title",
-            type="requirement",
-            status="draft",
-            description_html="<p>Old desc</p>",
-            project_id="proj1",
-        )
-        result = WorkItemUpdateResult(
-            updated=True,
-            dry_run=False,
-            current=current,
-            changes={"title": "New Title"},
-            payload_preview=None,
-        )
-        assert result.updated is True
-        assert result.current is not None
-        assert result.current.title == "Old Title"
-        assert result.changes["title"] == "New Title"
-        assert result.payload_preview is None
-
-    def test_dry_run(self):
-        result = WorkItemUpdateResult(
+class TestWorkItemsUpdateResultDryRun:
+    def test_dry_run_preview(self):
+        result = WorkItemsUpdateResult(
             updated=False,
             dry_run=True,
-            current=None,
-            changes={"status": "approved"},
+            work_item_ids=[],
             payload_preview={
-                "data": {
-                    "type": "workitems",
-                    "id": "proj1/MCPT-001",
-                    "attributes": {"status": "approved"},
-                }
+                "data": [
+                    {
+                        "type": "workitems",
+                        "id": "proj1/MCPT-001",
+                        "attributes": {"status": "approved"},
+                    }
+                ]
             },
         )
         assert result.updated is False
