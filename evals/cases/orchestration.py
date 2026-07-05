@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from strands_evals import Case
 
+from evals.cases._shared import Step, make_case
 from evals.harness.fixtures import (
     CHILD_REQ_ID,
     DOC,
@@ -25,8 +26,8 @@ MIN_PASS_RATE = 0.8
 
 # Reused step fragments. Move runs after create (new id, via ``after``) and
 # after read_document_parts (anchor, via observed-id source).
-_READ_PARTS = {"tool": "read_document_parts", "match": {"document_name": DOC}}
-_MOVE_ANCHORED = {
+_READ_PARTS: Step = {"tool": "read_document_parts", "match": {"document_name": DOC}}
+_MOVE_ANCHORED: Step = {
     "tool": "move_work_item_to_document",
     "match": {"target_document_name": DOC},
     "after": ["create_work_items"],
@@ -36,29 +37,28 @@ _MOVE_ANCHORED = {
 }
 
 
-def _step_tools(step: dict[str, object]) -> list[str]:
+def _step_tools(step: Step) -> list[str]:
     tool = step["tool"]
-    return [tool] if isinstance(tool, str) else list(tool)  # type: ignore[arg-type]
+    return [tool] if isinstance(tool, str) else list(tool)
 
 
-def _covers(steps: list[dict[str, object]]) -> list[str]:
+def _covers(steps: list[Step]) -> list[str]:
     """Tools a case exercises = every tool named across its steps."""
     return sorted({t for step in steps for t in _step_tools(step)})
 
 
-def _case(name: str, prompt: str, *, intent: str, **params: object) -> Case:
-    steps = params.get("steps", [])
-    assert isinstance(steps, list)
-    return Case(
-        name=name,
-        input=prompt,
-        metadata={
-            "check": "ordered_trajectory",
-            "params": params,
-            "min_pass_rate": MIN_PASS_RATE,
-            "intent": intent,
-            "covers": _covers(steps),
-        },
+def _case(
+    name: str, prompt: str, *, intent: str, steps: list[Step], **params: object
+) -> Case:
+    return make_case(
+        name,
+        prompt,
+        "ordered_trajectory",
+        intent=intent,
+        covers=_covers(steps),
+        min_pass_rate=MIN_PASS_RATE,
+        steps=steps,
+        **params,
     )
 
 
