@@ -42,6 +42,7 @@ from mcp_server_polarion.models.test_runs import (
     TestRunSummary,
 )
 from mcp_server_polarion.models.work_items import (
+    HtmlRecipeGallery,
     Hyperlink,
     SqlRecipeGallery,
     WorkItemCreateSpec,
@@ -66,6 +67,7 @@ __all__: list[str] = [
     "DocumentSummary",
     "DocumentUpdateResult",
     "EnumOption",
+    "HtmlRecipeGallery",
     "Hyperlink",
     "JsonValue",
     "PaginatedResult",

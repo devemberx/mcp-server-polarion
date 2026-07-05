@@ -654,6 +654,64 @@ class TestResolveObservedPath:
         assert checks._resolve_observed_path(None, "items[].id") == []
 
 
+class TestCheckTableHtmlRecipeSourced:
+    def test_recipe_then_table_update_passes(self) -> None:
+        trajectory = [
+            _call("get_html_recipes"),
+            _call(
+                "update_work_item",
+                {"work_item_id": "MCPT-200", "description_html": "<p>x</p><table>"},
+            ),
+        ]
+        passed, _ = checks.check_table_html_recipe_sourced(trajectory, {})
+        assert passed is True
+
+    def test_table_update_without_recipes_fails(self) -> None:
+        trajectory = [
+            _call(
+                "update_work_item",
+                {"work_item_id": "MCPT-200", "description_html": "<TABLE><tr>"},
+            )
+        ]
+        passed, reason = checks.check_table_html_recipe_sourced(trajectory, {})
+        assert passed is False
+        assert "get_html_recipes" in reason
+
+    def test_document_body_table_also_constrained(self) -> None:
+        trajectory = [
+            _call(
+                "update_document",
+                {"document_name": "D", "home_page_content_html": "<table></table>"},
+            )
+        ]
+        passed, _ = checks.check_table_html_recipe_sourced(trajectory, {})
+        assert passed is False
+
+    def test_no_table_update_at_all_fails(self) -> None:
+        # The task demands a table; a refusal must not pass vacuously.
+        trajectory = [
+            _call("get_work_item", {"work_item_id": "MCPT-200"}),
+            _call(
+                "update_work_item",
+                {"work_item_id": "MCPT-200", "description_html": "<p>plain</p>"},
+            ),
+        ]
+        passed, reason = checks.check_table_html_recipe_sourced(trajectory, {})
+        assert passed is False
+        assert "table" in reason.lower()
+
+    def test_recipe_after_table_update_fails(self) -> None:
+        trajectory = [
+            _call(
+                "update_work_item",
+                {"work_item_id": "MCPT-200", "description_html": "<table>"},
+            ),
+            _call("get_html_recipes"),
+        ]
+        passed, _ = checks.check_table_html_recipe_sourced(trajectory, {})
+        assert passed is False
+
+
 class TestCheckOrderedTrajectory:
     def test_canonical_spec_sequence_passes(self) -> None:
         trajectory = [

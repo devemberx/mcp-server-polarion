@@ -10,6 +10,7 @@ from mcp_server_polarion.utils.html import (
     first_anchorless_block,
     html_to_markdown,
     markdown_to_html,
+    polarionify_html,
     sanitize_html,
     stamp_block_ids,
 )
@@ -833,3 +834,130 @@ class TestFirstAnchorlessBlock:
         # <span>/<strong> are not in the block set, so an anchored <p>
         # wrapping them passes even though the inline tags lack ids.
         assert first_anchorless_block('<p id="a">x <span>y</span></p>') is None
+
+
+class TestPolarionifyTables:
+    """Verify bare-table styling injection."""
+
+    def test_bare_table_gets_polarion_class(self) -> None:
+        result = polarionify_html("<table><tr><td>x</td></tr></table>")
+        assert 'class="polarion-Document-table"' in result
+
+    def test_bare_table_gets_table_style(self) -> None:
+        result = polarionify_html("<table><tr><td>x</td></tr></table>")
+        assert "border-collapse: collapse" in result
+        assert "max-width: 1280px" in result
+
+    def test_th_and_td_get_cell_styles(self) -> None:
+        html = "<table><tr><th>h</th></tr><tr><td>d</td></tr></table>"
+        result = polarionify_html(html)
+        assert 'th style="' in result and "background-color: #F0F0F0" in result
+        assert 'td style="' in result and "padding: 5px" in result
+
+    def test_classed_table_untouched(self) -> None:
+        html = '<table class="custom"><tr><td>x</td></tr></table>'
+        assert polarionify_html(html) == html
+
+    def test_cell_with_existing_style_kept(self) -> None:
+        html = '<table><tr><td style="color: red;">x</td></tr></table>'
+        result = polarionify_html(html)
+        assert 'style="color: red;"' in result
+
+    def test_colspan_rowspan_survive(self) -> None:
+        html = '<table><tr><td colspan="2" rowspan="3">x</td></tr></table>'
+        result = polarionify_html(html)
+        assert 'colspan="2"' in result and 'rowspan="3"' in result
+
+    def test_no_table_returns_input_verbatim(self) -> None:
+        html = "<p>no&nbsp;tables here</p>"
+        assert polarionify_html(html) is html
+
+    def test_empty_input_returns_empty(self) -> None:
+        assert polarionify_html("") == ""
+        assert polarionify_html("   ") == ""
+
+    def test_thead_structure_preserved(self) -> None:
+        html = (
+            "<table><thead><tr><th>h</th></tr></thead>"
+            "<tbody><tr><td>d</td></tr></tbody></table>"
+        )
+        result = polarionify_html(html)
+        assert "<thead>" in result and "<tbody>" in result
+
+    def test_no_macro_id_added(self) -> None:
+        result = polarionify_html("<table><tr><td>x</td></tr></table>")
+        assert "polarion_wiki" not in result
+
+
+class TestPolarionifyCaptions:
+    """Verify Table:/Figure: paragraph → native caption widget."""
+
+    def test_table_caption_converted(self) -> None:
+        html = "<table><tr><td>x</td></tr></table><p>Table: 병합 테스트</p>"
+        result = polarionify_html(html)
+        assert 'class="polarion-rte-caption-paragraph"' in result
+        assert 'data-sequence="Table"' in result
+        assert 'class="polarion-rte-caption"' in result
+        assert "병합 테스트" in result
+        assert "Table:" not in result
+
+    def test_caption_paragraph_shape(self) -> None:
+        html = "<table><tr><td>x</td></tr></table><p>Table: cap</p>"
+        result = polarionify_html(html)
+        # BS4 serializes class before data-*; Polarion accepts either order.
+        assert (
+            '<p class="polarion-rte-caption-paragraph" style="text-align: left;">'
+            'Table <span class="polarion-rte-caption" data-sequence="Table">#</span>'
+            " cap</p>" in result
+        )
+
+    def test_figure_caption_after_image_paragraph(self) -> None:
+        html = '<p><img src="x.png" alt="x"/></p><p>Figure: 다이어그램</p>'
+        result = polarionify_html(html)
+        assert 'data-sequence="Figure"' in result
+        assert "다이어그램" in result
+
+    def test_non_adjacent_table_paragraph_untouched(self) -> None:
+        html = "<p>Table: just prose</p><p>other</p>"
+        assert polarionify_html(html) is html
+
+    def test_paragraph_between_table_and_caption_blocks_conversion(self) -> None:
+        html = "<table><tr><td>x</td></tr></table><p>gap</p><p>Table: cap</p>"
+        result = polarionify_html(html)
+        assert "polarion-rte-caption" not in result
+
+    def test_figure_prefix_after_table_not_converted(self) -> None:
+        html = "<table><tr><td>x</td></tr></table><p>Figure: wrong kind</p>"
+        result = polarionify_html(html)
+        assert "polarion-rte-caption" not in result
+
+    def test_inline_formatting_in_caption_preserved(self) -> None:
+        html = "<table><tr><td>x</td></tr></table><p>Table: with <b>bold</b> text</p>"
+        result = polarionify_html(html)
+        assert "<b>bold</b>" in result
+        assert 'data-sequence="Table"' in result
+
+    def test_whitespace_between_table_and_caption_skipped(self) -> None:
+        html = "<table><tr><td>x</td></tr></table>\n  <p>Table: cap</p>"
+        result = polarionify_html(html)
+        assert 'data-sequence="Table"' in result
+
+
+class TestPolarionifyPipeline:
+    """Markdown → sanitize → polarionify full greenfield chain."""
+
+    def test_markdown_table_with_caption_end_to_end(self) -> None:
+        markdown = (
+            "intro\n\n| 도구 | 결과 |\n| --- | --- |\n| a | b |\n\nTable: 테스트 표\n"
+        )
+        result = polarionify_html(sanitize_html(markdown_to_html(markdown)))
+        assert 'class="polarion-Document-table"' in result
+        assert 'data-sequence="Table"' in result
+        assert "테스트 표" in result
+
+    def test_markdown_image_stripped_so_figure_caption_stays_prose(self) -> None:
+        # sanitize_html drops <img>, so the Figure: paragraph loses its anchor.
+        markdown = "![alt](https://example.com/x.png)\n\nFigure: 그림 캡션\n"
+        result = polarionify_html(sanitize_html(markdown_to_html(markdown)))
+        assert "polarion-rte-caption" not in result
+        assert "Figure: 그림 캡션" in result
