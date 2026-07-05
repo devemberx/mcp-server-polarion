@@ -98,10 +98,12 @@ fails and the release is blocked (fail-closed).
 
 1. Add a pure check to [`evaluators/checks.py`](evaluators/checks.py) and register
    it in `REGISTRY` (or reuse one). Keep it a function of the trajectory only.
-2. Add a `Case` to the behaviour file — triggers/safety (`1.0`),
-   efficiency/orchestration (`0.8`). Give it an `intent` and a `covers` list. An
-   orchestration case derives `covers` from its steps and usually reuses the
-   `ordered_trajectory` check, declaring its step sequence in `params`.
+2. Add a `Case` to the behaviour file via its `_case` helper — a thin wrapper
+   binding the category threshold (triggers/safety `1.0`,
+   efficiency/orchestration `0.8`) over the shared factory in
+   [`cases/_shared.py`](cases/_shared.py). Give it an `intent` and a `covers`
+   list. An orchestration case instead takes typed `steps` (the `Step` dict),
+   derives `covers` from them, and is fixed to the `ordered_trajectory` check.
 3. Phrase the task neutrally — never state the rule, or you test the prompt
    instead of the tool docstrings (the only guard).
 4. If the case covers a previously-uncovered tool, drop it from the `DEFERRED`
