@@ -55,6 +55,7 @@ Other clients (VS Code, Claude Desktop, Cursor) — see [Client Configuration](#
 | `list_work_items` | List work items in a project (Lucene/SQL query) |
 | `list_test_runs` | List test runs in a project (Lucene query, templates filter) |
 | `get_sql_query_recipes` | Fetch copy-paste SQL recipes for advanced queries |
+| `get_html_recipes` | Fetch copy-paste Polarion HTML templates for raw-HTML body edits |
 | `get_document` | Get document metadata, optionally with the raw body HTML |
 | `read_document` | Render a document end-to-end as Markdown |
 | `read_document_parts` | List a document's structural parts with embedded work item metadata |
