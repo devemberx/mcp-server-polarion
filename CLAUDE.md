@@ -8,19 +8,19 @@ MCP server: AI read/write Polarion ALM. FastMCP 3.0, strict async, fully typed.
 uv sync --dev                                            # install deps
 uv run pytest                                            # all tests
 uv run pytest --cov --cov-report=term-missing            # tests + uncovered lines
-uv run pytest --cov --cov-report=html                    # htmlcov/index.html (visual)
 uv run ruff check . && uv run ruff format . && uv run mypy src/  # lint + format + types
 uv run pytest --cov=src/mcp_server_polarion --cov=evals --cov-report=xml \
   && uv run diff-cover coverage.xml --compare-branch=origin/main --fail-under=90  # changed-line gate
 uv run mcp-server-polarion                               # run server (stdio)
 ```
 
-CI: `ruff check` → `ruff format --check` → `mypy` → `pytest` (`--cov-fail-under=90`) → `diff-cover` (every changed line ≥90%). Each PR line needs test — incl parser defensive branches + `evals/harness` request handlers, not only `src/`. Run `diff-cover` command above before push.
+CI: `ruff check` → `ruff format --check` → `mypy` → `pytest` (`--cov-fail-under=90`) → `diff-cover` (changed lines ≥90% — incl parser defensive branches + `evals/harness` request handlers, not only `src/`). Run `diff-cover` command above before push.
 
 ## Architecture
 
-- `core/` — `client.py` (async httpx, retries 429/5xx → `PolarionError`/`PolarionAuthError`/`PolarionNotFoundError`), `config.py` (`POLARION_URL`/`POLARION_TOKEN`), `logging.py` (stderr-only; loggers `mcp_server_polarion.<module>`).
-- `tools/` — domain modules; `_build_*_payload` = unit-test seam; `tools/__init__.py` import registers `@mcp.tool`s. `_shared/`: `helpers.py`, `parse.py` (JSON:API→models), `pagination.py` (`make_page`), `fields.py`/`custom_fields.py` (sparse-fieldset + custom-field policy), `cache.py` (`TTLCache`), `guard/` (write guards, submodule per domain axis), `sql.py` (recipes). `tools/guides/` = on-demand data served by `recipes.py`.
+- `core/` — `client.py` (async httpx, retries 429/5xx), `exceptions.py` (`PolarionError`/`PolarionAuthError`/`PolarionNotFoundError`), `config.py` (`POLARION_URL`/`POLARION_TOKEN`), `logging.py` (stderr-only; loggers `mcp_server_polarion.<module>`).
+- `tools/` — domain modules; `_build_*_payload` = unit-test seam; `tools/__init__.py` import registers `@mcp.tool`s. `_shared/`: `helpers.py`, `parse.py` (JSON:API→models), `pagination.py` (`make_page`), `fields.py`/`custom_fields.py` (sparse-fieldset + custom-field policy), `cache.py` (`TTLCache`), `guard/` (write guards, submodule per domain axis; new guards compose `_http.py` `guarded_get`/`guarded_pages`, custom-field key checks via `_custom_keys.py` `check_custom_keys`), `sql.py` (recipes). `tools/guides/` = on-demand data served by `recipes.py`.
+- `middleware.py` — FastMCP `on_call_tool` middleware; compact tool-arg `ValidationError` to one-line summary (raw Pydantic dump = token waste).
 - `utils/html.py` — Markdown↔HTML, `stamp_block_ids`, `first_anchorless_block`.
 - `models/` — Pydantic v2, re-exported from `models/__init__.py`; `PaginatedResult[T]` wrap list responses.
 - `server.py` — FastMCP instance; lifespan owns `PolarionClient`.
