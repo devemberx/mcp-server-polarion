@@ -135,6 +135,19 @@ class TestGuardDocumentCustomFieldKeys:
                 mock_client, "P", "generic", {"doc_risk": 1}
             )
 
+    async def test_non_document_included_entries_are_skipped(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # Stray entries in ``included`` (non-dict, non-document type) must not
+        # break sampling of the well-formed document entries.
+        response = _docs_list(("generic", {"doc_risk": 3}))
+        included = response["included"]
+        assert isinstance(included, list)
+        included[:0] = ["stray", {"type": "workitems", "id": "P/W-1"}]
+        mock_client.get.return_value = response
+
+        await _check_document_custom_keys(mock_client, "P", "generic", {"doc_risk": 9})
+
     async def test_unknown_key_against_fresh_sample_rejects_without_retry(
         self, mock_client: AsyncMock
     ) -> None:

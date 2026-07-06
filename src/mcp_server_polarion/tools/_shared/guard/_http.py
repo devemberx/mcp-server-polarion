@@ -54,12 +54,18 @@ async def paged_responses(
 ) -> AsyncIterator[dict[str, object]]:
     """Yield each page's full response (consumers read ``included`` too);
     stop on non-list ``data`` or a short page. No error translation — callers
-    wrap the ``async for`` when they need it.
+    wrap the ``async for`` when they need it. ``page[size]`` is forced to
+    ``GUARD_PAGE_SIZE`` here because the short-page stop compares against it.
     """
     page_number = 1
     while True:
         response = await client.get(
-            path, params={**base_params, "page[number]": page_number}
+            path,
+            params={
+                **base_params,
+                "page[size]": GUARD_PAGE_SIZE,
+                "page[number]": page_number,
+            },
         )
         data = response.get("data", [])
         if not isinstance(data, list):

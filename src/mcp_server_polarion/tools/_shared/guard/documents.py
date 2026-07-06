@@ -18,10 +18,7 @@ from mcp_server_polarion.tools._shared.guard._errors import (
     unauthorized_write_block,
     unreachable_write_block,
 )
-from mcp_server_polarion.tools._shared.guard._http import (
-    GUARD_PAGE_SIZE,
-    paged_responses,
-)
+from mcp_server_polarion.tools._shared.guard._http import paged_responses
 from mcp_server_polarion.tools._shared.guard.enums import (
     check_custom_field_enum_values,
     check_enum,
@@ -69,7 +66,6 @@ async def _fetch_document_type_custom_keys(
         "include": "module",
         "fields[workitems]": "module",
         "fields[documents]": DOCUMENT_DETAIL_FIELDS,
-        "page[size]": GUARD_PAGE_SIZE,
     }
     by_type: dict[str, set[str]] = {}
     try:

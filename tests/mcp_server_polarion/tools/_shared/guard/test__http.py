@@ -97,12 +97,26 @@ class TestPagedResponses:
         assert len(pages) == 2
         assert mock_client.get.call_args_list[0].kwargs["params"] == {
             "q": "x",
+            "page[size]": GUARD_PAGE_SIZE,
             "page[number]": 1,
         }
         assert mock_client.get.call_args_list[1].kwargs["params"] == {
             "q": "x",
+            "page[size]": GUARD_PAGE_SIZE,
             "page[number]": 2,
         }
+
+    async def test_page_size_forced_over_caller_value(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # Termination compares against GUARD_PAGE_SIZE, so the helper must own
+        # page[size]; a caller-supplied value would desync fetch and stop.
+        mock_client.get.return_value = _page(3)
+
+        _ = [p async for p in paged_responses(mock_client, "/p", {"page[size]": 10})]
+
+        params = mock_client.get.call_args.kwargs["params"]
+        assert params["page[size]"] == GUARD_PAGE_SIZE
 
     async def test_non_list_data_yields_nothing(self, mock_client: AsyncMock) -> None:
         mock_client.get.return_value = {"data": {"id": "single"}}

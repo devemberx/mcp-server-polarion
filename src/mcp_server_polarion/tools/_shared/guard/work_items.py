@@ -99,7 +99,6 @@ async def _fetch_work_item_type_custom_keys(
     base_params: dict[str, str | int] = {
         "query": one_item_per_custom_field_sql(project_id, type_id),
         "fields[workitems]": WORK_ITEM_DETAIL_FIELDS,
-        "page[size]": GUARD_PAGE_SIZE,
     }
     keys: set[str] = set()
     try:

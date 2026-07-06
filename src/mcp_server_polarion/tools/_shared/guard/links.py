@@ -152,7 +152,6 @@ async def _existing_forward_link_ids(
     )
     base_params: dict[str, str | int] = {
         "fields[linkedworkitems]": "id",
-        "page[size]": GUARD_PAGE_SIZE,
     }
     found: set[str] = set()
     async for response in paged_responses(client, path, base_params):

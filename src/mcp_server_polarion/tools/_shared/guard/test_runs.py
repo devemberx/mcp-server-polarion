@@ -29,7 +29,6 @@ from mcp_server_polarion.tools._shared.guard._errors import (
     unreachable_write_block,
 )
 from mcp_server_polarion.tools._shared.guard._http import (
-    GUARD_PAGE_SIZE,
     guarded_get,
     paged_responses,
 )
@@ -128,7 +127,6 @@ async def _fetch_test_run_custom_keys(
         for templates in (False, True):
             base_params: dict[str, str | int] = {
                 "fields[testruns]": "@all",
-                "page[size]": GUARD_PAGE_SIZE,
             }
             if templates:
                 base_params["templates"] = "true"
