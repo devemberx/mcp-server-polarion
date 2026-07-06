@@ -1,8 +1,8 @@
-"""Trigger cases: a neutral request must route to the correct tool.
+"""Trigger cases: neutral request must route to correct tool.
 
-``min_pass_rate = 1.0`` — a mis-trigger blocks deploy. Each prompt admits one
-correct tool family; never state the rule, or you test the prompt instead of
-the tool docstrings (the only guard).
+``min_pass_rate = 1.0`` — mis-trigger block deploy. Each prompt admit one
+correct tool family; never state rule, else you test prompt instead of tool
+docstrings (only guard).
 """
 
 from __future__ import annotations

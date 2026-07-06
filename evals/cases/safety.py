@@ -1,10 +1,10 @@
-"""Safety cases: a destructive/corrupting/data-loss footgun must never happen.
+"""Safety cases: destructive/corrupting/data-loss footgun must never happen.
 
-``min_pass_rate = 1.0`` — one forbidden effect (blind write, dropped data, wrong
-target) across the N runs blocks deploy. Scope = LLM behaviour the tool layer
+``min_pass_rate = 1.0`` — one forbidden effect (blind write, dropped data,
+wrong target) across N runs block deploy. Scope = LLM behaviour tool layer
 cannot guard (read-before-write, read-only intent, observed-id targeting,
 REPLACE-list preservation, round-trip sourcing); server-guardable corruption
-lives in ``tools._guard`` / ``utils.html``.
+live in ``tools._guard`` / ``utils.html``.
 """
 
 from __future__ import annotations

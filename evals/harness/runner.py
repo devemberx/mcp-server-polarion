@@ -1,7 +1,7 @@
-"""Run one eval case end to end. ``run_case`` is the synchronous ``task``
-callable for ``strands_evals``; one ``asyncio.run`` drives Agent -> bridged
-tools -> in-memory server -> respx -> FakePolarion. LLM traffic falls through
-to the real provider (``assert_all_mocked=False``); Polarion never touched.
+"""Run one eval case end to end. ``run_case`` = synchronous ``task`` callable
+for ``strands_evals``; one ``asyncio.run`` drive Agent -> bridged tools ->
+in-memory server -> respx -> FakePolarion. LLM traffic fall through to real
+provider (``assert_all_mocked=False``); Polarion never touched.
 """
 
 from __future__ import annotations
@@ -25,15 +25,15 @@ from .fixtures import POLARION_HOST, PROJECT
 from .mcp_bridge import TrajectoryRecorder, build_agent_tools
 from .model import build_model
 
-# Runaway-agent caps: _MAX_CYCLES counts BeforeModelCallEvent firings;
-# _CASE_TIMEOUT_SECONDS is a wall-clock ceiling on invoke_async.
+# Runaway-agent caps: _MAX_CYCLES count BeforeModelCallEvent firings;
+# _CASE_TIMEOUT_SECONDS = wall-clock ceiling on invoke_async.
 _MAX_CYCLES: int = max(1, int(os.environ.get("EVAL_MAX_CYCLES", "10")))
 _CASE_TIMEOUT_SECONDS: float = max(
     1.0, float(os.environ.get("EVAL_CASE_TIMEOUT", "120"))
 )
 
-# Deliberately generic: must NOT teach the case rules, else the eval tests
-# the prompt instead of the tool docstrings (the only guard).
+# Deliberately generic: must NOT teach case rules, else eval test prompt
+# instead of tool docstrings (only guard).
 SYSTEM_PROMPT = (
     "You are an assistant with read/write access to a Polarion ALM instance "
     "through the provided tools. Use the tools to fulfil the user's request. "
@@ -41,8 +41,8 @@ SYSTEM_PROMPT = (
     "Choose tools by reading their descriptions. Stop once the request is done."
 )
 
-# Output prefix for an agent that raised before finishing; the gate fails any
-# output starting with it (a crashed agent's clean verdict is moot).
+# Output prefix for agent that raised before finishing; gate fail any output
+# starting with it (crashed agent clean verdict moot).
 AGENT_ERROR_PREFIX = "<agent-error:"
 
 
@@ -56,15 +56,15 @@ def _extract_text(result: Any) -> str:
 
 
 def _set_polarion_env() -> None:
-    # Hard-set, not setdefault: an inherited real POLARION_URL would route writes
-    # (respx matches by host) to a live instance.
+    # Hard-set, not setdefault: inherited real POLARION_URL would route writes
+    # (respx match by host) to live instance.
     os.environ["POLARION_URL"] = POLARION_HOST
     os.environ["POLARION_TOKEN"] = "fake-token"
 
 
 class _CycleGuard:
-    """Model-call counter fail-closing runaway agents. A class because Strands'
-    ``hooks=`` wants ``HookProvider`` instances; caller fail-closes on a forced
+    """Model-call counter fail-closing runaway agents. Class because Strands
+    ``hooks=`` want ``HookProvider`` instances; caller fail-close on forced
     stop (clean ``stop_event_loop`` could silently pass with empty text).
     """
 
@@ -114,7 +114,7 @@ async def _run_case_async(case: Case, recorder: TrajectoryRecorder) -> str:
 
 
 def run_case(case: Case) -> TaskOutput:
-    """Drive one case and return its tool-call trajectory as a ``TaskOutput``."""
+    """Drive one case, return tool-call trajectory as ``TaskOutput``."""
     _set_polarion_env()
     recorder = TrajectoryRecorder()
     fake = FakePolarion()
