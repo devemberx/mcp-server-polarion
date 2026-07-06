@@ -18,21 +18,10 @@ from mcp_server_polarion.tools._shared.guard import (
     guard_work_item_link_targets,
     partition_delete_links,
 )
-
-
-def _enum_response(ids: list[str]) -> dict[str, object]:
-    return {
-        "data": [{"id": i, "name": i} for i in ids],
-        "meta": {"totalCount": len(ids)},
-    }
-
-
-def _workitems_response(project_id: str, short_ids: list[str]) -> dict[str, object]:
-    """A JSON:API workitems list response (ids are ``project/short``)."""
-    return {
-        "data": [{"type": "workitems", "id": f"{project_id}/{i}"} for i in short_ids],
-        "meta": {"totalCount": len(short_ids)},
-    }
+from tests.mcp_server_polarion.tools._shared.guard._builders import (
+    project_enum_response,
+    workitems_response,
+)
 
 
 def _link(target: str, *, project: str | None = None) -> WorkItemLinkSpec:
@@ -47,7 +36,7 @@ class TestGuardWorkItemLinkTargets:
     async def test_all_targets_exist_one_get_per_project(
         self, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = _workitems_response("P", ["A", "B"])
+        mock_client.get.return_value = workitems_response("P", ["A", "B"])
 
         await guard_work_item_link_targets(mock_client, "P", [_link("A"), _link("B")])
 
@@ -63,7 +52,7 @@ class TestGuardWorkItemLinkTargets:
     async def test_missing_target_raises_value_error(
         self, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = _workitems_response("P", ["A"])
+        mock_client.get.return_value = workitems_response("P", ["A"])
 
         with pytest.raises(ValueError, match="P/B") as exc:
             await guard_work_item_link_targets(
@@ -74,8 +63,8 @@ class TestGuardWorkItemLinkTargets:
 
     async def test_cross_project_two_gets(self, mock_client: AsyncMock) -> None:
         responses = {
-            "P": _workitems_response("P", ["A"]),
-            "Q": _workitems_response("Q", ["X"]),
+            "P": workitems_response("P", ["A"]),
+            "Q": workitems_response("Q", ["X"]),
         }
 
         async def fake_get(path: str, **kwargs: object) -> dict[str, object]:
@@ -95,7 +84,7 @@ class TestGuardWorkItemLinkTargets:
     ) -> None:
         async def fake_get(path: str, **kwargs: object) -> dict[str, object]:
             project = path.split("/")[2]
-            return _workitems_response(project, ["A"] if project == "P" else [])
+            return workitems_response(project, ["A"] if project == "P" else [])
 
         mock_client.get.side_effect = fake_get
 
@@ -110,7 +99,7 @@ class TestGuardWorkItemLinkTargets:
         async def fake_get(path: str, **kwargs: object) -> dict[str, object]:
             query = str(kwargs["params"]["query"])  # type: ignore[index]
             chunk = query.removeprefix("id:(").removesuffix(")").split()
-            return _workitems_response("P", chunk)
+            return workitems_response("P", chunk)
 
         mock_client.get.side_effect = fake_get
 
@@ -148,22 +137,11 @@ class TestGuardWorkItemLinkTargets:
             await guard_work_item_link_targets(mock_client, "P", [_link("A")])
 
 
-def _project_enum_response(enum_name: str, ids: list[str]) -> dict[str, object]:
-    """A single-enumeration response: ``data`` is a dict, options nested under it."""
-    return {
-        "data": {
-            "type": "enumerations",
-            "id": enum_name,
-            "attributes": {"options": [{"id": i, "name": i} for i in ids]},
-        }
-    }
-
-
 class TestGuardWorkItemLinkRoles:
     """Link-role guard for ``create_work_item_links``."""
 
     async def test_valid_role_passes(self, mock_client: AsyncMock) -> None:
-        mock_client.get.return_value = _project_enum_response(
+        mock_client.get.return_value = project_enum_response(
             "workitem-link-role", ["parent", "relates_to"]
         )
 
@@ -172,7 +150,7 @@ class TestGuardWorkItemLinkRoles:
     async def test_unknown_role_raises_with_options(
         self, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = _project_enum_response(
+        mock_client.get.return_value = project_enum_response(
             "workitem-link-role", ["parent", "relates_to"]
         )
 
@@ -184,7 +162,7 @@ class TestGuardWorkItemLinkRoles:
     async def test_dedup_one_get_for_repeated_roles(
         self, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = _project_enum_response(
+        mock_client.get.return_value = project_enum_response(
             "workitem-link-role", ["parent"]
         )
 
@@ -223,7 +201,7 @@ class TestGuardHyperlinkRoles:
     """Hyperlink-role guard for ``create_work_items`` / ``update_work_items``."""
 
     async def test_valid_role_passes(self, mock_client: AsyncMock) -> None:
-        mock_client.get.return_value = _project_enum_response(
+        mock_client.get.return_value = project_enum_response(
             "hyperlink-role", ["ref_int", "ref_ext"]
         )
 
@@ -232,7 +210,7 @@ class TestGuardHyperlinkRoles:
     async def test_unknown_role_raises_with_options(
         self, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = _project_enum_response(
+        mock_client.get.return_value = project_enum_response(
             "hyperlink-role", ["ref_int", "ref_ext"]
         )
 

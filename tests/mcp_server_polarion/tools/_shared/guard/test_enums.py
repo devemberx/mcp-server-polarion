@@ -19,13 +19,10 @@ from mcp_server_polarion.tools._shared.guard.enums import (
     fetch_enum_option_ids,
     fetch_project_enum_option_ids,
 )
-
-
-def _enum_response(ids: list[str]) -> dict[str, object]:
-    return {
-        "data": [{"id": i, "name": i} for i in ids],
-        "meta": {"totalCount": len(ids)},
-    }
+from tests.mcp_server_polarion.tools._shared.guard._builders import (
+    enum_response,
+    project_enum_response,
+)
 
 
 class TestFetchEnumOptionIds:
@@ -34,7 +31,7 @@ class TestFetchEnumOptionIds:
     async def test_first_call_hits_polarion_and_parses_ids(
         self, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = _enum_response(["must_have", "should_have"])
+        mock_client.get.return_value = enum_response(["must_have", "should_have"])
 
         ids = await fetch_enum_option_ids(
             mock_client, "P", "workitems", "severity", "task"
@@ -52,7 +49,7 @@ class TestFetchEnumOptionIds:
         assert kwargs["params"]["page[size]"] == 100
 
     async def test_second_call_uses_cache(self, mock_client: AsyncMock) -> None:
-        mock_client.get.return_value = _enum_response(["a", "b"])
+        mock_client.get.return_value = enum_response(["a", "b"])
 
         await fetch_enum_option_ids(mock_client, "P", "workitems", "severity", "task")
         await fetch_enum_option_ids(mock_client, "P", "workitems", "severity", "task")
@@ -62,7 +59,7 @@ class TestFetchEnumOptionIds:
     async def test_cache_expiry_re_fetches(
         self, mock_client: AsyncMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        mock_client.get.return_value = _enum_response(["a"])
+        mock_client.get.return_value = enum_response(["a"])
         clock = [1000.0]
         monkeypatch.setattr(cache_mod, "_now", lambda: clock[0])
 
@@ -170,24 +167,13 @@ class TestFetchEnumOptionIds:
         assert ids == frozenset({"ok"})
 
 
-def _project_enum_response(enum_name: str, ids: list[str]) -> dict[str, object]:
-    """A single-enumeration response: ``data`` is a dict, options nested under it."""
-    return {
-        "data": {
-            "type": "enumerations",
-            "id": enum_name,
-            "attributes": {"options": [{"id": i, "name": i} for i in ids]},
-        }
-    }
-
-
 class TestFetchProjectEnumOptionIds:
     """Single-enumeration GET parsing (dict ``data``) + caching + fail-closed."""
 
     async def test_first_call_hits_polarion_and_parses_dict_options(
         self, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = _project_enum_response(
+        mock_client.get.return_value = project_enum_response(
             "workitem-link-role", ["parent", "relates_to"]
         )
 
@@ -205,7 +191,7 @@ class TestFetchProjectEnumOptionIds:
         assert kwargs["params"]["fields[enumerations]"] == "@all"
 
     async def test_second_call_uses_cache(self, mock_client: AsyncMock) -> None:
-        mock_client.get.return_value = _project_enum_response(
+        mock_client.get.return_value = project_enum_response(
             "hyperlink-role", ["ref_int", "ref_ext"]
         )
 
@@ -217,7 +203,7 @@ class TestFetchProjectEnumOptionIds:
     async def test_cache_expiry_re_fetches(
         self, mock_client: AsyncMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        mock_client.get.return_value = _project_enum_response("hyperlink-role", ["a"])
+        mock_client.get.return_value = project_enum_response("hyperlink-role", ["a"])
         clock = [1000.0]
         monkeypatch.setattr(cache_mod, "_now", lambda: clock[0])
 

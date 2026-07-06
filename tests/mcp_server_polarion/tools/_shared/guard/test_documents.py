@@ -22,22 +22,16 @@ from mcp_server_polarion.tools._shared.guard import (
 from mcp_server_polarion.tools._shared.guard.documents import (
     _check_document_custom_keys,
 )
-
-
-def _enum_response(ids: list[str]) -> dict[str, object]:
-    return {
-        "data": [{"id": i, "name": i} for i in ids],
-        "meta": {"totalCount": len(ids)},
-    }
+from tests.mcp_server_polarion.tools._shared.guard._builders import (
+    enum_response,
+)
 
 
 class TestGuardDocumentEnums:
     """Validation of document type / status."""
 
     async def test_listed_value_passes(self, mock_client: AsyncMock) -> None:
-        mock_client.get.return_value = _enum_response(
-            ["systemRequirementSpecification"]
-        )
+        mock_client.get.return_value = enum_response(["systemRequirementSpecification"])
 
         await guard_document_enums(
             mock_client,
@@ -47,9 +41,7 @@ class TestGuardDocumentEnums:
         )
 
     async def test_unlisted_value_raises(self, mock_client: AsyncMock) -> None:
-        mock_client.get.return_value = _enum_response(
-            ["systemRequirementSpecification"]
-        )
+        mock_client.get.return_value = enum_response(["systemRequirementSpecification"])
 
         with pytest.raises(ValueError) as exc:
             await guard_document_enums(
@@ -128,6 +120,40 @@ class TestGuardDocumentCustomFieldKeys:
             ("P", "systemReqSpecification")
         ) == frozenset({"version"})
 
+    async def test_non_list_included_is_skipped_and_fails_closed(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # Malformed page: ``included`` not a list -> no keys sampled -> empty
+        # schema refuses the write.
+        mock_client.get.return_value = {
+            "data": [{"type": "workitems"}],
+            "included": {"type": "documents"},
+        }
+
+        with pytest.raises(RuntimeError, match="Cannot verify custom_fields"):
+            await _check_document_custom_keys(
+                mock_client, "P", "generic", {"doc_risk": 1}
+            )
+
+    async def test_non_document_included_entries_are_skipped(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # Stray entries in ``included`` (non-dict, non-document type, non-dict
+        # attributes, missing document type) must not break sampling of the
+        # well-formed entries.
+        response = _docs_list(("generic", {"doc_risk": 3}))
+        included = response["included"]
+        assert isinstance(included, list)
+        included[:0] = [
+            "stray",
+            {"type": "workitems", "id": "P/W-1"},
+            {"type": "documents", "attributes": "stray"},
+            {"type": "documents", "attributes": {"title": "untyped", "ghost": 1}},
+        ]
+        mock_client.get.return_value = response
+
+        await _check_document_custom_keys(mock_client, "P", "generic", {"doc_risk": 9})
+
     async def test_unknown_key_against_fresh_sample_rejects_without_retry(
         self, mock_client: AsyncMock
     ) -> None:
@@ -199,14 +225,14 @@ class TestGuardDocumentCustomFieldEnums:
         )
 
     async def test_valid_option_id_passes(self, mock_client: AsyncMock) -> None:
-        mock_client.get.return_value = _enum_response(["high", "moderate", "low"])
+        mock_client.get.return_value = enum_response(["high", "moderate", "low"])
 
         await guard_document_custom_fields(
             mock_client, "P", "generic", {"docRisk": "low"}
         )  # must not raise
 
     async def test_unknown_option_id_raises(self, mock_client: AsyncMock) -> None:
-        mock_client.get.return_value = _enum_response(["high", "moderate", "low"])
+        mock_client.get.return_value = enum_response(["high", "moderate", "low"])
 
         with pytest.raises(ValueError, match=r"'docRisk'.*'severe'"):
             await guard_document_custom_fields(
@@ -216,7 +242,7 @@ class TestGuardDocumentCustomFieldEnums:
     async def test_queries_documents_fields_endpoint(
         self, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = _enum_response(["high"])
+        mock_client.get.return_value = enum_response(["high"])
 
         await guard_document_custom_fields(
             mock_client, "P", "generic", {"docRisk": "high"}

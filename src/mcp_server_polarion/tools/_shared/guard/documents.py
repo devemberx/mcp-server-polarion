@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from mcp_server_polarion.core.client import PolarionClient
-from mcp_server_polarion.core.exceptions import PolarionAuthError, PolarionError
 from mcp_server_polarion.tools._shared.cache import (
     get_document_type_custom_keys,
     invalidate_document_type_custom_keys,
@@ -13,14 +12,8 @@ from mcp_server_polarion.tools._shared.custom_fields import (
     STANDARD_DOCUMENT_ATTRIBUTES,
 )
 from mcp_server_polarion.tools._shared.fields import DOCUMENT_DETAIL_FIELDS
-from mcp_server_polarion.tools._shared.guard._common import (
-    GUARD_PAGE_SIZE,
-    reject_unknown_custom_keys,
-)
-from mcp_server_polarion.tools._shared.guard._errors import (
-    unauthorized_write_block,
-    unreachable_write_block,
-)
+from mcp_server_polarion.tools._shared.guard._custom_keys import check_custom_keys
+from mcp_server_polarion.tools._shared.guard._http import guarded_pages
 from mcp_server_polarion.tools._shared.guard.enums import (
     check_custom_field_enum_values,
     check_enum,
@@ -68,44 +61,29 @@ async def _fetch_document_type_custom_keys(
         "include": "module",
         "fields[workitems]": "module",
         "fields[documents]": DOCUMENT_DETAIL_FIELDS,
-        "page[size]": GUARD_PAGE_SIZE,
     }
     by_type: dict[str, set[str]] = {}
-    page_number = 1
-    while True:
-        try:
-            response = await client.get(
-                path, params={**base_params, "page[number]": page_number}
-            )
-        except PolarionAuthError as exc:
-            raise unauthorized_write_block("custom_fields keys", project_id) from exc
-        except PolarionError as exc:
-            raise unreachable_write_block(
-                "custom_fields keys", project_id, exc
-            ) from exc
-        data = response.get("data", [])
-        if not isinstance(data, list):
-            break
+    async for _data, response in guarded_pages(
+        client, path, base_params, what="custom_fields keys", project_id=project_id
+    ):
         included = response.get("included", [])
-        if isinstance(included, list):
-            for entry in included:
-                if not isinstance(entry, dict) or entry.get("type") != "documents":
-                    continue
-                attrs = entry.get("attributes")
-                if not isinstance(attrs, dict):
-                    continue
-                dtype = attrs.get("type")
-                if not isinstance(dtype, str) or not dtype:
-                    continue
-                keys = by_type.setdefault(dtype, set())
-                keys.update(
-                    k
-                    for k in attrs
-                    if isinstance(k, str) and k not in STANDARD_DOCUMENT_ATTRIBUTES
-                )
-        if len(data) < GUARD_PAGE_SIZE:
-            break
-        page_number += 1
+        if not isinstance(included, list):
+            continue
+        for entry in included:
+            if not isinstance(entry, dict) or entry.get("type") != "documents":
+                continue
+            attrs = entry.get("attributes")
+            if not isinstance(attrs, dict):
+                continue
+            dtype = attrs.get("type")
+            if not isinstance(dtype, str) or not dtype:
+                continue
+            keys = by_type.setdefault(dtype, set())
+            keys.update(
+                k
+                for k in attrs
+                if isinstance(k, str) and k not in STANDARD_DOCUMENT_ATTRIBUTES
+            )
 
     by_type.setdefault(document_type, set())
     for dtype, keys in by_type.items():
@@ -119,39 +97,25 @@ async def _check_document_custom_keys(
     document_type: str,
     custom_fields: dict[str, object],
 ) -> None:
-    """Document-axis mirror of :func:`_check_work_item_custom_keys`."""
-    schema = get_document_type_custom_keys(project_id, document_type)
-    fetched_fresh = schema is None
-    if schema is None:
-        schema = await _fetch_document_type_custom_keys(
+    await check_custom_keys(
+        custom_fields,
+        get_cached=lambda: get_document_type_custom_keys(project_id, document_type),
+        invalidate=lambda: invalidate_document_type_custom_keys(
+            project_id, document_type
+        ),
+        fetch=lambda: _fetch_document_type_custom_keys(
             client, project_id, document_type
-        )
-
-    if all(key in schema for key in custom_fields):
-        return
-
-    # Unknown key may be admin-added since caching; refetch once before rejecting.
-    if not fetched_fresh:
-        invalidate_document_type_custom_keys(project_id, document_type)
-        schema = await _fetch_document_type_custom_keys(
-            client, project_id, document_type
-        )
-
-    if not schema:
-        raise RuntimeError(
+        ),
+        scope=f"document type '{document_type}'",
+        discovery_tool="sample of existing documents",
+        empty_schema_error=(
             f"Cannot verify custom_fields {format_option_list(custom_fields)} for "
             f"document type '{document_type}' in project '{project_id}': no existing "
             f"document of this type has custom fields populated, so the schema can't "
             f"be sampled. Refusing the write -- an unknown key ghosts silently "
             f"(invisible to UI/Lucene). Do not create or edit documents to work around "
             f"this; ask the user to confirm these custom-field ids exist for this type."
-        )
-
-    reject_unknown_custom_keys(
-        custom_fields,
-        schema,
-        scope=f"document type '{document_type}'",
-        discovery_tool="sample of existing documents",
+        ),
     )
 
 

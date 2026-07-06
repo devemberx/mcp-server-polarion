@@ -8,11 +8,7 @@ import logging
 from collections.abc import Iterable
 
 from mcp_server_polarion.core.client import PolarionClient
-from mcp_server_polarion.core.exceptions import (
-    PolarionAuthError,
-    PolarionError,
-    PolarionNotFoundError,
-)
+from mcp_server_polarion.core.exceptions import PolarionNotFoundError
 from mcp_server_polarion.tools._shared.cache import (
     Resource,
     get_cached_enum_options,
@@ -20,10 +16,9 @@ from mcp_server_polarion.tools._shared.cache import (
     store_cached_enum_options,
     store_cached_project_enum,
 )
-from mcp_server_polarion.tools._shared.guard._common import GUARD_PAGE_SIZE
-from mcp_server_polarion.tools._shared.guard._errors import (
-    unauthorized_write_block,
-    unreachable_write_block,
+from mcp_server_polarion.tools._shared.guard._http import (
+    GUARD_PAGE_SIZE,
+    guarded_get,
 )
 from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
@@ -64,7 +59,9 @@ async def fetch_enum_option_ids(
         "page[number]": 1,
     }
     try:
-        response = await client.get(path, params=params)
+        response = await guarded_get(
+            client, path, params, what=f"{field_id} options", project_id=project_id
+        )
     except PolarionNotFoundError:
         # 404 = non-enum field or endpoint absent; cache empty set (long TTL —
         # stale worst case is the same deferral).
@@ -81,10 +78,6 @@ async def fetch_enum_option_ids(
             project_id, resource, field_id, type_id, frozenset(), not_found=True
         )
         return frozenset()
-    except PolarionAuthError as exc:
-        raise unauthorized_write_block(f"{field_id} options", project_id) from exc
-    except PolarionError as exc:
-        raise unreachable_write_block(f"{field_id} options", project_id, exc) from exc
 
     data = response.get("data", [])
     ids: set[str] = set()
@@ -148,7 +141,13 @@ async def fetch_project_enum_option_ids(
         f"/{encode_path_segment(enum_name)}/~"
     )
     try:
-        response = await client.get(path, params={"fields[enumerations]": "@all"})
+        response = await guarded_get(
+            client,
+            path,
+            {"fields[enumerations]": "@all"},
+            what=f"{enum_name} options",
+            project_id=project_id,
+        )
     except PolarionNotFoundError:
         logger.warning(
             "enumeration '%s' returned 404 for project=%s; skipping role "
@@ -159,10 +158,6 @@ async def fetch_project_enum_option_ids(
         )
         store_cached_project_enum(project_id, cache_key, frozenset())
         return frozenset()
-    except PolarionAuthError as exc:
-        raise unauthorized_write_block(f"{enum_name} options", project_id) from exc
-    except PolarionError as exc:
-        raise unreachable_write_block(f"{enum_name} options", project_id, exc) from exc
 
     ids: set[str] = set()
     data = response.get("data", {})

@@ -22,24 +22,20 @@ from mcp_server_polarion.tools._shared.guard import (
     guard_work_item_enums,
     resolve_work_item_types,
 )
-from mcp_server_polarion.tools._shared.guard._common import GUARD_PAGE_SIZE
+from mcp_server_polarion.tools._shared.guard._http import GUARD_PAGE_SIZE
 from mcp_server_polarion.tools._shared.guard.work_items import (
     _check_work_item_custom_keys,
 )
-
-
-def _enum_response(ids: list[str]) -> dict[str, object]:
-    return {
-        "data": [{"id": i, "name": i} for i in ids],
-        "meta": {"totalCount": len(ids)},
-    }
+from tests.mcp_server_polarion.tools._shared.guard._builders import (
+    enum_response,
+)
 
 
 class TestGuardWorkItemEnums:
     """Validation of each work-item enum argument."""
 
     async def test_listed_value_passes(self, mock_client: AsyncMock) -> None:
-        mock_client.get.return_value = _enum_response(["must_have", "should_have"])
+        mock_client.get.return_value = enum_response(["must_have", "should_have"])
 
         await guard_work_item_enums(
             mock_client, "P", "task", severity="must_have"
@@ -48,7 +44,7 @@ class TestGuardWorkItemEnums:
     async def test_unlisted_value_raises_value_error_with_options(
         self, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = _enum_response(["must_have", "should_have"])
+        mock_client.get.return_value = enum_response(["must_have", "should_have"])
 
         with pytest.raises(ValueError) as exc:
             await guard_work_item_enums(mock_client, "P", "task", severity="ghost")
@@ -62,7 +58,7 @@ class TestGuardWorkItemEnums:
     ) -> None:
         # A 60-option enum shows the first 50 + a (+N more) suffix, not all 60.
         ids = [f"opt{i:03d}" for i in range(60)]
-        mock_client.get.return_value = _enum_response(ids)
+        mock_client.get.return_value = enum_response(ids)
 
         with pytest.raises(ValueError) as exc:
             await guard_work_item_enums(mock_client, "P", "task", severity="ghost")
@@ -90,7 +86,7 @@ class TestGuardWorkItemEnums:
             await guard_work_item_enums(mock_client, "P", "task", priority="999")
 
     async def test_type_uses_tilde_axis(self, mock_client: AsyncMock) -> None:
-        mock_client.get.return_value = _enum_response(["task", "requirement"])
+        mock_client.get.return_value = enum_response(["task", "requirement"])
 
         await guard_work_item_enums(mock_client, "P", "task", type="task")
 
@@ -100,7 +96,7 @@ class TestGuardWorkItemEnums:
     async def test_status_uses_work_item_type_axis(
         self, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = _enum_response(["open", "done"])
+        mock_client.get.return_value = enum_response(["open", "done"])
 
         await guard_work_item_enums(mock_client, "P", "task", status="open")
 
@@ -108,7 +104,7 @@ class TestGuardWorkItemEnums:
         assert params["type"] == "task"
 
     async def test_listed_resolution_passes(self, mock_client: AsyncMock) -> None:
-        mock_client.get.return_value = _enum_response(["done", "wontfix"])
+        mock_client.get.return_value = enum_response(["done", "wontfix"])
 
         await guard_work_item_enums(
             mock_client, "P", "task", resolution="done"
@@ -118,7 +114,7 @@ class TestGuardWorkItemEnums:
         assert params["type"] == "task"
 
     async def test_unlisted_resolution_raises(self, mock_client: AsyncMock) -> None:
-        mock_client.get.return_value = _enum_response(["done", "wontfix"])
+        mock_client.get.return_value = enum_response(["done", "wontfix"])
 
         with pytest.raises(ValueError) as exc:
             await guard_work_item_enums(mock_client, "P", "task", resolution="ghost")
@@ -317,7 +313,7 @@ class TestGuardWorkItemCustomFieldEnums:
             assert "getAvailableOptions" not in call.args[0]
 
     async def test_valid_option_id_passes(self, mock_client: AsyncMock) -> None:
-        mock_client.get.return_value = _enum_response(["1", "2", "3", "4"])
+        mock_client.get.return_value = enum_response(["1", "2", "3", "4"])
 
         await guard_work_item_custom_fields(
             mock_client, "P", "softwarerequirement", {"asil": "4"}
@@ -326,7 +322,7 @@ class TestGuardWorkItemCustomFieldEnums:
     async def test_unknown_option_id_raises_with_options(
         self, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = _enum_response(["1", "2", "3", "4"])
+        mock_client.get.return_value = enum_response(["1", "2", "3", "4"])
 
         with pytest.raises(ValueError, match=r"'asil'.*'9'.*\['1', '2', '3', '4'\]"):
             await guard_work_item_custom_fields(
@@ -345,7 +341,7 @@ class TestGuardWorkItemCustomFieldEnums:
         self, mock_client: AsyncMock
     ) -> None:
         # Option ids are strings; the int 4 would ghost even though '4' is valid.
-        mock_client.get.return_value = _enum_response(["1", "2", "3", "4"])
+        mock_client.get.return_value = enum_response(["1", "2", "3", "4"])
 
         with pytest.raises(ValueError, match="int 4"):
             await guard_work_item_custom_fields(
@@ -355,7 +351,7 @@ class TestGuardWorkItemCustomFieldEnums:
     async def test_dict_value_on_enum_field_raises(
         self, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = _enum_response(["1", "2"])
+        mock_client.get.return_value = enum_response(["1", "2"])
 
         with pytest.raises(ValueError, match="dict"):
             await guard_work_item_custom_fields(
@@ -363,7 +359,7 @@ class TestGuardWorkItemCustomFieldEnums:
             )
 
     async def test_list_of_valid_options_passes(self, mock_client: AsyncMock) -> None:
-        mock_client.get.return_value = _enum_response(["windows", "linux", "osx"])
+        mock_client.get.return_value = enum_response(["windows", "linux", "osx"])
 
         await guard_work_item_custom_fields(
             mock_client, "P", "task", {"platform": ["windows", "linux"]}
@@ -372,7 +368,7 @@ class TestGuardWorkItemCustomFieldEnums:
     async def test_list_with_unknown_option_raises(
         self, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = _enum_response(["windows", "linux"])
+        mock_client.get.return_value = enum_response(["windows", "linux"])
 
         with pytest.raises(ValueError, match="'beos'"):
             await guard_work_item_custom_fields(
@@ -382,7 +378,7 @@ class TestGuardWorkItemCustomFieldEnums:
     async def test_list_with_non_string_element_raises(
         self, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = _enum_response(["1", "2"])
+        mock_client.get.return_value = enum_response(["1", "2"])
 
         with pytest.raises(ValueError, match="int 2"):
             await guard_work_item_custom_fields(
@@ -403,7 +399,7 @@ class TestGuardWorkItemCustomFieldEnums:
     async def test_options_fetched_once_per_key_within_ttl(
         self, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = _enum_response(["1", "2"])
+        mock_client.get.return_value = enum_response(["1", "2"])
 
         await guard_work_item_custom_fields(mock_client, "P", "task", {"a": "1"})
         await guard_work_item_custom_fields(mock_client, "P", "task", {"a": "2"})
@@ -448,14 +444,6 @@ class TestGuardWorkItemCustomFieldEnums:
 
         with pytest.raises(PermissionError, match="lacks permission"):
             await guard_work_item_custom_fields(mock_client, "P", "task", {"asil": "1"})
-
-
-def _workitems_response(project_id: str, short_ids: list[str]) -> dict[str, object]:
-    """A JSON:API workitems list response (ids are ``project/short``)."""
-    return {
-        "data": [{"type": "workitems", "id": f"{project_id}/{i}"} for i in short_ids],
-        "meta": {"totalCount": len(short_ids)},
-    }
 
 
 def _typed_workitems_response(

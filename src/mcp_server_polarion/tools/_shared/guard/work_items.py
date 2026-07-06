@@ -7,11 +7,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from mcp_server_polarion.core.client import PolarionClient
-from mcp_server_polarion.core.exceptions import (
-    PolarionAuthError,
-    PolarionError,
-    PolarionNotFoundError,
-)
+from mcp_server_polarion.core.exceptions import PolarionNotFoundError
 from mcp_server_polarion.tools._shared.cache import (
     get_work_item_custom_keys,
     invalidate_work_item_custom_keys,
@@ -21,14 +17,14 @@ from mcp_server_polarion.tools._shared.custom_fields import (
     STANDARD_WORK_ITEM_ATTRIBUTES,
 )
 from mcp_server_polarion.tools._shared.fields import WORK_ITEM_DETAIL_FIELDS
-from mcp_server_polarion.tools._shared.guard._common import (
-    GUARD_PAGE_SIZE,
+from mcp_server_polarion.tools._shared.guard._custom_keys import (
+    check_custom_keys,
     custom_keys_from_data_list,
-    reject_unknown_custom_keys,
 )
-from mcp_server_polarion.tools._shared.guard._errors import (
-    unauthorized_write_block,
-    unreachable_write_block,
+from mcp_server_polarion.tools._shared.guard._http import (
+    GUARD_PAGE_SIZE,
+    guarded_get,
+    guarded_pages,
 )
 from mcp_server_polarion.tools._shared.guard.enums import (
     check_custom_field_enum_values,
@@ -95,28 +91,12 @@ async def _fetch_work_item_type_custom_keys(
     base_params: dict[str, str | int] = {
         "query": one_item_per_custom_field_sql(project_id, type_id),
         "fields[workitems]": WORK_ITEM_DETAIL_FIELDS,
-        "page[size]": GUARD_PAGE_SIZE,
     }
     keys: set[str] = set()
-    page_number = 1
-    while True:
-        try:
-            response = await client.get(
-                path, params={**base_params, "page[number]": page_number}
-            )
-        except PolarionAuthError as exc:
-            raise unauthorized_write_block("custom_fields keys", project_id) from exc
-        except PolarionError as exc:
-            raise unreachable_write_block(
-                "custom_fields keys", project_id, exc
-            ) from exc
-        data = response.get("data", [])
-        if not isinstance(data, list):
-            break
-        keys.update(custom_keys_from_data_list(response, STANDARD_WORK_ITEM_ATTRIBUTES))
-        if len(data) < GUARD_PAGE_SIZE:
-            break
-        page_number += 1
+    async for data, _response in guarded_pages(
+        client, path, base_params, what="custom_fields keys", project_id=project_id
+    ):
+        keys.update(custom_keys_from_data_list(data, STANDARD_WORK_ITEM_ATTRIBUTES))
 
     result = frozenset(keys)
     store_work_item_custom_keys(project_id, type_id, result)
@@ -129,43 +109,23 @@ async def _check_work_item_custom_keys(
     work_item_type: str,
     custom_fields: dict[str, object],
 ) -> None:
-    """Reject ``custom_fields`` keys absent from the type's sampled schema.
-
-    Unknown key vs *cached* schema forces one fresh re-fetch before rejecting;
-    empty schema fails closed (ghost write unrecoverable).
-    """
-    schema = get_work_item_custom_keys(project_id, work_item_type)
-    fetched_fresh = schema is None
-    if schema is None:
-        schema = await _fetch_work_item_type_custom_keys(
+    await check_custom_keys(
+        custom_fields,
+        get_cached=lambda: get_work_item_custom_keys(project_id, work_item_type),
+        invalidate=lambda: invalidate_work_item_custom_keys(project_id, work_item_type),
+        fetch=lambda: _fetch_work_item_type_custom_keys(
             client, project_id, work_item_type
-        )
-
-    if all(key in schema for key in custom_fields):
-        return
-
-    # Unknown key may be admin-added since caching; refetch once before rejecting.
-    if not fetched_fresh:
-        invalidate_work_item_custom_keys(project_id, work_item_type)
-        schema = await _fetch_work_item_type_custom_keys(
-            client, project_id, work_item_type
-        )
-
-    if not schema:
-        raise RuntimeError(
+        ),
+        scope=f"work_item_type '{work_item_type}'",
+        discovery_tool="sample of existing items",
+        empty_schema_error=(
             f"Cannot verify custom_fields {format_option_list(custom_fields)} for "
             f"work_item_type '{work_item_type}' in project '{project_id}': no existing "
             f"item of this type has custom fields populated, so the schema can't be "
             f"sampled. Refusing the write -- an unknown key ghosts silently (invisible "
             f"to UI/Lucene). Do not create or edit items to work around this; ask the "
             f"user to confirm these custom-field ids exist for this type."
-        )
-
-    reject_unknown_custom_keys(
-        custom_fields,
-        schema,
-        scope=f"work_item_type '{work_item_type}'",
-        discovery_tool="sample of existing items",
+        ),
     )
 
 
@@ -215,17 +175,13 @@ async def resolve_work_item_types(
             "page[number]": 1,
         }
         try:
-            response = await client.get(path, params=params)
+            response = await guarded_get(
+                client, path, params, what="work item existence", project_id=project_id
+            )
         except PolarionNotFoundError as exc:
             raise ValueError(
                 f"Project '{project_id}' not found. Use `list_projects` to "
                 "discover valid project IDs."
-            ) from exc
-        except PolarionAuthError as exc:
-            raise unauthorized_write_block("work item existence", project_id) from exc
-        except PolarionError as exc:
-            raise unreachable_write_block(
-                "work item existence", project_id, exc
             ) from exc
         data = response.get("data", [])
         if not isinstance(data, list):
