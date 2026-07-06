@@ -138,12 +138,16 @@ class TestGuardDocumentCustomFieldKeys:
     async def test_non_document_included_entries_are_skipped(
         self, mock_client: AsyncMock
     ) -> None:
-        # Stray entries in ``included`` (non-dict, non-document type) must not
-        # break sampling of the well-formed document entries.
+        # Stray entries in ``included`` (non-dict, non-document type, non-dict
+        # attributes) must not break sampling of the well-formed entries.
         response = _docs_list(("generic", {"doc_risk": 3}))
         included = response["included"]
         assert isinstance(included, list)
-        included[:0] = ["stray", {"type": "workitems", "id": "P/W-1"}]
+        included[:0] = [
+            "stray",
+            {"type": "workitems", "id": "P/W-1"},
+            {"type": "documents", "attributes": "stray"},
+        ]
         mock_client.get.return_value = response
 
         await _check_document_custom_keys(mock_client, "P", "generic", {"doc_risk": 9})

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from mcp_server_polarion.core.client import PolarionClient
-from mcp_server_polarion.core.exceptions import PolarionAuthError, PolarionError
 from mcp_server_polarion.tools._shared.cache import (
     get_document_type_custom_keys,
     invalidate_document_type_custom_keys,
@@ -14,11 +13,7 @@ from mcp_server_polarion.tools._shared.custom_fields import (
 )
 from mcp_server_polarion.tools._shared.fields import DOCUMENT_DETAIL_FIELDS
 from mcp_server_polarion.tools._shared.guard._custom_keys import check_custom_keys
-from mcp_server_polarion.tools._shared.guard._errors import (
-    unauthorized_write_block,
-    unreachable_write_block,
-)
-from mcp_server_polarion.tools._shared.guard._http import paged_responses
+from mcp_server_polarion.tools._shared.guard._http import guarded_pages
 from mcp_server_polarion.tools._shared.guard.enums import (
     check_custom_field_enum_values,
     check_enum,
@@ -68,30 +63,27 @@ async def _fetch_document_type_custom_keys(
         "fields[documents]": DOCUMENT_DETAIL_FIELDS,
     }
     by_type: dict[str, set[str]] = {}
-    try:
-        async for response in paged_responses(client, path, base_params):
-            included = response.get("included", [])
-            if not isinstance(included, list):
+    async for _data, response in guarded_pages(
+        client, path, base_params, what="custom_fields keys", project_id=project_id
+    ):
+        included = response.get("included", [])
+        if not isinstance(included, list):
+            continue
+        for entry in included:
+            if not isinstance(entry, dict) or entry.get("type") != "documents":
                 continue
-            for entry in included:
-                if not isinstance(entry, dict) or entry.get("type") != "documents":
-                    continue
-                attrs = entry.get("attributes")
-                if not isinstance(attrs, dict):
-                    continue
-                dtype = attrs.get("type")
-                if not isinstance(dtype, str) or not dtype:
-                    continue
-                keys = by_type.setdefault(dtype, set())
-                keys.update(
-                    k
-                    for k in attrs
-                    if isinstance(k, str) and k not in STANDARD_DOCUMENT_ATTRIBUTES
-                )
-    except PolarionAuthError as exc:
-        raise unauthorized_write_block("custom_fields keys", project_id) from exc
-    except PolarionError as exc:
-        raise unreachable_write_block("custom_fields keys", project_id, exc) from exc
+            attrs = entry.get("attributes")
+            if not isinstance(attrs, dict):
+                continue
+            dtype = attrs.get("type")
+            if not isinstance(dtype, str) or not dtype:
+                continue
+            keys = by_type.setdefault(dtype, set())
+            keys.update(
+                k
+                for k in attrs
+                if isinstance(k, str) and k not in STANDARD_DOCUMENT_ATTRIBUTES
+            )
 
     by_type.setdefault(document_type, set())
     for dtype, keys in by_type.items():

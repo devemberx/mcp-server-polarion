@@ -7,11 +7,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from mcp_server_polarion.core.client import PolarionClient
-from mcp_server_polarion.core.exceptions import (
-    PolarionAuthError,
-    PolarionError,
-    PolarionNotFoundError,
-)
+from mcp_server_polarion.core.exceptions import PolarionNotFoundError
 from mcp_server_polarion.tools._shared.cache import (
     get_work_item_custom_keys,
     invalidate_work_item_custom_keys,
@@ -25,14 +21,10 @@ from mcp_server_polarion.tools._shared.guard._custom_keys import (
     check_custom_keys,
     custom_keys_from_data_list,
 )
-from mcp_server_polarion.tools._shared.guard._errors import (
-    unauthorized_write_block,
-    unreachable_write_block,
-)
 from mcp_server_polarion.tools._shared.guard._http import (
     GUARD_PAGE_SIZE,
     guarded_get,
-    paged_responses,
+    guarded_pages,
 )
 from mcp_server_polarion.tools._shared.guard.enums import (
     check_custom_field_enum_values,
@@ -101,15 +93,10 @@ async def _fetch_work_item_type_custom_keys(
         "fields[workitems]": WORK_ITEM_DETAIL_FIELDS,
     }
     keys: set[str] = set()
-    try:
-        async for response in paged_responses(client, path, base_params):
-            keys.update(
-                custom_keys_from_data_list(response, STANDARD_WORK_ITEM_ATTRIBUTES)
-            )
-    except PolarionAuthError as exc:
-        raise unauthorized_write_block("custom_fields keys", project_id) from exc
-    except PolarionError as exc:
-        raise unreachable_write_block("custom_fields keys", project_id, exc) from exc
+    async for data, _response in guarded_pages(
+        client, path, base_params, what="custom_fields keys", project_id=project_id
+    ):
+        keys.update(custom_keys_from_data_list(data, STANDARD_WORK_ITEM_ATTRIBUTES))
 
     result = frozenset(keys)
     store_work_item_custom_keys(project_id, type_id, result)
@@ -189,12 +176,7 @@ async def resolve_work_item_types(
         }
         try:
             response = await guarded_get(
-                client,
-                path,
-                params,
-                what="work item existence",
-                project_id=project_id,
-                propagate_not_found=True,
+                client, path, params, what="work item existence", project_id=project_id
             )
         except PolarionNotFoundError as exc:
             raise ValueError(

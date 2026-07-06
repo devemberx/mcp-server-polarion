@@ -12,12 +12,9 @@ from mcp_server_polarion.core.exceptions import (
     PolarionNotFoundError,
 )
 from mcp_server_polarion.models import WorkItemLinkSpec
-from mcp_server_polarion.tools._shared.guard._errors import (
-    unauthorized_write_block,
-    unreachable_write_block,
-)
 from mcp_server_polarion.tools._shared.guard._http import (
     GUARD_PAGE_SIZE,
+    guarded_get,
     paged_responses,
 )
 from mcp_server_polarion.tools._shared.guard.enums import check_project_enum_roles
@@ -78,7 +75,8 @@ async def _existing_target_ids(
     target_ids: frozenset[str],
 ) -> frozenset[str]:
     """Subset of *target_ids* that exist in *project_id*, via chunked
-    ``id:(...)`` queries. 404 (project missing) propagates to caller.
+    ``id:(...)`` queries. 404 (project missing) propagates to caller;
+    auth/other failures translate fail-closed.
     """
     ordered = sorted(target_ids)
     found: set[str] = set()
@@ -91,7 +89,9 @@ async def _existing_target_ids(
             "page[number]": 1,
         }
         path = f"/projects/{encode_path_segment(project_id)}/workitems"
-        response = await client.get(path, params=params)
+        response = await guarded_get(
+            client, path, params, what="link targets", project_id=project_id
+        )
         data = response.get("data", [])
         if isinstance(data, list):
             for entry in data:
@@ -123,10 +123,6 @@ async def guard_work_item_link_targets(
         except PolarionNotFoundError:
             missing.extend(f"{project_id}/{wi}" for wi in sorted(requested))
             continue
-        except PolarionAuthError as exc:
-            raise unauthorized_write_block("link targets", project_id) from exc
-        except PolarionError as exc:
-            raise unreachable_write_block("link targets", project_id, exc) from exc
         missing.extend(f"{project_id}/{wi}" for wi in sorted(requested - existing))
 
     if missing:
@@ -154,14 +150,12 @@ async def _existing_forward_link_ids(
         "fields[linkedworkitems]": "id",
     }
     found: set[str] = set()
-    async for response in paged_responses(client, path, base_params):
-        data = response.get("data", [])
-        if isinstance(data, list):
-            for entry in data:
-                if isinstance(entry, dict):
-                    link_id = entry.get("id")
-                    if isinstance(link_id, str) and link_id:
-                        found.add(link_id)
+    async for data, _response in paged_responses(client, path, base_params):
+        for entry in data:
+            if isinstance(entry, dict):
+                link_id = entry.get("id")
+                if isinstance(link_id, str) and link_id:
+                    found.add(link_id)
     return frozenset(found)
 
 

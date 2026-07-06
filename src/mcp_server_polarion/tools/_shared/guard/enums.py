@@ -60,12 +60,7 @@ async def fetch_enum_option_ids(
     }
     try:
         response = await guarded_get(
-            client,
-            path,
-            params,
-            what=f"{field_id} options",
-            project_id=project_id,
-            propagate_not_found=True,
+            client, path, params, what=f"{field_id} options", project_id=project_id
         )
     except PolarionNotFoundError:
         # 404 = non-enum field or endpoint absent; cache empty set (long TTL —
@@ -152,7 +147,6 @@ async def fetch_project_enum_option_ids(
             {"fields[enumerations]": "@all"},
             what=f"{enum_name} options",
             project_id=project_id,
-            propagate_not_found=True,
         )
     except PolarionNotFoundError:
         logger.warning(

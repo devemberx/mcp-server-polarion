@@ -7,11 +7,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from mcp_server_polarion.core.client import PolarionClient
-from mcp_server_polarion.core.exceptions import (
-    PolarionAuthError,
-    PolarionError,
-    PolarionNotFoundError,
-)
+from mcp_server_polarion.core.exceptions import PolarionNotFoundError
 from mcp_server_polarion.tools._shared.cache import (
     get_test_run_custom_keys,
     invalidate_test_run_custom_keys,
@@ -24,13 +20,9 @@ from mcp_server_polarion.tools._shared.guard._custom_keys import (
     check_custom_keys,
     custom_keys_from_data_list,
 )
-from mcp_server_polarion.tools._shared.guard._errors import (
-    unauthorized_write_block,
-    unreachable_write_block,
-)
 from mcp_server_polarion.tools._shared.guard._http import (
     guarded_get,
-    paged_responses,
+    guarded_pages,
 )
 from mcp_server_polarion.tools._shared.guard.enums import check_project_enum_roles
 from mcp_server_polarion.tools._shared.helpers import (
@@ -91,7 +83,6 @@ async def guard_test_run_templates(
                 {"fields[testruns]": "id,isTemplate"},
                 what="test run templates",
                 project_id=project_id,
-                propagate_not_found=True,
             )
         except PolarionNotFoundError as exc:
             raise ValueError(
@@ -123,21 +114,16 @@ async def _fetch_test_run_custom_keys(
     """
     path = f"/projects/{encode_path_segment(project_id)}/testruns"
     keys: set[str] = set()
-    try:
-        for templates in (False, True):
-            base_params: dict[str, str | int] = {
-                "fields[testruns]": "@all",
-            }
-            if templates:
-                base_params["templates"] = "true"
-            async for response in paged_responses(client, path, base_params):
-                keys.update(
-                    custom_keys_from_data_list(response, STANDARD_TEST_RUN_ATTRIBUTES)
-                )
-    except PolarionAuthError as exc:
-        raise unauthorized_write_block("custom_fields keys", project_id) from exc
-    except PolarionError as exc:
-        raise unreachable_write_block("custom_fields keys", project_id, exc) from exc
+    for templates in (False, True):
+        base_params: dict[str, str | int] = {
+            "fields[testruns]": "@all",
+        }
+        if templates:
+            base_params["templates"] = "true"
+        async for data, _response in guarded_pages(
+            client, path, base_params, what="custom_fields keys", project_id=project_id
+        ):
+            keys.update(custom_keys_from_data_list(data, STANDARD_TEST_RUN_ATTRIBUTES))
 
     result = frozenset(keys)
     store_test_run_custom_keys(project_id, result)

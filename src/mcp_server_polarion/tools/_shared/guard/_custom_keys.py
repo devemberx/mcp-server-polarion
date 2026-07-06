@@ -65,17 +65,14 @@ def reject_unknown_custom_keys(
 
 
 def custom_keys_from_data_list(
-    response: dict[str, object], allowlist: frozenset[str]
+    data: list[object], allowlist: frozenset[str]
 ) -> frozenset[str]:
+    """Non-allowlisted attribute keys across a page's (pre-narrowed) entries."""
     keys: set[str] = set()
-    data = response.get("data", [])
-    if isinstance(data, list):
-        for entry in data:
-            if not isinstance(entry, dict):
-                continue
-            attrs = entry.get("attributes")
-            if isinstance(attrs, dict):
-                keys.update(
-                    k for k in attrs if isinstance(k, str) and k not in allowlist
-                )
+    for entry in data:
+        if not isinstance(entry, dict):
+            continue
+        attrs = entry.get("attributes")
+        if isinstance(attrs, dict):
+            keys.update(k for k in attrs if isinstance(k, str) and k not in allowlist)
     return frozenset(keys)

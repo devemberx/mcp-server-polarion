@@ -129,28 +129,23 @@ class TestRejectUnknownCustomKeys:
 
 class TestCustomKeysFromDataList:
     def test_collects_non_allowlisted_attribute_keys(self) -> None:
-        response: dict[str, object] = {
-            "data": [
-                {"attributes": {"id": "P/W-1", "risk": "high"}},
-                {"attributes": {"id": "P/W-2", "freeText": "x"}},
-            ]
-        }
+        data: list[object] = [
+            {"attributes": {"id": "P/W-1", "risk": "high"}},
+            {"attributes": {"id": "P/W-2", "freeText": "x"}},
+        ]
 
-        keys = custom_keys_from_data_list(response, frozenset({"id"}))
+        keys = custom_keys_from_data_list(data, frozenset({"id"}))
 
         assert keys == frozenset({"risk", "freeText"})
 
-    def test_missing_data_returns_empty(self) -> None:
-        assert custom_keys_from_data_list({}, frozenset()) == frozenset()
-
-    def test_non_list_data_returns_empty(self) -> None:
-        response: dict[str, object] = {"data": {"attributes": {"risk": "high"}}}
-
-        assert custom_keys_from_data_list(response, frozenset()) == frozenset()
+    def test_empty_data_returns_empty(self) -> None:
+        assert custom_keys_from_data_list([], frozenset()) == frozenset()
 
     def test_non_dict_entries_and_attributes_skipped(self) -> None:
-        response: dict[str, object] = {
-            "data": ["stray", {"attributes": "stray"}, {"attributes": {"risk": 1}}]
-        }
+        data: list[object] = [
+            "stray",
+            {"attributes": "stray"},
+            {"attributes": {"risk": 1}},
+        ]
 
-        assert custom_keys_from_data_list(response, frozenset()) == frozenset({"risk"})
+        assert custom_keys_from_data_list(data, frozenset()) == frozenset({"risk"})
