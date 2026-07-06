@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from mcp_server_polarion.tools._shared.helpers import format_option_list
 
-_GUARD_PAGE_SIZE: int = 100
+GUARD_PAGE_SIZE: int = 100
 
 
-def _reject_unknown_custom_keys(
+def reject_unknown_custom_keys(
     custom_fields: dict[str, object],
     known: frozenset[str],
     *,
@@ -24,7 +24,7 @@ def _reject_unknown_custom_keys(
         )
 
 
-def _custom_keys_from_data_list(
+def custom_keys_from_data_list(
     response: dict[str, object], allowlist: frozenset[str]
 ) -> frozenset[str]:
     keys: set[str] = set()

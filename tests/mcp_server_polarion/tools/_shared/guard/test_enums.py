@@ -14,10 +14,10 @@ from mcp_server_polarion.core.exceptions import (
     PolarionNotFoundError,
 )
 from mcp_server_polarion.tools._shared import cache as cache_mod
-from mcp_server_polarion.tools._shared.guard import (
+from mcp_server_polarion.tools._shared.guard import guard_work_item_enums
+from mcp_server_polarion.tools._shared.guard.enums import (
     fetch_enum_option_ids,
     fetch_project_enum_option_ids,
-    guard_work_item_enums,
 )
 
 

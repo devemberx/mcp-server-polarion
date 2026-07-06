@@ -20,10 +20,10 @@ from mcp_server_polarion.tools._shared.cache import (
     store_cached_enum_options,
     store_cached_project_enum,
 )
-from mcp_server_polarion.tools._shared.guard._common import _GUARD_PAGE_SIZE
+from mcp_server_polarion.tools._shared.guard._common import GUARD_PAGE_SIZE
 from mcp_server_polarion.tools._shared.guard._errors import (
-    _unauthorized_write_block,
-    _unreachable_write_block,
+    unauthorized_write_block,
+    unreachable_write_block,
 )
 from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
@@ -60,7 +60,7 @@ async def fetch_enum_option_ids(
     )
     params: dict[str, str | int] = {
         "type": type_id,
-        "page[size]": _GUARD_PAGE_SIZE,
+        "page[size]": GUARD_PAGE_SIZE,
         "page[number]": 1,
     }
     try:
@@ -82,9 +82,9 @@ async def fetch_enum_option_ids(
         )
         return frozenset()
     except PolarionAuthError as exc:
-        raise _unauthorized_write_block(f"{field_id} options", project_id) from exc
+        raise unauthorized_write_block(f"{field_id} options", project_id) from exc
     except PolarionError as exc:
-        raise _unreachable_write_block(f"{field_id} options", project_id, exc) from exc
+        raise unreachable_write_block(f"{field_id} options", project_id, exc) from exc
 
     data = response.get("data", [])
     ids: set[str] = set()
@@ -101,7 +101,7 @@ async def fetch_enum_option_ids(
     return option_ids
 
 
-async def _check_enum(  # noqa: PLR0913
+async def check_enum(  # noqa: PLR0913
     client: PolarionClient,
     project_id: str,
     resource: Resource,
@@ -160,9 +160,9 @@ async def fetch_project_enum_option_ids(
         store_cached_project_enum(project_id, cache_key, frozenset())
         return frozenset()
     except PolarionAuthError as exc:
-        raise _unauthorized_write_block(f"{enum_name} options", project_id) from exc
+        raise unauthorized_write_block(f"{enum_name} options", project_id) from exc
     except PolarionError as exc:
-        raise _unreachable_write_block(f"{enum_name} options", project_id, exc) from exc
+        raise unreachable_write_block(f"{enum_name} options", project_id, exc) from exc
 
     ids: set[str] = set()
     data = response.get("data", {})
@@ -182,7 +182,7 @@ async def fetch_project_enum_option_ids(
     return option_ids
 
 
-async def _check_project_enum_roles(  # noqa: PLR0913
+async def check_project_enum_roles(  # noqa: PLR0913
     client: PolarionClient,
     project_id: str,
     enum_name: str,
@@ -238,7 +238,7 @@ def _bad_custom_enum_value(  # noqa: PLR0913
     )
 
 
-async def _check_custom_field_enum_values(
+async def check_custom_field_enum_values(
     client: PolarionClient,
     project_id: str,
     resource: Resource,

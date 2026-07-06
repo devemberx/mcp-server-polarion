@@ -11,7 +11,7 @@ from mcp_server_polarion.core.exceptions import PolarionError
 logger = logging.getLogger("mcp_server_polarion.tools._shared.guard._errors")
 
 
-def _unreachable_write_block(
+def unreachable_write_block(
     what: str, project_id: str, exc: PolarionError
 ) -> RuntimeError:
     logger.warning(
@@ -28,7 +28,7 @@ def _unreachable_write_block(
     )
 
 
-def _unauthorized_write_block(what: str, project_id: str) -> PermissionError:
+def unauthorized_write_block(what: str, project_id: str) -> PermissionError:
     """Mirrors the tool layer's ``PolarionAuthError -> PermissionError``
     (fixable token scope, not a backend to retry).
     """

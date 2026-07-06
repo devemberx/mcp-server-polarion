@@ -22,17 +22,17 @@ from mcp_server_polarion.tools._shared.custom_fields import (
 )
 from mcp_server_polarion.tools._shared.fields import WORK_ITEM_DETAIL_FIELDS
 from mcp_server_polarion.tools._shared.guard._common import (
-    _GUARD_PAGE_SIZE,
-    _custom_keys_from_data_list,
-    _reject_unknown_custom_keys,
+    GUARD_PAGE_SIZE,
+    custom_keys_from_data_list,
+    reject_unknown_custom_keys,
 )
 from mcp_server_polarion.tools._shared.guard._errors import (
-    _unauthorized_write_block,
-    _unreachable_write_block,
+    unauthorized_write_block,
+    unreachable_write_block,
 )
 from mcp_server_polarion.tools._shared.guard.enums import (
-    _check_custom_field_enum_values,
-    _check_enum,
+    check_custom_field_enum_values,
+    check_enum,
 )
 from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
@@ -61,21 +61,21 @@ async def guard_work_item_enums(  # noqa: PLR0913
     being reused as the scoping axis.
     """
     if type is not None and type != "":
-        await _check_enum(client, project_id, "workitems", "type", "~", type)
+        await check_enum(client, project_id, "workitems", "type", "~", type)
     if status is not None and status != "":
-        await _check_enum(
+        await check_enum(
             client, project_id, "workitems", "status", work_item_type, status
         )
     if severity is not None and severity != "":
-        await _check_enum(
+        await check_enum(
             client, project_id, "workitems", "severity", work_item_type, severity
         )
     if priority is not None and priority != "":
-        await _check_enum(
+        await check_enum(
             client, project_id, "workitems", "priority", work_item_type, priority
         )
     if resolution is not None and resolution != "":
-        await _check_enum(
+        await check_enum(
             client, project_id, "workitems", "resolution", work_item_type, resolution
         )
 
@@ -95,7 +95,7 @@ async def _fetch_work_item_type_custom_keys(
     base_params: dict[str, str | int] = {
         "query": one_item_per_custom_field_sql(project_id, type_id),
         "fields[workitems]": WORK_ITEM_DETAIL_FIELDS,
-        "page[size]": _GUARD_PAGE_SIZE,
+        "page[size]": GUARD_PAGE_SIZE,
     }
     keys: set[str] = set()
     page_number = 1
@@ -105,18 +105,16 @@ async def _fetch_work_item_type_custom_keys(
                 path, params={**base_params, "page[number]": page_number}
             )
         except PolarionAuthError as exc:
-            raise _unauthorized_write_block("custom_fields keys", project_id) from exc
+            raise unauthorized_write_block("custom_fields keys", project_id) from exc
         except PolarionError as exc:
-            raise _unreachable_write_block(
+            raise unreachable_write_block(
                 "custom_fields keys", project_id, exc
             ) from exc
         data = response.get("data", [])
         if not isinstance(data, list):
             break
-        keys.update(
-            _custom_keys_from_data_list(response, STANDARD_WORK_ITEM_ATTRIBUTES)
-        )
-        if len(data) < _GUARD_PAGE_SIZE:
+        keys.update(custom_keys_from_data_list(response, STANDARD_WORK_ITEM_ATTRIBUTES))
+        if len(data) < GUARD_PAGE_SIZE:
             break
         page_number += 1
 
@@ -163,7 +161,7 @@ async def _check_work_item_custom_keys(
             f"user to confirm these custom-field ids exist for this type."
         )
 
-    _reject_unknown_custom_keys(
+    reject_unknown_custom_keys(
         custom_fields,
         schema,
         scope=f"work_item_type '{work_item_type}'",
@@ -188,7 +186,7 @@ async def guard_work_item_custom_fields(
     await _check_work_item_custom_keys(
         client, project_id, work_item_type, custom_fields
     )
-    await _check_custom_field_enum_values(
+    await check_custom_field_enum_values(
         client, project_id, "workitems", work_item_type, custom_fields
     )
 
@@ -208,12 +206,12 @@ async def resolve_work_item_types(
 
     resolved: dict[str, str] = {}
     path = f"/projects/{encode_path_segment(project_id)}/workitems"
-    for start in range(0, len(requested), _GUARD_PAGE_SIZE):
-        chunk = requested[start : start + _GUARD_PAGE_SIZE]
+    for start in range(0, len(requested), GUARD_PAGE_SIZE):
+        chunk = requested[start : start + GUARD_PAGE_SIZE]
         params: dict[str, str | int] = {
             "query": f"id:({' '.join(chunk)})",
             "fields[workitems]": "id,type",
-            "page[size]": _GUARD_PAGE_SIZE,
+            "page[size]": GUARD_PAGE_SIZE,
             "page[number]": 1,
         }
         try:
@@ -224,9 +222,9 @@ async def resolve_work_item_types(
                 "discover valid project IDs."
             ) from exc
         except PolarionAuthError as exc:
-            raise _unauthorized_write_block("work item existence", project_id) from exc
+            raise unauthorized_write_block("work item existence", project_id) from exc
         except PolarionError as exc:
-            raise _unreachable_write_block(
+            raise unreachable_write_block(
                 "work item existence", project_id, exc
             ) from exc
         data = response.get("data", [])

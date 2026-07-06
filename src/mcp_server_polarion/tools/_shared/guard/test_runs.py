@@ -21,15 +21,15 @@ from mcp_server_polarion.tools._shared.custom_fields import (
     STANDARD_TEST_RUN_ATTRIBUTES,
 )
 from mcp_server_polarion.tools._shared.guard._common import (
-    _GUARD_PAGE_SIZE,
-    _custom_keys_from_data_list,
-    _reject_unknown_custom_keys,
+    GUARD_PAGE_SIZE,
+    custom_keys_from_data_list,
+    reject_unknown_custom_keys,
 )
 from mcp_server_polarion.tools._shared.guard._errors import (
-    _unauthorized_write_block,
-    _unreachable_write_block,
+    unauthorized_write_block,
+    unreachable_write_block,
 )
-from mcp_server_polarion.tools._shared.guard.enums import _check_project_enum_roles
+from mcp_server_polarion.tools._shared.guard.enums import check_project_enum_roles
 from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
     format_option_list,
@@ -47,7 +47,7 @@ async def guard_test_run_enums(
     project enumerations — testruns have no ``getAvailableOptions`` endpoint,
     and the ``~`` wildcard context does not resolve these enums.
     """
-    await _check_project_enum_roles(
+    await check_project_enum_roles(
         client,
         project_id,
         "testrun-type",
@@ -56,7 +56,7 @@ async def guard_test_run_enums(
         discovery_hint="use list_test_runs to see values in use.",
         context="testing",
     )
-    await _check_project_enum_roles(
+    await check_project_enum_roles(
         client,
         project_id,
         "testrun-status",
@@ -92,9 +92,9 @@ async def guard_test_run_templates(
                 f"discover template ids."
             ) from exc
         except PolarionAuthError as exc:
-            raise _unauthorized_write_block("test run templates", project_id) from exc
+            raise unauthorized_write_block("test run templates", project_id) from exc
         except PolarionError as exc:
-            raise _unreachable_write_block(
+            raise unreachable_write_block(
                 "test run templates", project_id, exc
             ) from exc
 
@@ -124,7 +124,7 @@ async def _fetch_test_run_custom_keys(
     for templates in (False, True):
         base_params: dict[str, str | int] = {
             "fields[testruns]": "@all",
-            "page[size]": _GUARD_PAGE_SIZE,
+            "page[size]": GUARD_PAGE_SIZE,
         }
         if templates:
             base_params["templates"] = "true"
@@ -135,20 +135,20 @@ async def _fetch_test_run_custom_keys(
                     path, params={**base_params, "page[number]": page_number}
                 )
             except PolarionAuthError as exc:
-                raise _unauthorized_write_block(
+                raise unauthorized_write_block(
                     "custom_fields keys", project_id
                 ) from exc
             except PolarionError as exc:
-                raise _unreachable_write_block(
+                raise unreachable_write_block(
                     "custom_fields keys", project_id, exc
                 ) from exc
             data = response.get("data", [])
             if not isinstance(data, list):
                 break
             keys.update(
-                _custom_keys_from_data_list(response, STANDARD_TEST_RUN_ATTRIBUTES)
+                custom_keys_from_data_list(response, STANDARD_TEST_RUN_ATTRIBUTES)
             )
-            if len(data) < _GUARD_PAGE_SIZE:
+            if len(data) < GUARD_PAGE_SIZE:
                 break
             page_number += 1
 
@@ -186,7 +186,7 @@ async def _check_test_run_custom_keys(
             f"custom-field ids exist for test runs."
         )
 
-    _reject_unknown_custom_keys(
+    reject_unknown_custom_keys(
         custom_fields,
         schema,
         scope=f"test runs in project '{project_id}'",

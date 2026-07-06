@@ -16,12 +16,14 @@ from mcp_server_polarion.tools._shared.cache import (
     store_test_run_custom_keys,
 )
 from mcp_server_polarion.tools._shared.guard import (
-    fetch_project_enum_option_ids,
     guard_test_run_custom_fields,
     guard_test_run_enums,
     guard_test_run_templates,
 )
-from mcp_server_polarion.tools._shared.guard._common import _GUARD_PAGE_SIZE
+from mcp_server_polarion.tools._shared.guard._common import GUARD_PAGE_SIZE
+from mcp_server_polarion.tools._shared.guard.enums import (
+    fetch_project_enum_option_ids,
+)
 
 
 def _enum_response(ids: list[str]) -> dict[str, object]:
@@ -282,7 +284,7 @@ class TestGuardTestRunCustomFieldKeys:
         assert mock_client.get.await_count == 2
 
     async def test_paginates_full_pages(self, mock_client: AsyncMock) -> None:
-        page1 = _tr_list(*({"id": "R", f"k{i}": 1} for i in range(_GUARD_PAGE_SIZE)))
+        page1 = _tr_list(*({"id": "R", f"k{i}": 1} for i in range(GUARD_PAGE_SIZE)))
         page2 = _tr_list({"id": "R", "late_key": 9})
         mock_client.get.side_effect = [page1, page2, {"data": []}]
 

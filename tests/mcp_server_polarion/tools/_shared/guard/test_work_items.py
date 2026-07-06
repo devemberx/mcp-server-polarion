@@ -22,7 +22,7 @@ from mcp_server_polarion.tools._shared.guard import (
     guard_work_item_enums,
     resolve_work_item_types,
 )
-from mcp_server_polarion.tools._shared.guard._common import _GUARD_PAGE_SIZE
+from mcp_server_polarion.tools._shared.guard._common import GUARD_PAGE_SIZE
 from mcp_server_polarion.tools._shared.guard.work_items import (
     _check_work_item_custom_keys,
 )
@@ -185,7 +185,7 @@ class TestGuardWorkItemCustomFieldKeys:
         page1 = _wi_list(
             *(
                 {"title": "x", "type": "task", f"k{i}": 1}
-                for i in range(_GUARD_PAGE_SIZE)
+                for i in range(GUARD_PAGE_SIZE)
             )
         )
         page2 = _wi_list({"title": "y", "type": "task", "late_key": 9})
@@ -199,7 +199,7 @@ class TestGuardWorkItemCustomFieldKeys:
         assert schema is not None
         assert "late_key" in schema
         assert "k0" in schema
-        assert len(schema) == _GUARD_PAGE_SIZE + 1
+        assert len(schema) == GUARD_PAGE_SIZE + 1
 
     async def test_unknown_key_against_fresh_sample_rejects_without_retry(
         self, mock_client: AsyncMock

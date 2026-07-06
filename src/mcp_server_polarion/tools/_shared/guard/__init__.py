@@ -4,6 +4,10 @@ real options and raises before the write. Fail-closed — validation error block
 the write (auth → ``PermissionError``, else ``RuntimeError``); only a
 *successful* empty option set and a 404 defer to Polarion. Caching in
 :mod:`...tools._shared.cache`.
+
+Naming: ``guard_*`` = pure validators (return ``None``, raise on invalid);
+``resolve_*``/``partition_*`` = fail-closed helpers whose validation result
+the caller also needs as data.
 """
 
 from __future__ import annotations
@@ -11,10 +15,6 @@ from __future__ import annotations
 from mcp_server_polarion.tools._shared.guard.documents import (
     guard_document_custom_fields,
     guard_document_enums,
-)
-from mcp_server_polarion.tools._shared.guard.enums import (
-    fetch_enum_option_ids,
-    fetch_project_enum_option_ids,
 )
 from mcp_server_polarion.tools._shared.guard.links import (
     guard_hyperlink_roles,
@@ -34,8 +34,6 @@ from mcp_server_polarion.tools._shared.guard.work_items import (
 )
 
 __all__ = [
-    "fetch_enum_option_ids",
-    "fetch_project_enum_option_ids",
     "guard_document_custom_fields",
     "guard_document_enums",
     "guard_hyperlink_roles",

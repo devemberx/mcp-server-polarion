@@ -14,16 +14,16 @@ from mcp_server_polarion.tools._shared.custom_fields import (
 )
 from mcp_server_polarion.tools._shared.fields import DOCUMENT_DETAIL_FIELDS
 from mcp_server_polarion.tools._shared.guard._common import (
-    _GUARD_PAGE_SIZE,
-    _reject_unknown_custom_keys,
+    GUARD_PAGE_SIZE,
+    reject_unknown_custom_keys,
 )
 from mcp_server_polarion.tools._shared.guard._errors import (
-    _unauthorized_write_block,
-    _unreachable_write_block,
+    unauthorized_write_block,
+    unreachable_write_block,
 )
 from mcp_server_polarion.tools._shared.guard.enums import (
-    _check_custom_field_enum_values,
-    _check_enum,
+    check_custom_field_enum_values,
+    check_enum,
 )
 from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
@@ -42,9 +42,9 @@ async def guard_document_enums(
 ) -> None:
     """Validate every supplied document enum arg against ``getAvailableOptions``."""
     if type is not None and type != "":
-        await _check_enum(client, project_id, "documents", "type", "~", type)
+        await check_enum(client, project_id, "documents", "type", "~", type)
     if status is not None and status != "":
-        await _check_enum(
+        await check_enum(
             client, project_id, "documents", "status", document_type, status
         )
 
@@ -68,7 +68,7 @@ async def _fetch_document_type_custom_keys(
         "include": "module",
         "fields[workitems]": "module",
         "fields[documents]": DOCUMENT_DETAIL_FIELDS,
-        "page[size]": _GUARD_PAGE_SIZE,
+        "page[size]": GUARD_PAGE_SIZE,
     }
     by_type: dict[str, set[str]] = {}
     page_number = 1
@@ -78,9 +78,9 @@ async def _fetch_document_type_custom_keys(
                 path, params={**base_params, "page[number]": page_number}
             )
         except PolarionAuthError as exc:
-            raise _unauthorized_write_block("custom_fields keys", project_id) from exc
+            raise unauthorized_write_block("custom_fields keys", project_id) from exc
         except PolarionError as exc:
-            raise _unreachable_write_block(
+            raise unreachable_write_block(
                 "custom_fields keys", project_id, exc
             ) from exc
         data = response.get("data", [])
@@ -103,7 +103,7 @@ async def _fetch_document_type_custom_keys(
                     for k in attrs
                     if isinstance(k, str) and k not in STANDARD_DOCUMENT_ATTRIBUTES
                 )
-        if len(data) < _GUARD_PAGE_SIZE:
+        if len(data) < GUARD_PAGE_SIZE:
             break
         page_number += 1
 
@@ -147,7 +147,7 @@ async def _check_document_custom_keys(
             f"this; ask the user to confirm these custom-field ids exist for this type."
         )
 
-    _reject_unknown_custom_keys(
+    reject_unknown_custom_keys(
         custom_fields,
         schema,
         scope=f"document type '{document_type}'",
@@ -165,6 +165,6 @@ async def guard_document_custom_fields(
     if not custom_fields:
         return
     await _check_document_custom_keys(client, project_id, document_type, custom_fields)
-    await _check_custom_field_enum_values(
+    await check_custom_field_enum_values(
         client, project_id, "documents", document_type, custom_fields
     )

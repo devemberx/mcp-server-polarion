@@ -12,12 +12,12 @@ from mcp_server_polarion.core.exceptions import (
     PolarionNotFoundError,
 )
 from mcp_server_polarion.models import WorkItemLinkSpec
-from mcp_server_polarion.tools._shared.guard._common import _GUARD_PAGE_SIZE
+from mcp_server_polarion.tools._shared.guard._common import GUARD_PAGE_SIZE
 from mcp_server_polarion.tools._shared.guard._errors import (
-    _unauthorized_write_block,
-    _unreachable_write_block,
+    unauthorized_write_block,
+    unreachable_write_block,
 )
-from mcp_server_polarion.tools._shared.guard.enums import _check_project_enum_roles
+from mcp_server_polarion.tools._shared.guard.enums import check_project_enum_roles
 from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
     format_option_list,
@@ -36,7 +36,7 @@ async def guard_work_item_link_roles(
     """Reject link roles not in ``workitem-link-role`` — an unknown role stores
     verbatim (HTTP 201) as a ghost link.
     """
-    await _check_project_enum_roles(
+    await check_project_enum_roles(
         client,
         project_id,
         "workitem-link-role",
@@ -57,7 +57,7 @@ async def guard_hyperlink_roles(
     """Reject hyperlink roles not in the project's ``hyperlink-role`` enum
     (typically ``ref_int``/``ref_ext``) — unknown roles ghost silently.
     """
-    await _check_project_enum_roles(
+    await check_project_enum_roles(
         client,
         project_id,
         "hyperlink-role",
@@ -79,12 +79,12 @@ async def _existing_target_ids(
     """
     ordered = sorted(target_ids)
     found: set[str] = set()
-    for start in range(0, len(ordered), _GUARD_PAGE_SIZE):
-        chunk = ordered[start : start + _GUARD_PAGE_SIZE]
+    for start in range(0, len(ordered), GUARD_PAGE_SIZE):
+        chunk = ordered[start : start + GUARD_PAGE_SIZE]
         params: dict[str, str | int] = {
             "query": f"id:({' '.join(chunk)})",
             "fields[workitems]": "id",
-            "page[size]": _GUARD_PAGE_SIZE,
+            "page[size]": GUARD_PAGE_SIZE,
             "page[number]": 1,
         }
         path = f"/projects/{encode_path_segment(project_id)}/workitems"
@@ -121,9 +121,9 @@ async def guard_work_item_link_targets(
             missing.extend(f"{project_id}/{wi}" for wi in sorted(requested))
             continue
         except PolarionAuthError as exc:
-            raise _unauthorized_write_block("link targets", project_id) from exc
+            raise unauthorized_write_block("link targets", project_id) from exc
         except PolarionError as exc:
-            raise _unreachable_write_block("link targets", project_id, exc) from exc
+            raise unreachable_write_block("link targets", project_id, exc) from exc
         missing.extend(f"{project_id}/{wi}" for wi in sorted(requested - existing))
 
     if missing:
@@ -152,7 +152,7 @@ async def _existing_forward_link_ids(
     while True:
         params: dict[str, str | int] = {
             "fields[linkedworkitems]": "id",
-            "page[size]": _GUARD_PAGE_SIZE,
+            "page[size]": GUARD_PAGE_SIZE,
             "page[number]": page_number,
         }
         response = await client.get(path, params=params)
@@ -164,7 +164,7 @@ async def _existing_forward_link_ids(
                 link_id = entry.get("id")
                 if isinstance(link_id, str) and link_id:
                     found.add(link_id)
-        if len(data) < _GUARD_PAGE_SIZE:
+        if len(data) < GUARD_PAGE_SIZE:
             break
         page_number += 1
     return frozenset(found)

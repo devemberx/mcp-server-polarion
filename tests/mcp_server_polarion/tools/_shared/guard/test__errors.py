@@ -10,8 +10,8 @@ import pytest
 
 from mcp_server_polarion.core.exceptions import PolarionError
 from mcp_server_polarion.tools._shared.guard._errors import (
-    _unauthorized_write_block,
-    _unreachable_write_block,
+    unauthorized_write_block,
+    unreachable_write_block,
 )
 
 
@@ -28,7 +28,7 @@ class TestUnreachableWriteBlock:
     ) -> None:
         caplog.set_level("WARNING", logger="mcp_server_polarion.tools._shared.guard")
 
-        exc = _unreachable_write_block(
+        exc = unreachable_write_block(
             "enum 'severity'", "P", PolarionError("backend down")
         )
 
@@ -47,7 +47,7 @@ class TestUnauthorizedWriteBlock:
     ) -> None:
         caplog.set_level("WARNING", logger="mcp_server_polarion.tools._shared.guard")
 
-        exc = _unauthorized_write_block("link roles", "P")
+        exc = unauthorized_write_block("link roles", "P")
 
         assert isinstance(exc, PermissionError)
         message = str(exc)
