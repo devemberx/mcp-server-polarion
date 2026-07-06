@@ -51,6 +51,13 @@ class TestCommentSpec:
         with pytest.raises(ValidationError):
             CommentSpec(text="")
 
+    def test_typo_key_rejected(self):
+        # extra='forbid' smoke: a typo'd key must fail at parse time rather
+        # than silently drop and persist as a ghost field in Polarion.
+        with pytest.raises(ValidationError) as exc:
+            CommentSpec(text="hi", resloved=True)  # type: ignore[call-arg]
+        assert exc.value.errors()[0]["type"] == "extra_forbidden"
+
 
 class TestWorkItemCommentSpec:
     def test_inherits_base_fields(self):
@@ -66,6 +73,12 @@ class TestWorkItemCommentSpec:
     def test_empty_text_rejected(self):
         with pytest.raises(ValidationError):
             WorkItemCommentSpec(text="")
+
+    def test_typo_key_rejected(self):
+        """forbid inherited from CommentSpec; declared ``title`` still allowed."""
+        with pytest.raises(ValidationError) as exc:
+            WorkItemCommentSpec(text="hi", titel="Oops")  # type: ignore[call-arg]
+        assert exc.value.errors()[0]["type"] == "extra_forbidden"
 
 
 class TestCommentsCreateResult:

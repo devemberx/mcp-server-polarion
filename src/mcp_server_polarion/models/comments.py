@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Comment(BaseModel):
@@ -24,6 +24,9 @@ class Comment(BaseModel):
 
 class CommentSpec(BaseModel):
     """Common fields for a comment to create; base for type-specific specs."""
+
+    # LLM input model: reject typo keys instead of silently dropping them.
+    model_config = ConfigDict(extra="forbid")
 
     text: str = Field(min_length=1)
     text_format: Literal["text/html", "text/plain"] = "text/plain"
