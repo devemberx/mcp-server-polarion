@@ -139,7 +139,8 @@ class TestGuardDocumentCustomFieldKeys:
         self, mock_client: AsyncMock
     ) -> None:
         # Stray entries in ``included`` (non-dict, non-document type, non-dict
-        # attributes) must not break sampling of the well-formed entries.
+        # attributes, missing document type) must not break sampling of the
+        # well-formed entries.
         response = _docs_list(("generic", {"doc_risk": 3}))
         included = response["included"]
         assert isinstance(included, list)
@@ -147,6 +148,7 @@ class TestGuardDocumentCustomFieldKeys:
             "stray",
             {"type": "workitems", "id": "P/W-1"},
             {"type": "documents", "attributes": "stray"},
+            {"type": "documents", "attributes": {"title": "untyped", "ghost": 1}},
         ]
         mock_client.get.return_value = response
 

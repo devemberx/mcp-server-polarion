@@ -21,6 +21,17 @@ from mcp_server_polarion.tools._shared.guard._errors import (
 GUARD_PAGE_SIZE: int = 100
 
 
+def _translate_error(
+    exc: PolarionError, what: str, project_id: str
+) -> PermissionError | RuntimeError:
+    """Single source of the fail-closed mapping (auth → ``PermissionError``,
+    else ``RuntimeError``); 404 policy stays at each call site.
+    """
+    if isinstance(exc, PolarionAuthError):
+        return unauthorized_write_block(what, project_id)
+    return unreachable_write_block(what, project_id, exc)
+
+
 async def guarded_get(
     client: PolarionClient,
     path: str,
@@ -35,12 +46,10 @@ async def guarded_get(
     """
     try:
         return await client.get(path, params=params)
-    except PolarionAuthError as exc:
-        raise unauthorized_write_block(what, project_id) from exc
     except PolarionNotFoundError:
         raise
     except PolarionError as exc:
-        raise unreachable_write_block(what, project_id, exc) from exc
+        raise _translate_error(exc, what, project_id) from exc
 
 
 async def paged_responses(
@@ -89,7 +98,5 @@ async def guarded_pages(
     try:
         async for page in paged_responses(client, path, base_params):
             yield page
-    except PolarionAuthError as exc:
-        raise unauthorized_write_block(what, project_id) from exc
     except PolarionError as exc:
-        raise unreachable_write_block(what, project_id, exc) from exc
+        raise _translate_error(exc, what, project_id) from exc
