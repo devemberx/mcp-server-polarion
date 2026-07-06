@@ -9,18 +9,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from mcp_server_polarion.models.common import MAX_BODY_HTML_LEN
 
 
-class SqlRecipeGallery(BaseModel):
-    """Copy-paste SQL recipe gallery returned by ``get_sql_query_recipes``."""
-
-    recipes: str
-
-
-class HtmlRecipeGallery(BaseModel):
-    """Copy-paste Polarion HTML templates returned by ``get_html_recipes``."""
-
-    recipes: str
-
-
 class WorkItemSummary(BaseModel):
     """Compact work-item representation for list and search results."""
 
