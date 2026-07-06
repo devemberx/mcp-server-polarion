@@ -20,9 +20,9 @@ from mcp_server_polarion.tools._shared.cache import (
 from mcp_server_polarion.tools._shared.custom_fields import (
     STANDARD_TEST_RUN_ATTRIBUTES,
 )
-from mcp_server_polarion.tools._shared.guard._common import (
+from mcp_server_polarion.tools._shared.guard._custom_keys import (
+    check_custom_keys,
     custom_keys_from_data_list,
-    reject_unknown_custom_keys,
 )
 from mcp_server_polarion.tools._shared.guard._errors import (
     unauthorized_write_block,
@@ -151,35 +151,21 @@ async def _check_test_run_custom_keys(
     project_id: str,
     custom_fields: dict[str, object],
 ) -> None:
-    """Test-run mirror of :func:`_check_work_item_custom_keys` (project scope)."""
-    schema = get_test_run_custom_keys(project_id)
-    fetched_fresh = schema is None
-    if schema is None:
-        schema = await _fetch_test_run_custom_keys(client, project_id)
-
-    if all(key in schema for key in custom_fields):
-        return
-
-    # Unknown key may be admin-added since caching; refetch once before rejecting.
-    if not fetched_fresh:
-        invalidate_test_run_custom_keys(project_id)
-        schema = await _fetch_test_run_custom_keys(client, project_id)
-
-    if not schema:
-        raise RuntimeError(
+    await check_custom_keys(
+        custom_fields,
+        get_cached=lambda: get_test_run_custom_keys(project_id),
+        invalidate=lambda: invalidate_test_run_custom_keys(project_id),
+        fetch=lambda: _fetch_test_run_custom_keys(client, project_id),
+        scope=f"test runs in project '{project_id}'",
+        discovery_tool="sample of existing runs",
+        empty_schema_error=(
             f"Cannot verify custom_fields {format_option_list(custom_fields)} for "
             f"test runs in project '{project_id}': no existing test run has custom "
             f"fields populated, so the schema can't be sampled. Refusing the write "
             f"-- an unknown key ghosts silently (invisible to UI/Lucene). Do not "
             f"create runs to work around this; ask the user to confirm these "
             f"custom-field ids exist for test runs."
-        )
-
-    reject_unknown_custom_keys(
-        custom_fields,
-        schema,
-        scope=f"test runs in project '{project_id}'",
-        discovery_tool="sample of existing runs",
+        ),
     )
 
 

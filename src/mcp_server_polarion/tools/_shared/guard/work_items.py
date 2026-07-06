@@ -21,9 +21,9 @@ from mcp_server_polarion.tools._shared.custom_fields import (
     STANDARD_WORK_ITEM_ATTRIBUTES,
 )
 from mcp_server_polarion.tools._shared.fields import WORK_ITEM_DETAIL_FIELDS
-from mcp_server_polarion.tools._shared.guard._common import (
+from mcp_server_polarion.tools._shared.guard._custom_keys import (
+    check_custom_keys,
     custom_keys_from_data_list,
-    reject_unknown_custom_keys,
 )
 from mcp_server_polarion.tools._shared.guard._errors import (
     unauthorized_write_block,
@@ -123,43 +123,23 @@ async def _check_work_item_custom_keys(
     work_item_type: str,
     custom_fields: dict[str, object],
 ) -> None:
-    """Reject ``custom_fields`` keys absent from the type's sampled schema.
-
-    Unknown key vs *cached* schema forces one fresh re-fetch before rejecting;
-    empty schema fails closed (ghost write unrecoverable).
-    """
-    schema = get_work_item_custom_keys(project_id, work_item_type)
-    fetched_fresh = schema is None
-    if schema is None:
-        schema = await _fetch_work_item_type_custom_keys(
+    await check_custom_keys(
+        custom_fields,
+        get_cached=lambda: get_work_item_custom_keys(project_id, work_item_type),
+        invalidate=lambda: invalidate_work_item_custom_keys(project_id, work_item_type),
+        fetch=lambda: _fetch_work_item_type_custom_keys(
             client, project_id, work_item_type
-        )
-
-    if all(key in schema for key in custom_fields):
-        return
-
-    # Unknown key may be admin-added since caching; refetch once before rejecting.
-    if not fetched_fresh:
-        invalidate_work_item_custom_keys(project_id, work_item_type)
-        schema = await _fetch_work_item_type_custom_keys(
-            client, project_id, work_item_type
-        )
-
-    if not schema:
-        raise RuntimeError(
+        ),
+        scope=f"work_item_type '{work_item_type}'",
+        discovery_tool="sample of existing items",
+        empty_schema_error=(
             f"Cannot verify custom_fields {format_option_list(custom_fields)} for "
             f"work_item_type '{work_item_type}' in project '{project_id}': no existing "
             f"item of this type has custom fields populated, so the schema can't be "
             f"sampled. Refusing the write -- an unknown key ghosts silently (invisible "
             f"to UI/Lucene). Do not create or edit items to work around this; ask the "
             f"user to confirm these custom-field ids exist for this type."
-        )
-
-    reject_unknown_custom_keys(
-        custom_fields,
-        schema,
-        scope=f"work_item_type '{work_item_type}'",
-        discovery_tool="sample of existing items",
+        ),
     )
 
 

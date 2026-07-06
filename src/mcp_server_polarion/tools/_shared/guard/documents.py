@@ -13,9 +13,7 @@ from mcp_server_polarion.tools._shared.custom_fields import (
     STANDARD_DOCUMENT_ATTRIBUTES,
 )
 from mcp_server_polarion.tools._shared.fields import DOCUMENT_DETAIL_FIELDS
-from mcp_server_polarion.tools._shared.guard._common import (
-    reject_unknown_custom_keys,
-)
+from mcp_server_polarion.tools._shared.guard._custom_keys import check_custom_keys
 from mcp_server_polarion.tools._shared.guard._errors import (
     unauthorized_write_block,
     unreachable_write_block,
@@ -111,39 +109,25 @@ async def _check_document_custom_keys(
     document_type: str,
     custom_fields: dict[str, object],
 ) -> None:
-    """Document-axis mirror of :func:`_check_work_item_custom_keys`."""
-    schema = get_document_type_custom_keys(project_id, document_type)
-    fetched_fresh = schema is None
-    if schema is None:
-        schema = await _fetch_document_type_custom_keys(
+    await check_custom_keys(
+        custom_fields,
+        get_cached=lambda: get_document_type_custom_keys(project_id, document_type),
+        invalidate=lambda: invalidate_document_type_custom_keys(
+            project_id, document_type
+        ),
+        fetch=lambda: _fetch_document_type_custom_keys(
             client, project_id, document_type
-        )
-
-    if all(key in schema for key in custom_fields):
-        return
-
-    # Unknown key may be admin-added since caching; refetch once before rejecting.
-    if not fetched_fresh:
-        invalidate_document_type_custom_keys(project_id, document_type)
-        schema = await _fetch_document_type_custom_keys(
-            client, project_id, document_type
-        )
-
-    if not schema:
-        raise RuntimeError(
+        ),
+        scope=f"document type '{document_type}'",
+        discovery_tool="sample of existing documents",
+        empty_schema_error=(
             f"Cannot verify custom_fields {format_option_list(custom_fields)} for "
             f"document type '{document_type}' in project '{project_id}': no existing "
             f"document of this type has custom fields populated, so the schema can't "
             f"be sampled. Refusing the write -- an unknown key ghosts silently "
             f"(invisible to UI/Lucene). Do not create or edit documents to work around "
             f"this; ask the user to confirm these custom-field ids exist for this type."
-        )
-
-    reject_unknown_custom_keys(
-        custom_fields,
-        schema,
-        scope=f"document type '{document_type}'",
-        discovery_tool="sample of existing documents",
+        ),
     )
 
 
