@@ -293,7 +293,7 @@ class TestGuardWorkItemCustomFieldEnums:
     """
 
     @pytest.fixture(autouse=True)
-    def _prime_key_schemas(self, _reset_caches: None) -> None:
+    def _prime_key_schemas(self, _reset_guard_caches: None) -> None:
         store_work_item_custom_keys("P", "softwarerequirement", frozenset({"asil"}))
         store_work_item_custom_keys(
             "P", "task", frozenset({"a", "asil", "f", "ftti", "other", "platform"})

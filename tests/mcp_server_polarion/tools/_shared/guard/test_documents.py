@@ -193,7 +193,7 @@ class TestGuardDocumentCustomFieldEnums:
     """Document-axis mirror; the shared enum core is exercised above."""
 
     @pytest.fixture(autouse=True)
-    def _prime_key_schemas(self, _reset_caches: None) -> None:
+    def _prime_key_schemas(self, _reset_guard_caches: None) -> None:
         store_document_type_custom_keys(
             "P", "generic", frozenset({"docRisk", "freeText"})
         )
