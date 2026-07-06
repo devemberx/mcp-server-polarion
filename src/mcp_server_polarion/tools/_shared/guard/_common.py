@@ -1,10 +1,8 @@
-"""Paging constant and custom-field key helpers shared by guard submodules."""
+"""Custom-field key helpers shared by guard submodules."""
 
 from __future__ import annotations
 
 from mcp_server_polarion.tools._shared.helpers import format_option_list
-
-GUARD_PAGE_SIZE: int = 100
 
 
 def reject_unknown_custom_keys(

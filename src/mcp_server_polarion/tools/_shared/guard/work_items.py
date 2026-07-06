@@ -22,13 +22,17 @@ from mcp_server_polarion.tools._shared.custom_fields import (
 )
 from mcp_server_polarion.tools._shared.fields import WORK_ITEM_DETAIL_FIELDS
 from mcp_server_polarion.tools._shared.guard._common import (
-    GUARD_PAGE_SIZE,
     custom_keys_from_data_list,
     reject_unknown_custom_keys,
 )
 from mcp_server_polarion.tools._shared.guard._errors import (
     unauthorized_write_block,
     unreachable_write_block,
+)
+from mcp_server_polarion.tools._shared.guard._http import (
+    GUARD_PAGE_SIZE,
+    guarded_get,
+    paged_responses,
 )
 from mcp_server_polarion.tools._shared.guard.enums import (
     check_custom_field_enum_values,
@@ -98,25 +102,15 @@ async def _fetch_work_item_type_custom_keys(
         "page[size]": GUARD_PAGE_SIZE,
     }
     keys: set[str] = set()
-    page_number = 1
-    while True:
-        try:
-            response = await client.get(
-                path, params={**base_params, "page[number]": page_number}
+    try:
+        async for response in paged_responses(client, path, base_params):
+            keys.update(
+                custom_keys_from_data_list(response, STANDARD_WORK_ITEM_ATTRIBUTES)
             )
-        except PolarionAuthError as exc:
-            raise unauthorized_write_block("custom_fields keys", project_id) from exc
-        except PolarionError as exc:
-            raise unreachable_write_block(
-                "custom_fields keys", project_id, exc
-            ) from exc
-        data = response.get("data", [])
-        if not isinstance(data, list):
-            break
-        keys.update(custom_keys_from_data_list(response, STANDARD_WORK_ITEM_ATTRIBUTES))
-        if len(data) < GUARD_PAGE_SIZE:
-            break
-        page_number += 1
+    except PolarionAuthError as exc:
+        raise unauthorized_write_block("custom_fields keys", project_id) from exc
+    except PolarionError as exc:
+        raise unreachable_write_block("custom_fields keys", project_id, exc) from exc
 
     result = frozenset(keys)
     store_work_item_custom_keys(project_id, type_id, result)
@@ -215,17 +209,18 @@ async def resolve_work_item_types(
             "page[number]": 1,
         }
         try:
-            response = await client.get(path, params=params)
+            response = await guarded_get(
+                client,
+                path,
+                params,
+                what="work item existence",
+                project_id=project_id,
+                propagate_not_found=True,
+            )
         except PolarionNotFoundError as exc:
             raise ValueError(
                 f"Project '{project_id}' not found. Use `list_projects` to "
                 "discover valid project IDs."
-            ) from exc
-        except PolarionAuthError as exc:
-            raise unauthorized_write_block("work item existence", project_id) from exc
-        except PolarionError as exc:
-            raise unreachable_write_block(
-                "work item existence", project_id, exc
             ) from exc
         data = response.get("data", [])
         if not isinstance(data, list):

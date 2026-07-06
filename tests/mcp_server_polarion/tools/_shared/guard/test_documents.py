@@ -128,6 +128,21 @@ class TestGuardDocumentCustomFieldKeys:
             ("P", "systemReqSpecification")
         ) == frozenset({"version"})
 
+    async def test_non_list_included_is_skipped_and_fails_closed(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # Malformed page: ``included`` not a list -> no keys sampled -> empty
+        # schema refuses the write.
+        mock_client.get.return_value = {
+            "data": [{"type": "workitems"}],
+            "included": {"type": "documents"},
+        }
+
+        with pytest.raises(RuntimeError, match="Cannot verify custom_fields"):
+            await _check_document_custom_keys(
+                mock_client, "P", "generic", {"doc_risk": 1}
+            )
+
     async def test_unknown_key_against_fresh_sample_rejects_without_retry(
         self, mock_client: AsyncMock
     ) -> None:

@@ -20,7 +20,7 @@ from mcp_server_polarion.tools._shared.guard import (
     guard_test_run_enums,
     guard_test_run_templates,
 )
-from mcp_server_polarion.tools._shared.guard._common import GUARD_PAGE_SIZE
+from mcp_server_polarion.tools._shared.guard._http import GUARD_PAGE_SIZE
 from mcp_server_polarion.tools._shared.guard.enums import (
     fetch_project_enum_option_ids,
 )

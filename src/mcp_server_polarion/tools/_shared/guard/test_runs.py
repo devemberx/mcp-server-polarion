@@ -21,13 +21,17 @@ from mcp_server_polarion.tools._shared.custom_fields import (
     STANDARD_TEST_RUN_ATTRIBUTES,
 )
 from mcp_server_polarion.tools._shared.guard._common import (
-    GUARD_PAGE_SIZE,
     custom_keys_from_data_list,
     reject_unknown_custom_keys,
 )
 from mcp_server_polarion.tools._shared.guard._errors import (
     unauthorized_write_block,
     unreachable_write_block,
+)
+from mcp_server_polarion.tools._shared.guard._http import (
+    GUARD_PAGE_SIZE,
+    guarded_get,
+    paged_responses,
 )
 from mcp_server_polarion.tools._shared.guard.enums import check_project_enum_roles
 from mcp_server_polarion.tools._shared.helpers import (
@@ -82,20 +86,19 @@ async def guard_test_run_templates(
             f"/testruns/{encode_path_segment(template_id)}"
         )
         try:
-            response = await client.get(
-                path, params={"fields[testruns]": "id,isTemplate"}
+            response = await guarded_get(
+                client,
+                path,
+                {"fields[testruns]": "id,isTemplate"},
+                what="test run templates",
+                project_id=project_id,
+                propagate_not_found=True,
             )
         except PolarionNotFoundError as exc:
             raise ValueError(
                 f"Test run template '{template_id}' not found in project "
                 f"'{project_id}'. Use list_test_runs(templates=True) to "
                 f"discover template ids."
-            ) from exc
-        except PolarionAuthError as exc:
-            raise unauthorized_write_block("test run templates", project_id) from exc
-        except PolarionError as exc:
-            raise unreachable_write_block(
-                "test run templates", project_id, exc
             ) from exc
 
         data = response.get("data", {})
@@ -121,36 +124,22 @@ async def _fetch_test_run_custom_keys(
     """
     path = f"/projects/{encode_path_segment(project_id)}/testruns"
     keys: set[str] = set()
-    for templates in (False, True):
-        base_params: dict[str, str | int] = {
-            "fields[testruns]": "@all",
-            "page[size]": GUARD_PAGE_SIZE,
-        }
-        if templates:
-            base_params["templates"] = "true"
-        page_number = 1
-        while True:
-            try:
-                response = await client.get(
-                    path, params={**base_params, "page[number]": page_number}
+    try:
+        for templates in (False, True):
+            base_params: dict[str, str | int] = {
+                "fields[testruns]": "@all",
+                "page[size]": GUARD_PAGE_SIZE,
+            }
+            if templates:
+                base_params["templates"] = "true"
+            async for response in paged_responses(client, path, base_params):
+                keys.update(
+                    custom_keys_from_data_list(response, STANDARD_TEST_RUN_ATTRIBUTES)
                 )
-            except PolarionAuthError as exc:
-                raise unauthorized_write_block(
-                    "custom_fields keys", project_id
-                ) from exc
-            except PolarionError as exc:
-                raise unreachable_write_block(
-                    "custom_fields keys", project_id, exc
-                ) from exc
-            data = response.get("data", [])
-            if not isinstance(data, list):
-                break
-            keys.update(
-                custom_keys_from_data_list(response, STANDARD_TEST_RUN_ATTRIBUTES)
-            )
-            if len(data) < GUARD_PAGE_SIZE:
-                break
-            page_number += 1
+    except PolarionAuthError as exc:
+        raise unauthorized_write_block("custom_fields keys", project_id) from exc
+    except PolarionError as exc:
+        raise unreachable_write_block("custom_fields keys", project_id, exc) from exc
 
     result = frozenset(keys)
     store_test_run_custom_keys(project_id, result)

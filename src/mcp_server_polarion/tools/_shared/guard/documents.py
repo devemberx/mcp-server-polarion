@@ -14,12 +14,15 @@ from mcp_server_polarion.tools._shared.custom_fields import (
 )
 from mcp_server_polarion.tools._shared.fields import DOCUMENT_DETAIL_FIELDS
 from mcp_server_polarion.tools._shared.guard._common import (
-    GUARD_PAGE_SIZE,
     reject_unknown_custom_keys,
 )
 from mcp_server_polarion.tools._shared.guard._errors import (
     unauthorized_write_block,
     unreachable_write_block,
+)
+from mcp_server_polarion.tools._shared.guard._http import (
+    GUARD_PAGE_SIZE,
+    paged_responses,
 )
 from mcp_server_polarion.tools._shared.guard.enums import (
     check_custom_field_enum_values,
@@ -71,23 +74,11 @@ async def _fetch_document_type_custom_keys(
         "page[size]": GUARD_PAGE_SIZE,
     }
     by_type: dict[str, set[str]] = {}
-    page_number = 1
-    while True:
-        try:
-            response = await client.get(
-                path, params={**base_params, "page[number]": page_number}
-            )
-        except PolarionAuthError as exc:
-            raise unauthorized_write_block("custom_fields keys", project_id) from exc
-        except PolarionError as exc:
-            raise unreachable_write_block(
-                "custom_fields keys", project_id, exc
-            ) from exc
-        data = response.get("data", [])
-        if not isinstance(data, list):
-            break
-        included = response.get("included", [])
-        if isinstance(included, list):
+    try:
+        async for response in paged_responses(client, path, base_params):
+            included = response.get("included", [])
+            if not isinstance(included, list):
+                continue
             for entry in included:
                 if not isinstance(entry, dict) or entry.get("type") != "documents":
                     continue
@@ -103,9 +94,10 @@ async def _fetch_document_type_custom_keys(
                     for k in attrs
                     if isinstance(k, str) and k not in STANDARD_DOCUMENT_ATTRIBUTES
                 )
-        if len(data) < GUARD_PAGE_SIZE:
-            break
-        page_number += 1
+    except PolarionAuthError as exc:
+        raise unauthorized_write_block("custom_fields keys", project_id) from exc
+    except PolarionError as exc:
+        raise unreachable_write_block("custom_fields keys", project_id, exc) from exc
 
     by_type.setdefault(document_type, set())
     for dtype, keys in by_type.items():

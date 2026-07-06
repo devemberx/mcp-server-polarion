@@ -22,7 +22,7 @@ from mcp_server_polarion.tools._shared.guard import (
     guard_work_item_enums,
     resolve_work_item_types,
 )
-from mcp_server_polarion.tools._shared.guard._common import GUARD_PAGE_SIZE
+from mcp_server_polarion.tools._shared.guard._http import GUARD_PAGE_SIZE
 from mcp_server_polarion.tools._shared.guard.work_items import (
     _check_work_item_custom_keys,
 )

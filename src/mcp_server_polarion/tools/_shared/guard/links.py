@@ -12,10 +12,13 @@ from mcp_server_polarion.core.exceptions import (
     PolarionNotFoundError,
 )
 from mcp_server_polarion.models import WorkItemLinkSpec
-from mcp_server_polarion.tools._shared.guard._common import GUARD_PAGE_SIZE
 from mcp_server_polarion.tools._shared.guard._errors import (
     unauthorized_write_block,
     unreachable_write_block,
+)
+from mcp_server_polarion.tools._shared.guard._http import (
+    GUARD_PAGE_SIZE,
+    paged_responses,
 )
 from mcp_server_polarion.tools._shared.guard.enums import check_project_enum_roles
 from mcp_server_polarion.tools._shared.helpers import (
@@ -147,26 +150,19 @@ async def _existing_forward_link_ids(
         f"/projects/{encode_path_segment(project_id)}"
         f"/workitems/{encode_path_segment(work_item_id)}/linkedworkitems"
     )
+    base_params: dict[str, str | int] = {
+        "fields[linkedworkitems]": "id",
+        "page[size]": GUARD_PAGE_SIZE,
+    }
     found: set[str] = set()
-    page_number = 1
-    while True:
-        params: dict[str, str | int] = {
-            "fields[linkedworkitems]": "id",
-            "page[size]": GUARD_PAGE_SIZE,
-            "page[number]": page_number,
-        }
-        response = await client.get(path, params=params)
+    async for response in paged_responses(client, path, base_params):
         data = response.get("data", [])
-        if not isinstance(data, list):
-            break
-        for entry in data:
-            if isinstance(entry, dict):
-                link_id = entry.get("id")
-                if isinstance(link_id, str) and link_id:
-                    found.add(link_id)
-        if len(data) < GUARD_PAGE_SIZE:
-            break
-        page_number += 1
+        if isinstance(data, list):
+            for entry in data:
+                if isinstance(entry, dict):
+                    link_id = entry.get("id")
+                    if isinstance(link_id, str) and link_id:
+                        found.add(link_id)
     return frozenset(found)
 
 
