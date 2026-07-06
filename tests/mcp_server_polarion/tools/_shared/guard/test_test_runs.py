@@ -24,24 +24,9 @@ from mcp_server_polarion.tools._shared.guard._http import GUARD_PAGE_SIZE
 from mcp_server_polarion.tools._shared.guard.enums import (
     fetch_project_enum_option_ids,
 )
-
-
-def _enum_response(ids: list[str]) -> dict[str, object]:
-    return {
-        "data": [{"id": i, "name": i} for i in ids],
-        "meta": {"totalCount": len(ids)},
-    }
-
-
-def _project_enum_response(enum_name: str, ids: list[str]) -> dict[str, object]:
-    """A single-enumeration response: ``data`` is a dict, options nested under it."""
-    return {
-        "data": {
-            "type": "enumerations",
-            "id": enum_name,
-            "attributes": {"options": [{"id": i, "name": i} for i in ids]},
-        }
-    }
+from tests.mcp_server_polarion.tools._shared.guard._builders import (
+    project_enum_response,
+)
 
 
 def _tr_list(*attrs: dict[str, object]) -> dict[str, object]:
@@ -59,8 +44,8 @@ class TestGuardTestRunEnums:
 
     async def test_valid_type_and_status_pass(self, mock_client: AsyncMock) -> None:
         mock_client.get.side_effect = [
-            _project_enum_response("testrun-type", ["manual", "automated"]),
-            _project_enum_response("testrun-status", ["open", "inProgress"]),
+            project_enum_response("testrun-type", ["manual", "automated"]),
+            project_enum_response("testrun-status", ["open", "inProgress"]),
         ]
 
         await guard_test_run_enums(mock_client, "P", type="manual", status="open")
@@ -75,7 +60,7 @@ class TestGuardTestRunEnums:
     async def test_unknown_type_raises_with_options(
         self, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = _project_enum_response(
+        mock_client.get.return_value = project_enum_response(
             "testrun-type", ["manual", "automated"]
         )
 
@@ -85,9 +70,7 @@ class TestGuardTestRunEnums:
         assert "manual" in str(exc.value)
 
     async def test_unknown_status_raises(self, mock_client: AsyncMock) -> None:
-        mock_client.get.return_value = _project_enum_response(
-            "testrun-status", ["open"]
-        )
+        mock_client.get.return_value = project_enum_response("testrun-status", ["open"])
 
         with pytest.raises(ValueError, match="test run status"):
             await guard_test_run_enums(mock_client, "P", status="ghost")
@@ -103,8 +86,8 @@ class TestGuardTestRunEnums:
         # Same enum name under "~" must not satisfy the "testing"-context probe;
         # the composite cache key keeps the two contexts distinct.
         mock_client.get.side_effect = [
-            _project_enum_response("testrun-type", ["stale"]),
-            _project_enum_response("testrun-type", ["manual"]),
+            project_enum_response("testrun-type", ["stale"]),
+            project_enum_response("testrun-type", ["manual"]),
         ]
         await fetch_project_enum_option_ids(mock_client, "P", "testrun-type")
 

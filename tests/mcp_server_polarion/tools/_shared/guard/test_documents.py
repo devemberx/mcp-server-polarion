@@ -22,22 +22,16 @@ from mcp_server_polarion.tools._shared.guard import (
 from mcp_server_polarion.tools._shared.guard.documents import (
     _check_document_custom_keys,
 )
-
-
-def _enum_response(ids: list[str]) -> dict[str, object]:
-    return {
-        "data": [{"id": i, "name": i} for i in ids],
-        "meta": {"totalCount": len(ids)},
-    }
+from tests.mcp_server_polarion.tools._shared.guard._builders import (
+    enum_response,
+)
 
 
 class TestGuardDocumentEnums:
     """Validation of document type / status."""
 
     async def test_listed_value_passes(self, mock_client: AsyncMock) -> None:
-        mock_client.get.return_value = _enum_response(
-            ["systemRequirementSpecification"]
-        )
+        mock_client.get.return_value = enum_response(["systemRequirementSpecification"])
 
         await guard_document_enums(
             mock_client,
@@ -47,9 +41,7 @@ class TestGuardDocumentEnums:
         )
 
     async def test_unlisted_value_raises(self, mock_client: AsyncMock) -> None:
-        mock_client.get.return_value = _enum_response(
-            ["systemRequirementSpecification"]
-        )
+        mock_client.get.return_value = enum_response(["systemRequirementSpecification"])
 
         with pytest.raises(ValueError) as exc:
             await guard_document_enums(
@@ -214,14 +206,14 @@ class TestGuardDocumentCustomFieldEnums:
         )
 
     async def test_valid_option_id_passes(self, mock_client: AsyncMock) -> None:
-        mock_client.get.return_value = _enum_response(["high", "moderate", "low"])
+        mock_client.get.return_value = enum_response(["high", "moderate", "low"])
 
         await guard_document_custom_fields(
             mock_client, "P", "generic", {"docRisk": "low"}
         )  # must not raise
 
     async def test_unknown_option_id_raises(self, mock_client: AsyncMock) -> None:
-        mock_client.get.return_value = _enum_response(["high", "moderate", "low"])
+        mock_client.get.return_value = enum_response(["high", "moderate", "low"])
 
         with pytest.raises(ValueError, match=r"'docRisk'.*'severe'"):
             await guard_document_custom_fields(
@@ -231,7 +223,7 @@ class TestGuardDocumentCustomFieldEnums:
     async def test_queries_documents_fields_endpoint(
         self, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = _enum_response(["high"])
+        mock_client.get.return_value = enum_response(["high"])
 
         await guard_document_custom_fields(
             mock_client, "P", "generic", {"docRisk": "high"}
