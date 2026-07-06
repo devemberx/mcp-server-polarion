@@ -20,7 +20,7 @@ CI: `ruff check` → `ruff format --check` → `mypy` → `pytest` (`--cov-fail-
 ## Architecture
 
 - `core/` — `client.py` (async httpx, retries 429/5xx → `PolarionError`/`PolarionAuthError`/`PolarionNotFoundError`), `config.py` (`POLARION_URL`/`POLARION_TOKEN`), `logging.py` (stderr-only; loggers `mcp_server_polarion.<module>`).
-- `tools/` — domain modules; `_build_*_payload` = unit-test seam; `tools/__init__.py` import registers `@mcp.tool`s. `_shared/`: `helpers.py`, `parse.py` (JSON:API→models), `pagination.py` (`make_page`), `fields.py`/`custom_fields.py` (sparse-fieldset + custom-field policy), `cache.py` (`TTLCache`), `guard.py` (write guards), `sql.py` (recipes). `tools/guides/` = on-demand data.
+- `tools/` — domain modules; `_build_*_payload` = unit-test seam; `tools/__init__.py` import registers `@mcp.tool`s. `_shared/`: `helpers.py`, `parse.py` (JSON:API→models), `pagination.py` (`make_page`), `fields.py`/`custom_fields.py` (sparse-fieldset + custom-field policy), `cache.py` (`TTLCache`), `guard.py` (write guards), `sql.py` (recipes). `tools/guides/` = on-demand data served by `recipes.py`.
 - `utils/html.py` — Markdown↔HTML, `stamp_block_ids`, `first_anchorless_block`.
 - `models/` — Pydantic v2, re-exported from `models/__init__.py`; `PaginatedResult[T]` wrap list responses.
 - `server.py` — FastMCP instance; lifespan owns `PolarionClient`.
