@@ -1,0 +1,566 @@
+"""Work-item guard tests: enum args, custom-field keys/values, bulk
+id/type resolution.
+"""
+
+from __future__ import annotations
+
+from unittest.mock import AsyncMock
+
+import pytest
+
+from mcp_server_polarion.core.exceptions import (
+    PolarionAuthError,
+    PolarionError,
+    PolarionNotFoundError,
+)
+from mcp_server_polarion.tools._shared import cache as cache_mod
+from mcp_server_polarion.tools._shared.cache import (
+    store_work_item_custom_keys,
+)
+from mcp_server_polarion.tools._shared.guard import (
+    guard_work_item_custom_fields,
+    guard_work_item_enums,
+    resolve_work_item_types,
+)
+from mcp_server_polarion.tools._shared.guard._common import GUARD_PAGE_SIZE
+from mcp_server_polarion.tools._shared.guard.work_items import (
+    _check_work_item_custom_keys,
+)
+
+
+def _enum_response(ids: list[str]) -> dict[str, object]:
+    return {
+        "data": [{"id": i, "name": i} for i in ids],
+        "meta": {"totalCount": len(ids)},
+    }
+
+
+class TestGuardWorkItemEnums:
+    """Validation of each work-item enum argument."""
+
+    async def test_listed_value_passes(self, mock_client: AsyncMock) -> None:
+        mock_client.get.return_value = _enum_response(["must_have", "should_have"])
+
+        await guard_work_item_enums(
+            mock_client, "P", "task", severity="must_have"
+        )  # must not raise
+
+    async def test_unlisted_value_raises_value_error_with_options(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _enum_response(["must_have", "should_have"])
+
+        with pytest.raises(ValueError) as exc:
+            await guard_work_item_enums(mock_client, "P", "task", severity="ghost")
+
+        msg = str(exc.value)
+        assert "severity='ghost'" in msg
+        assert "must_have" in msg and "should_have" in msg
+
+    async def test_options_list_capped_for_pathological_enum(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # A 60-option enum shows the first 50 + a (+N more) suffix, not all 60.
+        ids = [f"opt{i:03d}" for i in range(60)]
+        mock_client.get.return_value = _enum_response(ids)
+
+        with pytest.raises(ValueError) as exc:
+            await guard_work_item_enums(mock_client, "P", "task", severity="ghost")
+
+        msg = str(exc.value)
+        assert "opt000" in msg
+        assert "opt049" in msg
+        assert "opt050" not in msg
+        assert "(+10 more)" in msg
+
+    async def test_none_args_skip_all_checks(self, mock_client: AsyncMock) -> None:
+        await guard_work_item_enums(mock_client, "P", "task")
+
+        mock_client.get.assert_not_awaited()
+
+    async def test_empty_string_args_skip_checks(self, mock_client: AsyncMock) -> None:
+        await guard_work_item_enums(mock_client, "P", "task", status="", severity="")
+
+        mock_client.get.assert_not_awaited()
+
+    async def test_polarion_error_blocks_write(self, mock_client: AsyncMock) -> None:
+        mock_client.get.side_effect = PolarionError("backend down")
+
+        with pytest.raises(RuntimeError, match="Refusing the write"):
+            await guard_work_item_enums(mock_client, "P", "task", priority="999")
+
+    async def test_type_uses_tilde_axis(self, mock_client: AsyncMock) -> None:
+        mock_client.get.return_value = _enum_response(["task", "requirement"])
+
+        await guard_work_item_enums(mock_client, "P", "task", type="task")
+
+        params = mock_client.get.call_args.kwargs["params"]
+        assert params["type"] == "~"
+
+    async def test_status_uses_work_item_type_axis(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _enum_response(["open", "done"])
+
+        await guard_work_item_enums(mock_client, "P", "task", status="open")
+
+        params = mock_client.get.call_args.kwargs["params"]
+        assert params["type"] == "task"
+
+    async def test_listed_resolution_passes(self, mock_client: AsyncMock) -> None:
+        mock_client.get.return_value = _enum_response(["done", "wontfix"])
+
+        await guard_work_item_enums(
+            mock_client, "P", "task", resolution="done"
+        )  # must not raise
+
+        params = mock_client.get.call_args.kwargs["params"]
+        assert params["type"] == "task"
+
+    async def test_unlisted_resolution_raises(self, mock_client: AsyncMock) -> None:
+        mock_client.get.return_value = _enum_response(["done", "wontfix"])
+
+        with pytest.raises(ValueError) as exc:
+            await guard_work_item_enums(mock_client, "P", "task", resolution="ghost")
+
+        assert "resolution='ghost'" in str(exc.value)
+
+
+def _wi_list(*attrs: dict[str, object]) -> dict[str, object]:
+    """JSON:API list response of work items with the given ``attributes`` dicts."""
+    return {
+        "data": [
+            {"type": "workitems", "id": f"MCPT-{i}", "attributes": a}
+            for i, a in enumerate(attrs)
+        ]
+    }
+
+
+class TestGuardWorkItemCustomFieldKeys:
+    """Validation of ``custom_fields`` keys via the MIN-per-key type sample."""
+
+    async def test_no_custom_fields_short_circuits(
+        self, mock_client: AsyncMock
+    ) -> None:
+        await guard_work_item_custom_fields(mock_client, "P", "task", {})
+
+        mock_client.get.assert_not_awaited()
+
+    async def test_cached_schema_passes_without_sample(
+        self, mock_client: AsyncMock
+    ) -> None:
+        store_work_item_custom_keys("P", "task", frozenset({"risk_score"}))
+
+        await _check_work_item_custom_keys(mock_client, "P", "task", {"risk_score": 5})
+
+        mock_client.get.assert_not_awaited()
+
+    async def test_sql_sample_primes_schema_and_passes(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _wi_list(
+            {"title": "a", "type": "task", "risk_score": 5},
+            {"title": "b", "type": "task", "release_train_id": "RT-1"},
+        )
+
+        await _check_work_item_custom_keys(
+            mock_client, "P", "task", {"risk_score": 9, "release_train_id": "RT-9"}
+        )
+
+        mock_client.get.assert_awaited_once()
+        # Primary path issues the MIN-per-key SQL with @all, not a per-item GET.
+        params = mock_client.get.await_args.kwargs["params"]
+        assert params["query"].startswith("SQL:(SELECT")
+        assert "GROUP BY cf.c_name" in params["query"]
+        assert params["fields[workitems]"] == "@all"
+        assert cache_mod._work_item_custom_key_cache.get(("P", "task")) == frozenset(
+            {"risk_score", "release_train_id"}
+        )
+
+    async def test_paginates_beyond_first_page_of_keys(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # A type with >100 distinct keys spans pages; the union must span them too,
+        # else a key on page 2+ would be false-rejected.
+        page1 = _wi_list(
+            *(
+                {"title": "x", "type": "task", f"k{i}": 1}
+                for i in range(GUARD_PAGE_SIZE)
+            )
+        )
+        page2 = _wi_list({"title": "y", "type": "task", "late_key": 9})
+        mock_client.get.side_effect = [page1, page2]
+
+        await _check_work_item_custom_keys(mock_client, "P", "task", {"late_key": 9})
+
+        # Full page 1 (==100) forces page 2; short page 2 stops the loop.
+        assert mock_client.get.await_count == 2
+        schema = cache_mod._work_item_custom_key_cache.get(("P", "task"))
+        assert schema is not None
+        assert "late_key" in schema
+        assert "k0" in schema
+        assert len(schema) == GUARD_PAGE_SIZE + 1
+
+    async def test_unknown_key_against_fresh_sample_rejects_without_retry(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # Cold cache: the sample is already current, so an unknown key is rejected
+        # straight away -- no redundant second fetch.
+        mock_client.get.return_value = _wi_list(
+            {"title": "a", "type": "task", "risk_score": 5}
+        )
+
+        with pytest.raises(ValueError) as exc:
+            await _check_work_item_custom_keys(
+                mock_client, "P", "task", {"release_train_id": "RT-42"}
+            )
+
+        msg = str(exc.value)
+        assert "release_train_id" in msg
+        assert "risk_score" in msg
+        mock_client.get.assert_awaited_once()
+
+    async def test_empty_sample_fails_closed(self, mock_client: AsyncMock) -> None:
+        mock_client.get.return_value = {"data": []}
+
+        with pytest.raises(RuntimeError, match="Refusing the write") as exc:
+            await _check_work_item_custom_keys(
+                mock_client, "P", "task", {"risk_score": 5}
+            )
+
+        msg = str(exc.value)
+        # Names the unverifiable key and defers to the user -- never instructs a
+        # self-recovery write (mid-update the LLM could create junk items).
+        assert "risk_score" in msg
+        assert "ask the user" in msg.lower()
+        assert "save one" not in msg.lower()
+        assert "retry" not in msg.lower()
+
+    async def test_sql_rejection_fails_closed(self, mock_client: AsyncMock) -> None:
+        # No Lucene fallback: a rejected SQL sample blocks the write rather than
+        # validating against an incomplete schema.
+        mock_client.get.side_effect = PolarionError("SQL not supported")
+
+        with pytest.raises(RuntimeError, match="Refusing the write"):
+            await _check_work_item_custom_keys(
+                mock_client, "P", "task", {"risk_score": 9}
+            )
+
+        mock_client.get.assert_awaited_once()
+
+    async def test_cached_schema_unknown_key_refetches_then_passes(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # A key unknown against a *cached* (possibly stale) schema triggers one
+        # fresh re-fetch; the admin-added field now present, the write passes.
+        store_work_item_custom_keys("P", "task", frozenset({"risk_score"}))
+        mock_client.get.return_value = _wi_list(
+            {"title": "a", "type": "task", "risk_score": 5},
+            {"title": "b", "type": "task", "release_train_id": "RT-1"},
+        )
+
+        await _check_work_item_custom_keys(
+            mock_client, "P", "task", {"release_train_id": "RT-9"}
+        )
+
+        mock_client.get.assert_awaited_once()
+
+    async def test_sample_error_blocks_write(self, mock_client: AsyncMock) -> None:
+        # The SQL sample fails -> fail-closed.
+        mock_client.get.side_effect = PolarionError("backend down")
+
+        with pytest.raises(RuntimeError, match="Refusing the write"):
+            await _check_work_item_custom_keys(
+                mock_client, "P", "task", {"release_train_id": "RT-42"}
+            )
+
+    async def test_sample_auth_error_raises_permission_error(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
+
+        with pytest.raises(PermissionError, match="lacks permission"):
+            await _check_work_item_custom_keys(
+                mock_client, "P", "task", {"release_train_id": "RT-42"}
+            )
+
+
+class TestGuardWorkItemCustomFieldEnums:
+    """Enum-value stage of ``guard_work_item_custom_fields``.
+
+    The key stage is covered by ``TestGuardWorkItemCustomFieldKeys``; schemas
+    are primed here so each test exercises only the enum-value checks.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _prime_key_schemas(self, _reset_guard_caches: None) -> None:
+        store_work_item_custom_keys("P", "softwarerequirement", frozenset({"asil"}))
+        store_work_item_custom_keys(
+            "P", "task", frozenset({"a", "asil", "f", "ftti", "other", "platform"})
+        )
+
+    async def test_unknown_key_rejected_before_enum_probe(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # Key stage runs first: a ghost key never reaches getAvailableOptions,
+        # so it cannot plant a long-lived 404 entry in the enum cache.
+        mock_client.get.return_value = _wi_list(
+            {"title": "a", "type": "task", "asil": "1"}
+        )
+
+        with pytest.raises(ValueError, match="ghost_key"):
+            await guard_work_item_custom_fields(
+                mock_client, "P", "task", {"ghost_key": "x"}
+            )
+
+        for call in mock_client.get.call_args_list:
+            assert "getAvailableOptions" not in call.args[0]
+
+    async def test_valid_option_id_passes(self, mock_client: AsyncMock) -> None:
+        mock_client.get.return_value = _enum_response(["1", "2", "3", "4"])
+
+        await guard_work_item_custom_fields(
+            mock_client, "P", "softwarerequirement", {"asil": "4"}
+        )  # must not raise
+
+    async def test_unknown_option_id_raises_with_options(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _enum_response(["1", "2", "3", "4"])
+
+        with pytest.raises(ValueError, match=r"'asil'.*'9'.*\['1', '2', '3', '4'\]"):
+            await guard_work_item_custom_fields(
+                mock_client, "P", "softwarerequirement", {"asil": "9"}
+            )
+
+    async def test_non_enum_field_defers_on_404(self, mock_client: AsyncMock) -> None:
+        # Polarion: "Field 'X' is not an Enumeration field." -- nothing to check.
+        mock_client.get.side_effect = PolarionNotFoundError("not enum", status_code=404)
+
+        await guard_work_item_custom_fields(
+            mock_client, "P", "task", {"ftti": 1000}
+        )  # must not raise
+
+    async def test_non_string_value_on_enum_field_raises(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # Option ids are strings; the int 4 would ghost even though '4' is valid.
+        mock_client.get.return_value = _enum_response(["1", "2", "3", "4"])
+
+        with pytest.raises(ValueError, match="int 4"):
+            await guard_work_item_custom_fields(
+                mock_client, "P", "softwarerequirement", {"asil": 4}
+            )
+
+    async def test_dict_value_on_enum_field_raises(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _enum_response(["1", "2"])
+
+        with pytest.raises(ValueError, match="dict"):
+            await guard_work_item_custom_fields(
+                mock_client, "P", "task", {"asil": {"id": "1"}}
+            )
+
+    async def test_list_of_valid_options_passes(self, mock_client: AsyncMock) -> None:
+        mock_client.get.return_value = _enum_response(["windows", "linux", "osx"])
+
+        await guard_work_item_custom_fields(
+            mock_client, "P", "task", {"platform": ["windows", "linux"]}
+        )  # must not raise
+
+    async def test_list_with_unknown_option_raises(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _enum_response(["windows", "linux"])
+
+        with pytest.raises(ValueError, match="'beos'"):
+            await guard_work_item_custom_fields(
+                mock_client, "P", "task", {"platform": ["windows", "beos"]}
+            )
+
+    async def test_list_with_non_string_element_raises(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _enum_response(["1", "2"])
+
+        with pytest.raises(ValueError, match="int 2"):
+            await guard_work_item_custom_fields(
+                mock_client, "P", "task", {"asil": ["1", 2]}
+            )
+
+    async def test_empty_values_skip_probe_entirely(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # Payload builders drop empties; nothing reaches Polarion to ghost,
+        # so the guard must not even spend the probe GET.
+        await guard_work_item_custom_fields(
+            mock_client, "P", "task", {"asil": "", "other": None, "platform": []}
+        )
+
+        mock_client.get.assert_not_awaited()
+
+    async def test_options_fetched_once_per_key_within_ttl(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _enum_response(["1", "2"])
+
+        await guard_work_item_custom_fields(mock_client, "P", "task", {"a": "1"})
+        await guard_work_item_custom_fields(mock_client, "P", "task", {"a": "2"})
+
+        assert mock_client.get.await_count == 1
+
+    async def test_not_found_outlives_guard_ttl(
+        self, mock_client: AsyncMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # 404 entries get the long not_found TTL; positive sets keep 60s.
+        mock_client.get.side_effect = PolarionNotFoundError("not enum", status_code=404)
+        clock = [1000.0]
+        monkeypatch.setattr(cache_mod, "_now", lambda: clock[0])
+        # The fixture primed the key schema under the real monotonic clock; on
+        # a freshly booted host its expiry can precede 1000.0. Re-prime under
+        # the patched clock so only the enum cache's expiry is measured.
+        store_work_item_custom_keys("P", "task", frozenset({"f"}))
+
+        await guard_work_item_custom_fields(mock_client, "P", "task", {"f": "x"})
+        clock[0] += 61.0  # past _GUARD_TTL_SECONDS, within not_found TTL
+        # The key schema shares the 60s TTL; re-prime so only the enum
+        # cache's expiry is measured.
+        store_work_item_custom_keys("P", "task", frozenset({"f"}))
+        await guard_work_item_custom_fields(mock_client, "P", "task", {"f": "x"})
+        assert mock_client.get.await_count == 1
+
+        clock[0] += 600.0  # past _ENUM_NOT_FOUND_TTL_SECONDS
+        store_work_item_custom_keys("P", "task", frozenset({"f"}))
+        await guard_work_item_custom_fields(mock_client, "P", "task", {"f": "x"})
+        assert mock_client.get.await_count == 2
+
+    async def test_polarion_error_blocks_write(self, mock_client: AsyncMock) -> None:
+        mock_client.get.side_effect = PolarionError("backend down")
+
+        with pytest.raises(RuntimeError, match="Refusing the write"):
+            await guard_work_item_custom_fields(mock_client, "P", "task", {"asil": "1"})
+
+    async def test_auth_error_raises_permission_error(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
+
+        with pytest.raises(PermissionError, match="lacks permission"):
+            await guard_work_item_custom_fields(mock_client, "P", "task", {"asil": "1"})
+
+
+def _workitems_response(project_id: str, short_ids: list[str]) -> dict[str, object]:
+    """A JSON:API workitems list response (ids are ``project/short``)."""
+    return {
+        "data": [{"type": "workitems", "id": f"{project_id}/{i}"} for i in short_ids],
+        "meta": {"totalCount": len(short_ids)},
+    }
+
+
+def _typed_workitems_response(
+    project_id: str, pairs: list[tuple[str, str]]
+) -> dict[str, object]:
+    """A JSON:API workitems list response carrying each item's ``type``."""
+    return {
+        "data": [
+            {
+                "type": "workitems",
+                "id": f"{project_id}/{short_id}",
+                "attributes": {"type": type_id},
+            }
+            for short_id, type_id in pairs
+        ],
+        "meta": {"totalCount": len(pairs)},
+    }
+
+
+class TestResolveWorkItemTypes:
+    """Batched existence + type lookup backing bulk update guards."""
+
+    async def test_all_found_maps_id_to_type(self, mock_client: AsyncMock) -> None:
+        mock_client.get.return_value = _typed_workitems_response(
+            "P", [("A", "task"), ("B", "requirement")]
+        )
+
+        types = await resolve_work_item_types(mock_client, "P", ["B", "A"])
+
+        assert types == {"A": "task", "B": "requirement"}
+        mock_client.get.assert_awaited_once()
+        path = mock_client.get.call_args.args[0]
+        params = mock_client.get.call_args.kwargs["params"]
+        assert path == "/projects/P/workitems"
+        assert params["query"] == "id:(A B)"
+        assert params["fields[workitems]"] == "id,type"
+
+    async def test_missing_ids_all_named(self, mock_client: AsyncMock) -> None:
+        mock_client.get.return_value = _typed_workitems_response("P", [("A", "task")])
+
+        with pytest.raises(ValueError, match=r"\['B', 'C'\]") as exc:
+            await resolve_work_item_types(mock_client, "P", ["A", "B", "C"])
+
+        assert "list_work_items" in str(exc.value)
+
+    async def test_empty_ids_no_request(self, mock_client: AsyncMock) -> None:
+        assert await resolve_work_item_types(mock_client, "P", []) == {}
+        mock_client.get.assert_not_awaited()
+
+    async def test_chunks_above_page_size(self, mock_client: AsyncMock) -> None:
+        ids = sorted(f"WI-{n}" for n in range(150))
+
+        async def fake_get(path: str, **kwargs: object) -> dict[str, object]:
+            query = str(kwargs["params"]["query"])  # type: ignore[index]
+            chunk = query.removeprefix("id:(").removesuffix(")").split()
+            return _typed_workitems_response("P", [(i, "task") for i in chunk])
+
+        mock_client.get.side_effect = fake_get
+
+        types = await resolve_work_item_types(mock_client, "P", ids)
+
+        assert mock_client.get.await_count == 2
+        assert len(types) == 150
+
+    async def test_missing_type_attribute_maps_to_empty(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # Defensive: entry without attributes still counts as existing.
+        mock_client.get.return_value = {
+            "data": [{"type": "workitems", "id": "P/A"}, "not-a-dict"]
+        }
+
+        assert await resolve_work_item_types(mock_client, "P", ["A"]) == {"A": ""}
+
+    async def test_non_list_data_treated_as_missing(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # Defensive: a malformed reply must not pass the existence check.
+        mock_client.get.return_value = {"data": {"type": "workitems"}}
+
+        with pytest.raises(ValueError, match="not found"):
+            await resolve_work_item_types(mock_client, "P", ["A"])
+
+    async def test_project_not_found_raises_value_error(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionNotFoundError(
+            "no such project", status_code=404
+        )
+
+        with pytest.raises(ValueError, match="Project 'P' not found"):
+            await resolve_work_item_types(mock_client, "P", ["A"])
+
+    async def test_unreachable_backend_blocks_write(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionError("backend down")
+
+        with pytest.raises(RuntimeError, match="Refusing the write"):
+            await resolve_work_item_types(mock_client, "P", ["A"])
+
+    async def test_auth_error_raises_permission_error(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
+
+        with pytest.raises(PermissionError, match="lacks permission"):
+            await resolve_work_item_types(mock_client, "P", ["A"])

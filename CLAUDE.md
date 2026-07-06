@@ -20,7 +20,7 @@ CI: `ruff check` → `ruff format --check` → `mypy` → `pytest` (`--cov-fail-
 ## Architecture
 
 - `core/` — `client.py` (async httpx, retries 429/5xx → `PolarionError`/`PolarionAuthError`/`PolarionNotFoundError`), `config.py` (`POLARION_URL`/`POLARION_TOKEN`), `logging.py` (stderr-only; loggers `mcp_server_polarion.<module>`).
-- `tools/` — domain modules; `_build_*_payload` = unit-test seam; `tools/__init__.py` import registers `@mcp.tool`s. `_shared/`: `helpers.py`, `parse.py` (JSON:API→models), `pagination.py` (`make_page`), `fields.py`/`custom_fields.py` (sparse-fieldset + custom-field policy), `cache.py` (`TTLCache`), `guard.py` (write guards), `sql.py` (recipes). `tools/guides/` = on-demand data served by `recipes.py`.
+- `tools/` — domain modules; `_build_*_payload` = unit-test seam; `tools/__init__.py` import registers `@mcp.tool`s. `_shared/`: `helpers.py`, `parse.py` (JSON:API→models), `pagination.py` (`make_page`), `fields.py`/`custom_fields.py` (sparse-fieldset + custom-field policy), `cache.py` (`TTLCache`), `guard/` (write guards, submodule per domain axis), `sql.py` (recipes). `tools/guides/` = on-demand data served by `recipes.py`.
 - `utils/html.py` — Markdown↔HTML, `stamp_block_ids`, `first_anchorless_block`.
 - `models/` — Pydantic v2, re-exported from `models/__init__.py`; `PaginatedResult[T]` wrap list responses.
 - `server.py` — FastMCP instance; lifespan owns `PolarionClient`.
@@ -52,7 +52,7 @@ CI: `ruff check` → `ruff format --check` → `mypy` → `pytest` (`--cov-fail-
 - Server limits: ≤3 req/s, no concurrency. Client serialize via lock + pace every request to ≤3 req/s (start-based min-interval, so slow request add no extra wait); writes add 1.5s post-delay; retries 429/5xx.
 - Sparse fieldset drop `relationships` block — list relationship names explicit. To-many need `include=`; nested dot-path drop intermediate resource (`module,module.author`, not `module.author` alone).
 - `/backlinkedworkitems` unsupported — back direction via `query=linkedWorkItems:{wi}`, so back results have `role=None`.
-- Polarion validate neither custom-field ids (unknown keys persist; wrong-type 400), nor enum values, nor link targets/roles — `guard.py` validate pre-write. `getAvailableOptions` = only key→enum-options API (non-enum/unknown → 404). Link/hyperlink roles not there — use `GET /projects/{p}/enumerations/~/{enumName}/~` (`data` = dict, not list).
+- Polarion validate neither custom-field ids (unknown keys persist; wrong-type 400), nor enum values, nor link targets/roles — `guard/` validate pre-write. `getAvailableOptions` = only key→enum-options API (non-enum/unknown → 404). Link/hyperlink roles not there — use `GET /projects/{p}/enumerations/~/{enumName}/~` (`data` = dict, not list).
 - Custom fields inline under `attributes` (no `customFields` container; `@all` tokens dropped). `GET /projects/{p}/documents` absent on some builds.
 - Testruns: POST require explicit `id` (400 without; UI-only autofill); enums resolve only under `testing` context (`~` 404); no `getAvailableOptions` → custom-field enum values unguardable (keys only); `isTemplate` served only on templates.
 
