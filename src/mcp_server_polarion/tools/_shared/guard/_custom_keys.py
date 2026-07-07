@@ -1,6 +1,6 @@
-"""Custom-field key validation shared by the work-item / document / test-run
-guards: one control-flow engine over axis-supplied cache and fetch closures —
-the sampling strategies differ per axis, the check algorithm must not.
+"""Custom-field key validation shared by work-item / document / test-run
+guards: one control-flow engine over axis-supplied cache + fetch closures —
+sampling strategies differ per axis, check algorithm must not.
 """
 
 from __future__ import annotations
@@ -20,10 +20,10 @@ async def check_custom_keys(  # noqa: PLR0913
     discovery_tool: str,
     empty_schema_error: str,
 ) -> None:
-    """Reject ``custom_fields`` keys absent from the axis's sampled schema.
+    """Reject ``custom_fields`` keys absent from axis's sampled schema.
 
-    Unknown key vs *cached* schema forces one fresh re-fetch before rejecting;
-    empty schema fails closed with ``RuntimeError(empty_schema_error)`` (ghost
+    Unknown key vs *cached* schema force one fresh re-fetch before reject;
+    empty schema fail closed with ``RuntimeError(empty_schema_error)`` (ghost
     write unrecoverable).
     """
     schema = get_cached()
@@ -34,7 +34,7 @@ async def check_custom_keys(  # noqa: PLR0913
     if all(key in schema for key in custom_fields):
         return
 
-    # Unknown key may be admin-added since caching; refetch once before rejecting.
+    # Unknown key may be admin-added since caching; refetch once before reject.
     if not fetched_fresh:
         invalidate()
         schema = await fetch()

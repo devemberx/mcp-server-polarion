@@ -49,8 +49,8 @@ def _build_comment_create_payload(
     parent_prefix: str,
 ) -> dict[str, JsonValue]:
     """JSON:API POST body (``data`` list); ``None``/empty fields omitted, short
-    ``parent_comment_id`` expanded to the full path the API requires. ``title``
-    emitted only when the spec carries a non-empty one (WorkItemCommentSpec);
+    ``parent_comment_id`` expanded to full path API require. ``title``
+    emitted only when spec carry non-empty one (WorkItemCommentSpec);
     base CommentSpec has no title, so document comments never send it.
     """
     items: list[JsonValue] = []
@@ -93,7 +93,7 @@ def _build_document_comments_payload(
     space_id: str,
     document_name: str,
 ) -> dict[str, JsonValue]:
-    """POST body for .../documents/{d}/comments; parent ids are 4-segment."""
+    """POST body for .../documents/{d}/comments; parent ids 4-segment."""
     return _build_comment_create_payload(
         specs=specs,
         comment_type="document_comments",
@@ -107,7 +107,7 @@ def _build_work_item_comments_payload(
     project_id: str,
     work_item_id: str,
 ) -> dict[str, JsonValue]:
-    """POST body for .../workitems/{wi}/comments; parent ids are 3-segment."""
+    """POST body for .../workitems/{wi}/comments; parent ids 3-segment."""
     return _build_comment_create_payload(
         specs=specs,
         comment_type="workitem_comments",
@@ -116,7 +116,7 @@ def _build_work_item_comments_payload(
 
 
 def _extract_created_comment_ids(response: object) -> list[str]:
-    """Short ids from a comment-create POST response (``data`` list)."""
+    """Short ids from comment-create POST response (``data`` list)."""
     raw_data = response.get("data", []) if isinstance(response, dict) else []
     comment_ids: list[str] = []
     if isinstance(raw_data, list):
@@ -135,7 +135,7 @@ def _build_comment_update_payload(
     resolved: bool,
 ) -> dict[str, JsonValue]:
     """Single-resource PATCH body (``data`` dict, not list). Only ``resolved``
-    is patchable; ``id`` is the full resource path the API expects.
+    patchable; ``id`` = full resource path API expect.
     """
     return {
         "data": {
@@ -156,7 +156,7 @@ def _build_document_comment_update_payload(
     comment_id: str,
     resolved: bool,
 ) -> dict[str, JsonValue]:
-    """PATCH body for a document comment; ``id`` is the full 4-segment path."""
+    """PATCH body for document comment; ``id`` = full 4-segment path."""
     full_id = f"{project_id}/{space_id}/{document_name}/{comment_id}"
     return _build_comment_update_payload(
         full_id=full_id,
@@ -172,7 +172,7 @@ def _build_work_item_comment_update_payload(
     comment_id: str,
     resolved: bool,
 ) -> dict[str, JsonValue]:
-    """PATCH body for a work item comment; ``id`` is the full 3-segment path."""
+    """PATCH body for work item comment; ``id`` = full 3-segment path."""
     full_id = f"{project_id}/{work_item_id}/{comment_id}"
     return _build_comment_update_payload(
         full_id=full_id,
@@ -212,7 +212,7 @@ async def list_document_comments(  # noqa: PLR0913
             path,
             params={
                 "fields[document_comments]": DOCUMENT_COMMENT_LIST_FIELDS,
-                # To-many ``childComments.data`` is only inlined when included.
+                # To-many ``childComments.data`` inlined only when included.
                 "include": "childComments",
                 "page[size]": page_size,
                 "page[number]": page_number,
@@ -264,7 +264,7 @@ async def list_work_item_comments(
             path,
             params={
                 "fields[workitem_comments]": WORK_ITEM_COMMENT_LIST_FIELDS,
-                # To-many ``childComments.data`` is only inlined when included.
+                # To-many ``childComments.data`` inlined only when included.
                 "include": "childComments",
                 "page[size]": page_size,
                 "page[number]": page_number,
@@ -291,7 +291,7 @@ async def list_work_item_comments(
     tags={"write"},
     timeout=60.0,
     annotations={
-        # Additive: non-destructive, but non-idempotent (a retry duplicates comments).
+        # Additive: non-destructive, non-idempotent (retry duplicate comments).
         "readOnlyHint": False,
         "destructiveHint": False,
         "idempotentHint": False,
@@ -382,7 +382,7 @@ async def create_document_comments(  # noqa: PLR0913
     tags={"write"},
     timeout=60.0,
     annotations={
-        # Additive: non-destructive, but non-idempotent (a retry duplicates comments).
+        # Additive: non-destructive, non-idempotent (retry duplicate comments).
         "readOnlyHint": False,
         "destructiveHint": False,
         "idempotentHint": False,

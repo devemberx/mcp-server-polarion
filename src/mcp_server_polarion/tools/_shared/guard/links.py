@@ -33,8 +33,8 @@ async def guard_work_item_link_roles(
     project_id: str,
     roles: Iterable[str],
 ) -> None:
-    """Reject link roles not in ``workitem-link-role`` — an unknown role stores
-    verbatim (HTTP 201) as a ghost link.
+    """Reject link roles not in ``workitem-link-role`` — unknown role store
+    verbatim (HTTP 201) as ghost link.
     """
     await check_project_enum_roles(
         client,
@@ -54,7 +54,7 @@ async def guard_hyperlink_roles(
     project_id: str,
     roles: Iterable[str],
 ) -> None:
-    """Reject hyperlink roles not in the project's ``hyperlink-role`` enum
+    """Reject hyperlink roles not in project ``hyperlink-role`` enum
     (typically ``ref_int``/``ref_ext``) — unknown roles ghost silently.
     """
     await check_project_enum_roles(
@@ -74,8 +74,8 @@ async def _existing_target_ids(
     project_id: str,
     target_ids: frozenset[str],
 ) -> frozenset[str]:
-    """Subset of *target_ids* that exist in *project_id*, via chunked
-    ``id:(...)`` queries. 404 (project missing) propagates to caller;
+    """Subset of *target_ids* existing in *project_id*, via chunked
+    ``id:(...)`` queries. 404 (project missing) propagate to caller;
     auth/other failures translate fail-closed.
     """
     ordered = sorted(target_ids)
@@ -105,8 +105,8 @@ async def guard_work_item_link_targets(
     source_project_id: str,
     links: list[WorkItemLinkSpec],
 ) -> None:
-    """Reject links whose target work item does not exist — Polarion stores a
-    nonexistent target as a silent dangling link (HTTP 201, empty
+    """Reject links whose target work item not exist — Polarion store
+    nonexistent target as silent dangling link (HTTP 201, empty
     title/type/status). One ``id:(...)`` query per target project.
     """
     by_project: dict[str, set[str]] = {}
@@ -138,9 +138,9 @@ async def _existing_forward_link_ids(
     project_id: str,
     work_item_id: str,
 ) -> frozenset[str]:
-    """Composite ids of every outgoing link on the source work item — each
-    ``data[].id`` is the 5-segment composite the delete payload reconstructs,
-    so it is set-membership-testable directly. 404 propagates.
+    """Composite ids of every outgoing link on source work item — each
+    ``data[].id`` = the 5-segment composite the delete payload reconstruct,
+    so set-membership-testable directly. 404 propagate.
     """
     path = (
         f"/projects/{encode_path_segment(project_id)}"
@@ -165,8 +165,8 @@ async def partition_delete_links(
     work_item_id: str,
     link_ids: list[str],
 ) -> tuple[list[str], list[str]]:
-    """Pre-read existing links and split *link_ids* into ``(matched, not_found)``
-    — the only way to surface the no-ops Polarion's 204 hides. Fail-closed:
+    """Pre-read existing links, split *link_ids* into ``(matched, not_found)``
+    — only way to surface the no-ops Polarion's 204 hide. Fail-closed:
     missing source → ``ValueError``, auth → ``PermissionError``, else
     ``RuntimeError``.
     """

@@ -38,9 +38,9 @@ async def guard_test_run_enums(
     type: str | None = None,
     status: str | None = None,
 ) -> None:
-    """Validate test-run ``type``/``status`` against the ``testing``-context
+    """Validate test-run ``type``/``status`` against ``testing``-context
     project enumerations — testruns have no ``getAvailableOptions`` endpoint,
-    and the ``~`` wildcard context does not resolve these enums.
+    and ``~`` wildcard context not resolve these enums.
     """
     await check_project_enum_roles(
         client,
@@ -67,8 +67,8 @@ async def guard_test_run_templates(
     project_id: str,
     template_ids: Iterable[str],
 ) -> None:
-    """Resolve each template id before the write — Polarion doesn't validate
-    relationship targets. Run instances are rejected too: ``isTemplate`` is
+    """Resolve each template id before write — Polarion not validate
+    relationship targets. Run instances rejected too: ``isTemplate``
     served only (as ``true``) on templates, absent on instances.
     """
     for template_id in sorted({t for t in template_ids if t}):
@@ -108,9 +108,9 @@ async def _fetch_test_run_custom_keys(
     client: PolarionClient,
     project_id: str,
 ) -> frozenset[str]:
-    """Union of custom-field keys sampled from the project's runs and
-    templates — testrun custom fields are project config (no type axis, no
-    SQL needed). Cached even if empty.
+    """Union of custom-field keys sampled from project's runs + templates —
+    testrun custom fields = project config (no type axis, no SQL needed).
+    Cached even if empty.
     """
     path = f"/projects/{encode_path_segment(project_id)}/testruns"
     keys: set[str] = set()
@@ -158,9 +158,9 @@ async def guard_test_run_custom_fields(
     project_id: str,
     custom_fields: dict[str, object],
 ) -> None:
-    """Validate ``custom_fields`` keys before a test-run write. Keys only —
-    testruns have no ``getAvailableOptions``, so enum-typed *values* defer to
-    Polarion (wrong option ids there ghost; keys are the guardable axis).
+    """Validate ``custom_fields`` keys before test-run write. Keys only —
+    testruns have no ``getAvailableOptions``, enum-typed *values* defer to
+    Polarion (wrong option ids there ghost; keys = the guardable axis).
     """
     if not custom_fields:
         return

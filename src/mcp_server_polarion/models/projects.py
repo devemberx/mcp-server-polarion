@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 
 class ProjectSummary(BaseModel):
-    """Summary of a Polarion project returned by ``list_projects``."""
+    """Polarion project summary from ``list_projects``."""
 
     id: str
     name: str

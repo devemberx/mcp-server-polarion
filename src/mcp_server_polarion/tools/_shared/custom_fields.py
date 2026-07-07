@@ -1,6 +1,5 @@
-"""Custom-field policy: the standard-attribute allowlists plus the read
-(extract) and write (merge) helpers that split inline customs from standard
-Polarion attributes.
+"""Custom-field policy: standard-attribute allowlists + read (extract) and
+write (merge) helpers splitting inline customs from standard Polarion attrs.
 """
 
 from __future__ import annotations
@@ -9,8 +8,8 @@ from typing import Final, cast
 
 from mcp_server_polarion.models import JsonValue
 
-# Standard-attribute allowlist (REST OpenAPI schema); anything outside is
-# treated as a custom field, so new standard attrs misclassify until added.
+# Standard-attribute allowlist (REST OpenAPI schema); anything outside =
+# custom field, so new standard attrs misclassify until added.
 STANDARD_WORK_ITEM_ATTRIBUTES: Final[frozenset[str]] = frozenset(
     {
         "id",
@@ -60,7 +59,7 @@ STANDARD_DOCUMENT_ATTRIBUTES: Final[frozenset[str]] = frozenset(
 )
 
 
-# Testrun custom fields sit inline under attributes, like work items.
+# Testrun custom fields inline under attributes, like work items.
 STANDARD_TEST_RUN_ATTRIBUTES: Final[frozenset[str]] = frozenset(
     {
         "id",
@@ -86,8 +85,8 @@ def extract_custom_fields(
     attributes: dict[str, object],
     standard: frozenset[str],
 ) -> dict[str, object]:
-    """Inline custom-field subset of ``attributes`` (keys outside *standard*),
-    returned verbatim so rich-text values round-trip unchanged.
+    """Custom-field subset of ``attributes`` (keys outside *standard*),
+    verbatim so rich-text values round-trip unchanged.
     """
     return {k: v for k, v in attributes.items() if k not in standard}
 
@@ -97,9 +96,9 @@ def merge_custom_fields(
     customs: dict[str, object] | None,
     standard: frozenset[str],
 ) -> None:
-    """Merge custom-field key/values into *attributes* in place; a key in
-    *standard* raises ``ValueError`` (would shadow a tool parameter), ``None``
-    values skipped. Values stored by reference — callers must NOT mutate
+    """Merge custom-field key/values into *attributes* in place; key in
+    *standard* raise ``ValueError`` (would shadow tool parameter), ``None``
+    values skipped. Values stored by reference — caller must NOT mutate
     *customs* before serialisation.
     """
     if not customs:

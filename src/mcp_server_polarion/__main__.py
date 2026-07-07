@@ -1,4 +1,4 @@
-"""Entry point for the MCP server — ``python -m mcp_server_polarion``."""
+"""Entry point — ``python -m mcp_server_polarion``."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from mcp_server_polarion.server import mcp
 
 
 def main() -> None:
-    """Run the Polarion MCP server over stdio transport."""
+    """Run Polarion MCP server over stdio."""
     mcp.run(transport="stdio")
 
 

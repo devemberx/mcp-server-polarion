@@ -1,7 +1,7 @@
 """Enum option tools — list valid option ids via Polarion getAvailableOptions.
 
-One module for both resources: getAvailableOptions applies to work items and
-documents alike, mirroring the resource-parameterized guard layer.
+One module for both resources: getAvailableOptions apply to work items and
+documents alike, mirror the resource-parameterized guard layer.
 """
 
 from __future__ import annotations

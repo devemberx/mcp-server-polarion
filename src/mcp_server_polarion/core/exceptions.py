@@ -1,12 +1,10 @@
-"""Polarion API exceptions; each carries the HTTP ``status_code`` so tool-level
-handlers can produce actionable messages for the LLM.
-"""
+"""Polarion API exceptions; each carry HTTP ``status_code`` for tool handlers."""
 
 from __future__ import annotations
 
 
 class PolarionError(Exception):
-    """Base exception for all Polarion REST API errors."""
+    """Base for Polarion REST API errors."""
 
     def __init__(self, message: str, *, status_code: int = 0) -> None:
         super().__init__(message)

@@ -1,4 +1,4 @@
-"""Document models — summaries, details, parts, and write results."""
+"""Document models — summaries, details, parts, write results."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 
 class DocumentSummary(BaseModel):
-    """Summary of a Polarion document returned by ``list_documents``."""
+    """Polarion document summary from ``list_documents``."""
 
     space_id: str
     document_name: str
@@ -21,7 +21,7 @@ class DocumentSummary(BaseModel):
 
 
 class DocumentDetail(BaseModel):
-    """Full details of a Polarion document returned by ``get_document``."""
+    """Full Polarion document detail from ``get_document``."""
 
     title: str
     type: str = ""
@@ -36,7 +36,7 @@ class DocumentDetail(BaseModel):
 
 
 class DocumentPart(BaseModel):
-    """A single part (heading or work item) within a Polarion document."""
+    """Single part (heading or work item) within Polarion document."""
 
     id: str
     title: str
@@ -72,7 +72,7 @@ class DocumentReadResult(BaseModel):
 
 
 class DocumentCreateResult(BaseModel):
-    """Result of a ``create_document`` operation."""
+    """``create_document`` result."""
 
     created: bool
     dry_run: bool
@@ -81,7 +81,7 @@ class DocumentCreateResult(BaseModel):
 
 
 class DocumentUpdateResult(BaseModel):
-    """Result of an ``update_document`` operation."""
+    """``update_document`` result."""
 
     updated: bool
     dry_run: bool

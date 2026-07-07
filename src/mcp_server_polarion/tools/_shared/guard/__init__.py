@@ -1,13 +1,12 @@
-"""Pre-write guards: Polarion persists unknown enum ids / custom-field keys as
-silent ghosts (HTTP 200, invisible to UI and Lucene), so each guard fetches the
-real options and raises before the write. Fail-closed — validation error blocks
-the write (auth → ``PermissionError``, else ``RuntimeError``); only a
-*successful* empty option set and a 404 defer to Polarion. Caching in
-:mod:`...tools._shared.cache`.
+"""Pre-write guards: Polarion persist unknown enum ids / custom-field keys as
+silent ghosts (HTTP 200, invisible to UI and Lucene) — each guard fetch real
+options and raise before write. Fail-closed — validation error block write
+(auth → ``PermissionError``, else ``RuntimeError``); only *successful* empty
+option set and 404 defer to Polarion. Caching in :mod:`...tools._shared.cache`.
 
 Naming: ``guard_*`` = pure validators (return ``None``, raise on invalid);
 ``resolve_*``/``partition_*`` = fail-closed helpers whose validation result
-the caller also needs as data.
+caller also need as data.
 """
 
 from __future__ import annotations
