@@ -1,8 +1,6 @@
-"""Efficiency cases: the correct answer must be reached without waste.
-
-The short path: one bulk call, direct id lookup, no redundant reads, right
-query mechanism. ``min_pass_rate = 0.8`` — occasional waste tolerated,
-systematic waste blocks.
+"""Efficiency cases: correct answer without waste — one bulk call, direct id
+lookup, no redundant reads, right query mechanism. ``min_pass_rate = 0.8`` —
+occasional waste tolerated, systematic waste block.
 """
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
-"""Synthetic seed data + identifiers for the in-process fake Polarion. Every
-string is invented (no production data in eval logs) but the *structure*
-mirrors MCP_Test_Project. Eval cases import these ids; ``fake_polarion``
-serves resources built from ``SEEDS``.
+"""Synthetic seed data + identifiers for in-process fake Polarion. Every
+string invented (no production data in eval logs) but *structure* mirror
+MCP_Test_Project. Eval cases import these ids; ``fake_polarion`` serve
+resources built from ``SEEDS``.
 """
 
 from __future__ import annotations
@@ -17,11 +17,11 @@ DOC = "FakeDoc"
 AUTHOR = "u-fake-0001"
 MODULE_ID = f"{PROJECT}/{SPACE}/{DOC}"
 
-# Heading work items that carry a `module` relationship — the only ones
-# `list_documents`' discovery scan (query=type:heading) surfaces.
+# Heading work items carrying `module` relationship — only ones
+# `list_documents` discovery scan (query=type:heading) surface.
 DOC_HEADING_ID = "MCPT-100"
 
-# Free-floating (space_id == "") seeds used by the move/heading cases.
+# Free-floating (space_id == "") seeds for move/heading cases.
 FLOATING_TASK_ID = "MCPT-200"
 FLOATING_HEADING_ID = "MCPT-201"
 FLOATING_GHOST_ID = "MCPT-202"
@@ -30,11 +30,11 @@ FLOATING_GHOST_ID = "MCPT-202"
 ROOT_COMMENT_ID = "1"
 REPLY_COMMENT_ID = "2"
 
-# Pre-existing hyperlink on the floating task; SAFE-HYPERLINK-PRESERVE asserts
-# an update keeps it (Polarion REPLACES the whole list).
+# Pre-existing hyperlink on floating task; SAFE-HYPERLINK-PRESERVE assert
+# update keep it (Polarion REPLACES whole list).
 FLOATING_TASK_HYPERLINK_URI = "https://specs.example.com/fake-spec"
 
-# Anchored intro paragraph in the doc body; SAFE-ROUNDTRIP-SOURCE edits it.
+# Anchored intro paragraph in doc body; SAFE-ROUNDTRIP-SOURCE edit it.
 DOC_INTRO_PARAGRAPH_ID = "p-1"
 
 # Second document + requirement traceability seeds (orchestration cases).
@@ -47,13 +47,13 @@ PARENT_REQ_ID = "MCPT-400"  # in FakeParentDoc
 UNCOVERED_REQ_ID = "MCPT-301"  # in FakeDoc; no test-case link (coverage-gap signal)
 TESTCASE_ID = "MCPT-500"  # test case linked from CHILD_REQ_ID
 
-# Section A heading part id served by read_document_parts; anchors positional moves.
+# Section A heading part id served by read_document_parts; anchor positional moves.
 SECTION_A_PART_ID = f"heading_{DOC_HEADING_ID}"
 
 # Test run instance served by list_test_runs (TRIG-LIST-TEST-RUNS).
 TEST_RUN_ID = "Fake-TR-001"
 
-# Template blueprint; create_test_runs resolves it via the template guard.
+# Template blueprint; create_test_runs resolve it via template guard.
 TEST_RUN_TEMPLATE_ID = "Fake-TR-Template"
 
 TS = "2026-01-01T00:00:00.000Z"
@@ -67,19 +67,19 @@ class WorkItem:
     status: str = "open"
     priority: str = "50.0"
     severity: str = "should_have"
-    module_id: str = ""  # full module id (PROJECT/SPACE/DOC) if in a document, else ""
+    module_id: str = ""  # full module id (PROJECT/SPACE/DOC) if in document, else ""
     outline_number: str = ""
     hyperlinks: list[dict[str, str]] = field(default_factory=list)
-    # Keys MUST stay outside ``STANDARD_WORK_ITEM_ATTRIBUTES`` so the merge
-    # into the resource attributes dict doesn't shadow real attributes.
+    # Keys MUST stay outside ``STANDARD_WORK_ITEM_ATTRIBUTES`` — else merge
+    # into resource attributes dict shadow real attributes.
     custom_fields: dict[str, str] = field(default_factory=dict)
     comments: list[Comment] = field(default_factory=list)
 
 
 @dataclass
 class DocumentPart:
-    """One entry in a document's ordered part chain. ``part_id`` suffix derives
-    as ``{kind}_{work_item_id}``; ``nextPart`` links are derived from order.
+    """One entry in document's ordered part chain. ``part_id`` suffix derive
+    as ``{kind}_{work_item_id}``; ``nextPart`` links derived from order.
     """
 
     kind: Literal["heading", "workitem"]
@@ -89,9 +89,9 @@ class DocumentPart:
 
 @dataclass
 class Comment:
-    """A document or work-item comment. ``parent_id is None`` marks a thread
-    root; child links are derived from the set (no redundant child-id lists).
-    ``title`` is work-item-only — document comments leave it "" (never emitted).
+    """Document or work-item comment. ``parent_id is None`` mark thread root;
+    child links derived from set (no redundant child-id lists). ``title``
+    work-item-only — document comments leave it "" (never emitted).
     """
 
     comment_id: str
@@ -103,8 +103,8 @@ class Comment:
 
 @dataclass
 class TestRun:
-    """A test run. ``is_template`` splits template blueprints from actual run
-    instances (the ``templates`` query param filters on it).
+    """Test run. ``is_template`` split template blueprints from actual run
+    instances (``templates`` query param filter on it).
     """
 
     short_id: str
@@ -128,10 +128,10 @@ class Document:
 
 @dataclass(frozen=True)
 class Seeds:
-    """Read-only seed tables. ``frozen`` blocks attribute rebind, not dict
-    mutation — sufficient since nothing mutates these (writes record into
-    ``FakePolarion.mutations`` instead). Add an entity by adding a table entry;
-    ``FakePolarion`` serves it without per-entity branching.
+    """Read-only seed tables. ``frozen`` block attribute rebind, not dict
+    mutation — sufficient since nothing mutate these (writes record into
+    ``FakePolarion.mutations`` instead). Add entity by adding table entry;
+    ``FakePolarion`` serve it without per-entity branching.
     """
 
     work_items: dict[str, WorkItem]
@@ -143,7 +143,7 @@ class Seeds:
 
 
 SEEDS = Seeds(
-    # Structure mirrored from MCP_Test_Project; every string is synthetic.
+    # Structure mirror MCP_Test_Project; every string synthetic.
     work_items={
         DOC_HEADING_ID: WorkItem(
             DOC_HEADING_ID,
@@ -158,8 +158,8 @@ SEEDS = Seeds(
             "task",
             hyperlinks=[{"role": "ref_ext", "uri": FLOATING_TASK_HYPERLINK_URI}],
             custom_fields={"acceptance_criteria_id": "AC-1"},
-            # One root comment so list_work_item_comments returns a populated page;
-            # work-item comment ids are 3-segment and carry a title.
+            # One root comment so list_work_item_comments return populated
+            # page; work-item comment ids 3-segment + carry title.
             comments=[Comment("c-1", "Fake work item comment", title="Initial note")],
         ),
         FLOATING_HEADING_ID: WorkItem(
@@ -196,7 +196,7 @@ SEEDS = Seeds(
                 DocumentPart("heading", DOC_HEADING_ID, level=1),
                 DocumentPart("workitem", CHILD_REQ_ID),
             ],
-            # Root + one reply; resolving the root resolves the whole thread.
+            # Root + one reply; resolve root = resolve whole thread.
             comments=[
                 Comment(ROOT_COMMENT_ID, "fake root comment"),
                 Comment(
@@ -226,12 +226,13 @@ SEEDS = Seeds(
             is_template=True,
         ),
     },
-    # Forward (outgoing) work-item links: source short id -> [(role, target short
-    # id)]. CHILD_REQ has a parent + a test case; UNCOVERED_REQ deliberately none.
+    # Forward (outgoing) work-item links: source short id -> [(role, target
+    # short id)]. CHILD_REQ has parent + test case; UNCOVERED_REQ deliberately
+    # none.
     links={
         CHILD_REQ_ID: [("satisfies", PARENT_REQ_ID), ("verifies", TESTCASE_ID)],
     },
-    # (resource, field_id) -> enum option ids (+ which is the default).
+    # (resource, field_id) -> enum option ids (+ which default).
     enums={
         ("workitems", "type"): [
             ("systemrequirement", False),

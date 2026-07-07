@@ -1,6 +1,6 @@
-"""Bridge the in-memory FastMCP server to Strands tools — Strands' native MCP
-client spawns a separate process, out of respx's reach. ``TrajectoryRecorder``
-captures each call's parsed result (checks need returns, not just args).
+"""Bridge in-memory FastMCP server to Strands tools — Strands' native MCP
+client spawn separate process, out of respx reach. ``TrajectoryRecorder``
+capture each call's parsed result (checks need returns, not just args).
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from strands.types.tools import ToolResult, ToolSpec, ToolUse
 
 @dataclass
 class TrajectoryRecorder:
-    """Append-only (name, args, result) log in call order; ``result`` is the parsed
+    """Append-only (name, args, result) log in call order; ``result`` = parsed
     payload so checks can verify values came from prior calls, not ghosted ids.
     """
 
@@ -32,10 +32,10 @@ class TrajectoryRecorder:
 
 
 def _result_payload(result: Any) -> object:
-    """Parse a fastmcp call result into a JSON-shaped trajectory object.
+    """Parse fastmcp call result into JSON-shaped trajectory object.
 
-    Prefers typed ``structured_content``; else JSON-parses the flattened text,
-    falling back to the raw string; ``None`` for empty responses.
+    Prefer typed ``structured_content``; else JSON-parse flattened text, fall
+    back to raw string; ``None`` for empty responses.
     """
     structured = getattr(result, "structured_content", None)
     if structured is not None:
@@ -52,7 +52,7 @@ def _result_payload(result: Any) -> object:
 
 
 def _result_text(result: Any) -> str:
-    """Flatten a fastmcp call result into a single text payload for the LLM."""
+    """Flatten fastmcp call result into single text payload for LLM."""
     structured = getattr(result, "structured_content", None)
     if structured is not None:
         return json.dumps(structured, ensure_ascii=False, default=str)

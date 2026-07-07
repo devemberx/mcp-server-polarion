@@ -28,8 +28,7 @@ WRITE_TOOLS: frozenset[str] = frozenset(
     }
 )
 
-# Reads whose result can change after a write: a repeat is legitimate once any
-# write has run in between.
+# Read result can change after write: repeat legit once any write ran between.
 STATE_READ_TOOLS: frozenset[str] = frozenset(
     {
         "get_work_item",
@@ -44,8 +43,7 @@ STATE_READ_TOOLS: frozenset[str] = frozenset(
     }
 )
 
-# Reads invariant under the agent's own writes: an identical repeat is always
-# redundant.
+# Reads invariant under agent's own writes: identical repeat always redundant.
 STABLE_READ_TOOLS: frozenset[str] = frozenset(
     {
         "list_projects",
@@ -75,9 +73,9 @@ def _errored(call: dict[str, Any]) -> bool:
 
 
 def _expand_item_calls(call: dict[str, Any]) -> list[dict[str, Any]]:
-    """Flatten a bulk call into per-item pseudo-calls: each dict entry of
-    ``args["items"]`` merged over the top-level args (batch-level keys like
-    ``project_id`` stay visible); identity for flat calls.
+    """Flatten bulk call into per-item pseudo-calls: each ``args["items"]``
+    dict entry merged over top-level args (batch-level keys like ``project_id``
+    stay visible); identity for flat calls.
     """
     args = _args(call)
     items = args.get("items")
@@ -96,8 +94,8 @@ def check_readonly(trajectory: Trajectory, _params: dict[str, Any]) -> CheckResu
     return True, "no write tools called"
 
 
-# Last element: True when the tool is a bulk call whose per-item ids live in
-# ``args["items"]`` (checked via ``_expand_item_calls``); False = flat call.
+# Last element: True = bulk call, per-item ids in ``args["items"]`` (checked
+# via ``_expand_item_calls``); False = flat call.
 _UPDATE_TO_GET: dict[str, tuple[str, tuple[str, ...], bool]] = {
     "update_work_items": ("get_work_item", ("project_id", "work_item_id"), True),
     "update_document": (
@@ -109,7 +107,7 @@ _UPDATE_TO_GET: dict[str, tuple[str, tuple[str, ...], bool]] = {
 
 
 def _target_key(call: dict[str, Any], keys: tuple[str, ...]) -> tuple[object, ...]:
-    """Identifier tuple for matching two calls on one target; ``work_item_id``
+    """Identifier tuple matching two calls on one target; ``work_item_id``
     normalized via ``_short_id``, ``document_name`` verbatim (may contain ``/``).
     """
     args = _args(call)
@@ -124,8 +122,8 @@ def _target_key(call: dict[str, Any], keys: tuple[str, ...]) -> tuple[object, ..
 def check_get_before_update(
     trajectory: Trajectory, _params: dict[str, Any]
 ) -> CheckResult:
-    """Every ``update_*`` needs an earlier matching ``get_*`` — REPLACE-list and
-    partial-PATCH semantics make blind writes clobber silently.
+    """Every ``update_*`` need earlier matching ``get_*`` — REPLACE-list +
+    partial-PATCH semantics = blind write clobber silently.
     """
     for i, call in enumerate(trajectory):
         name = call.get("name", "")
@@ -135,8 +133,8 @@ def check_get_before_update(
         get_name, id_keys, bulk = spec
         subcalls = _expand_item_calls(call) if bulk else [call]
         if not subcalls:
-            # Fail closed: a bulk write carrying no per-item dicts is still a
-            # blind write attempt, not a free pass.
+            # Fail closed: bulk write with no per-item dicts still blind write
+            # attempt, not free pass.
             return False, f"called {name} with no readable items"
         for sub in subcalls:
             target = _target_key(sub, id_keys)
@@ -156,9 +154,9 @@ def check_get_before_update(
 def check_resolve_root_comment(
     trajectory: Trajectory, params: dict[str, Any]
 ) -> CheckResult:
-    """Resolution must set ``resolved=True`` on an observed root
-    (``params["root_ids"]``). Reply-only resolves and never-observed ids fail;
-    a stray reply attempt alongside a root resolve is tolerated (server 400s it).
+    """Resolution must set ``resolved=True`` on observed root
+    (``params["root_ids"]``). Reply-only resolve + never-observed id fail;
+    stray reply attempt alongside root resolve tolerated (server 400s it).
     """
     root_ids = {str(r) for r in params.get("root_ids", [])}
     doc_keys = ("project_id", "space_id", "document_name")
@@ -197,8 +195,8 @@ def check_resolve_root_comment(
 def check_preserve_hyperlinks(
     trajectory: Trajectory, params: dict[str, Any]
 ) -> CheckResult:
-    """A ``hyperlinks`` update must carry every URI in ``params["required_uris"]``
-    — Polarion REPLACES the list, omissions silently delete.
+    """``hyperlinks`` update must carry every URI in ``params["required_uris"]``
+    — Polarion REPLACES list, omission silently delete.
     """
     target = _short_id(params.get("work_item_id", ""))
     required = [str(u) for u in params.get("required_uris", [])]
@@ -244,8 +242,8 @@ _BODY_WRITE_TO_SOURCE: dict[str, tuple[str, str, str, tuple[str, ...], bool]] = 
 def check_round_trip_source(
     trajectory: Trajectory, _params: dict[str, Any]
 ) -> CheckResult:
-    """Body writes must source from ``get_*(include_*_html=True)`` on the same
-    target — ``read_*`` synthesis Markdown collapses Polarion anchors.
+    """Body write must source from ``get_*(include_*_html=True)`` on same
+    target — ``read_*`` synthesis Markdown collapse Polarion anchors.
     """
     for i, call in enumerate(trajectory):
         spec = _BODY_WRITE_TO_SOURCE.get(call.get("name", ""))
@@ -274,8 +272,8 @@ def check_round_trip_source(
 def check_no_detach_retry_loop(
     trajectory: Trajectory, params: dict[str, Any]
 ) -> CheckResult:
-    """Free-floating ``params["floating_ids"]`` detach 400s ("not in Document") —
-    recoverable, so one attempt passes; only a retry loop on the same item fails.
+    """Free-floating ``params["floating_ids"]`` detach 400s ("not in Document")
+    — recoverable, one attempt pass; only retry loop on same item fail.
     """
     floating = {_short_id(x) for x in params.get("floating_ids", [])}
     attempts: dict[str, int] = {}
@@ -298,11 +296,11 @@ def check_no_detach_retry_loop(
 def check_single_bulk_write(
     trajectory: Trajectory, params: dict[str, Any]
 ) -> CheckResult:
-    """Items writable in one bulk call must not be split across calls or left
+    """Items writable in one bulk call must not split across calls or stay
     partial. ``params``: ``tool`` (default ``create_work_items``), ``max_calls``
     (default 1), ``min_total_items`` (optional) — committed (non-``dry_run``,
-    non-errored) batches must carry at least that many items in total; a
-    zero-commit or partial batch is undone work, not an efficient pass.
+    non-errored) batches must carry at least that many items total; zero-commit
+    or partial batch = undone work, not efficient pass.
     """
     tool = str(params.get("tool", "create_work_items"))
     max_calls = int(params.get("max_calls", 1))
@@ -381,9 +379,9 @@ def check_no_duplicate_reads(
 def check_scoped_query_uses_sql(
     trajectory: Trajectory, _params: dict[str, Any]
 ) -> CheckResult:
-    """Document scoping must use ``SQL:(...)`` or ``read_document_parts`` — Lucene
-    ``module``/``module.id`` field terms match nothing (not indexed). A SQL:(...)
-    query must be preceded by ``get_sql_query_recipes`` (joins are recipe-sourced,
+    """Document scoping must use ``SQL:(...)`` or ``read_document_parts`` —
+    Lucene ``module``/``module.id`` field terms match nothing (not indexed).
+    SQL:(...) query need prior ``get_sql_query_recipes`` (joins recipe-sourced,
     not hand-written).
     """
     field_re = re.compile(r"\bmodule(?:\.\w+)?\s*:", re.IGNORECASE)
@@ -412,9 +410,9 @@ def check_scoped_query_uses_sql(
 def check_table_html_recipe_sourced(
     trajectory: Trajectory, _params: dict[str, Any]
 ) -> CheckResult:
-    """Table HTML written through an update tool must be recipe-sourced —
-    ``get_html_recipes`` first. The task demands a table, so a trajectory that
-    never writes one fails too (a refusal must not pass vacuously).
+    """Table HTML through update tool must be recipe-sourced —
+    ``get_html_recipes`` first. Task demand table, so trajectory that never
+    write one fail too (refusal must not pass vacuously).
     """
     recipes_seen = False
     wrote_table = False
@@ -425,8 +423,8 @@ def check_table_html_recipe_sourced(
             continue
         if name not in {"update_work_items", "update_document"}:
             continue
-        # update_work_items nests description_html per item; update_document is
-        # flat (_expand_item_calls is identity for it).
+        # update_work_items nest description_html per item; update_document
+        # flat (_expand_item_calls identity for it).
         for sub in _expand_item_calls(call):
             args = _args(sub)
             body = str(
@@ -446,11 +444,11 @@ def check_table_html_recipe_sourced(
 
 
 def _resolve_observed_path(result: object, path: str) -> list[str]:
-    """Collect string leaf values at ``path`` from a recorded tool result.
+    """Collect string leaf values at ``path`` from recorded tool result.
 
-    Grammar: dotted with at most one ``[]`` list-spread per segment, e.g.
-    ``items[].id`` walks ``result["items"]`` then each element's ``id``. Missing
-    keys yield ``[]`` rather than raising.
+    Grammar: dotted, at most one ``[]`` list-spread per segment, e.g.
+    ``items[].id`` walk ``result["items"]`` then each element's ``id``. Missing
+    keys yield ``[]``, no raise.
     """
     current: list[object] = [result]
     for segment in path.split("."):
@@ -471,9 +469,9 @@ def _resolve_observed_path(result: object, path: str) -> list[str]:
 
 
 def _args_match(args: dict[str, Any], match: dict[str, Any]) -> bool:
-    """All ``match`` entries equal the call's args (``*_id`` via ``_short_id``).
-    A key absent at the top level may be satisfied by any per-item dict in a
-    bulk call's ``args["items"]``.
+    """All ``match`` entries equal call's args (``*_id`` via ``_short_id``).
+    Key absent at top level may be satisfied by any per-item dict in bulk
+    call's ``args["items"]``.
     """
     items = [i for i in args.get("items") or [] if isinstance(i, dict)]
     for key, expected in match.items():
@@ -491,7 +489,7 @@ def _args_match(args: dict[str, Any], match: dict[str, Any]) -> bool:
 
 
 def _step_tools(step: dict[str, Any]) -> list[str]:
-    """A step's accepted tool names -- ``tool`` is one name or a list of
+    """Step's accepted tool names -- ``tool`` = one name or list of
     semantically-equivalent alternatives (e.g. ``get_work_item``/``read_work_item``).
     """
     tool = step["tool"]
@@ -499,8 +497,8 @@ def _step_tools(step: dict[str, Any]) -> list[str]:
 
 
 def _observed_value(call: dict[str, Any], arg_spec: object) -> str:
-    """Short-id value a call threads, from the first ``observed_arg`` it set
-    (``arg_spec`` is one arg name or a list of alternatives)."""
+    """Short-id value call thread, from first ``observed_arg`` it set
+    (``arg_spec`` = one arg name or list of alternatives)."""
     candidates = [arg_spec] if isinstance(arg_spec, str) else list(arg_spec)
     args = _args(call)
     return next((_short_id(args[a]) for a in candidates if args.get(a)), "")
@@ -509,14 +507,14 @@ def _observed_value(call: dict[str, Any], arg_spec: object) -> str:
 def check_ordered_trajectory(
     trajectory: Trajectory, params: dict[str, Any]
 ) -> CheckResult:
-    """Composite orchestration over a partial order: each ``params['steps']`` is
-    satisfied by a trajectory call whose name matches the step's ``tool`` (or an
-    alternative) and whose args match ``match``. ``after`` deps and the
-    ``observed_in`` source must be earlier steps that ran before it; an
-    ``observed_arg`` value must appear in the source step's result. Steps match
-    greedily in declaration order, each taking the earliest call satisfying all
-    constraints (a later read beats an unrelated earlier one). Independent steps
-    are unordered. Optional flags AND existing primitives.
+    """Composite orchestration over partial order: each ``params['steps']``
+    satisfied by trajectory call whose name match step's ``tool`` (or
+    alternative) and args match ``match``. ``after`` deps + ``observed_in``
+    source must be earlier steps that ran before it; ``observed_arg`` value
+    must appear in source step's result. Steps match greedily in declaration
+    order, each taking earliest call satisfying all constraints (later read
+    beat unrelated earlier one). Independent steps unordered. Optional flags
+    AND existing primitives.
     """
     if params.get("read_only") and not (r := check_readonly(trajectory, params))[0]:
         return r
@@ -616,12 +614,12 @@ def check_ordered_trajectory(
 
 
 def check_triggers_tool(trajectory: Trajectory, params: dict[str, Any]) -> CheckResult:
-    """The request must route to an expected tool; rejected tools must not fire.
+    """Request must route to expected tool; rejected tools must not fire.
 
-    ``params``: ``expect`` (one tool name or a list of acceptable ones),
-    ``reject`` (tools that must not be called, optional), ``match`` (arg
-    constraint on an expected call, optional). A rejected call fails immediately;
-    otherwise an errored expected call does not count as a trigger.
+    ``params``: ``expect`` (one tool name or list of acceptable), ``reject``
+    (tools that must not be called, optional), ``match`` (arg constraint on
+    expected call, optional). Rejected call fail immediately; else errored
+    expected call not count as trigger.
     """
     raw = params.get("expect", [])
     expect = [raw] if isinstance(raw, str) else list(raw)

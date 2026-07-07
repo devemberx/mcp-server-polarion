@@ -1,1 +1,1 @@
-"""Harness that wires a Strands agent to the in-memory MCP server."""
+"""Harness wiring Strands agent to in-memory MCP server."""

@@ -1,6 +1,6 @@
-"""Generic check dispatcher: routes ``Case.metadata["check"]`` to the matching
-pure check in ``checks.py``. One evaluator serves every category — categories
-are a property of cases, not evaluators.
+"""Generic check dispatcher: route ``Case.metadata["check"]`` to matching pure
+check in ``checks.py``. One evaluator serve every category — categories =
+property of cases, not evaluators.
 """
 
 from __future__ import annotations
@@ -25,8 +25,8 @@ class CheckDispatchEvaluator(Evaluator[Any, Any]):
 
         trajectory = evaluation_case.actual_trajectory
         if not isinstance(trajectory, list) or not trajectory:
-            # Empty trajectory = agent never engaged; a "passing" verdict would be
-            # vacuous, so fail closed.
+            # Empty trajectory = agent never engaged; "passing" verdict vacuous
+            # — fail closed.
             return [
                 EvaluationOutput(
                     score=0.0,
