@@ -1,4 +1,4 @@
-"""Tests for the FastMCP server instance and lifespan management."""
+"""FastMCP server instance and lifespan tests."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ _FAKE_ENV = {
 
 
 class TestMcpInstance:
-    """Verify the FastMCP instance is configured correctly."""
+    """FastMCP instance configured correctly."""
 
     def test_server_name(self) -> None:
         assert mcp.name == "mcp-server-polarion"
@@ -29,7 +29,7 @@ class TestMcpInstance:
 
 
 class TestLifespan:
-    """Verify the lifespan context manager."""
+    """Lifespan context manager."""
 
     async def test_lifespan_yields_polarion_client(self) -> None:
         with patch.dict("os.environ", _FAKE_ENV, clear=False):

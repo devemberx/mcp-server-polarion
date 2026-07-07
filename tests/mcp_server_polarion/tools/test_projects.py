@@ -1,4 +1,4 @@
-"""Tests for the ``list_projects`` tool."""
+"""``list_projects`` tool tests."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from mcp_server_polarion.tools.projects import list_projects
 
 
 class TestListProjects:
-    """Tests for the ``list_projects`` tool."""
+    """``list_projects`` tool."""
 
     async def test_returns_projects(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -256,7 +256,7 @@ class TestListProjects:
     async def test_total_count_floor_when_api_returns_zero(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """totalCount=0 with items present uses item count."""
+        """totalCount=0 with items present use item count."""
         mock_client.get.return_value = {
             "data": [
                 {

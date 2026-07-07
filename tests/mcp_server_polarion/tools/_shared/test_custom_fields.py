@@ -1,6 +1,5 @@
-"""Direct tests for custom-field policy worth pinning beyond the transitive
-per-tool coverage — `extract_custom_fields` / `merge_custom_fields` allowlist
-semantics.
+"""Custom-field policy worth pinning beyond transitive per-tool coverage —
+`extract_custom_fields` / `merge_custom_fields` allowlist semantics.
 """
 
 from __future__ import annotations
@@ -73,7 +72,7 @@ class TestExtractCustomFields:
         }
 
     def test_document_allowlist_filters_document_attrs(self) -> None:
-        # Document allowlist filters document-only keys (homePageContent, moduleFolder).
+        # Document allowlist filter document-only keys (homePageContent, moduleFolder).
         attributes: dict[str, object] = {
             "title": "Doc",
             "type": "req_specification",
@@ -90,8 +89,8 @@ class TestExtractCustomFields:
         }
 
     def test_allowlist_swap_changes_classification(self) -> None:
-        # autoSuspect is standard for documents but custom for work items;
-        # swapping the allowlist flips its classification.
+        # autoSuspect standard for documents but custom for work items;
+        # swapping allowlist flip its classification.
         attributes: dict[str, object] = {"autoSuspect": False}
         assert extract_custom_fields(attributes, STANDARD_DOCUMENT_ATTRIBUTES) == {}
         assert extract_custom_fields(attributes, STANDARD_WORK_ITEM_ATTRIBUTES) == {
@@ -112,7 +111,7 @@ class TestMergeCustomFields:
         assert attributes == {"riskLevel": "high", "effortHours": 8.0}
 
     def test_merges_into_pre_populated_attributes(self) -> None:
-        # Existing standard fields stay; customs are appended.
+        # Existing standard fields stay; customs appended.
         attributes: dict[str, JsonValue] = {"title": "T", "status": "open"}
         merge_custom_fields(
             attributes, {"riskLevel": "high"}, STANDARD_WORK_ITEM_ATTRIBUTES
@@ -152,7 +151,7 @@ class TestMergeCustomFields:
         assert "skip_me" not in attributes
 
     def test_rich_text_dict_passes_through_identity(self) -> None:
-        # {type, value} dict round-trips by identity, no defensive copy.
+        # {type, value} dict round-trip by identity, no defensive copy.
         rich = {"type": "text/html", "value": "<p>x</p>"}
         attributes: dict[str, JsonValue] = {}
         merge_custom_fields(
@@ -163,7 +162,7 @@ class TestMergeCustomFields:
         assert attributes["reviewerNote"] is rich
 
     def test_collision_with_standard_attr_raises(self) -> None:
-        # A custom key overlapping the allowlist would shadow a standard param.
+        # Custom key overlap allowlist = shadow standard param.
         with pytest.raises(ValueError, match="custom_fields keys collide"):
             merge_custom_fields(
                 {},
@@ -172,7 +171,7 @@ class TestMergeCustomFields:
             )
 
     def test_collision_message_lists_offending_keys_sorted(self) -> None:
-        # Collisions reported sorted for a predictable message.
+        # Collisions reported sorted — predictable message.
         with pytest.raises(ValueError) as exc_info:
             merge_custom_fields(
                 {},
@@ -182,7 +181,7 @@ class TestMergeCustomFields:
         assert "['status', 'title']" in str(exc_info.value)
 
     def test_document_allowlist_recognises_document_collisions(self) -> None:
-        # moduleFolder is standard for documents but custom for work items.
+        # moduleFolder standard for documents but custom for work items.
         merge_custom_fields(
             {}, {"moduleFolder": "Design"}, STANDARD_WORK_ITEM_ATTRIBUTES
         )  # OK for work items
@@ -194,7 +193,7 @@ class TestMergeCustomFields:
             )
 
     def test_returns_none_mutates_in_place(self) -> None:
-        # Mutates attributes in place and returns None, like _build_*_payload.
+        # Mutate attributes in place, return None, like _build_*_payload.
         attributes: dict[str, JsonValue] = {}
         result = merge_custom_fields(
             attributes, {"riskLevel": "high"}, STANDARD_WORK_ITEM_ATTRIBUTES

@@ -1,4 +1,4 @@
-"""Tests for comment models in ``mcp_server_polarion.models.comments``."""
+"""Comment model tests (``mcp_server_polarion.models.comments``)."""
 
 from __future__ import annotations
 
@@ -52,8 +52,8 @@ class TestCommentSpec:
             CommentSpec(text="")
 
     def test_typo_key_rejected(self):
-        # extra='forbid' smoke: a typo'd key must fail at parse time rather
-        # than silently drop and persist as a ghost field in Polarion.
+        # extra='forbid' smoke: typo'd key must fail at parse, not silently
+        # drop and persist as ghost field in Polarion.
         with pytest.raises(ValidationError) as exc:
             CommentSpec(text="hi", resloved=True)  # type: ignore[call-arg]
         assert exc.value.errors()[0]["type"] == "extra_forbidden"

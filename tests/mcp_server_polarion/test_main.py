@@ -1,4 +1,4 @@
-"""Tests for the __main__ entry point module."""
+"""__main__ entry point tests."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from mcp_server_polarion.__main__ import main
 
 
 class TestMain:
-    """Verify the CLI entry point."""
+    """CLI entry point."""
 
     def test_main_calls_mcp_run_with_stdio(self) -> None:
         with patch("mcp_server_polarion.__main__.mcp") as mock_mcp:

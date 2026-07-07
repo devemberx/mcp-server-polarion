@@ -1,4 +1,4 @@
-"""Tests for shared models in ``mcp_server_polarion.models.common``."""
+"""Shared model tests (``mcp_server_polarion.models.common``)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from mcp_server_polarion.models import (
 
 
 class TestPaginatedResult:
-    """Tests for the generic ``PaginatedResult[T]`` wrapper."""
+    """Generic ``PaginatedResult[T]`` wrapper."""
 
     def test_with_project_summaries(self):
         result = PaginatedResult[ProjectSummary](

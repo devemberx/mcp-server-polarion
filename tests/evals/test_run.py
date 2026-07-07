@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-# ``run`` imports ``strands_evals`` at load; skip on the bare dev install.
+# ``run`` import ``strands_evals`` at load; skip on bare dev install.
 pytest.importorskip("strands_evals")
 
 from strands_evals import Case

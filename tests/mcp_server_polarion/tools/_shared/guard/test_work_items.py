@@ -1,6 +1,4 @@
-"""Work-item guard tests: enum args, custom-field keys/values, bulk
-id/type resolution.
-"""
+"""Work-item guard: enum args, custom-field keys/values, bulk id/type resolution."""
 
 from __future__ import annotations
 
@@ -56,7 +54,7 @@ class TestGuardWorkItemEnums:
     async def test_options_list_capped_for_pathological_enum(
         self, mock_client: AsyncMock
     ) -> None:
-        # A 60-option enum shows the first 50 + a (+N more) suffix, not all 60.
+        # 60-option enum show first 50 + (+N more) suffix, not all 60.
         ids = [f"opt{i:03d}" for i in range(60)]
         mock_client.get.return_value = enum_response(ids)
 
@@ -123,7 +121,7 @@ class TestGuardWorkItemEnums:
 
 
 def _wi_list(*attrs: dict[str, object]) -> dict[str, object]:
-    """JSON:API list response of work items with the given ``attributes`` dicts."""
+    """JSON:API work-item list response with given ``attributes`` dicts."""
     return {
         "data": [
             {"type": "workitems", "id": f"MCPT-{i}", "attributes": a}
@@ -164,7 +162,7 @@ class TestGuardWorkItemCustomFieldKeys:
         )
 
         mock_client.get.assert_awaited_once()
-        # Primary path issues the MIN-per-key SQL with @all, not a per-item GET.
+        # Primary path issue MIN-per-key SQL with @all, not per-item GET.
         params = mock_client.get.await_args.kwargs["params"]
         assert params["query"].startswith("SQL:(SELECT")
         assert "GROUP BY cf.c_name" in params["query"]
@@ -176,8 +174,8 @@ class TestGuardWorkItemCustomFieldKeys:
     async def test_paginates_beyond_first_page_of_keys(
         self, mock_client: AsyncMock
     ) -> None:
-        # A type with >100 distinct keys spans pages; the union must span them too,
-        # else a key on page 2+ would be false-rejected.
+        # Type with >100 distinct keys span pages; union must span them
+        # too, else key on page 2+ false-rejected.
         page1 = _wi_list(
             *(
                 {"title": "x", "type": "task", f"k{i}": 1}
@@ -189,7 +187,7 @@ class TestGuardWorkItemCustomFieldKeys:
 
         await _check_work_item_custom_keys(mock_client, "P", "task", {"late_key": 9})
 
-        # Full page 1 (==100) forces page 2; short page 2 stops the loop.
+        # Full page 1 (==100) force page 2; short page 2 stop loop.
         assert mock_client.get.await_count == 2
         schema = cache_mod._work_item_custom_key_cache.get(("P", "task"))
         assert schema is not None
@@ -200,8 +198,8 @@ class TestGuardWorkItemCustomFieldKeys:
     async def test_unknown_key_against_fresh_sample_rejects_without_retry(
         self, mock_client: AsyncMock
     ) -> None:
-        # Cold cache: the sample is already current, so an unknown key is rejected
-        # straight away -- no redundant second fetch.
+        # Cold cache: sample already current — unknown key rejected
+        # straight away, no redundant second fetch.
         mock_client.get.return_value = _wi_list(
             {"title": "a", "type": "task", "risk_score": 5}
         )
@@ -225,16 +223,16 @@ class TestGuardWorkItemCustomFieldKeys:
             )
 
         msg = str(exc.value)
-        # Names the unverifiable key and defers to the user -- never instructs a
-        # self-recovery write (mid-update the LLM could create junk items).
+        # Name unverifiable key and defer to user -- never instruct
+        # self-recovery write (mid-update LLM could create junk items).
         assert "risk_score" in msg
         assert "ask the user" in msg.lower()
         assert "save one" not in msg.lower()
         assert "retry" not in msg.lower()
 
     async def test_sql_rejection_fails_closed(self, mock_client: AsyncMock) -> None:
-        # No Lucene fallback: a rejected SQL sample blocks the write rather than
-        # validating against an incomplete schema.
+        # No Lucene fallback: rejected SQL sample block write rather than
+        # validate against incomplete schema.
         mock_client.get.side_effect = PolarionError("SQL not supported")
 
         with pytest.raises(RuntimeError, match="Refusing the write"):
@@ -247,8 +245,8 @@ class TestGuardWorkItemCustomFieldKeys:
     async def test_cached_schema_unknown_key_refetches_then_passes(
         self, mock_client: AsyncMock
     ) -> None:
-        # A key unknown against a *cached* (possibly stale) schema triggers one
-        # fresh re-fetch; the admin-added field now present, the write passes.
+        # Key unknown against *cached* (possibly stale) schema trigger one
+        # fresh re-fetch; admin-added field now present — write pass.
         store_work_item_custom_keys("P", "task", frozenset({"risk_score"}))
         mock_client.get.return_value = _wi_list(
             {"title": "a", "type": "task", "risk_score": 5},
@@ -262,7 +260,7 @@ class TestGuardWorkItemCustomFieldKeys:
         mock_client.get.assert_awaited_once()
 
     async def test_sample_error_blocks_write(self, mock_client: AsyncMock) -> None:
-        # The SQL sample fails -> fail-closed.
+        # SQL sample fail -> fail-closed.
         mock_client.get.side_effect = PolarionError("backend down")
 
         with pytest.raises(RuntimeError, match="Refusing the write"):
@@ -284,8 +282,8 @@ class TestGuardWorkItemCustomFieldKeys:
 class TestGuardWorkItemCustomFieldEnums:
     """Enum-value stage of ``guard_work_item_custom_fields``.
 
-    The key stage is covered by ``TestGuardWorkItemCustomFieldKeys``; schemas
-    are primed here so each test exercises only the enum-value checks.
+    Key stage covered by ``TestGuardWorkItemCustomFieldKeys``; schemas
+    primed here so each test exercise only enum-value checks.
     """
 
     @pytest.fixture(autouse=True)
@@ -298,8 +296,8 @@ class TestGuardWorkItemCustomFieldEnums:
     async def test_unknown_key_rejected_before_enum_probe(
         self, mock_client: AsyncMock
     ) -> None:
-        # Key stage runs first: a ghost key never reaches getAvailableOptions,
-        # so it cannot plant a long-lived 404 entry in the enum cache.
+        # Key stage run first: ghost key never reach getAvailableOptions —
+        # cannot plant long-lived 404 entry in enum cache.
         mock_client.get.return_value = _wi_list(
             {"title": "a", "type": "task", "asil": "1"}
         )
@@ -340,7 +338,7 @@ class TestGuardWorkItemCustomFieldEnums:
     async def test_non_string_value_on_enum_field_raises(
         self, mock_client: AsyncMock
     ) -> None:
-        # Option ids are strings; the int 4 would ghost even though '4' is valid.
+        # Option ids are strings; int 4 would ghost even though '4' valid.
         mock_client.get.return_value = enum_response(["1", "2", "3", "4"])
 
         with pytest.raises(ValueError, match="int 4"):
@@ -388,8 +386,8 @@ class TestGuardWorkItemCustomFieldEnums:
     async def test_empty_values_skip_probe_entirely(
         self, mock_client: AsyncMock
     ) -> None:
-        # Payload builders drop empties; nothing reaches Polarion to ghost,
-        # so the guard must not even spend the probe GET.
+        # Payload builders drop empties; nothing reach Polarion to ghost —
+        # guard must not even spend the probe GET.
         await guard_work_item_custom_fields(
             mock_client, "P", "task", {"asil": "", "other": None, "platform": []}
         )
@@ -413,15 +411,14 @@ class TestGuardWorkItemCustomFieldEnums:
         mock_client.get.side_effect = PolarionNotFoundError("not enum", status_code=404)
         clock = [1000.0]
         monkeypatch.setattr(cache_mod, "_now", lambda: clock[0])
-        # The fixture primed the key schema under the real monotonic clock; on
-        # a freshly booted host its expiry can precede 1000.0. Re-prime under
-        # the patched clock so only the enum cache's expiry is measured.
+        # Fixture primed key schema under real monotonic clock; on freshly
+        # booted host its expiry can precede 1000.0. Re-prime under patched
+        # clock so only enum cache expiry measured.
         store_work_item_custom_keys("P", "task", frozenset({"f"}))
 
         await guard_work_item_custom_fields(mock_client, "P", "task", {"f": "x"})
         clock[0] += 61.0  # past _GUARD_TTL_SECONDS, within not_found TTL
-        # The key schema shares the 60s TTL; re-prime so only the enum
-        # cache's expiry is measured.
+        # Key schema share 60s TTL; re-prime so only enum cache expiry measured.
         store_work_item_custom_keys("P", "task", frozenset({"f"}))
         await guard_work_item_custom_fields(mock_client, "P", "task", {"f": "x"})
         assert mock_client.get.await_count == 1
@@ -449,7 +446,7 @@ class TestGuardWorkItemCustomFieldEnums:
 def _typed_workitems_response(
     project_id: str, pairs: list[tuple[str, str]]
 ) -> dict[str, object]:
-    """A JSON:API workitems list response carrying each item's ``type``."""
+    """JSON:API workitems list response carrying each item ``type``."""
     return {
         "data": [
             {
@@ -511,7 +508,7 @@ class TestResolveWorkItemTypes:
     async def test_missing_type_attribute_maps_to_empty(
         self, mock_client: AsyncMock
     ) -> None:
-        # Defensive: entry without attributes still counts as existing.
+        # Defensive: entry without attributes still count as existing.
         mock_client.get.return_value = {
             "data": [{"type": "workitems", "id": "P/A"}, "not-a-dict"]
         }
@@ -521,7 +518,7 @@ class TestResolveWorkItemTypes:
     async def test_non_list_data_treated_as_missing(
         self, mock_client: AsyncMock
     ) -> None:
-        # Defensive: a malformed reply must not pass the existence check.
+        # Defensive: malformed reply must not pass existence check.
         mock_client.get.return_value = {"data": {"type": "workitems"}}
 
         with pytest.raises(ValueError, match="not found"):

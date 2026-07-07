@@ -1,4 +1,4 @@
-"""Tests for the static SQL and HTML recipe gallery tools."""
+"""Static SQL and HTML recipe gallery tool tests."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from mcp_server_polarion.utils.html import (
 
 
 class TestGetSqlQueryRecipes:
-    """``get_sql_query_recipes`` serves the SQL:(...) recipe gallery."""
+    """``get_sql_query_recipes`` serve the SQL:(...) recipe gallery."""
 
     async def test_returns_gallery_with_schema_and_core_recipes(self) -> None:
         result = await get_sql_query_recipes()
@@ -28,7 +28,7 @@ class TestGetSqlQueryRecipes:
 
 
 class TestGetHtmlRecipes:
-    """``get_html_recipes`` serves raw-HTML templates for update tools."""
+    """``get_html_recipes`` serve raw-HTML templates for update tools."""
 
     async def test_returns_gallery_with_core_templates(self) -> None:
         result = await get_html_recipes()

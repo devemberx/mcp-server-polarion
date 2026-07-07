@@ -226,7 +226,7 @@ class TestGuardHyperlinkRoles:
 
 
 def _linkedworkitems_response(composite_ids: list[str]) -> dict[str, object]:
-    """A JSON:API forward-link page; ids are the 5-segment composite form."""
+    """JSON:API forward-link page; ids = 5-segment composite form."""
     return {
         "data": [{"type": "linkedworkitems", "id": cid} for cid in composite_ids],
         "meta": {"totalCount": len(composite_ids)},

@@ -22,9 +22,9 @@ from mcp_server_polarion.tools.work_items import (
 
 
 class TestReadPathEncoding:
-    """Every read tool must URL-encode each path segment — unencoded reserved chars
-    malform the URL or allow ``../`` traversal. Pins ``encode_path_segment()`` so
-    a refactor cannot silently drop it.
+    """Every read tool must URL-encode each path segment — unencoded reserved
+    chars malform URL or allow ``../`` traversal. Pin ``encode_path_segment()``
+    so a refactor cannot silently drop it.
     """
 
     @pytest.fixture(autouse=True)
@@ -145,8 +145,8 @@ class TestReadPathEncoding:
     async def test_list_work_item_links_back_encodes_project_id(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # work_item_id is rejected by the Lucene allowlist before encoding;
-        # use a safe id and verify only project_id is encoded.
+        # work_item_id rejected by Lucene allowlist before encoding; use
+        # safe id and verify only project_id encoded.
         mock_client.get.return_value = {"data": [], "meta": {"totalCount": 0}}
 
         await list_work_item_links(

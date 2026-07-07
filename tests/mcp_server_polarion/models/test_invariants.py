@@ -24,7 +24,7 @@ from mcp_server_polarion.models import (
 
 
 class TestCrossModelIntegration:
-    """Ensure models compose correctly as they would in real tool usage."""
+    """Models compose correctly as in real tool usage."""
 
     def test_paginated_work_items_json_round_trip(self):
         page = PaginatedResult[WorkItemSummary](
@@ -79,9 +79,9 @@ class TestCrossModelIntegration:
         assert restored.work_item_ids == ["MCPT-001", "MCPT-002"]
 
     def test_workitemread_metadata_mirrors_workitemdetail(self):
-        """Drift between the two models makes ``read_work_item`` silently
-        return less than ``get_work_item``; they must match exactly except
-        for the body field (``description_html`` vs ``description``)."""
+        """Drift between the two models make ``read_work_item`` silently
+        return less than ``get_work_item``; must match exactly except body
+        field (``description_html`` vs ``description``)."""
         detail_meta = set(WorkItemDetail.model_fields) - {"description_html"}
         read_meta = set(WorkItemRead.model_fields) - {"description"}
         assert detail_meta == read_meta, (
@@ -91,8 +91,8 @@ class TestCrossModelIntegration:
         )
 
     def test_field_descriptions_are_non_empty_when_set(self):
-        """When a model field carries a ``Field(description=...)`` it must be
-        non-empty; fields whose name alone is unambiguous may omit it."""
+        """Model field carrying ``Field(description=...)`` must be non-empty;
+        fields whose name alone is unambiguous may omit it."""
         models = [
             ProjectSummary,
             DocumentSummary,

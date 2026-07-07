@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-# ``mcp_bridge`` imports ``strands`` at module load; skip on the bare dev install.
+# ``mcp_bridge`` import ``strands`` at module load; skip on bare dev install.
 pytest.importorskip("strands")
 
 from evals.harness.mcp_bridge import (

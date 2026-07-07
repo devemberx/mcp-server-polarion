@@ -8,8 +8,8 @@ from mcp_server_polarion.server import mcp
 
 
 class TestWriteToolAnnotations:
-    """Write tools must advertise destructive/idempotent/openWorld hints — MCP
-    clients use them for risk display and auto-approval policies.
+    """Write tools must advertise destructive/idempotent/openWorld hints —
+    MCP clients use them for risk display and auto-approval policies.
     """
 
     @staticmethod
