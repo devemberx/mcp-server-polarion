@@ -41,7 +41,7 @@ CI: `ruff check` → `ruff format --check` → `mypy` → `pytest` (`--cov-fail-
 - Guards fail closed: validation GET error block write; only successful empty option set defer to Polarion.
 - Docstrings = LLM manual, Google-style; only prose above `Args:` ship — keep tight; return-field bullets sync with model. Field descriptions one line, skip when name + type say all.
 - No `WARNING:`/`NOTE:` prefixes, no dev-narrative, no banner dividers. CLAUDE.md dev-only — MCP-user info live in `@mcp.tool` docstring. Module docstrings = why module exists; constraints inline next to what they constrain.
-- Comments: one line, explain why not what; never restate self-evident code. No dead code, no stray `TODO`s; keep comments sync when code change.
+- Comments + dev docstrings caveman-style: drop articles/filler, compress verbs — `# Custom key match standard attr = silent shadow.` One line per point, why not what; never restate self-evident code; multi-line only when each line carry distinct fact. Technical terms/ids/API names/numbers exact; no invented abbreviations. Exempt (LLM-facing, eval-gated): `@mcp.tool` docstrings + `Field(description=...)` — normal prose per Docstrings rule above. `TODO` = `# TODO(#issue): concrete action`, never stray. No dead code; keep comments sync when code change.
 
 ## Polarion API Gotchas
 
