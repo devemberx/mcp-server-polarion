@@ -1,5 +1,5 @@
-"""Tests for the test run tools — list parsing/param forwarding, bulk create
-payloads and guards, error mapping, and field bounds.
+"""Test run tools — list parsing/param forwarding, bulk create payloads and
+guards, error mapping, field bounds.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from mcp_server_polarion.tools.test_runs import (
 
 
 def _template_response(run_id: str) -> dict[str, object]:
-    """Single-testrun GET body the template guard accepts."""
+    """Single-testrun GET body template guard accept."""
     return {
         "data": {
             "type": "testruns",
@@ -36,7 +36,7 @@ def _template_response(run_id: str) -> dict[str, object]:
 
 
 class TestListTestRuns:
-    """Tests for the ``list_test_runs`` tool."""
+    """``list_test_runs`` tool."""
 
     async def test_returns_test_runs(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -324,9 +324,9 @@ class TestListTestRuns:
 
 
 class TestListTestRunsQueryDocumentation:
-    """Lock the query docs to Lucene-only — ``SQL:(...)`` on ``/testruns`` 400s
-    on the live server (the endpoint wraps the query verbatim into Lucene), so
-    even a "no SQL" disclaimer must not reintroduce the token an LLM could copy.
+    """Lock query docs to Lucene-only — ``SQL:(...)`` on ``/testruns`` 400 on
+    live server (endpoint wrap query verbatim into Lucene), so even a "no SQL"
+    disclaimer must not reintroduce the token an LLM could copy.
     """
 
     def test_query_docs_promise_lucene_only(self) -> None:
@@ -414,13 +414,13 @@ class TestBuildCreateTestRunsPayload:
 
 
 class TestCreateTestRuns:
-    """Tests for the ``create_test_runs`` tool."""
+    """``create_test_runs`` tool."""
 
     async def test_duplicate_ids_rejected_before_any_request(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # Client-supplied ids can collide; the server would 409 after
-        # partially creating the batch.
+        # Client-supplied ids can collide; server would 409 after partially
+        # creating the batch.
         with pytest.raises(ValueError, match=r"Duplicate id\(s\) \['TR-1'\]"):
             await create_test_runs(
                 mock_ctx,
@@ -452,7 +452,7 @@ class TestCreateTestRuns:
         assert result.dry_run is False
         assert result.test_run_ids == ["TR-1"]
         assert result.payload_preview is None
-        # No enums / template / custom fields supplied -> no guard traffic.
+        # No enums / template / custom fields -> no guard traffic.
         mock_client.get.assert_not_awaited()
         path = mock_client.post.await_args.args[0]
         assert path == "/projects/proj1/testruns"
@@ -546,7 +546,7 @@ class TestCreateTestRuns:
         )
 
         assert result.test_run_ids == ["TR-5"]
-        # Sampled instances then templates before the POST.
+        # Sampled instances then templates before POST.
         assert mock_client.get.await_count == 2
 
     async def test_project_not_found_raises_value_error(
@@ -640,7 +640,7 @@ class TestCreateTestRunsFieldValidation:
 
 class TestListTestRunsFieldValidation:
     """``page_size`` bounds — direct calls bypass JSON Schema; proven via
-    ``TypeAdapter`` rebuild from the signature.
+    ``TypeAdapter`` rebuild from signature.
     """
 
     @staticmethod

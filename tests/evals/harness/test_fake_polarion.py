@@ -1,5 +1,5 @@
 """Fake-Polarion tests: ``_dispatch`` is a pure request router, driven with
-hand-built requests (no respx). Pins the routing table and the mutation log.
+hand-built requests (no respx). Pin routing table and mutation log.
 """
 
 from __future__ import annotations
@@ -206,8 +206,8 @@ class TestTestRunRouting:
         assert attributes["isTemplate"] is True
 
     def test_single_instance_omits_is_template(self) -> None:
-        # Live Polarion omits isTemplate on run instances; the template guard
-        # relies on the absence to reject instances passed as templates.
+        # Live Polarion omit isTemplate on run instances; template guard
+        # rely on absence to reject instances passed as templates.
         response = _get(FakePolarion(), f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}")
         assert response.status_code == 200
         assert "isTemplate" not in _json(response)["data"]["attributes"]
@@ -226,7 +226,7 @@ class TestTestRunRouting:
         assert ids == ["manual", "automated"]
 
     def test_wildcard_context_does_not_resolve_testrun_enum(self) -> None:
-        # Mirrors live Polarion: testrun enums 404 outside the testing context.
+        # Mirror live Polarion: testrun enums 404 outside testing context.
         response = _get(
             FakePolarion(),
             f"/projects/{PROJECT}/enumerations/~/testrun-type/~",

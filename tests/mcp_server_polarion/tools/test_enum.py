@@ -1,4 +1,4 @@
-"""Tests for the enum option tools (work item + document)."""
+"""Enum option tool tests (work item + document)."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ _STATUS_DATA: list[dict[str, object]] = [
 
 
 class TestListWorkItemEnumOptions:
-    """Tests for the ``list_work_item_enum_options`` tool."""
+    """``list_work_item_enum_options`` tool."""
 
     async def test_returns_enum_options(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -257,7 +257,7 @@ class TestListWorkItemEnumOptions:
 
 
 class TestListWorkItemEnumOptionsFieldValidation:
-    """Verify Field constraints on ``list_work_item_enum_options`` parameters."""
+    """Field constraints on ``list_work_item_enum_options`` parameters."""
 
     @staticmethod
     def _adapter_for(param_name: str) -> TypeAdapter[object]:
@@ -283,7 +283,7 @@ class TestListWorkItemEnumOptionsFieldValidation:
 
 
 class TestListDocumentEnumOptions:
-    """Tests for the ``list_document_enum_options`` tool."""
+    """``list_document_enum_options`` tool."""
 
     async def test_returns_enum_options(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -493,7 +493,7 @@ class TestListDocumentEnumOptions:
 
 
 class TestListDocumentEnumOptionsFieldValidation:
-    """Verify Field constraints on ``list_document_enum_options`` parameters."""
+    """Field constraints on ``list_document_enum_options`` parameters."""
 
     @staticmethod
     def _adapter_for(param_name: str) -> TypeAdapter[object]:

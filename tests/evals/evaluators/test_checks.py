@@ -1,5 +1,5 @@
-"""Evaluator check tests: every pure predicate exercised against clean and
-forbidden synthetic trajectories. No LLM, no respx.
+"""Evaluator checks: every pure predicate vs clean + forbidden synthetic
+trajectories. No LLM, no respx.
 """
 
 from __future__ import annotations
@@ -20,12 +20,12 @@ def _call(
 
 
 def _update_call(*items: dict[str, Any], project: str = "P") -> dict[str, Any]:
-    """A bulk ``update_work_items`` call with per-item dicts."""
+    """Bulk ``update_work_items`` call with per-item dicts."""
     return _call("update_work_items", {"project_id": project, "items": list(items)})
 
 
 class TestExpandItemCalls:
-    """``_expand_item_calls`` flattens bulk calls into per-item pseudo-calls."""
+    """``_expand_item_calls`` flatten bulk calls into per-item pseudo-calls."""
 
     def test_flat_call_is_identity(self) -> None:
         call = _call("get_work_item", {"project_id": "P", "work_item_id": "MCPT-1"})
@@ -65,7 +65,7 @@ class TestCheckReadonly:
 
 
 class TestCheckGetBeforeUpdate:
-    """A matching ``get_*`` must precede every ``update_*`` on the same id."""
+    """Matching ``get_*`` must precede every ``update_*`` on same id."""
 
     def test_empty_trajectory_passes(self) -> None:
         passed, _ = checks.check_get_before_update([], {})
@@ -87,7 +87,7 @@ class TestCheckGetBeforeUpdate:
         assert "get_work_item" in reason
 
     def test_every_item_needs_its_own_prior_get(self) -> None:
-        # Item A was read, item B was not: the bulk write is still blind on B.
+        # Item A read, item B not: bulk write still blind on B.
         trajectory = [
             _call("get_work_item", {"project_id": "P", "work_item_id": "MCPT-1"}),
             _update_call(
@@ -112,8 +112,7 @@ class TestCheckGetBeforeUpdate:
         assert passed is True
 
     def test_bulk_update_without_readable_items_fails(self) -> None:
-        # A bulk write carrying no per-item dicts is still a blind write
-        # attempt, not a free pass.
+        # Bulk write with no per-item dicts = still blind write, not free pass.
         trajectory = [_call("update_work_items", {"project_id": "P", "items": []})]
         passed, reason = checks.check_get_before_update(trajectory, {})
         assert passed is False
@@ -129,8 +128,8 @@ class TestCheckGetBeforeUpdate:
         assert "MCPT-1" in reason
 
     def test_qualified_and_short_work_item_ids_match(self) -> None:
-        # A project-qualified id in the get and a short id in the update
-        # target the same item; the check must not false-fail.
+        # Project-qualified id in get and short id in update target same
+        # item; check must not false-fail.
         trajectory = [
             _call("get_work_item", {"project_id": "P", "work_item_id": "P/MCPT-1"}),
             _update_call({"work_item_id": "MCPT-1", "title": "x"}),
@@ -223,8 +222,8 @@ class TestCheckResolveRootComment:
         assert passed is False
 
     def test_root_plus_stray_reply_passes(self) -> None:
-        # The reply attempt 400s loudly in real Polarion (server-guarded);
-        # the root resolve already did the job.
+        # Reply attempt 400 loudly in real Polarion (server-guarded); root
+        # resolve already did the job.
         trajectory = [
             _call("list_document_comments", dict(_DOC_ARGS)),
             _call(
@@ -240,8 +239,7 @@ class TestCheckResolveRootComment:
         assert passed is True
 
     def test_reopened_root_does_not_mask_reply_resolve(self) -> None:
-        # resolved=False on the root is not a resolution; the reply attempt
-        # must still be flagged.
+        # resolved=False on root is no resolution; reply attempt still flagged.
         trajectory = [
             _call("list_document_comments", dict(_DOC_ARGS)),
             _call(
@@ -313,7 +311,7 @@ class TestCheckPreserveHyperlinks:
         assert "fake-spec" in reason
 
     def test_dropping_uri_on_later_item_fails(self) -> None:
-        # The offending item hides behind a benign one in the same batch.
+        # Offending item hide behind benign one in same batch.
         trajectory = [
             _update_call(
                 {"work_item_id": "MCPT-1", "title": "x"},
@@ -403,7 +401,7 @@ class TestCheckRoundTripSource:
         assert passed is True
 
     def test_body_write_on_later_item_needs_its_own_flagged_get(self) -> None:
-        # Only item 1 was round-trip sourced; item 2's body write is not.
+        # Only item 1 round-trip sourced; item 2 body write is not.
         trajectory = [
             _call(
                 "get_work_item",
@@ -539,8 +537,8 @@ class TestCheckSingleBulkWrite:
         assert "update_work_items" in reason
 
     def test_min_total_items_fails_on_partial_batch(self) -> None:
-        # One committed call but only one of the three required items: the
-        # batch left the task undone, not an efficient pass.
+        # One committed call but only one of three required items: batch
+        # left task undone, not efficient pass.
         trajectory = [_update_call({"work_item_id": "MCPT-1", "title": "a"})]
         passed, reason = checks.check_single_bulk_write(
             trajectory, {"tool": "update_work_items", "min_total_items": 3}
@@ -727,7 +725,7 @@ def _parts_result(*ids: str) -> dict[str, Any]:
     return {"items": [{"id": i} for i in ids]}
 
 
-# create + read_parts (any order) -> move(anchored) -- the authoring partial order.
+# create + read_parts (any order) -> move(anchored) -- authoring partial order.
 _SPEC_STEPS: list[dict[str, Any]] = [
     {"tool": "create_work_items"},
     {"tool": "read_document_parts", "match": {"document_name": "D"}},
@@ -774,8 +772,8 @@ class TestCheckTableHtmlRecipeSourced:
         assert "get_html_recipes" in reason
 
     def test_table_nested_in_later_bulk_item_is_caught(self) -> None:
-        # The table hides on item 2 of a bulk update; the per-item scan must
-        # still find it and require a prior recipe.
+        # Table hide on item 2 of bulk update; per-item scan must still
+        # find it and require prior recipe.
         trajectory = [
             _update_call(
                 {"work_item_id": "MCPT-1", "description_html": "<p>plain</p>"},
@@ -797,7 +795,7 @@ class TestCheckTableHtmlRecipeSourced:
         assert passed is False
 
     def test_no_table_update_at_all_fails(self) -> None:
-        # The task demands a table; a refusal must not pass vacuously.
+        # Task demand table; refusal must not pass vacuously.
         trajectory = [
             _call("get_work_item", {"work_item_id": "MCPT-200"}),
             _update_call(
@@ -851,8 +849,8 @@ class TestCheckOrderedTrajectory:
         assert passed is True
 
     def test_read_before_create_tolerated(self) -> None:
-        # inspect-then-create: read_document_parts before create_work_items is a
-        # valid order; only the move's dependencies are constrained.
+        # inspect-then-create: read_document_parts before create_work_items
+        # valid order; only move dependencies constrained.
         trajectory = [
             _call(
                 "read_document_parts",
@@ -887,8 +885,8 @@ class TestCheckOrderedTrajectory:
         assert "get_work_item" in reason
 
     def test_match_key_satisfied_by_bulk_item(self) -> None:
-        # A step's work_item_id constraint matches a per-item id nested in a
-        # bulk call's args["items"].
+        # Step work_item_id constraint match per-item id nested in bulk
+        # call args["items"].
         steps = [
             {"tool": "get_work_item", "match": {"work_item_id": "MCPT-1"}},
             {
@@ -958,7 +956,7 @@ class TestCheckOrderedTrajectory:
         assert "guessed" in reason
 
     def test_observed_threads_qualified_id_via_short_id(self) -> None:
-        # link result carries a short target id; the read uses a qualified id.
+        # Link result carry short target id; read use qualified id.
         steps = [
             {"tool": "list_work_item_links", "match": {"work_item_id": "MCPT-300"}},
             {

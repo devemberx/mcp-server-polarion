@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-# ``runner`` imports ``strands`` / ``strands_evals`` at load; skip on bare install.
+# ``runner`` import ``strands`` / ``strands_evals`` at load; skip on bare install.
 pytest.importorskip("strands_evals")
 
 from evals.harness.runner import (

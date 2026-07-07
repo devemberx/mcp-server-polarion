@@ -1,4 +1,4 @@
-"""Tests for ``setup_logging`` — stderr handler, propagation, idempotency."""
+"""``setup_logging`` — stderr handler, propagation, idempotency."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from mcp_server_polarion.core.logging import setup_logging
 
 
 class TestSetupLogging:
-    """Verify logging configuration behaviour."""
+    """Logging configuration behaviour."""
 
     def test_returns_named_logger(self) -> None:
         logger = setup_logging()
@@ -36,7 +36,7 @@ class TestSetupLogging:
         setup_logging(level=logging.INFO)
 
     def test_idempotent_no_duplicate_handlers(self) -> None:
-        """Calling ``setup_logging`` twice must not add a second handler."""
+        """``setup_logging`` twice must not add second handler."""
         logger = setup_logging()
         handler_count = len(logger.handlers)
         setup_logging()

@@ -1,4 +1,4 @@
-"""Tests for the work item link tools."""
+"""Work item link tool tests."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ from mcp_server_polarion.tools.links import (
 
 
 def _project_enum_get_response(enum_name: str, ids: list[str]) -> dict[str, object]:
-    """Single-enumeration response: ``data`` is a dict, options nested under it."""
+    """Single-enumeration response: ``data`` = dict, options nested under."""
     return {
         "data": {
             "type": "enumerations",
@@ -51,7 +51,7 @@ def _project_enum_get_response(enum_name: str, ids: list[str]) -> dict[str, obje
 def _echo_targets_exist(
     path: str, *, params: dict[str, object] | None = None, **_: object
 ) -> dict[str, object]:
-    """Guard GET stub: report every id in the ``id:(...)`` query as existing."""
+    """Guard GET stub: report every id in ``id:(...)`` query as existing."""
     project = path.split("/")[2]
     query = str((params or {}).get("query", ""))
     ids = query.removeprefix("id:(").removesuffix(")").split()
@@ -59,7 +59,7 @@ def _echo_targets_exist(
 
 
 def _forward_links_response(composite_ids: list[str]) -> dict[str, object]:
-    """A JSON:API forward-link page used by the delete pre-read."""
+    """JSON:API forward-link page used by delete pre-read."""
     return {
         "data": [{"type": "linkedworkitems", "id": cid} for cid in composite_ids],
         "meta": {"totalCount": len(composite_ids)},
@@ -67,10 +67,10 @@ def _forward_links_response(composite_ids: list[str]) -> dict[str, object]:
 
 
 class TestListWorkItemLinks:
-    """Tests for the ``list_work_item_links`` tool.
+    """``list_work_item_links`` tool.
 
-    Each call returns a single page in a single direction (``forward`` or
-    ``back``). Pagination matches the convention used by other list tools.
+    Each call return single page in single direction (``forward`` or
+    ``back``). Pagination match other list tools' convention.
     """
 
     async def test_forward_returns_paginated_result(
@@ -387,8 +387,8 @@ class TestListWorkItemLinks:
     async def test_direction_default_is_forward_in_registered_schema(
         self,
     ) -> None:
-        """Guard the JSON-Schema default for ``direction`` — direct calls can't exercise
-        FastMCP default-injection, so the registered schema is authoritative.
+        """Guard JSON-Schema default for ``direction`` — direct calls can't
+        exercise FastMCP default-injection; registered schema authoritative.
         """
         tools = await mcp.list_tools()
         tool = next(t for t in tools if t.name == "list_work_item_links")
@@ -414,7 +414,7 @@ class TestListWorkItemLinks:
         mock_client: AsyncMock,
         bad_id: str,
     ) -> None:
-        """Back-link Lucene query is built from the raw id; bad chars must abort."""
+        """Back-link Lucene query built from raw id; bad chars must abort."""
         with pytest.raises(ValueError, match="Lucene"):
             await list_work_item_links(
                 mock_ctx,
@@ -428,7 +428,7 @@ class TestListWorkItemLinks:
 
 
 class TestBuildCreateLinksPayload:
-    """Tests for the private ``_build_create_links_payload`` helper."""
+    """Private ``_build_create_links_payload`` helper."""
 
     def test_single_spec_minimal_skips_revision(self) -> None:
         payload = _build_create_links_payload(
@@ -519,7 +519,7 @@ class TestBuildCreateLinksPayload:
 
 
 class TestExtractCreatedLinkIds:
-    """Tests for the private ``_extract_created_link_ids`` helper."""
+    """Private ``_extract_created_link_ids`` helper."""
 
     def test_extracts_in_order(self) -> None:
         response: dict[str, object] = {
@@ -550,7 +550,7 @@ class TestExtractCreatedLinkIds:
 
 
 class TestCreateWorkItemLinksDryRun:
-    """Tests for ``create_work_item_links`` with ``dry_run=True``."""
+    """``create_work_item_links`` with ``dry_run=True``."""
 
     @pytest.fixture(autouse=True)
     def _stub_target_existence(self, mock_client: AsyncMock) -> None:
@@ -578,12 +578,12 @@ class TestCreateWorkItemLinksDryRun:
         assert attrs == {"role": "parent", "suspect": False}
         rels = cast(dict[str, object], item["relationships"])
         wi_rel = cast(dict[str, object], rels["workItem"])
-        # target_project_id defaults to source project_id when None.
+        # target_project_id default to source project_id when None.
         assert wi_rel["data"] == {"type": "workitems", "id": "MyProj/MCPT-2"}
 
 
 class TestCreateWorkItemLinksTargetGuard:
-    """The target-existence guard runs before the write, on dry-run too."""
+    """Target-existence guard run before write, on dry-run too."""
 
     async def test_dry_run_missing_target_raises_without_post(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -619,11 +619,11 @@ class TestCreateWorkItemLinksTargetGuard:
 
 
 class TestCreateWorkItemLinksRoleGuard:
-    """The link-role guard runs after the target guard, before the write."""
+    """Link-role guard run after target guard, before write."""
 
     @staticmethod
     def _stub(valid_roles: list[str]) -> object:
-        """GET stub: echo targets as existing, serve the role enumeration."""
+        """GET stub: echo targets as existing, serve role enumeration."""
 
         def fake_get(
             path: str, *, params: dict[str, object] | None = None, **_: object
@@ -677,7 +677,7 @@ class TestCreateWorkItemLinksRoleGuard:
     async def test_target_guard_runs_before_role_guard(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # Target guard runs first, so its error surfaces before role enumeration.
+        # Target guard run first — its error surface before role enumeration.
         def fake_get(
             path: str, *, params: dict[str, object] | None = None, **_: object
         ) -> dict[str, object]:
@@ -702,7 +702,7 @@ class TestCreateWorkItemLinksRoleGuard:
 
 
 class TestCreateWorkItemLinksHappyPath:
-    """Tests for a successful ``create_work_item_links`` call."""
+    """Successful ``create_work_item_links`` call."""
 
     @pytest.fixture(autouse=True)
     def _stub_target_existence(self, mock_client: AsyncMock) -> None:
@@ -810,7 +810,7 @@ class TestCreateWorkItemLinksHappyPath:
 
 
 class TestCreateWorkItemLinksErrorMapping:
-    """Tests that domain exceptions are mapped at the tool layer."""
+    """Domain exceptions mapped at tool layer."""
 
     @pytest.fixture(autouse=True)
     def _stub_target_existence(self, mock_client: AsyncMock) -> None:
@@ -868,7 +868,7 @@ class TestCreateWorkItemLinksErrorMapping:
 
 
 class TestCreateWorkItemLinksResponseParsing:
-    """Tests for unexpected 2xx response shapes from Polarion."""
+    """Unexpected 2xx response shapes from Polarion."""
 
     @pytest.fixture(autouse=True)
     def _stub_target_existence(self, mock_client: AsyncMock) -> None:
@@ -909,7 +909,7 @@ class TestCreateWorkItemLinksResponseParsing:
     async def test_id_count_mismatch_raises_runtime_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Fewer returned ids than submitted links flags a partial create."""
+        """Fewer returned ids than submitted links flag partial create."""
         mock_client.post.return_value = {
             "data": [
                 {
@@ -933,7 +933,7 @@ class TestCreateWorkItemLinksResponseParsing:
 
 
 class TestCreateWorkItemLinksFieldValidation:
-    """Verify ``min_length=1`` constraints on the required parameters."""
+    """``min_length=1`` constraints on required parameters."""
 
     @staticmethod
     def _adapter_for(param_name: str) -> TypeAdapter[object]:
@@ -984,7 +984,7 @@ class TestCreateWorkItemLinksFieldValidation:
 
 
 class TestBuildDeleteLinksPayload:
-    """Tests for the private ``_build_delete_links_payload`` helper."""
+    """Private ``_build_delete_links_payload`` helper."""
 
     def test_single_ref_composite_id_same_project(self) -> None:
         link_ids, payload = _build_delete_links_payload(
@@ -1039,7 +1039,7 @@ class TestBuildDeleteLinksPayload:
 
 
 class TestDeleteWorkItemLinksDryRun:
-    """Tests for ``delete_work_item_links`` with ``dry_run=True``."""
+    """``delete_work_item_links`` with ``dry_run=True``."""
 
     async def test_dry_run_returns_payload_without_calling_delete(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1063,12 +1063,12 @@ class TestDeleteWorkItemLinksDryRun:
         assert isinstance(result, WorkItemLinksDeleteResult)
         assert result.dry_run is True
         assert result.deleted is False
-        # link_ids are always populated since they are reconstructed from input.
+        # link_ids always populated — reconstructed from input.
         assert result.link_ids == [
             "MyProj/MCPT-1/parent/MyProj/MCPT-2",
             "MyProj/MCPT-1/verifies/MyProj/MCPT-3",
         ]
-        # The pre-read runs on dry_run so the preview's split is accurate.
+        # Pre-read run on dry_run so preview split accurate.
         assert result.deleted_link_ids == ["MyProj/MCPT-1/parent/MyProj/MCPT-2"]
         assert result.not_found_link_ids == ["MyProj/MCPT-1/verifies/MyProj/MCPT-3"]
         assert result.payload_preview is not None
@@ -1080,7 +1080,7 @@ class TestDeleteWorkItemLinksDryRun:
 
 
 class TestDeleteWorkItemLinksHappyPath:
-    """Tests for a successful ``delete_work_item_links`` call."""
+    """Successful ``delete_work_item_links`` call."""
 
     async def test_returns_deleted_true_on_204(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1190,7 +1190,7 @@ class TestDeleteWorkItemLinksHappyPath:
 
 
 class TestDeleteWorkItemLinksErrorMapping:
-    """Tests that domain exceptions are mapped at the tool layer."""
+    """Domain exceptions mapped at tool layer."""
 
     async def test_401_raises_permission_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1214,8 +1214,8 @@ class TestDeleteWorkItemLinksErrorMapping:
     async def test_404_raises_value_error_about_source_wi(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Path-level 404 = source WI missing; body-level 'link not found' is silently
-        ignored by Polarion (confirmed on testdrive, 2026-05-22).
+        """Path-level 404 = source WI missing; body-level 'link not found'
+        silently ignored by Polarion (confirmed on testdrive, 2026-05-22).
         """
         mock_client.get.return_value = _forward_links_response(
             ["MyProj/MCPT-1/parent/MyProj/MCPT-2"]
@@ -1289,7 +1289,7 @@ class TestDeleteWorkItemLinksErrorMapping:
     async def test_preread_unreachable_blocks_before_delete(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """A 5xx pre-read fails closed -- the delete is never attempted."""
+        """5xx pre-read fail closed -- delete never attempted."""
         mock_client.get.side_effect = PolarionError("server error", status_code=500)
 
         with pytest.raises(RuntimeError, match="Refusing the delete"):
@@ -1304,7 +1304,7 @@ class TestDeleteWorkItemLinksErrorMapping:
 
 
 class TestDeleteWorkItemLinksFieldValidation:
-    """Verify ``min_length=1`` constraints on the required parameters."""
+    """``min_length=1`` constraints on required parameters."""
 
     @staticmethod
     def _adapter_for(param_name: str) -> TypeAdapter[object]:
@@ -1355,7 +1355,7 @@ class TestDeleteWorkItemLinksFieldValidation:
 
 
 class TestBuildUpdateLinkPayload:
-    """Tests for the private ``_build_update_link_payload`` helper."""
+    """Private ``_build_update_link_payload`` helper."""
 
     def test_composite_id_same_project(self) -> None:
         link_id, path, payload = _build_update_link_payload(
@@ -1434,7 +1434,7 @@ class TestBuildUpdateLinkPayload:
         assert attributes == {"revision": "HEAD", "suspect": False}
 
     def test_suspect_false_is_emitted(self) -> None:
-        """``suspect=False`` is a real value (clearing the flag), not omitted."""
+        """``suspect=False`` is a real value (clear the flag), not omitted."""
         _link_id, _path, payload = _build_update_link_payload(
             source_project_id="MyProj",
             source_work_item_id="MCPT-1",
@@ -1449,7 +1449,7 @@ class TestBuildUpdateLinkPayload:
 
 
 class TestUpdateWorkItemLinkDryRun:
-    """Tests for ``update_work_item_link`` with ``dry_run=True``."""
+    """``update_work_item_link`` with ``dry_run=True``."""
 
     async def test_dry_run_returns_preview_without_calling_patch(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1477,7 +1477,7 @@ class TestUpdateWorkItemLinkDryRun:
 
 
 class TestUpdateWorkItemLinkHappyPath:
-    """Tests for a successful ``update_work_item_link`` call."""
+    """Successful ``update_work_item_link`` call."""
 
     async def test_returns_updated_true_and_link_id(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1530,7 +1530,7 @@ class TestUpdateWorkItemLinkHappyPath:
 
 
 class TestUpdateWorkItemLinkErrors:
-    """Domain exceptions are raised, not returned in the result."""
+    """Domain exceptions raised, not returned in result."""
 
     async def test_not_found_raises_value_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1594,7 +1594,7 @@ class TestUpdateWorkItemLinkAuthError:
 
 
 class TestUpdateWorkItemLinkFieldValidation:
-    """Verify ``min_length=1`` constraints and at-least-one-attribute check."""
+    """``min_length=1`` constraints + at-least-one-attribute check."""
 
     @staticmethod
     def _adapter_for(param_name: str) -> TypeAdapter[object]:
@@ -1622,7 +1622,7 @@ class TestUpdateWorkItemLinkFieldValidation:
     async def test_both_attributes_none_raises_value_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """suspect=None and revision=None must be rejected before any PATCH."""
+        """suspect=None and revision=None rejected before any PATCH."""
         with pytest.raises(ValueError, match="at least one"):
             await update_work_item_link(
                 mock_ctx,

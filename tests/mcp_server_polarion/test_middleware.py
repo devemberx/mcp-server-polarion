@@ -1,5 +1,5 @@
-"""Tests for the tool-argument ValidationError compaction middleware: the pure
-``compact_validation_error`` seam plus the ``on_call_tool`` wrapper behaviour.
+"""Tool-argument ValidationError compaction middleware: pure
+``compact_validation_error`` seam plus ``on_call_tool`` wrapper behaviour.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ def _validation_error(payload: dict[str, object]) -> ValidationError:
 
 
 class TestCompactValidationError:
-    """Tests for `compact_validation_error(tool_name, exc)`."""
+    """`compact_validation_error(tool_name, exc)`."""
 
     def test_names_tool_and_field(self) -> None:
         exc = _validation_error({"links": []})
@@ -70,7 +70,7 @@ class TestCompactValidationError:
 
 
 class TestCompactValidationErrorMiddleware:
-    """Tests for `CompactValidationErrorMiddleware.on_call_tool`."""
+    """`CompactValidationErrorMiddleware.on_call_tool`."""
 
     async def test_compacts_validation_error_into_tool_error(self) -> None:
         mw = CompactValidationErrorMiddleware()

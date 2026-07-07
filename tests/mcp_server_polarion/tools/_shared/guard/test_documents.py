@@ -57,8 +57,8 @@ class TestGuardDocumentEnums:
 def _docs_list(*docs: tuple[str, dict[str, object]]) -> dict[str, object]:
     """Heading + ``include=module`` sample: one module per document in ``included``.
 
-    ``data`` rows are bare heading placeholders that only drive pagination; the
-    document type + customs ride in the ``included`` module resources.
+    ``data`` rows = bare heading placeholders, only drive pagination;
+    document type + customs ride in ``included`` module resources.
     """
     return {
         "data": [{"type": "workitems"} for _ in docs],
@@ -96,7 +96,7 @@ class TestGuardDocumentCustomFieldKeys:
     async def test_sample_primes_schema_and_passes(
         self, mock_client: AsyncMock
     ) -> None:
-        # Customs are grouped per type across the whole project in one GET.
+        # Customs grouped per type across whole project in one GET.
         mock_client.get.return_value = _docs_list(
             ("generic", {"doc_risk": 3}),
             ("generic", {"owner": "x"}),
@@ -111,11 +111,11 @@ class TestGuardDocumentCustomFieldKeys:
         params = mock_client.get.call_args.kwargs["params"]
         path = mock_client.get.call_args.args[0]
         assert path == "/projects/P/workitems"
-        # Heading-discovery SQL + include=module surfaces each doc's type+customs.
+        # Heading-discovery SQL + include=module surface each doc type+customs.
         assert params["query"].startswith("SQL:(")
         assert params["include"] == "module"
         assert params["fields[documents]"] == "@all"
-        # Every type's schema is stored from the one fetch.
+        # Every type schema stored from the one fetch.
         assert cache_mod._document_type_custom_key_cache.get(
             ("P", "systemReqSpecification")
         ) == frozenset({"version"})
@@ -123,8 +123,8 @@ class TestGuardDocumentCustomFieldKeys:
     async def test_non_list_included_is_skipped_and_fails_closed(
         self, mock_client: AsyncMock
     ) -> None:
-        # Malformed page: ``included`` not a list -> no keys sampled -> empty
-        # schema refuses the write.
+        # Malformed page: ``included`` not a list -> no keys sampled ->
+        # empty schema refuse the write.
         mock_client.get.return_value = {
             "data": [{"type": "workitems"}],
             "included": {"type": "documents"},
@@ -138,9 +138,9 @@ class TestGuardDocumentCustomFieldKeys:
     async def test_non_document_included_entries_are_skipped(
         self, mock_client: AsyncMock
     ) -> None:
-        # Stray entries in ``included`` (non-dict, non-document type, non-dict
-        # attributes, missing document type) must not break sampling of the
-        # well-formed entries.
+        # Stray entries in ``included`` (non-dict, non-document type,
+        # non-dict attributes, missing document type) must not break
+        # sampling of well-formed entries.
         response = _docs_list(("generic", {"doc_risk": 3}))
         included = response["included"]
         assert isinstance(included, list)
@@ -216,7 +216,7 @@ class TestGuardDocumentCustomFieldKeys:
 
 
 class TestGuardDocumentCustomFieldEnums:
-    """Document-axis mirror; the shared enum core is exercised above."""
+    """Document-axis mirror; shared enum core exercised above."""
 
     @pytest.fixture(autouse=True)
     def _prime_key_schemas(self, _reset_guard_caches: None) -> None:

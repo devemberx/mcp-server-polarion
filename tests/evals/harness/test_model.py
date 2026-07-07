@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-# ``model`` imports ``strands.models.litellm`` at load; skip on the bare install.
+# ``model`` import ``strands.models.litellm`` at load; skip on bare install.
 pytest.importorskip("strands")
 
 from evals.harness.model import (
@@ -51,7 +51,7 @@ class TestBuildModel:
 
     def test_base_url_absent_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("EVAL_MODEL_BASE_URL", raising=False)
-        # No base url -> no api_base routing (LiteLLM normalises None to {}).
+        # No base url -> no api_base routing (LiteLLM normalise None to {}).
         assert "api_base" not in (build_model().client_args or {})
 
     def test_base_url_routed_when_set(self, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,5 +1,5 @@
 """Request-layer building blocks: fail-closed error translation in
-``guarded_get``/``guarded_pages`` and page iteration/termination in
+``guarded_get``/``guarded_pages``, page iteration/termination in
 ``paged_responses``.
 """
 
@@ -43,7 +43,7 @@ class TestGuardedGet:
             )
 
     async def test_not_found_propagates(self, mock_client: AsyncMock) -> None:
-        # 404 meaning is per-call-site; the caller's own handler must see it.
+        # 404 meaning is per-call-site; caller's own handler must see it.
         mock_client.get.side_effect = PolarionNotFoundError("gone", status_code=404)
 
         with pytest.raises(PolarionNotFoundError):
@@ -98,8 +98,8 @@ class TestPagedResponses:
     async def test_page_size_forced_over_caller_value(
         self, mock_client: AsyncMock
     ) -> None:
-        # Termination compares against GUARD_PAGE_SIZE, so the helper must own
-        # page[size]; a caller-supplied value would desync fetch and stop.
+        # Termination compare against GUARD_PAGE_SIZE — helper must own
+        # page[size]; caller-supplied value would desync fetch and stop.
         mock_client.get.return_value = _page(3)
 
         _ = [p async for p in paged_responses(mock_client, "/p", {"page[size]": 10})]

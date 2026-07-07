@@ -1,4 +1,4 @@
-"""``TTLCache`` + typed wrapper tests; expiry driven by patching the
+"""``TTLCache`` + typed wrapper tests; expiry driven by patching
 module-level ``_now`` clock seam.
 """
 
@@ -38,14 +38,14 @@ def _reset_caches() -> None:
 
 @pytest.fixture
 def clock(monkeypatch: pytest.MonkeyPatch) -> list[float]:
-    """Patch the cache clock to a controllable list-wrapped value."""
+    """Patch cache clock to controllable list-wrapped value."""
     now = [1000.0]
     monkeypatch.setattr(cache_mod, "_now", lambda: now[0])
     return now
 
 
 class TestTTLCachePrimitive:
-    """Behaviour of the generic ``TTLCache`` independent of any wrapper."""
+    """Generic ``TTLCache`` behaviour independent of any wrapper."""
 
     def test_miss_returns_none(self) -> None:
         cache: TTLCache[str, int] = TTLCache(60.0)
@@ -127,7 +127,7 @@ class TestTTLCachePrimitive:
 
 
 class TestDocumentListCache:
-    """The mutable document-discovery listing wrappers."""
+    """Mutable document-discovery listing wrappers."""
 
     def test_store_then_get_returns_a_list_copy(self) -> None:
         doc = DiscoveredDocument("_default", "Doc")
@@ -135,7 +135,7 @@ class TestDocumentListCache:
 
         cached = get_cached_documents("P")
         assert cached == [doc]
-        # A mutation of the returned list must not corrupt the cache.
+        # Mutation of returned list must not corrupt cache.
         assert cached is not None
         cached.append(DiscoveredDocument("_default", "Other"))
         assert get_cached_documents("P") == [doc]
@@ -226,7 +226,7 @@ class TestProjectEnumCache:
 
 
 class TestWorkItemCustomKeys:
-    """``store/get/invalidate_work_item_custom_keys`` — the type's key schema."""
+    """``store/get/invalidate_work_item_custom_keys`` — type key schema."""
 
     def test_store_then_get(self) -> None:
         store_work_item_custom_keys("P", "task", frozenset({"a", "b"}))

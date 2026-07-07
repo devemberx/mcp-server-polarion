@@ -1,4 +1,4 @@
-"""Tests for the comment tools."""
+"""Comment tool tests."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ from mcp_server_polarion.tools.comments import (
 
 
 class TestListDocumentComments:
-    """Tests for the ``list_document_comments`` tool."""
+    """``list_document_comments`` tool."""
 
     async def test_returns_paginated_result(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -349,7 +349,7 @@ class TestListDocumentComments:
 
 
 class TestListWorkItemComments:
-    """Tests for the ``list_work_item_comments`` tool."""
+    """``list_work_item_comments`` tool."""
 
     async def test_returns_paginated_result(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -651,7 +651,7 @@ class TestListWorkItemComments:
 
 
 class TestBuildDocumentCommentsPayload:
-    """Unit tests for the private ``_build_document_comments_payload`` helper."""
+    """Private ``_build_document_comments_payload`` helper."""
 
     def test_single_plain_text_spec(self) -> None:
         payload = _build_document_comments_payload(
@@ -729,7 +729,7 @@ class TestBuildDocumentCommentsPayload:
         }
 
     def test_parent_comment_full_path_composed(self) -> None:
-        """Short parent_comment_id is expanded to the full 4-segment path."""
+        """Short parent_comment_id expanded to full 4-segment path."""
         payload = _build_document_comments_payload(
             specs=[CommentSpec(text="t", parent_comment_id="c1")],
             project_id="Proj",
@@ -775,7 +775,7 @@ class TestBuildDocumentCommentsPayload:
         assert len(payload["data"]) == 1  # type: ignore[arg-type]
 
     def test_no_title_for_documents(self) -> None:
-        """Base CommentSpec has no title field, so it never reaches attributes."""
+        """Base CommentSpec has no title field — never reach attributes."""
         spec = CommentSpec(text="t")
         assert not hasattr(spec, "title")
         payload = _build_document_comments_payload(
@@ -789,7 +789,7 @@ class TestBuildDocumentCommentsPayload:
 
 
 class TestCreateDocumentCommentsDryRun:
-    """Verify dry_run returns preview without calling Polarion."""
+    """dry_run return preview without calling Polarion."""
 
     async def test_dry_run_no_post_call(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -846,7 +846,7 @@ class TestCreateDocumentCommentsDryRun:
 
 
 class TestCreateDocumentCommentsHappyPath:
-    """Verify successful creation extracts and returns short comment IDs."""
+    """Successful creation extract and return short comment IDs."""
 
     async def test_returns_short_comment_ids(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -951,7 +951,7 @@ class TestCreateDocumentCommentsHappyPath:
 
 
 class TestCreateDocumentCommentsErrors:
-    """Verify domain exceptions map to the correct public exceptions."""
+    """Domain exceptions map to correct public exceptions."""
 
     async def test_auth_error_raises_permission_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1000,7 +1000,7 @@ class TestCreateDocumentCommentsErrors:
     async def test_empty_response_raises_runtime_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """201 with no IDs must raise rather than silently return created=True."""
+        """201 with no IDs must raise, not silently return created=True."""
         mock_client.post.return_value = {}
         with pytest.raises(RuntimeError, match="no comment IDs"):
             await create_document_comments(
@@ -1015,8 +1015,8 @@ class TestCreateDocumentCommentsErrors:
 
 class TestCreateDocumentCommentsFieldValidation:
     """Field constraints on create_document_comments / CommentSpec — direct
-    calls bypass FastMCP's JSON Schema gate, so rebuild a ``TypeAdapter`` per
-    parameter to prove the constraint is wired.
+    calls bypass FastMCP JSON Schema gate; rebuild ``TypeAdapter`` per
+    parameter to prove constraint wired.
     """
 
     @staticmethod
@@ -1064,7 +1064,7 @@ class TestCreateDocumentCommentsFieldValidation:
 
 
 class TestBuildWorkItemCommentsPayload:
-    """Unit tests for the private ``_build_work_item_comments_payload`` helper."""
+    """Private ``_build_work_item_comments_payload`` helper."""
 
     def test_single_plain_text_spec(self) -> None:
         payload = _build_work_item_comments_payload(
@@ -1095,7 +1095,7 @@ class TestBuildWorkItemCommentsPayload:
         assert attrs["title"] == "Heads up"  # type: ignore[index]
 
     def test_empty_title_omitted(self) -> None:
-        """Empty title is dropped, not sent as a blank heading."""
+        """Empty title dropped, not sent as blank heading."""
         payload = _build_work_item_comments_payload(
             specs=[WorkItemCommentSpec(text="t", title="")],
             project_id="P",
@@ -1136,7 +1136,7 @@ class TestBuildWorkItemCommentsPayload:
         }
 
     def test_parent_comment_full_path_composed(self) -> None:
-        """Short parent_comment_id is expanded to the full 3-segment path."""
+        """Short parent_comment_id expanded to full 3-segment path."""
         payload = _build_work_item_comments_payload(
             specs=[WorkItemCommentSpec(text="t", parent_comment_id="c1")],
             project_id="Proj",
@@ -1160,7 +1160,7 @@ class TestBuildWorkItemCommentsPayload:
 
 
 class TestCreateWorkItemCommentsDryRun:
-    """Verify dry_run returns preview without calling Polarion."""
+    """dry_run return preview without calling Polarion."""
 
     async def test_dry_run_no_post_call(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1196,7 +1196,7 @@ class TestCreateWorkItemCommentsDryRun:
 
 
 class TestCreateWorkItemCommentsHappyPath:
-    """Verify successful creation extracts and returns short comment IDs."""
+    """Successful creation extract and return short comment IDs."""
 
     async def test_returns_short_comment_ids(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1271,7 +1271,7 @@ class TestCreateWorkItemCommentsHappyPath:
 
 
 class TestCreateWorkItemCommentsErrors:
-    """Verify domain exceptions map to the correct public exceptions."""
+    """Domain exceptions map to correct public exceptions."""
 
     async def test_auth_error_raises_permission_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1317,7 +1317,7 @@ class TestCreateWorkItemCommentsErrors:
     async def test_empty_response_raises_runtime_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """201 with no IDs must raise rather than silently return created=True."""
+        """201 with no IDs must raise, not silently return created=True."""
         mock_client.post.return_value = {}
         with pytest.raises(RuntimeError, match="no comment IDs"):
             await create_work_item_comments(
@@ -1331,8 +1331,8 @@ class TestCreateWorkItemCommentsErrors:
 
 class TestCreateWorkItemCommentsFieldValidation:
     """Field constraints on create_work_item_comments — direct calls bypass
-    FastMCP's JSON Schema gate, so rebuild a ``TypeAdapter`` per parameter to
-    prove the constraint is wired.
+    FastMCP JSON Schema gate; rebuild ``TypeAdapter`` per parameter to
+    prove constraint wired.
     """
 
     @staticmethod
@@ -1364,7 +1364,7 @@ class TestCreateWorkItemCommentsFieldValidation:
 
 
 class TestBuildDocumentCommentUpdatePayload:
-    """Unit tests for _build_document_comment_update_payload (no I/O)."""
+    """_build_document_comment_update_payload (no I/O)."""
 
     def _build(
         self,
@@ -1651,7 +1651,7 @@ class TestUpdateDocumentCommentErrors:
 
 
 class TestBuildWorkItemCommentUpdatePayload:
-    """Unit tests for _build_work_item_comment_update_payload (no I/O)."""
+    """_build_work_item_comment_update_payload (no I/O)."""
 
     def _build(
         self,

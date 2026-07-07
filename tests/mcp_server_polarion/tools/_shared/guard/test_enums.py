@@ -1,5 +1,5 @@
-"""Enum option fetch tests: parse path and fail-closed on Polarion
-error (write blocked, not skipped).
+"""Enum option fetch: parse path, fail-closed on Polarion error (write
+blocked, not skipped).
 """
 
 from __future__ import annotations
@@ -75,7 +75,7 @@ class TestFetchEnumOptionIds:
         caplog: pytest.LogCaptureFixture,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        # setup_logging sets propagate=False, so caplog misses package logs;
+        # setup_logging set propagate=False — caplog miss package logs;
         # re-enable propagation locally for order independence.
         import logging  # noqa: PLC0415 -- fixture-local import is intentional
 
@@ -106,7 +106,7 @@ class TestFetchEnumOptionIds:
         caplog: pytest.LogCaptureFixture,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        # 404 = options endpoint unsupported, so the guard defers (empty set).
+        # 404 = options endpoint unsupported — guard defer (empty set).
         import logging  # noqa: PLC0415 -- fixture-local import is intentional
 
         monkeypatch.setattr(logging.getLogger("mcp_server_polarion"), "propagate", True)
@@ -123,7 +123,7 @@ class TestFetchEnumOptionIds:
         assert any("404" in r.message for r in caplog.records)
 
     async def test_not_found_result_is_cached(self, mock_client: AsyncMock) -> None:
-        # Deferred result is cached; a missing endpoint isn't re-probed in the TTL.
+        # Deferred result cached; missing endpoint not re-probed within TTL.
         mock_client.get.side_effect = PolarionNotFoundError("nope", status_code=404)
 
         await fetch_enum_option_ids(mock_client, "P", "workitems", "severity", "task")
@@ -134,7 +134,7 @@ class TestFetchEnumOptionIds:
     async def test_guard_defers_when_options_unsupported(
         self, mock_client: AsyncMock
     ) -> None:
-        # A 404 on the options endpoint lets the enum write through, no raise.
+        # 404 on options endpoint let enum write through, no raise.
         mock_client.get.side_effect = PolarionNotFoundError("nope", status_code=404)
 
         await guard_work_item_enums(
