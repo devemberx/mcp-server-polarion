@@ -1,4 +1,4 @@
-"""Test run models — summaries, create specs, and write results."""
+"""Test run models — summaries, create specs, write results."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class TestRunSummary(BaseModel):
     """Compact test-run representation for list results."""
 
-    # pytest collects Test*-named classes as tests on import; opt out here.
+    # pytest collect Test*-named classes on import; opt out.
     __test__ = False
 
     id: str
@@ -28,7 +28,7 @@ class TestRunCreateSpec(BaseModel):
 
     __test__ = False
 
-    # LLM input model: reject typo keys instead of silently dropping them.
+    # LLM input model: reject typo keys, not silent-drop.
     model_config = ConfigDict(extra="forbid")
 
     id: str = Field(min_length=1)
@@ -43,7 +43,7 @@ class TestRunCreateSpec(BaseModel):
 
 
 class TestRunsCreateResult(BaseModel):
-    """Result of a ``create_test_runs`` operation."""
+    """``create_test_runs`` result."""
 
     __test__ = False
 

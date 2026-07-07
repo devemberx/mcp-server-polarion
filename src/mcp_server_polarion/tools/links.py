@@ -58,7 +58,7 @@ logger = logging.getLogger("mcp_server_polarion.tools.links")
 
 
 def _extract_created_link_ids(response: dict[str, object]) -> list[str]:
-    """Composite link ids verbatim, input order, from a bulk create response —
+    """Composite link ids verbatim, input order, from bulk create response —
     the path ids for later PATCH / DELETE. Empty on malformed shapes.
     """
     data = response.get("data")
@@ -79,7 +79,7 @@ def _build_create_links_payload(
     links: list[WorkItemLinkSpec],
 ) -> dict[str, JsonValue]:
     """JSON:API body for bulk create-link POST; ``revision`` skipped when
-    unset, ``target_project_id`` defaults to source.
+    unset, ``target_project_id`` default to source.
     """
     data: list[JsonValue] = []
     for spec in links:
@@ -182,7 +182,7 @@ def _parse_work_item_links(
     direction: Literal["forward", "back"],
 ) -> list[WorkItemLink]:
     """Parse linked work items into ``WorkItemLink``s; target id from
-    ``relationships.workItem.data.id``, never by parsing the composite id.
+    ``relationships.workItem.data.id``, never parse composite id.
     """
     work_item_map = parse_included_work_item_map(response)
 
@@ -201,7 +201,7 @@ def _parse_work_item_links(
         role = safe_str(attributes.get("role", ""))
         suspect = bool(attributes.get("suspect", False))
 
-        # Derive the target via relationships, never by parsing the 5-segment id.
+        # Derive target via relationships, never parse 5-segment id.
         relationships = item.get("relationships", {})
         if not isinstance(relationships, dict):
             relationships = {}
@@ -251,7 +251,7 @@ async def _get_forward_link_page(
     page_size: int,
     page_number: int,
 ) -> PaginatedResult[WorkItemLink]:
-    """Fetch a single page of forward (outgoing) links."""
+    """Fetch one page of forward (outgoing) links."""
     path = (
         f"/projects/{encode_path_segment(project_id)}"
         f"/workitems/{encode_path_segment(work_item_id)}/linkedworkitems"
@@ -295,7 +295,7 @@ async def _get_back_link_page(
     page_size: int,
     page_number: int,
 ) -> PaginatedResult[WorkItemLink]:
-    """Fetch a single page of back (incoming) links via Lucene query."""
+    """Fetch one page of back (incoming) links via Lucene query."""
     validate_work_item_id_for_lucene(work_item_id)
     try:
         response = await client.get(
@@ -370,7 +370,7 @@ async def list_work_item_links(  # noqa: PLR0913
     tags={"write"},
     timeout=60.0,
     annotations={
-        # Additive: non-destructive, non-idempotent (a duplicate role+target 409s).
+        # Additive: non-destructive, non-idempotent (duplicate role+target 409s).
         "readOnlyHint": False,
         "destructiveHint": False,
         "idempotentHint": False,
@@ -462,7 +462,7 @@ async def create_work_item_links(
     tags={"write"},
     timeout=60.0,
     annotations={
-        # Destructive but idempotent: unmatched ids are ignored, 204 regardless.
+        # Destructive but idempotent: unmatched ids ignored, 204 regardless.
         "readOnlyHint": False,
         "destructiveHint": True,
         "idempotentHint": True,
@@ -550,7 +550,7 @@ async def delete_work_item_links(
     tags={"write"},
     timeout=60.0,
     annotations={
-        # Non-destructive, non-idempotent (a re-PATCH still bumps the revision).
+        # Non-destructive, non-idempotent (re-PATCH still bump revision).
         "readOnlyHint": False,
         "destructiveHint": False,
         "idempotentHint": False,

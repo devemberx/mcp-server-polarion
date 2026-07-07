@@ -42,7 +42,7 @@ async def fetch_enum_option_ids(
     type_id: str,
 ) -> frozenset[str]:
     """Valid option ids for ``(project, resource, field, type)``; cached,
-    fail-closed, 404 defers (empty set).
+    fail-closed, 404 defer (empty set).
     """
     cached = get_cached_enum_options(project_id, resource, field_id, type_id)
     if cached is not None:
@@ -64,7 +64,7 @@ async def fetch_enum_option_ids(
         )
     except PolarionNotFoundError:
         # 404 = non-enum field or endpoint absent; cache empty set (long TTL —
-        # stale worst case is the same deferral).
+        # stale worst case = same deferral).
         logger.warning(
             "getAvailableOptions returned 404 for field=%s (resource=%s, "
             "project=%s); skipping enum validation for this field -- the "
@@ -123,10 +123,10 @@ async def fetch_project_enum_option_ids(
     enum_name: str,
     context: str = "~",
 ) -> frozenset[str]:
-    """Valid option ids for a project-level enum not in ``getAvailableOptions``
-    (link/hyperlink role, testrun type/status). ``context`` is the enumeration
+    """Valid option ids for project-level enum not in ``getAvailableOptions``
+    (link/hyperlink role, testrun type/status). ``context`` = enumeration
     context path segment (``testing`` for testrun enums; ``~`` does NOT
-    resolve them). Response ``data`` is a dict (not list), options at
+    resolve them). Response ``data`` = dict (not list), options at
     ``data.attributes.options[].id``. Cached; fail-closed like
     :func:`fetch_enum_option_ids`.
     """
@@ -242,11 +242,10 @@ async def check_custom_field_enum_values(
 ) -> None:
     """Validate enum-typed ``custom_fields`` values against ``getAvailableOptions``.
 
-    Non-empty option set proves the field is an enum (the endpoint is the only
-    API mapping key → options) → value must be an option-id string or list of
-    them; empty set defers. Arity unchecked — endpoint can't distinguish
-    single/multi-enum, but wrong arity 400s loudly at Polarion, so only wrong
-    option-id strings ghost.
+    Non-empty option set prove field is enum (endpoint = only API mapping
+    key → options) → value must be option-id string or list of them; empty
+    set defer. Arity unchecked — endpoint can't distinguish single/multi-enum,
+    wrong arity 400 loudly at Polarion, only wrong option-id strings ghost.
     """
     for field_id in sorted(custom_fields):
         value = custom_fields[field_id]

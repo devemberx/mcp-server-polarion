@@ -1,5 +1,5 @@
-"""Fail-closed write blocks: a guard that cannot validate raises instead of
-letting the write through (unknown ids/keys persist as silent ghosts).
+"""Fail-closed write blocks: guard that cannot validate raise instead of
+letting write through (unknown ids/keys persist as silent ghosts).
 """
 
 from __future__ import annotations
@@ -29,8 +29,8 @@ def unreachable_write_block(
 
 
 def unauthorized_write_block(what: str, project_id: str) -> PermissionError:
-    """Mirrors the tool layer's ``PolarionAuthError -> PermissionError``
-    (fixable token scope, not a backend to retry).
+    """Mirror tool layer ``PolarionAuthError -> PermissionError``
+    (fixable token scope, not backend to retry).
     """
     logger.warning(
         "guard blocking write: not authorized to validate %s for project=%s",

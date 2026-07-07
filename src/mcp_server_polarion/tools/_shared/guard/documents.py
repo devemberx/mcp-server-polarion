@@ -47,13 +47,13 @@ async def _fetch_document_type_custom_keys(
     project_id: str,
     document_type: str,
 ) -> frozenset[str]:
-    """Sample the project's documents and return *document_type*'s key schema.
+    """Sample project documents, return *document_type*'s key schema.
 
-    Heading-discovery SQL + ``include=module`` surfaces each document's type and
-    inline customs — works on every build, unlike ``GET /documents``. All types'
-    schemas are stored (later writes hit cache); target type stored even when
-    empty so a no-customs type fails closed without re-probing. Headingless
-    documents are invisible to this sample.
+    Heading-discovery SQL + ``include=module`` surface each document's type +
+    inline customs — work on every build, unlike ``GET /documents``. All
+    types' schemas stored (later writes hit cache); target type stored even
+    when empty so no-customs type fail closed without re-probe. Headingless
+    documents invisible to this sample.
     """
     path = f"/projects/{encode_path_segment(project_id)}/workitems"
     base_params: dict[str, str | int] = {

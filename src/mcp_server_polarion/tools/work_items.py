@@ -72,8 +72,8 @@ def _build_work_item_resource(
     spec: WorkItemCreateSpec,
     description_html: str,
 ) -> dict[str, JsonValue]:
-    """One ``workitems`` resource for a bulk create POST; skips unset (no
-    overwriting defaults). ``description_html`` arrives pre-converted.
+    """One ``workitems`` resource for bulk create POST; skip unset (no
+    overwriting defaults). ``description_html`` arrive pre-converted.
     """
     attributes: dict[str, JsonValue] = {
         "title": spec.title,
@@ -134,9 +134,9 @@ def _build_update_work_item_resource(
     project_id: str,
     spec: WorkItemUpdateSpec,
 ) -> dict[str, JsonValue]:
-    """One ``workitems`` resource for the bulk PATCH; skips unset so an
-    update never blanks an existing attribute. The spec validator guarantees
-    at least one attribute or relationship survives.
+    """One ``workitems`` resource for bulk PATCH; skip unset so update
+    never blank existing attribute. Spec validator guarantee at least one
+    attribute or relationship survive.
     """
     attributes: dict[str, JsonValue] = {}
     if spec.title:
@@ -211,7 +211,7 @@ def _update_query_params(
     tags={"write"},
     timeout=60.0,
     annotations={
-        # Additive: non-destructive, but non-idempotent (a retry duplicates).
+        # Additive: non-destructive, non-idempotent (retry duplicate).
         "readOnlyHint": False,
         "destructiveHint": False,
         "idempotentHint": False,
@@ -377,28 +377,27 @@ async def update_work_items(  # noqa: PLR0913
     """
     client = get_client(ctx)
 
-    # Ids are embedded into the id:(...) existence query below.
+    # Ids embed into the id:(...) existence query below.
     for spec in items:
         validate_work_item_id_for_lucene(spec.work_item_id)
     ensure_unique_ids((spec.work_item_id for spec in items), label="work_item_id")
     payload = _build_update_work_items_payload(project_id=project_id, specs=items)
 
-    # One batched query resolves existence + type for every item (on dry_run
-    # too, so preview raises the same errors); enum options are type-scoped.
+    # One batched query resolve existence + type for every item (on dry_run
+    # too, so preview raise same errors); enum options type-scoped.
     types_by_id = await resolve_work_item_types(
         client, project_id, (spec.work_item_id for spec in items)
     )
 
     if change_type_to:
-        # Request-wide param: validate once on its own axis, unprefixed — a
-        # bad value is not any single item's fault.
+        # Request-wide param: validate once on own axis, unprefixed — bad
+        # value is no single item's fault.
         await guard_work_item_enums(
             client, project_id, work_item_type=change_type_to, type=change_type_to
         )
 
     for index, spec in enumerate(items):
-        # change_type_to retypes in the same PATCH — enums and customs are
-        # scoped to the new type.
+        # change_type_to retype in same PATCH — enums + customs scope to new type.
         effective_type = change_type_to or types_by_id.get(spec.work_item_id, "")
         with reraise_with_item_context(index, spec.work_item_id):
             if spec.status or spec.severity or spec.priority or spec.resolution:
@@ -416,8 +415,8 @@ async def update_work_items(  # noqa: PLR0913
                     client, project_id, effective_type, spec.custom_fields
                 )
             if spec.hyperlinks:
-                # Per item (option cache makes repeats free) so a bad role is
-                # attributed to its batch position like the other guards.
+                # Per item (option cache make repeats free) so bad role
+                # attribute to its batch position like other guards.
                 await guard_hyperlink_roles(
                     client, project_id, [h.role for h in spec.hyperlinks]
                 )
@@ -446,8 +445,8 @@ async def update_work_items(  # noqa: PLR0913
             "Cannot update work items -- check your POLARION_TOKEN permissions."
         ) from exc
     except PolarionNotFoundError as exc:
-        # Race fallback: existence was verified above, so a PATCH 404 means
-        # the batch changed under us.
+        # Race fallback: existence verified above — PATCH 404 = batch changed
+        # under us.
         raise ValueError(
             f"A work item in the batch was not found in project '{project_id}': "
             f"{exc.message} Use `list_work_items` to discover valid IDs."
@@ -495,7 +494,7 @@ async def list_work_items(
     client = get_client(ctx)
     params: dict[str, str | int] = {
         "fields[workitems]": WORK_ITEM_LIST_FIELDS,
-        # To-many ``assignee.data`` is only inlined when explicitly included.
+        # To-many ``assignee.data`` inlined only when explicitly included.
         "include": "assignee",
         "page[size]": page_size,
         "page[number]": page_number,
@@ -583,7 +582,7 @@ async def get_work_item(
         fallback_id=work_item_id,
     )
     if not include_description_html:
-        # Body always travels over the wire; blank it per the False contract.
+        # Body always travel over wire; blank it per the False contract.
         detail = detail.model_copy(update={"description_html": ""})
     return detail
 
@@ -604,7 +603,7 @@ async def read_work_item(
     Polarion anchors) — NEVER feed to update_work_items; round-trip via the HTML
     pair instead.
     """
-    # Pull raw HTML from get_work_item so conversion needs no second round trip.
+    # Pull raw HTML from get_work_item — conversion need no second round trip.
     detail = await get_work_item(
         ctx,
         project_id=project_id,

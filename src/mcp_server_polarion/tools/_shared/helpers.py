@@ -15,13 +15,13 @@ from fastmcp import Context
 
 from mcp_server_polarion.core.client import PolarionClient
 
-# Ceiling for option lists in guard errors: showing the full set beats a
-# list_*_enum_options re-call, but a pathological enum must not flood context.
+# Ceiling for option lists in guard errors: full set beat list_*_enum_options
+# re-call, but pathological enum must not flood context.
 OPTION_LIST_LIMIT: Final[int] = 50
 
 
 def get_client(ctx: Context) -> PolarionClient:
-    """Extract the active ``PolarionClient`` from the lifespan context."""
+    """Active ``PolarionClient`` from lifespan context."""
     lifespan_ctx = ctx.lifespan_context
     if "polarion_client" not in lifespan_ctx:  # pragma: no cover
         msg = "polarion_client is missing from lifespan_context"
@@ -38,8 +38,8 @@ def get_client(ctx: Context) -> PolarionClient:
 
 
 def format_option_list(options: Iterable[str], limit: int = OPTION_LIST_LIMIT) -> str:
-    """Sorted option list for an error message; past *limit*, truncates to the
-    first *limit* items plus a ``(+N more)`` suffix.
+    """Sorted option list for error message; past *limit*, truncate to
+    first *limit* items + ``(+N more)`` suffix.
     """
     ordered = sorted(options)
     if len(ordered) <= limit:
@@ -48,14 +48,14 @@ def format_option_list(options: Iterable[str], limit: int = OPTION_LIST_LIMIT) -
 
 
 def safe_str(value: object) -> str:
-    """Convert a value to ``str``, returning ``""`` for ``None``."""
+    """``str(value)``; ``""`` for ``None``."""
     if value is None:
         return ""
     return str(value)
 
 
 def encode_path_segment(segment: str) -> str:
-    """URL-encode a single path segment (e.g. a document name with spaces)."""
+    """URL-encode single path segment (e.g. document name with spaces)."""
     return quote(segment, safe="")
 
 
@@ -64,8 +64,8 @@ _WORK_ITEM_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def validate_work_item_id_for_lucene(work_item_id: str) -> None:
-    """Reject ids outside ``[A-Za-z0-9_-]`` — Lucene treats punctuation as
-    operators, so an unescaped id could reshape the query.
+    """Reject ids outside ``[A-Za-z0-9_-]`` — Lucene treat punctuation as
+    operators; unescaped id could reshape query.
     """
     if not _WORK_ITEM_ID_PATTERN.match(work_item_id):
         msg = (
@@ -76,8 +76,8 @@ def validate_work_item_id_for_lucene(work_item_id: str) -> None:
 
 
 def ensure_unique_ids(ids: Iterable[str], *, label: str) -> None:
-    """Reject duplicate ids within one bulk batch — the server's apply order
-    for duplicate resources in a single request is undefined.
+    """Reject duplicate ids in one bulk batch — server apply order for
+    duplicate resources in single request undefined.
     """
     duplicates = sorted(id_ for id_, count in Counter(ids).items() if count > 1)
     if duplicates:
@@ -90,8 +90,8 @@ def ensure_unique_ids(ids: Iterable[str], *, label: str) -> None:
 
 @contextmanager
 def reraise_with_item_context(index: int, item_id: str) -> Iterator[None]:
-    """Prefix a per-item guard ``ValueError`` with the batch position and id so
-    bulk-tool errors name the offending item; other exceptions (project-level
+    """Prefix per-item guard ``ValueError`` with batch position + id so
+    bulk-tool errors name offending item; other exceptions (project-level
     auth/backend failures) pass through unwrapped.
     """
     try:

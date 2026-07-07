@@ -1,6 +1,6 @@
-"""JSON:API response -> Pydantic model parsers, plus the relationship/id
-extractors they build on. Read side only; description/text values pass through
-as raw HTML so they round-trip unchanged.
+"""JSON:API response -> Pydantic model parsers + relationship/id extractors.
+Read side only; description/text values pass through as raw HTML for
+unchanged round-trip.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from mcp_server_polarion.tools._shared.pagination import make_page
 
 
 class WorkItemSummaryKwargs(TypedDict):
-    """Kwargs shape produced by ``parse_work_item_summary_kwargs``."""
+    """Kwargs shape from ``parse_work_item_summary_kwargs``."""
 
     id: str
     title: str
@@ -43,7 +43,7 @@ def extract_relationship_id(
     relationships: dict[str, object],
     rel_name: str,
 ) -> str:
-    """Return a named relationship's ``data.id``, or ``""`` if absent."""
+    """Named relationship ``data.id``, or ``""`` if absent."""
     rel = relationships.get(rel_name, {})
     if isinstance(rel, dict):
         inner = rel.get("data")
@@ -56,7 +56,7 @@ def extract_relationship_ids(
     relationships: dict[str, object],
     rel_name: str,
 ) -> list[str]:
-    """Return a to-many relationship's ``data[].id`` list (declaration order)."""
+    """To-many relationship ``data[].id`` list (declaration order)."""
     rel = relationships.get(rel_name, {})
     if not isinstance(rel, dict):
         return []
@@ -86,16 +86,16 @@ def split_module_id(module_full_id: str) -> tuple[str, str]:
 
 
 def extract_short_id(full_id: str) -> str:
-    """Strip the path prefix from a JSON:API id (``"p/MCPT-001"`` → ``"MCPT-001"``)."""
+    """Strip path prefix from JSON:API id (``"p/MCPT-001"`` → ``"MCPT-001"``)."""
     if "/" not in full_id:
         return full_id
     return full_id.rsplit("/", maxsplit=1)[-1]
 
 
 def extract_created_short_ids(response: dict[str, object]) -> list[str]:
-    """Short resource ids from a bulk 201 response, relying on Polarion echoing
-    ``data`` in submission order (call-site count check catches missing ids,
-    not reordered ones).
+    """Short resource ids from bulk 201 response; rely on Polarion echoing
+    ``data`` in submission order (call-site count check catch missing ids,
+    not reordered).
     """
     data = response.get("data")
     if not isinstance(data, list):
@@ -112,7 +112,7 @@ def extract_created_short_ids(response: dict[str, object]) -> list[str]:
 def parse_included_work_item_map(
     response: dict[str, object],
 ) -> dict[str, dict[str, object]]:
-    """Map full work-item ID to its included resource dict from a response."""
+    """Full work-item ID → included resource dict from response."""
     work_item_map: dict[str, dict[str, object]] = {}
     included = response.get("included", [])
     if isinstance(included, list):
@@ -123,7 +123,7 @@ def parse_included_work_item_map(
 
 
 def parse_included_user_name_map(response: dict[str, object]) -> dict[str, str]:
-    """Map user ID to display name from a response's included ``users`` resources."""
+    """User ID → display name from included ``users`` resources."""
     user_map: dict[str, str] = {}
     included = response.get("included", [])
     if isinstance(included, list):
@@ -142,8 +142,8 @@ def parse_included_user_name_map(response: dict[str, object]) -> dict[str, str]:
 def parse_work_item_summary_kwargs(
     item: dict[str, object],
 ) -> WorkItemSummaryKwargs:
-    """``WorkItemSummary`` kwargs from a JSON:API resource; shared so
-    ``WorkItemDetail`` stays a strict superset of ``WorkItemSummary``.
+    """``WorkItemSummary`` kwargs from JSON:API resource; shared so
+    ``WorkItemDetail`` stay strict superset of ``WorkItemSummary``.
     """
     attributes = item.get("attributes", {})
     if not isinstance(attributes, dict):
@@ -199,9 +199,9 @@ def parse_work_item_detail(
     project_id: str,
     fallback_id: str = "",
 ) -> WorkItemDetail:
-    """JSON:API work-item resource → ``WorkItemDetail``. Expects
-    ``WORK_ITEM_DETAIL_FIELDS`` + ``include=assignee``; description passes
-    through as raw HTML so it round-trips unchanged.
+    """JSON:API work-item resource → ``WorkItemDetail``. Expect
+    ``WORK_ITEM_DETAIL_FIELDS`` + ``include=assignee``; description pass
+    through as raw HTML, round-trip unchanged.
     """
     attributes = item.get("attributes", {})
     if not isinstance(attributes, dict):
@@ -234,8 +234,8 @@ def parse_work_item_detail(
 
 
 def summary_to_back_link(summary: WorkItemSummary) -> WorkItemLink:
-    """Lift a ``linkedWorkItems:`` query result to a back link; the query
-    exposes no role/suspect → ``role=None``, ``suspect=False``.
+    """Lift ``linkedWorkItems:`` query result to back link; query expose
+    no role/suspect → ``role=None``, ``suspect=False``.
     """
     return WorkItemLink(
         id=summary.id,
@@ -253,7 +253,7 @@ def summary_to_back_link(summary: WorkItemSummary) -> WorkItemLink:
 def parse_work_item_summaries(
     data: object,
 ) -> list[WorkItemSummary]:
-    """Parse a JSON:API ``data`` array into ``WorkItemSummary`` models."""
+    """JSON:API ``data`` array → ``WorkItemSummary`` models."""
     items: list[WorkItemSummary] = []
     if not isinstance(data, list):
         return items
@@ -266,7 +266,7 @@ def parse_work_item_summaries(
 
 
 class TestRunSummaryKwargs(TypedDict):
-    """Kwargs shape produced by ``parse_test_run_summary_kwargs``."""
+    """Kwargs shape from ``parse_test_run_summary_kwargs``."""
 
     id: str
     title: str
@@ -282,8 +282,8 @@ def parse_test_run_summary_kwargs(
     item: dict[str, object],
     user_names: dict[str, str],
 ) -> TestRunSummaryKwargs:
-    """``TestRunSummary`` kwargs from a JSON:API resource; ``user_names`` maps the
-    full author id to a display name (from the response's included ``users``).
+    """``TestRunSummary`` kwargs from JSON:API resource; ``user_names`` map
+    full author id → display name (from included ``users``).
     """
     attributes = item.get("attributes", {})
     if not isinstance(attributes, dict):
@@ -306,9 +306,9 @@ def parse_test_run_summary_kwargs(
 
 
 def parse_test_run_summaries(response: dict[str, object]) -> list[TestRunSummary]:
-    """Parse a test-runs list response into ``TestRunSummary`` models. Takes the
-    whole response (not just ``data``) to resolve author display names from the
-    included ``users`` resources.
+    """Test-runs list response → ``TestRunSummary`` models. Take whole
+    response (not just ``data``) to resolve author names from included
+    ``users``.
     """
     user_names = parse_included_user_name_map(response)
     data = response.get("data", [])
@@ -324,7 +324,7 @@ def parse_test_run_summaries(response: dict[str, object]) -> list[TestRunSummary
 
 
 def _parse_comment(item: dict[str, object]) -> Comment:
-    """Build a ``Comment`` from a JSON:API resource (short relationship IDs)."""
+    """``Comment`` from JSON:API resource (short relationship IDs)."""
     attributes_raw = item.get("attributes")
     attributes: dict[str, object] = (
         attributes_raw if isinstance(attributes_raw, dict) else {}
@@ -362,8 +362,8 @@ def _parse_comment(item: dict[str, object]) -> Comment:
 def parse_comments_page(
     response: dict[str, object], page_number: int, page_size: int
 ) -> PaginatedResult[Comment]:
-    """Parse a JSON:API comments response into a ``PaginatedResult`` page; shared
-    by the document- and work-item comment list tools.
+    """JSON:API comments response → ``PaginatedResult`` page; shared by
+    document- and work-item comment list tools.
     """
     raw_data = response.get("data", [])
     comment_items: list[Comment] = []
