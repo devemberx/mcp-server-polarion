@@ -1,6 +1,6 @@
-"""Pydantic models for MCP tool I/O, grouped by domain and re-exported here as
-the single import surface. Class docstrings and ``Field(description=...)`` ship
-in the JSON Schema — omit a description when name + type say everything.
+"""Pydantic models for MCP tool I/O, grouped by domain, re-exported here as
+single import surface. Class docstrings + ``Field(description=...)`` ship in
+JSON Schema — omit description when name + type say everything.
 """
 
 from __future__ import annotations

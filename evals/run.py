@@ -1,5 +1,5 @@
-"""Eval deploy gate (wired into ``publish.yml``): runs every case N times,
-exits non-zero below ``min_pass_rate`` (1.0 triggers/safety, 0.8
+"""Eval deploy gate (wired into ``publish.yml``): run every case N times,
+exit non-zero below ``min_pass_rate`` (1.0 triggers/safety, 0.8
 efficiency/orchestration).
 
     uv run python -m evals.run                      # all cases, EVAL_RUNS (default 10)
@@ -13,7 +13,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# Put repo root on the path so `python evals/run.py` works alongside `-m`.
+# Put repo root on path so `python evals/run.py` work alongside `-m`.
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -39,7 +39,7 @@ _REPORT_DIR = Path(__file__).parent / "reports"
 
 ALL_CASES = [*TRIGGER_CASES, *SAFETY_CASES, *EFFICIENCY_CASES, *ORCHESTRATION_CASES]
 
-# One CI job per category: a cheap early failure skips pricier later ones.
+# One CI job per category: cheap early failure skip pricier later ones.
 CATEGORIES: dict[str, list[Case]] = {
     "triggers": TRIGGER_CASES,
     "safety": SAFETY_CASES,
@@ -48,7 +48,7 @@ CATEGORIES: dict[str, list[Case]] = {
     "all": ALL_CASES,
 }
 
-# Reverse lookup: case name -> its behaviour category (for catalog and report).
+# Reverse lookup: case name -> behaviour category (for catalog + report).
 _CASE_CATEGORY: dict[str, str] = {
     str(c.name): cat for cat, cases in CATEGORIES.items() if cat != "all" for c in cases
 }

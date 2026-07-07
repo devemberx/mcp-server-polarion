@@ -1,6 +1,6 @@
 """MCP tool definitions — domain-grouped tools for Polarion ALM.
 
-Importing each module registers its ``@mcp.tool`` functions as a side effect.
+Import of each module register its ``@mcp.tool``s as side effect.
 """
 
 from __future__ import annotations
@@ -15,5 +15,5 @@ import mcp_server_polarion.tools.recipes
 import mcp_server_polarion.tools.test_runs
 import mcp_server_polarion.tools.work_items  # noqa: F401
 
-# Intentionally empty: tools register via import side effect, not by name export.
+# Empty: tools register via import side effect, not name export.
 __all__: list[str] = []

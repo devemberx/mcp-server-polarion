@@ -1,9 +1,9 @@
-"""Async HTTP client for the Polarion REST API v1.
+"""Async HTTP client for Polarion REST API v1.
 
-``PolarionClient`` wraps :class:`httpx.AsyncClient` with bearer auth,
-JSON:API error mapping (401/403 → ``PolarionAuthError``, 404 →
+``PolarionClient`` wrap :class:`httpx.AsyncClient`: bearer auth, JSON:API
+error mapping (401/403 → ``PolarionAuthError``, 404 →
 ``PolarionNotFoundError``, else ``PolarionError``), 429/5xx
-exponential-backoff retry, and a post-mutation delay.
+exponential-backoff retry, post-mutation delay.
 """
 
 from __future__ import annotations
@@ -30,10 +30,9 @@ _INITIAL_BACKOFF_SECONDS: Final[float] = 1.0
 _BACKOFF_MULTIPLIER: Final[float] = 2.0
 _RETRYABLE_STATUS_CODES: Final[frozenset[int]] = frozenset({429, 500, 502, 503, 504})
 
-# Pause after each mutation (Polarion forbids concurrent writes).
+# Pause after each mutation (Polarion forbid concurrent writes).
 _WRITE_DELAY_SECONDS: Final[float] = 1.5
-# Min gap between request starts → ≤3 req/s; start-based, so slow
-# requests add no extra wait.
+# Start-based min gap → ≤3 req/s; slow request add no extra wait.
 _MIN_REQUEST_INTERVAL_SECONDS: Final[float] = 1.0 / 3.0
 _DEFAULT_TIMEOUT_SECONDS: Final[float] = 30.0
 
@@ -46,9 +45,7 @@ _MAX_ERROR_DETAIL_LEN: Final[int] = 200
 
 
 def _extract_json_api_detail(body: object) -> str:
-    """Concise detail from a JSON:API body: ``errors[*].detail``/``title``,
-    else truncated body.
-    """
+    """Detail from JSON:API body: ``errors[*].detail``/``title``, else truncated."""
     if not isinstance(body, dict):
         return str(body)[:_MAX_ERROR_DETAIL_LEN]
     errors = body.get("errors")
@@ -65,7 +62,7 @@ def _extract_json_api_detail(body: object) -> str:
 
 
 def _sanitize_error_text(raw: str) -> str:
-    """Strip HTML tags and truncate raw error text for safe display."""
+    """Strip HTML tags + truncate for safe display."""
     clean = re.sub(r"<[^>]+>", " ", raw)
     clean = " ".join(clean.split())
     if len(clean) > _MAX_ERROR_DETAIL_LEN:
@@ -74,9 +71,7 @@ def _sanitize_error_text(raw: str) -> str:
 
 
 class PolarionClient:
-    """Async HTTP client for the Polarion REST API; created once and reused
-    for the MCP server lifetime (``lifespan`` context in ``server.py``).
-    """
+    """Async Polarion REST client; one instance per server ``lifespan``."""
 
     def __init__(
         self,
@@ -88,7 +83,7 @@ class PolarionClient:
         self.base_url: str = config.base_api_url
         self._write_delay = write_delay
         self._min_interval = min_interval
-        # -inf: first request never waits, whatever the clock epoch.
+        # -inf: first request never wait, any clock epoch.
         self._last_request_monotonic: float = float("-inf")
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
@@ -100,8 +95,7 @@ class PolarionClient:
             timeout=httpx.Timeout(_DEFAULT_TIMEOUT_SECONDS),
             verify=config.polarion_verify_ssl,
         )
-        # Lazily bound to running loop; serializes all calls
-        # (no concurrency); not reentrant.
+        # Lazy-bound to running loop; serialize all calls; not reentrant.
         self._request_lock: asyncio.Lock | None = None
 
     def _get_request_lock(self) -> asyncio.Lock:
@@ -110,9 +104,7 @@ class PolarionClient:
         return self._request_lock
 
     async def _pace(self) -> None:
-        """Block until ``_min_interval`` since the previous request issued. Caller
-        holds the lock; :meth:`_request` stamps each attempt's issue time.
-        """
+        """Block until ``_min_interval`` since previous request (caller hold lock)."""
         loop = asyncio.get_running_loop()
         wait = self._min_interval - (loop.time() - self._last_request_monotonic)
         if wait > 0:
@@ -131,11 +123,11 @@ class PolarionClient:
 
     @property
     def is_closed(self) -> bool:
-        """Whether the underlying HTTP transport has been closed."""
+        """Whether underlying HTTP transport closed."""
         return self._client.is_closed
 
     async def close(self) -> None:
-        """Close the underlying ``httpx.AsyncClient``."""
+        """Close underlying ``httpx.AsyncClient``."""
         await self._client.aclose()
 
     async def get(
@@ -144,7 +136,7 @@ class PolarionClient:
         *,
         params: dict[str, str | int] | None = None,
     ) -> dict[str, object]:
-        """``GET``; raises ``PolarionAuthError`` (401/403),
+        """``GET``; raise ``PolarionAuthError`` (401/403),
         ``PolarionNotFoundError`` (404), ``PolarionError`` (other non-2xx).
         """
         async with self._get_request_lock():
@@ -156,8 +148,8 @@ class PolarionClient:
         *,
         json: dict[str, object] | None = None,
     ) -> dict[str, object]:
-        """``POST``; sleeps ``_write_delay`` after success, inside the lock,
-        for cluster propagation before the next call.
+        """``POST``; sleep ``_write_delay`` in-lock after success —
+        cluster propagation before next call.
         """
         async with self._get_request_lock():
             result = await self._request("POST", path, json=json)
@@ -182,9 +174,9 @@ class PolarionClient:
         *,
         json: dict[str, object] | None = None,
     ) -> dict[str, object]:
-        """``DELETE``; same delay contract as :meth:`post`. ``json`` carries
-        bulk-delete ids — non-standard for DELETE, but httpx and Polarion's
-        gateway both accept it. ``{}`` for 204 No Content.
+        """``DELETE``; same delay contract as :meth:`post`. ``json`` carry
+        bulk-delete ids — non-standard for DELETE, httpx + Polarion gateway
+        both accept. ``{}`` for 204 No Content.
         """
         async with self._get_request_lock():
             result = await self._request("DELETE", path, json=json)
@@ -199,19 +191,18 @@ class PolarionClient:
         params: dict[str, str | int] | None = None,
         json: dict[str, object] | None = None,
     ) -> dict[str, object]:
-        """Execute with error mapping; retries 429/5xx up to ``_MAX_RETRIES``
+        """Execute with error mapping; retry 429/5xx up to ``_MAX_RETRIES``
         with exponential backoff, other errors raise immediately.
         """
-        # Lock held across retries — releasing mid-backoff would let another caller
-        # slip in and hit the same 429. Pace before first attempt; backoffs widen gap.
+        # Lock held across retries — release mid-backoff = other caller hit same 429.
+        # Pace before first attempt; backoffs widen gap.
         await self._pace()
         last_exception: PolarionError | None = None
         backoff = _INITIAL_BACKOFF_SECONDS
         loop = asyncio.get_running_loop()
 
         for attempt in range(_MAX_RETRIES + 1):
-            # Stamp per attempt so the next request paces from the last one
-            # sent, not the stale first.
+            # Stamp per attempt — next request pace from last sent, not stale first.
             self._last_request_monotonic = loop.time()
             try:
                 response = await self._client.request(
@@ -264,7 +255,7 @@ class PolarionClient:
 
     @staticmethod
     def _map_status_to_error(response: httpx.Response) -> PolarionError:
-        """Map a non-2xx response to the matching ``PolarionError`` subclass."""
+        """Map non-2xx response to matching ``PolarionError`` subclass."""
         status = response.status_code
         try:
             detail: str = _extract_json_api_detail(response.json())

@@ -1,7 +1,7 @@
 """REST-SQL ``query`` builders (not public API). No bind parameters — ids
-escaped inline by doubling ``'``. A ``SELECT`` over ``workitem`` always yields
-work-item resources (column list ignored); callers pair with
-``include=``/``fields=`` for the attributes they need.
+escaped inline by doubling ``'``. ``SELECT`` over ``workitem`` always yield
+work-item resources (column list ignored); caller pair with
+``include=``/``fields=`` for needed attributes.
 """
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 def one_heading_per_document_sql(project_id: str) -> str:
     """One representative heading per document (``MIN`` per ``module`` URI).
-    ``c_deleted IS NOT TRUE`` excludes the recycle bin (``= 0`` 500s).
+    ``c_deleted IS NOT TRUE`` exclude recycle bin (``= 0`` 500s).
     """
     project = project_id.replace("'", "''")
     return (
@@ -23,7 +23,7 @@ def one_heading_per_document_sql(project_id: str) -> str:
 
 def one_item_per_custom_field_sql(project_id: str, type_id: str) -> str:
     """One representative item per custom-field key (``MIN`` per indexed
-    ``cf.c_name``) — catches single-item keys a fixed-N sample misses.
+    ``cf.c_name``) — catch single-item keys a fixed-N sample miss.
     """
     project = project_id.replace("'", "''")
     type_value = type_id.replace("'", "''")

@@ -52,9 +52,9 @@ async def guard_work_item_enums(  # noqa: PLR0913
 ) -> None:
     """Validate supplied work-item enum args against ``getAvailableOptions``.
 
-    ``work_item_type`` scopes status/severity/resolution/priority (``'~'`` =
-    type-agnostic); ``type`` checked first so an invalid type raises before
-    being reused as the scoping axis.
+    ``work_item_type`` scope status/severity/resolution/priority (``'~'`` =
+    type-agnostic); ``type`` checked first so invalid type raise before
+    reuse as scoping axis.
     """
     if type is not None and type != "":
         await check_enum(client, project_id, "workitems", "type", "~", type)
@@ -83,8 +83,8 @@ async def _fetch_work_item_type_custom_keys(
 ) -> frozenset[str]:
     """Union of custom-field keys sampled from existing items of a type.
 
-    MIN-per-key SQL, paged for >100 distinct keys. SQL rejection fails closed —
-    a partial Lucene sample would silently false-reject real keys. Cached even
+    MIN-per-key SQL, paged for >100 distinct keys. SQL rejection fail closed —
+    partial Lucene sample would silently false-reject real keys. Cached even
     if empty.
     """
     path = f"/projects/{encode_path_segment(project_id)}/workitems"
@@ -135,9 +135,9 @@ async def guard_work_item_custom_fields(
     work_item_type: str,
     custom_fields: dict[str, object],
 ) -> None:
-    """Validate ``custom_fields`` keys then enum-typed values before a write.
+    """Validate ``custom_fields`` keys then enum-typed values before write.
 
-    Keys-first order keeps ghost keys out of the enum probe's long-lived 404
+    Keys-first order keep ghost keys out of enum probe's long-lived 404
     cache. Wrong key, option id, or value shape → ``ValueError``; fail-closed
     otherwise.
     """
@@ -156,9 +156,9 @@ async def resolve_work_item_types(
     project_id: str,
     work_item_ids: Iterable[str],
 ) -> dict[str, str]:
-    """Existence check plus short id -> type map for a bulk batch, via chunked
+    """Existence check + short id -> type map for bulk batch, via chunked
     ``id:(...)`` queries (enum guards scope options by type). Fail-closed:
-    raises ``ValueError`` naming every missing id before any write.
+    raise ``ValueError`` naming every missing id before any write.
     """
     requested = sorted({wi for wi in work_item_ids if wi})
     if not requested:

@@ -1,5 +1,5 @@
 """Pagination math for list tools: total-count extraction, has-more decision,
-and the shared ``make_page`` wrapper every list response ends in.
+shared ``make_page`` wrapper every list response end in.
 """
 
 from __future__ import annotations
@@ -8,12 +8,12 @@ from typing import Final
 
 from mcp_server_polarion.models import PaginatedResult
 
-# Polarion enforces a hard cap of 100 server-side.
+# Polarion hard cap 100 server-side.
 DEFAULT_PAGE_SIZE: Final[int] = 100
 
 
 def extract_total_count(response: dict[str, object]) -> int:
-    """Return ``meta.totalCount`` from a JSON:API response, or 0 if missing."""
+    """``meta.totalCount`` from JSON:API response, or 0 if missing."""
     meta = response.get("meta")
     if isinstance(meta, dict):
         total = meta.get("totalCount", 0)
@@ -23,7 +23,7 @@ def extract_total_count(response: dict[str, object]) -> int:
 
 
 def has_links_next(response: dict[str, object]) -> bool:
-    """Return whether the JSON:API response carries a ``links.next`` key."""
+    """Whether JSON:API response carry ``links.next`` key."""
     links = response.get("links")
     if isinstance(links, dict):
         return "next" in links
@@ -38,7 +38,7 @@ def compute_has_more(
     items_count: int,
 ) -> bool:
     """Whether more pages exist: ``total`` when reliable (>0), else
-    ``links.next`` (Polarion sometimes omits ``meta.totalCount``), else
+    ``links.next`` (Polarion sometimes omit ``meta.totalCount``), else
     full-page heuristic.
     """
     if total > 0:
@@ -54,9 +54,9 @@ def make_page[T](
     page_number: int,
     page_size: int,
 ) -> PaginatedResult[T]:
-    """Wrap parsed items in a ``PaginatedResult``. ``total`` falls back to an
-    offset estimate when Polarion omits ``meta.totalCount`` (non-empty page
-    only, else out-of-range pages inflate it); ``has_more`` via ``compute_has_more``.
+    """Wrap parsed items in ``PaginatedResult``. ``total`` fall back to offset
+    estimate when Polarion omit ``meta.totalCount`` (non-empty page only,
+    else out-of-range pages inflate it); ``has_more`` via ``compute_has_more``.
     """
     raw_total = extract_total_count(response)
     total = raw_total

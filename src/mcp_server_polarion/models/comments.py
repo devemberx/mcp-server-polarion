@@ -1,4 +1,4 @@
-"""Comment models — shared comment view, create specs, and update results."""
+"""Comment models — shared view, create specs, update results."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class Comment(BaseModel):
-    """A single comment returned by the comment list tools."""
+    """Single comment from comment list tools."""
 
     id: str
     created: str
@@ -23,9 +23,9 @@ class Comment(BaseModel):
 
 
 class CommentSpec(BaseModel):
-    """Common fields for a comment to create; base for type-specific specs."""
+    """Common create fields; base for type-specific specs."""
 
-    # LLM input model: reject typo keys instead of silently dropping them.
+    # LLM input model: reject typo keys, not silent-drop.
     model_config = ConfigDict(extra="forbid")
 
     text: str = Field(min_length=1)
@@ -42,7 +42,7 @@ class WorkItemCommentSpec(CommentSpec):
 
 
 class CommentsCreateResult(BaseModel):
-    """Result of a comment-create operation."""
+    """Comment-create result."""
 
     created: bool
     dry_run: bool
@@ -51,7 +51,7 @@ class CommentsCreateResult(BaseModel):
 
 
 class CommentUpdateResult(BaseModel):
-    """Shared result of a comment-resolve update, across all comment types."""
+    """Comment-resolve update result, shared across comment types."""
 
     updated: bool
     dry_run: bool

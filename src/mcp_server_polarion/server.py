@@ -1,4 +1,4 @@
-"""FastMCP server instance and lifespan management."""
+"""FastMCP server instance + lifespan management."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ ICON_URL = (
 
 
 class LifespanContext(TypedDict):
-    """Typed context yielded by the server lifespan."""
+    """Typed context yielded by server lifespan."""
 
     polarion_client: PolarionClient
 
@@ -62,5 +62,5 @@ mcp = FastMCP(
 )
 mcp.add_middleware(CompactValidationErrorMiddleware())
 
-# Register tool modules — must be at bottom to avoid circular imports.
+# Register tool modules — bottom to avoid circular import.
 import mcp_server_polarion.tools  # noqa: E402, F401

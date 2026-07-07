@@ -1,4 +1,4 @@
-"""Shared wrappers and constants used across model groups."""
+"""Shared wrappers + constants across model groups."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ from typing import Final
 
 from pydantic import BaseModel
 
-# Internal payload-builder alias only — result models expose previews as
-# `Mapping[str, object]` because the recursive self-reference breaks FastMCP's
+# Payload-builder alias only — result models expose previews as
+# `Mapping[str, object]`: recursive self-reference break FastMCP
 # `json_schema_to_type` (unresolved `ForwardRef('Root')`).
 type JsonValue = (
     str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
@@ -18,7 +18,7 @@ MAX_BODY_HTML_LEN: Final[int] = 2_000_000
 
 
 class PaginatedResult[T](BaseModel):
-    """Paginated response wrapper used by all list tools."""
+    """Paginated response wrapper for all list tools."""
 
     items: list[T]
     total_count: int

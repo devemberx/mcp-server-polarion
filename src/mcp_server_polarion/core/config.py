@@ -1,6 +1,4 @@
-"""Polarion configuration from environment variables; secrets live in ``.env``
-or real env vars, never hardcoded.
-"""
+"""Polarion configuration from env vars; secrets never hardcoded."""
 
 from __future__ import annotations
 
@@ -9,13 +7,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class PolarionConfig(BaseSettings):
-    """Environment-based configuration for the Polarion MCP server."""
+    """Env-based configuration for Polarion MCP server."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        # A shared .env may hold unrelated secrets (e.g. OPENAI_API_KEY for the
-        # eval gate); ignore extras instead of failing client construction.
+        # Shared .env may hold unrelated secrets (eval OPENAI_API_KEY); ignore extras.
         extra="ignore",
     )
 
@@ -37,5 +34,5 @@ class PolarionConfig(BaseSettings):
 
     @property
     def base_api_url(self) -> str:
-        """Return the full REST API v1 base URL."""
+        """Full REST API v1 base URL."""
         return f"{self.polarion_url.rstrip('/')}/polarion/rest/v1"

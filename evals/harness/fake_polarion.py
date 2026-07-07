@@ -1,8 +1,8 @@
 """In-process fake Polarion: real project *structure*, synthetic *content* (no
-production data in eval logs). One catch-all respx route on the Polarion host;
-other hosts (LLM provider) fall through (``assert_all_mocked=False``). Mutations
-recorded, no side effects. Seed data lives in ``fixtures``; ``seeds`` is
-injectable for per-case alternates without touching the global.
+production data in eval logs). One catch-all respx route on Polarion host;
+other hosts (LLM provider) fall through (``assert_all_mocked=False``).
+Mutations recorded, no side effects. Seed data live in ``fixtures``; ``seeds``
+injectable for per-case alternates without touching global.
 """
 
 from __future__ import annotations
@@ -86,7 +86,7 @@ class FakePolarion:
         }
 
     def _document_resource(self, name: str) -> dict[str, Any]:
-        # Direct index, not .get: only reached once dispatch confirms name seeded.
+        # Direct index, not .get: only reached once dispatch confirm name seeded.
         doc = self.seeds.documents[name]
         return {
             "type": "documents",
@@ -102,8 +102,8 @@ class FakePolarion:
         }
 
     def _discovery_document_resource(self, name: str) -> dict[str, Any]:
-        """Module-form ``documents`` resource for the list_documents discovery scan
-        (id = full module id; ``_discover_documents`` splits it for space/name).
+        """Module-form ``documents`` resource for list_documents discovery scan
+        (id = full module id; ``_discover_documents`` split it for space/name).
         """
         doc = self.seeds.documents[name]
         author_ref = {"data": {"type": "users", "id": f"{PROJECT}/{AUTHOR}"}}
@@ -115,9 +115,9 @@ class FakePolarion:
         }
 
     def _document_discovery_response(self) -> dict[str, Any]:
-        """list_documents scan: one heading per document carrying its ``module``,
-        with the module documents in ``included``. Only docs with a seeded heading
-        surface (mirrors the production GROUP-BY-heading discovery).
+        """list_documents scan: one heading per document carrying its
+        ``module``, module documents in ``included``. Only docs with seeded
+        heading surface (mirror production GROUP-BY-heading discovery).
         """
         headings = [
             wi
@@ -134,10 +134,10 @@ class FakePolarion:
         return {"data": data, "included": included, "meta": {"totalCount": len(data)}}
 
     def _document_parts_response(self, name: str) -> dict[str, Any]:
-        """A document's ``parts`` from its seed: each part chained to the next via
+        """Document ``parts`` from seed: each part chained to next via
         ``nextPart``; ``include=workItem`` resources supply titles so
-        ``read_document_parts`` returns populated ``items``. Empty for docs with
-        no seeded parts.
+        ``read_document_parts`` return populated ``items``. Empty for docs
+        with no seeded parts.
         """
         doc = self.seeds.documents.get(name)
         parts = doc.parts if doc else []
@@ -177,9 +177,9 @@ class FakePolarion:
         return {"data": data, "included": included, "meta": {"totalCount": len(data)}}
 
     def _linked_work_items_response(self, source_id: str) -> dict[str, Any]:
-        """Forward links for ``source_id`` from ``seeds.links``; targets supplied
-        as ``include=workItem`` resources (the parser derives targets from
-        ``relationships.workItem``, never the composite id).
+        """Forward links for ``source_id`` from ``seeds.links``; targets
+        supplied as ``include=workItem`` resources (parser derive targets from
+        ``relationships.workItem``, never composite id).
         """
         data: list[dict[str, Any]] = []
         included: list[dict[str, Any]] = []
@@ -203,11 +203,11 @@ class FakePolarion:
     def _comment_resources(
         self, comments: list[Comment], base: str, comment_type: str
     ) -> list[dict[str, Any]]:
-        """A comment thread's JSON:API resources; shared by document and
-        work-item comments. ``base`` prefixes the id (4-segment for documents,
-        3-segment for work items), ``comment_type`` is the resource type. Child
-        links derive from ``parent_id`` (no redundant child-id lists). ``title``
-        is emitted only when set -- document comments leave it absent.
+        """Comment thread JSON:API resources; shared by document + work-item
+        comments. ``base`` prefix the id (4-segment documents, 3-segment work
+        items), ``comment_type`` = resource type. Child links derive from
+        ``parent_id`` (no redundant child-id lists). ``title`` emitted only
+        when set -- document comments leave it absent.
         """
         resources: list[dict[str, Any]] = []
         for comment in comments:
@@ -294,7 +294,7 @@ class FakePolarion:
                 200, json=self._enum_response(enum.group(1), enum.group(2))
             )
 
-        # Context-qualified names ("testing/testrun-type") are separate seed
+        # Context-qualified names ("testing/testrun-type") = separate seed
         # keys, so wildcard-context probes for them 404 like live Polarion.
         project_enum = re.search(r"/enumerations/([^/]+)/([^/]+)/~$", path)
         if project_enum:
@@ -321,15 +321,15 @@ class FakePolarion:
                 return httpx.Response(404, json={"errors": [{"status": "404"}]})
             return httpx.Response(200, json={"data": self._work_item_resource(wi)})
 
-        # Forward links from a single source work item (empty if none seeded).
+        # Forward links from single source work item (empty if none seeded).
         linked = re.search(r"/workitems/([^/]+)/linkedworkitems$", path)
         if linked:
             return httpx.Response(
                 200, json=self._linked_work_items_response(linked.group(1))
             )
 
-        # Work-item comment thread from the item's seed (empty if none/unseeded);
-        # 3-segment ids and a title distinguish these from document comments.
+        # Work-item comment thread from item seed (empty if none/unseeded);
+        # 3-segment ids + title distinguish these from document comments.
         wi_comments = re.search(r"/workitems/([^/]+)/comments$", path)
         if wi_comments:
             wi = self.seeds.work_items.get(wi_comments.group(1))
@@ -342,11 +342,11 @@ class FakePolarion:
                 200, json={"data": data, "meta": {"totalCount": len(data)}}
             )
 
-        # Work item list / discovery: query=type:heading narrows to headings;
-        # query=linkedWorkItems:{wi} is the back-link fallback (sources -> target).
+        # Work item list / discovery: query=type:heading narrow to headings;
+        # query=linkedWorkItems:{wi} = back-link fallback (sources -> target).
         if path.endswith("/workitems"):
-            # list_documents discovery names fields[documents]; serve the module
-            # scan with included document resources rather than the plain list.
+            # list_documents discovery name fields[documents]; serve module
+            # scan with included document resources, not plain list.
             if params.get("fields[documents]"):
                 return httpx.Response(200, json=self._document_discovery_response())
             query = params.get("query", "")
@@ -368,8 +368,8 @@ class FakePolarion:
                 200, json={"data": data, "meta": {"totalCount": len(data)}}
             )
 
-        # Single test run (template-guard pre-read); isTemplate is served only
-        # on templates, mirroring live Polarion omitting it on instances.
+        # Single test run (template-guard pre-read); isTemplate served only on
+        # templates, mirror live Polarion omitting it on instances.
         single_tr = re.search(r"/testruns/([^/]+)$", path)
         if single_tr:
             tr = self.seeds.test_runs.get(single_tr.group(1))
@@ -389,8 +389,8 @@ class FakePolarion:
                 },
             )
 
-        # Test runs: templates=true returns blueprints, else actual instances.
-        # author resolves to a display name via the included users resource.
+        # Test runs: templates=true return blueprints, else actual instances;
+        # author resolve to display name via included users resource.
         if path.endswith("/testruns"):
             want_templates = params.get("templates", "").lower() == "true"
             runs = [
@@ -419,7 +419,7 @@ class FakePolarion:
                 },
             )
 
-        # Parts derive from the document's seed; unseeded/absent docs stay empty.
+        # Parts derive from document seed; unseeded/absent docs stay empty.
         parts = re.search(r"/documents/([^/]+)/parts$", path)
         if parts:
             return httpx.Response(
@@ -439,8 +439,8 @@ class FakePolarion:
                 200, json={"data": data, "meta": {"totalCount": len(data)}}
             )
 
-        # Exact match on a seeded doc: a broad "/documents/" would claim every
-        # name as existing, masking bugs in cases probing other names.
+        # Exact match on seeded doc: broad "/documents/" would claim every
+        # name exist, masking bugs in cases probing other names.
         doc_match = re.search(rf"/spaces/{SPACE}/documents/([^/]+)$", path)
         if doc_match and doc_match.group(1) in self.seeds.documents:
             return httpx.Response(
@@ -458,16 +458,16 @@ class FakePolarion:
                 body = None
         self.mutations.append({"method": request.method, "path": path, "json": body})
 
-        # Resource-creating POSTs must echo one id per submitted entry (the
-        # tool layer raises on a count mismatch, so bulk cases need N ids);
-        # action POSTs and PATCH / DELETE fall through to 204.
+        # Resource-creating POSTs must echo one id per submitted entry (tool
+        # layer raise on count mismatch, so bulk cases need N ids); action
+        # POSTs + PATCH/DELETE fall through to 204.
         submitted = 1
         if isinstance(body, dict):
             data = body.get("data")
             if isinstance(data, list) and data:
                 submitted = len(data)
         if request.method == "POST":
-            # moveFromDocument 400s on a free-floating item; 204 only when in a doc.
+            # moveFromDocument 400 on free-floating item; 204 only when in doc.
             if path.endswith("/actions/moveFromDocument"):
                 m = re.search(r"/workitems/([^/]+)/actions/moveFromDocument$", path)
                 wi = self.seeds.work_items.get(m.group(1)) if m else None
@@ -496,7 +496,7 @@ class FakePolarion:
                     },
                 )
             if path.endswith("/testruns"):
-                # Polarion honors the client-supplied id verbatim; echo it back.
+                # Polarion honor client-supplied id verbatim; echo it back.
                 ids: list[str] = []
                 if isinstance(body, dict) and isinstance(body.get("data"), list):
                     for i, entry in enumerate(body["data"]):
@@ -522,8 +522,8 @@ class FakePolarion:
                     json={"data": [{"type": "documents", "id": MODULE_ID}]},
                 )
             if path.endswith("/comments"):
-                # Work-item comments echo a 3-segment id + workitem_comments type;
-                # document comments a 4-segment id + document_comments type.
+                # Work-item comments echo 3-segment id + workitem_comments
+                # type; document comments 4-segment id + document_comments type.
                 wi_post = re.search(r"/workitems/([^/]+)/comments$", path)
                 if wi_post:
                     created = {
@@ -552,7 +552,7 @@ class FakePolarion:
         return httpx.Response(204)
 
     def install(self, router: respx.MockRouter) -> None:
-        """Register the catch-all Polarion route on *router*."""
+        """Register catch-all Polarion route on *router*."""
         router.route(url__regex=rf"{re.escape(POLARION_HOST)}/.*").mock(
             side_effect=self._dispatch
         )

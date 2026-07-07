@@ -1,4 +1,4 @@
-"""Enum option model — the valid option set returned by list_*_enum_options."""
+"""Enum option model — valid option set from list_*_enum_options."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 
 class EnumOption(BaseModel):
-    """Single enum option returned by ``list_*_enum_options``."""
+    """Single enum option from ``list_*_enum_options``."""
 
     id: str
     name: str
