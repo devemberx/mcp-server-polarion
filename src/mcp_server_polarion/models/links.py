@@ -1,4 +1,4 @@
-"""Work item link models — link views, create/delete/update specs and results."""
+"""Work item link models — views, create/delete/update specs + results."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class WorkItemLink(BaseModel):
-    """A work item link with the target's summary metadata."""
+    """Work item link with target summary metadata."""
 
     id: str
     title: str
@@ -25,7 +25,7 @@ class WorkItemLink(BaseModel):
 class WorkItemLinkSpec(BaseModel):
     """One link to create under a source work item."""
 
-    # LLM input model: reject typo keys instead of silently dropping them.
+    # LLM input model: reject typo keys, not silent-drop.
     model_config = ConfigDict(extra="forbid")
 
     role: str = Field(min_length=1)
@@ -46,7 +46,7 @@ class WorkItemLinkRef(BaseModel):
 
 
 class WorkItemLinksCreateResult(BaseModel):
-    """Result of a ``create_work_item_links`` operation."""
+    """``create_work_item_links`` result."""
 
     created: bool
     dry_run: bool
@@ -55,7 +55,7 @@ class WorkItemLinksCreateResult(BaseModel):
 
 
 class WorkItemLinksDeleteResult(BaseModel):
-    """Result of a ``delete_work_item_links`` operation."""
+    """``delete_work_item_links`` result."""
 
     deleted: bool
     dry_run: bool
@@ -88,7 +88,7 @@ class WorkItemLinkUpdateSpec(BaseModel):
 
 
 class WorkItemLinkUpdateResult(BaseModel):
-    """Result of an ``update_work_item_link`` operation."""
+    """``update_work_item_link`` result."""
 
     updated: bool
     dry_run: bool

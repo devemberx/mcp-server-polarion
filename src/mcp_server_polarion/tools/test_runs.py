@@ -53,8 +53,8 @@ def _build_test_run_resource(
     project_id: str,
     spec: TestRunCreateSpec,
 ) -> dict[str, JsonValue]:
-    """One ``testruns`` resource for a bulk create POST; skips unset so the
-    template (or Polarion default) fills them.
+    """One ``testruns`` resource for bulk create POST; skip unset so
+    template (or Polarion default) fill them.
     """
     attributes: dict[str, JsonValue] = {"id": spec.id}
     if spec.title:
@@ -97,7 +97,7 @@ def _build_create_test_runs_payload(
     tags={"write"},
     timeout=60.0,
     annotations={
-        # Additive: non-destructive; a retry 409s on the same explicit id.
+        # Additive: non-destructive; retry 409s on same explicit id.
         "readOnlyHint": False,
         "destructiveHint": False,
         "idempotentHint": False,

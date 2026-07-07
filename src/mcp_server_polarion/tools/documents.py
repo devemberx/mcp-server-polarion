@@ -104,7 +104,7 @@ class _LinkedWorkItem:
 
 
 def _extract_html_value(field: object) -> str:
-    """Extract HTML from a Polarion text field (``{type,value}`` dict or str)."""
+    """Extract HTML from Polarion text field (``{type,value}`` dict or str)."""
     if isinstance(field, dict):
         return safe_str(field.get("value", ""))
     if isinstance(field, str):
@@ -113,7 +113,7 @@ def _extract_html_value(field: object) -> str:
 
 
 def _resolve_heading_level(attributes: dict[str, object]) -> int:
-    """Return a heading part's level: ``attributes.level``, else parsed ``<hN>``."""
+    """Heading part level: ``attributes.level``, else parsed ``<hN>``."""
     attr_level = attributes.get("level")
     if isinstance(attr_level, int):
         return attr_level
@@ -126,7 +126,7 @@ def _resolve_linked_work_item(
     relationships: dict[str, object],
     work_item_map: dict[str, dict[str, object]],
 ) -> _LinkedWorkItem:
-    """Return metadata for the work item linked from a document part."""
+    """Metadata for work item linked from document part."""
     work_item_full_id = extract_relationship_id(relationships, "workItem")
     if not work_item_full_id:
         return _LinkedWorkItem()
@@ -154,7 +154,7 @@ def _parse_document_part(
     item: object,
     work_item_map: dict[str, dict[str, object]],
 ) -> DocumentPart | None:
-    """Parse a JSON:API document-part resource into a model; ``None`` if invalid."""
+    """JSON:API document-part resource → model; ``None`` if invalid."""
     if not isinstance(item, dict):
         return None
     attributes = item.get("attributes", {})
@@ -169,15 +169,15 @@ def _parse_document_part(
         _PartType,
         raw_type if raw_type in _POLARION_PART_TYPES else "normal",
     )
-    # Polarion reports TOF / page-break as ``normal``; kind is in the ID prefix.
+    # Polarion report TOF / page-break as ``normal``; kind live in ID prefix.
     if part_type == "normal":
         if short_id.startswith("tof_"):
             part_type = "tof"
         elif short_id.startswith("pagebreak_"):
             part_type = "page_break"
 
-    # Heading/workitem body lives in title/description; content is an empty
-    # <hN> stub — skip conversion to avoid "#" noise.
+    # Heading/workitem body live in title/description; content = empty <hN>
+    # stub — skip conversion, avoid "#" noise.
     content_html = (
         _extract_html_value(attributes.get("content"))
         if part_type not in {"heading", "workitem"}
@@ -231,7 +231,7 @@ _FENCED_MIN_LINES: Final[int] = 2
 
 
 def _render_parts_to_markdown(parts: list[DocumentPart]) -> str:
-    """Interleave a page of parts into one Markdown string; chunks join on a
+    """Interleave page of parts into one Markdown string; chunks join on
     blank line, runs of 3+ newlines collapse to 2.
     """
     chunks: list[str] = []
@@ -245,7 +245,7 @@ def _render_parts_to_markdown(parts: list[DocumentPart]) -> str:
 
 
 def _render_part(part: DocumentPart) -> str:
-    """Return the Markdown chunk for one part, or ``""`` to skip it."""
+    """Markdown chunk for one part, or ``""`` to skip."""
     constant = _CONSTANT_CHUNKS.get(part.type)
     if constant is not None:
         return constant
@@ -265,7 +265,7 @@ def _render_part(part: DocumentPart) -> str:
 
 
 def _render_workitem_part(part: DocumentPart) -> str:
-    """Format a ``workitem`` part's lead-in line and optional body."""
+    """``workitem`` part lead-in line + optional body."""
     if not part.title and not part.description:
         return f"`{part.work_item_id}`"
     if not part.description:
@@ -274,8 +274,8 @@ def _render_workitem_part(part: DocumentPart) -> str:
 
 
 def _decorate_wikiblock(content: str) -> str:
-    """Lift the Velocity macro name (``#name(``) into the fenced-code
-    info-string; raw fence when none detectable.
+    """Lift Velocity macro name (``#name(``) into fenced-code info-string;
+    raw fence when none detectable.
     """
     stripped = content.strip()
     if not stripped:
@@ -312,8 +312,8 @@ def _extract_document_from_module(
 ) -> None:
     """Record an included ``module`` resource as (space_id, document_name) → meta.
 
-    Attributes/relationships only present because discovery names them in
-    ``fields[documents]``; a plain ``module`` relationship carries id only.
+    Attributes/relationships only present because discovery name them in
+    ``fields[documents]``; plain ``module`` relationship carry id only.
     """
     if not isinstance(resource, dict) or resource.get("type") != "documents":
         return
@@ -341,9 +341,9 @@ async def _discover_documents(
 ) -> list[DiscoveredDocument]:
     """Discover every document in *project_id* with display metadata; TTL-cached.
 
-    ``GROUP BY mod.c_uri`` SQL collapses headings to one per document (pages of
+    ``GROUP BY mod.c_uri`` SQL collapse headings to one per document (pages of
     documents, not headings). ``module`` must be listed alongside its dot-path
-    includes — a dot-path alone drops the intermediate resource.
+    includes — dot-path alone drop the intermediate resource.
     """
     cached = get_cached_documents(project_id)
     if cached is not None:
@@ -401,7 +401,7 @@ async def _discover_documents(
 
 
 def _extract_first_resource_id(response: dict[str, object]) -> str | None:
-    """First resource id from a JSON:API ``{"data": [...]}`` body, else ``None``."""
+    """First resource id from JSON:API ``{"data": [...]}`` body, else ``None``."""
     data = response.get("data")
     if not isinstance(data, list) or not data:
         return None
@@ -413,7 +413,7 @@ def _extract_first_resource_id(response: dict[str, object]) -> str | None:
 
 
 def _extract_created_module_name(response: dict[str, object]) -> str | None:
-    """Document name from a 201 create response (name may contain ``/``);
+    """Document name from 201 create response (name may contain ``/``);
     ``None`` on unexpected shape.
     """
     full_id = _extract_first_resource_id(response)
@@ -436,7 +436,7 @@ def _build_update_document_payload(  # noqa: PLR0913
     uses_outline_numbering: bool | None = None,
     custom_fields: dict[str, object] | None = None,
 ) -> dict[str, JsonValue]:
-    """JSON:API PATCH body for ``.../documents/{d}``; skips unset.
+    """JSON:API PATCH body for ``.../documents/{d}``; skip unset.
     ``home_page_content_html`` wrapped verbatim (empty guard in tool layer).
     """
     attributes: dict[str, JsonValue] = {}
@@ -478,7 +478,7 @@ def _build_create_document_payload(  # noqa: PLR0913
     uses_outline_numbering: bool | None = None,
     custom_fields: dict[str, object] | None = None,
 ) -> dict[str, JsonValue]:
-    """JSON:API POST body for ``.../spaces/{s}/documents``; skips unset."""
+    """JSON:API POST body for ``.../spaces/{s}/documents``; skip unset."""
     attributes: dict[str, JsonValue] = {
         "moduleName": module_name,
         "title": title,
@@ -605,7 +605,7 @@ async def get_document(
         f"/documents/{encode_path_segment(document_name)}"
     )
 
-    # ``@all`` token: an explicit field list silently drops inline customs here.
+    # ``@all`` token: explicit field list silently drop inline customs here.
     try:
         response = await client.get(
             path,
@@ -639,12 +639,12 @@ async def get_document(
     relationships = data.get("relationships", {})
     if not isinstance(relationships, dict):
         relationships = {}
-    # Output carries display names only; ids are join keys into included users.
+    # Output carry display names only; ids = join keys into included users.
     user_names = parse_included_user_name_map(response)
 
     content_html = ""
     if include_homepage_content_html:
-        # Verbatim {type,value} so it round-trips through update_document.
+        # Verbatim {type,value} so it round-trip through update_document.
         content_obj = attributes.get("homePageContent", {})
         if isinstance(content_obj, dict):
             content_html = safe_str(content_obj.get("value", ""))
@@ -697,7 +697,7 @@ async def read_document_parts(  # noqa: PLR0913
             path,
             params={
                 "fields[document_parts]": "@all",
-                # Narrow workitem fields — ``@all`` ships unused inline customs.
+                # Narrow workitem fields — ``@all`` ship unused inline customs.
                 "fields[workitems]": WORK_ITEM_PART_FIELDS,
                 "include": "workItem",
                 "page[size]": page_size,
@@ -752,7 +752,7 @@ async def read_document(  # noqa: PLR0913
     round-trip via get_document(include_homepage_content_html=True). For
     metadata-only extraction prefer list_work_items SQL.
     """
-    # read_document_parts handles fetch + error mapping (@mcp.tool returns the
+    # read_document_parts handle fetch + error mapping (@mcp.tool return
     # original function).
     page = await read_document_parts(
         ctx,
@@ -778,8 +778,8 @@ async def _resolve_document_type(
     space_id: str,
     document_name: str,
 ) -> str:
-    """Resolve the ``type`` axis the custom-field guard keys on. Runs on dry_run
-    too, so the preview raises the same not-found / auth errors as the real write.
+    """Resolve the ``type`` axis the custom-field guard key on. Run on dry_run
+    too, so preview raise same not-found / auth errors as real write.
     """
     path = (
         f"/projects/{encode_path_segment(project_id)}"
@@ -937,7 +937,7 @@ async def update_document(  # noqa: PLR0913
         )
 
     client = get_client(ctx)
-    # Type-agnostic enum guard: avoids an extra GET, still catches ghost ids.
+    # Type-agnostic enum guard: avoid extra GET, still catch ghost ids.
     await guard_document_enums(
         client,
         project_id,
@@ -946,7 +946,7 @@ async def update_document(  # noqa: PLR0913
         status=status,
     )
 
-    # Build first: merge_custom_fields collision check is cheaper than guard GET.
+    # Build first: merge_custom_fields collision check cheaper than guard GET.
     payload = _build_update_document_payload(
         project_id=project_id,
         space_id=space_id,
@@ -959,7 +959,7 @@ async def update_document(  # noqa: PLR0913
         uses_outline_numbering=uses_outline_numbering,
         custom_fields=custom_fields,
     )
-    # A type change keys the custom-field schema on the new type, else current.
+    # Type change key custom-field schema on new type, else current.
     if custom_fields:
         effective_type = type or await _resolve_document_type(
             client, project_id, space_id, document_name
@@ -1011,7 +1011,7 @@ async def update_document(  # noqa: PLR0913
     tags={"write"},
     timeout=60.0,
     annotations={
-        # Additive: non-destructive, but non-idempotent (duplicate module_name 409s).
+        # Additive: non-destructive, non-idempotent (duplicate module_name 409s).
         "readOnlyHint": False,
         "destructiveHint": False,
         "idempotentHint": False,
@@ -1149,7 +1149,7 @@ async def create_document(  # noqa: PLR0913
             "The document may or may not exist; verify with list_documents."
         )
 
-    # Drop the stale list_documents cache so the new doc shows on the next call.
+    # Drop stale list_documents cache so new doc show on next call.
     invalidate_documents_cache(project_id)
 
     return DocumentCreateResult(

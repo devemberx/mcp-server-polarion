@@ -1,4 +1,4 @@
-"""Work item models — summaries, details, create specs, and write results."""
+"""Work item models — summaries, details, create specs, write results."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from mcp_server_polarion.models.common import MAX_BODY_HTML_LEN
 
 
 class WorkItemSummary(BaseModel):
-    """Compact work-item representation for list and search results."""
+    """Compact work-item view for list + search results."""
 
     id: str
     title: str
@@ -24,9 +24,9 @@ class WorkItemSummary(BaseModel):
 
 
 class Hyperlink(BaseModel):
-    """A single external hyperlink attached to a work item."""
+    """Single external hyperlink on a work item."""
 
-    # LLM input model: reject typo keys instead of silently dropping them.
+    # LLM input model: reject typo keys, not silent-drop.
     model_config = ConfigDict(extra="forbid")
 
     role: str
@@ -35,7 +35,7 @@ class Hyperlink(BaseModel):
 
 
 class WorkItemDetail(WorkItemSummary):
-    """Full work-item details returned by ``get_work_item``."""
+    """Full work-item detail from ``get_work_item``."""
 
     description_html: str = ""
     project_id: str
@@ -49,7 +49,7 @@ class WorkItemDetail(WorkItemSummary):
 
 
 class WorkItemRead(WorkItemSummary):
-    """LLM-friendly work-item view returned by ``read_work_item``."""
+    """LLM-friendly work-item view from ``read_work_item``."""
 
     description: str = ""
     project_id: str
@@ -81,7 +81,7 @@ class WorkItemCreateSpec(BaseModel):
 
 
 class WorkItemsCreateResult(BaseModel):
-    """Result of a ``create_work_items`` operation."""
+    """``create_work_items`` result."""
 
     created: bool
     dry_run: bool
@@ -139,8 +139,7 @@ class WorkItemUpdateSpec(BaseModel):
 
     @model_validator(mode="after")
     def _require_effective_change(self) -> WorkItemUpdateSpec:
-        # None-valued custom entries are dropped at payload build; an item
-        # reduced to an attribute-less resource would 400 the whole batch.
+        # None custom entries drop at payload build; attribute-less item 400 the batch.
         effective = (
             self.title
             or self.description_html
@@ -169,7 +168,7 @@ class WorkItemUpdateSpec(BaseModel):
 
 
 class WorkItemsUpdateResult(BaseModel):
-    """Result of an ``update_work_items`` operation."""
+    """``update_work_items`` result."""
 
     updated: bool
     dry_run: bool
@@ -178,7 +177,7 @@ class WorkItemsUpdateResult(BaseModel):
 
 
 class WorkItemMoveResult(BaseModel):
-    """Result of a ``move_work_item_to_document`` or sibling move-document call."""
+    """Result of ``move_work_item_to_document`` or sibling move call."""
 
     moved: bool
     dry_run: bool

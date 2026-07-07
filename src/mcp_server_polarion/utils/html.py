@@ -42,7 +42,7 @@ ALLOWED_TAGS: Final[frozenset[str]] = frozenset(
     }
 )
 
-# Per-tag attr allowlist (absent tag = none); blocks on* handlers → stored XSS.
+# Per-tag attr allowlist (absent tag = none); block on* handlers → stored XSS.
 ALLOWED_ATTRS: Final[dict[str, frozenset[str]]] = {
     "a": frozenset({"href", "title"}),
     "td": frozenset({"colspan", "rowspan"}),
@@ -55,7 +55,7 @@ _DECOMPOSE_TAGS: Final[frozenset[str]] = frozenset({"script", "style"})
 # Safe href schemes; others (javascript:, data:, vbscript:) stripped (XSS).
 _SAFE_URL_SCHEMES: Final[frozenset[str]] = frozenset({"http", "https", "mailto"})
 
-# Bounds adversarial colspan*rowspan (1M clones); covers realistic tables.
+# Bound adversarial colspan*rowspan (1M clones); cover realistic tables.
 _MAX_CELLS_PER_MERGE: Final[int] = 10_000
 
 # html_block/html_inline disabled so raw HTML can't bypass sanitization.
@@ -79,9 +79,9 @@ def html_to_markdown(html: str) -> str:
 
 def _render_polarion_rte_links(html: str) -> str:
     """Lift ``span.polarion-rte-link`` (empty span, target on ``data-*``) into
-    ``<a href="polarion:...">`` — markdownify drops empty spans, losing the
-    link. ``polarion:`` is intentionally absent from ``_SAFE_URL_SCHEMES`` so a
-    round-trip through ``sanitize_html`` strips the unresolvable href.
+    ``<a href="polarion:...">`` — markdownify drop empty spans, lose the
+    link. ``polarion:`` intentionally absent from ``_SAFE_URL_SCHEMES`` so
+    round-trip through ``sanitize_html`` strip the unresolvable href.
     """
     if "polarion-rte-link" not in html:
         return html
@@ -119,8 +119,8 @@ def _resolve_rte_link(span: Tag) -> tuple[str, str]:
     if item_id:
         scope_raw = span.attrs.get("data-scope", "")
         scope = scope_raw if isinstance(scope_raw, str) else ""
-        # Bare ``polarion:workitem/MCPT-7`` resolves against current project;
-        # ``polarion:project/Proj/workitem/MCPT-7`` carries cross-project scope.
+        # Bare ``polarion:workitem/MCPT-7`` resolve against current project;
+        # ``polarion:project/Proj/workitem/MCPT-7`` carry cross-project scope.
         if scope:
             href = (
                 f"polarion:project/{quote(scope, safe='')}"
@@ -140,7 +140,7 @@ def _escape_md_link_label(text: str) -> str:
 
 def _fill_empty_img_alt(html: str) -> str:
     """Promote ``<img title>`` (or post-colon ``src`` filename) to ``alt`` —
-    Polarion puts attachment filenames on ``title``, so markdownify emits a
+    Polarion put attachment filenames on ``title``, so markdownify emit
     label-less ``![](src)``.
     """
     if "<img" not in html.lower():
@@ -168,8 +168,8 @@ def _fill_empty_img_alt(html: str) -> str:
 
 def _expand_merged_table_cells(html: str) -> str:
     """Duplicate ``colspan``/``rowspan`` cells into every covered grid position
-    — markdownify 1.2.2 renders colspan as empty cells and drops rowspan,
-    breaking GFM cell counts.
+    — markdownify 1.2.2 render colspan as empty cells, drop rowspan,
+    break GFM cell counts.
     """
     if "<table" not in html.lower():
         return html
@@ -229,14 +229,14 @@ def _rectangularize_table(table: Tag) -> None:
                 for placed_col in placed_cols:
                     reservations[target][placed_col] = _clone_cell(cell)
 
-        # clear() drops inter-cell whitespace (markdownify ignores it anyway).
+        # clear() drop inter-cell whitespace (markdownify ignore it anyway).
         row.clear()
         for col in sorted(layout):
             row.append(layout[col])
 
 
 def _get_span(cell: Tag, attr_name: str) -> int:
-    """colspan/rowspan as int in ``[1, 1000]`` (mirrors markdownify); invalid → 1."""
+    """colspan/rowspan as int in ``[1, 1000]`` (mirror markdownify); invalid → 1."""
     raw = cell.attrs.get(attr_name)
     if isinstance(raw, list):
         raw = raw[0] if raw else ""
@@ -285,9 +285,9 @@ _CAPTION_KINDS: Final[dict[str, str]] = {"Table:": "Table", "Figure:": "Figure"}
 
 
 def polarionify_html(html: str) -> str:
-    """Style class-less tables and convert adjacent ``Table:``/``Figure:``
+    """Style class-less tables + convert adjacent ``Table:``/``Figure:``
     paragraphs into caption widgets. Must run AFTER ``sanitize_html`` (every
-    injected attribute is a fixed constant); unmatched input returned verbatim.
+    injected attribute = fixed constant); unmatched input returned verbatim.
     """
     if not html or not html.strip():
         return ""
@@ -386,7 +386,7 @@ def sanitize_html(html: str) -> str:
 
     ``script``/``style`` decomposed (content too — never visible text); other
     disallowed tags unwrapped (children kept). Surviving tags lose non-allowed
-    attrs (kills ``on*`` → stored XSS); ``href`` outside ``_SAFE_URL_SCHEMES``
+    attrs (kill ``on*`` → stored XSS); ``href`` outside ``_SAFE_URL_SCHEMES``
     (``javascript:``, ``data:``) removed.
     """
     if not html or not html.strip():
@@ -407,7 +407,7 @@ def sanitize_html(html: str) -> str:
         else:
             tag.unwrap()
 
-    # Fresh find_all visits only still-attached tags.
+    # Fresh find_all visit only still-attached tags.
     for tag in soup.find_all(True):
         allowed_attrs: frozenset[str] = ALLOWED_ATTRS.get(tag.name, frozenset())
         for attr in list(tag.attrs):
@@ -433,12 +433,11 @@ _BLOCK_TAGS_NEEDING_IDS: Final[frozenset[str]] = frozenset(
 
 def stamp_block_ids(html: str, prefix: str = "polarion_mcp") -> str:
     """Stamp unique ``id="{prefix}_{N}"`` on anchorless ``_BLOCK_TAGS_NEEDING_IDS``
-    blocks — an anchorless block saves fine but makes the next ``GET .../parts``
-    return HTTP 500. Headings skipped (Polarion rewrites their ids on save).
+    blocks — anchorless block save fine but make next ``GET .../parts``
+    return HTTP 500. Headings skipped (Polarion rewrite their ids on save).
     Existing non-blank ids preserved; generated ids skip in-document values
-    (Polarion 400s on duplicates). Input returned verbatim (not reserialized)
-    when nothing needs stamping, so an anchored round-trip body is never
-    perturbed.
+    (Polarion 400 on duplicates). Input returned verbatim (not reserialized)
+    when nothing need stamping — anchored round-trip body never perturbed.
     """
     if not html or not html.strip():
         return ""
@@ -468,9 +467,9 @@ def stamp_block_ids(html: str, prefix: str = "polarion_mcp") -> str:
 
 
 def first_anchorless_block(html: str) -> str | None:
-    """Name of the first block lacking a non-empty ``id=`` (whitespace-only
+    """Name of first block lacking non-empty ``id=`` (whitespace-only
     counts), or ``None``. Defensive counterpart to :func:`stamp_block_ids` —
-    document tools run it post-stamping so a stamping regression cannot reach
+    document tools run it post-stamping so stamping regression cannot reach
     Polarion (anchorless block ⇒ ``GET .../parts`` HTTP 500).
     """
     if not html or not html.strip():

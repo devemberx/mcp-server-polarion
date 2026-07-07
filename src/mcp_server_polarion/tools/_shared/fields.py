@@ -11,8 +11,8 @@ MAX_BULK_ITEMS: Final[int] = 50
 WORK_ITEM_LIST_FIELDS: Final[str] = "title,type,status,priority,updated,module,assignee"
 WORK_ITEM_DETAIL_FIELDS: Final[str] = "@all"
 WORK_ITEM_PART_FIELDS: Final[str] = "title,type,status,description,outlineNumber"
-# camelCase finishedOn/isTemplate are Polarion attr names; author keeps the
-# relationship block alive under the sparse fieldset.
+# camelCase finishedOn/isTemplate = Polarion attr names; author keep
+# relationship block alive under sparse fieldset.
 TEST_RUN_LIST_FIELDS: Final[str] = (
     "title,type,status,finishedOn,updated,author,isTemplate"
 )

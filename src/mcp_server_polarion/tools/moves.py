@@ -35,7 +35,7 @@ def _build_move_to_document_payload(
     next_part_id: str | None,
 ) -> dict[str, JsonValue]:
     """Flat ``moveToDocument`` action body (not JSON:API): ``targetDocument``
-    plus at most one of ``previousPart``/``nextPart`` (both omitted = append);
+    + at most one of ``previousPart``/``nextPart`` (both omitted = append);
     at-most-one re-checked here to fail closed.
     """
     if previous_part_id is not None and next_part_id is not None:
@@ -59,7 +59,7 @@ def _build_move_to_document_payload(
     tags={"write"},
     timeout=60.0,
     annotations={
-        # Non-idempotent: re-moving an already-moved item may 400, not no-op.
+        # Non-idempotent: re-move already-moved item may 400, not no-op.
         "readOnlyHint": False,
         "destructiveHint": True,
         "idempotentHint": False,
@@ -164,7 +164,7 @@ async def move_work_item_to_document(  # noqa: PLR0913
     tags={"write"},
     timeout=60.0,
     annotations={
-        # Non-idempotent: a second moveFromDocument 400s (already free-floating).
+        # Non-idempotent: second moveFromDocument 400s (already free-floating).
         "readOnlyHint": False,
         "destructiveHint": True,
         "idempotentHint": False,
@@ -204,7 +204,7 @@ async def move_work_item_from_document(
         "/actions/moveFromDocument"
     )
     try:
-        # moveFromDocument takes no body.
+        # moveFromDocument take no body.
         await client.post(path)
     except PolarionAuthError as exc:
         raise PermissionError(
