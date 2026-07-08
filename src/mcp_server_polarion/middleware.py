@@ -49,9 +49,8 @@ class CompactValidationErrorMiddleware(Middleware):
         try:
             return await call_next(context)
         except (ValidationError, FastMCPValidationError) as exc:
-            # fastmcp >=3.4.3 wraps tool-arg pydantic errors in its own
-            # ValidationError (original on __cause__); tool-body errors stay raw
-            # pydantic. Normalise to the pydantic error before compacting.
+            # fastmcp >=3.4.3 wrap arg pydantic error in own ValidationError
+            # (original on __cause__); tool-body error arrive raw pydantic.
             pydantic_exc = exc if isinstance(exc, ValidationError) else exc.__cause__
             if not isinstance(pydantic_exc, ValidationError):
                 raise
