@@ -6,8 +6,7 @@ gh api .../pulls/... or .../issues/...
 
 Rules:
   1. English-only — no non-ASCII letters. Common typographic punctuation
-     (dashes, arrows, curly quotes, ellipsis, math signs) + emoji allowed;
-     foreign-script prose (Korean/CJK) + accented Latin still blocked.
+     (dashes, arrows, curly quotes, ellipsis, math signs) + emoji allowed.
   2. Template checkboxes preserved — every checkbox from PULL_REQUEST_TEMPLATE.md
      must appear (PR create/edit only).
   3. ## Changes section — required, with exactly two non-empty bullets, each
