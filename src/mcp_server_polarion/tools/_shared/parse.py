@@ -288,6 +288,8 @@ class TestRunSummaryKwargs(TypedDict):
     updated: str
     author_name: str
     is_template: bool
+    group_id: str
+    template_id: str
 
 
 def parse_test_run_summary_kwargs(
@@ -314,6 +316,10 @@ def parse_test_run_summary_kwargs(
         "updated": safe_str(attributes.get("updated", "")),
         "author_name": user_names.get(author_id, ""),
         "is_template": bool(attributes.get("isTemplate", False)),
+        "group_id": safe_str(attributes.get("groupId", "")),
+        "template_id": extract_short_id(
+            extract_relationship_id(relationships, "template")
+        ),
     }
 
 
