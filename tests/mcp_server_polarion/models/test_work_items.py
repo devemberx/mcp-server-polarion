@@ -226,6 +226,8 @@ class TestWorkItemDetail:
             project_id="proj1",
         )
         assert detail.author_id == ""
+        assert detail.assignee_ids == []
+        assert detail.assignee_names == []
         assert detail.created == ""
         assert detail.resolution == ""
         assert detail.severity == ""
