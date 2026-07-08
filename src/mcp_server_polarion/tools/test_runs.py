@@ -208,8 +208,9 @@ async def list_test_runs(  # noqa: PLR0913
 
     Returns actual run instances by default; set templates=True for the reusable
     template blueprints instead. Filter with a Lucene query (status:open,
-    type:manual, HAS_VALUE:<field>) or omit for all. To filter by person, match
-    the full author_name exactly and quoted: author.name:"Jane Doe".
+    type:manual, HAS_VALUE:<field>) or omit for all. Filter by person with
+    author.name (exact, quoted) -- author.id does not match on test runs;
+    discover the full name from an unfiltered page first.
     """
     client = get_client(ctx)
     params: dict[str, str | int] = {

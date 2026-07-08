@@ -184,6 +184,16 @@ class TestParseWorkItemSummaryKwargs:
         assert kwargs["document_name"] == "Spec"
         assert kwargs["author_name"] == "J Doe"
 
+    def test_author_present_but_unresolved_yields_blank_name(self) -> None:
+        # Author relationship present but id absent from user_names map -> "".
+        item: dict[str, object] = {
+            "id": "proj/MCPT-3",
+            "attributes": {"title": "T", "type": "task", "status": "open"},
+            "relationships": {"author": {"data": {"id": "proj/ghost"}}},
+        }
+        kwargs = parse_work_item_summary_kwargs(item, {"proj/jdoe": "J Doe"})
+        assert kwargs["author_name"] == ""
+
     def test_non_dict_attributes_and_relationships_default_blank(self) -> None:
         kwargs = parse_work_item_summary_kwargs(
             {"id": "proj/MCPT-2", "attributes": None, "relationships": None}
