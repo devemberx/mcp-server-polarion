@@ -32,7 +32,6 @@ class CommentSpec(BaseModel):
     text: str = Field(min_length=1)
     text_format: Literal["text/html", "text/plain"] = "text/plain"
     resolved: bool | None = None
-    author_id: str | None = None
     parent_comment_id: str | None = None
 
 
