@@ -243,8 +243,8 @@ class FakePolarion:
         return resources
 
     def _author_included(self) -> list[dict[str, Any]]:
-        """``included`` users entry resolving the shared author id to a name;
-        production requests ``include=author&fields[users]=name`` on these reads.
+        """``included`` users entry resolve shared author id to name;
+        production request ``include=author&fields[users]=name`` on these read.
         """
         return [
             {

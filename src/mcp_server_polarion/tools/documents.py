@@ -296,8 +296,8 @@ def _decorate_wikiblock(content: str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class _DocumentMeta:
-    """Document attributes + editor user ids; ids are join keys into included
-    ``users`` for display names and are also surfaced (short form) for requery.
+    """Document attributes + editor user ids; ids = join keys into included
+    ``users`` for display names, surfaced short-form for requery too.
     """
 
     type: str = ""
