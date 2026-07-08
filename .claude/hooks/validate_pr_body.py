@@ -72,8 +72,9 @@ def main() -> int:
     errors: list[str] = []
     if has_disallowed_non_ascii(body):
         errors.append(
-            "Body contains non-ASCII characters (other than emoji). Per repo "
-            "convention PR/issue/commit artifacts must be in English."
+            "Body contains non-ASCII characters (other than emoji and "
+            "typographic punctuation). Per repo convention PR/issue/commit "
+            "artifacts must be in English."
         )
 
     if kind == "pr":
