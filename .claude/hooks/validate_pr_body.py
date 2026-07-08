@@ -5,7 +5,9 @@ Triggered on: gh pr (create|edit|comment), gh issue (create|edit|comment),
 gh api .../pulls/... or .../issues/...
 
 Rules:
-  1. English-only — no non-ASCII characters in the body.
+  1. English-only — no non-ASCII letters. Common typographic punctuation
+     (dashes, arrows, curly quotes, ellipsis, math signs) + emoji allowed;
+     foreign-script prose (Korean/CJK) + accented Latin still blocked.
   2. Template checkboxes preserved — every checkbox from PULL_REQUEST_TEMPLATE.md
      must appear (PR create/edit only).
   3. ## Changes section — required, with exactly two non-empty bullets, each
@@ -23,6 +25,12 @@ import sys
 from pathlib import Path
 
 NON_ASCII_RE = re.compile(r"[^\x00-\x7F]")
+# Typographic punctuation allowed: formatting not language.
+TYPOGRAPHIC_RE = re.compile(
+    "[\u2013\u2014\u2018\u2019\u201c\u201d\u2022\u2026"  # dashes quotes bullet ellipsis
+    "\u2190\u2192\u2194\u21d2\u2260\u2264\u2265"  # arrows ne le ge
+    "\u00b1\u00b7\u00d7\u00f7]"  # plus-minus middot times divide
+)
 EMOJI_RE = re.compile(
     "[\U0001f000-\U0001faff"  # pictographs, emoticons, transport, flags
     "\U00002600-\U000027bf"  # misc symbols + dingbats
@@ -89,7 +97,8 @@ def main() -> int:
 
 
 def has_disallowed_non_ascii(body: str) -> bool:
-    return bool(NON_ASCII_RE.search(EMOJI_RE.sub("", body)))
+    stripped = TYPOGRAPHIC_RE.sub("", EMOJI_RE.sub("", body))
+    return bool(NON_ASCII_RE.search(stripped))
 
 
 def classify(cmd: str) -> str | None:
