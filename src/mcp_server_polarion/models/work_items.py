@@ -107,7 +107,10 @@ class WorkItemUpdateSpec(BaseModel):
         default=None,
         max_length=MAX_BODY_HTML_LEN,
         description=(
-            "Raw HTML from get_work_item(include_description_html=True); verbatim."
+            "Raw Polarion HTML from get_work_item("
+            "include_description_html=True), sent verbatim. Adding a table, "
+            "caption, or widget requires get_html_recipes first — build this "
+            "field from its template; hand-written table markup is rejected."
         ),
     )
     status: str | None = Field(

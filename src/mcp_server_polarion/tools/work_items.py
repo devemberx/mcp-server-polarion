@@ -362,9 +362,10 @@ async def update_work_items(  # noqa: PLR0913
 
     description_html is raw Polarion HTML, sent verbatim — source from
     get_work_item(include_description_html=True); greenfield bodies use
-    create_work_items Markdown, formats never mix. New table, caption, link,
-    or widget HTML must be adapted from get_html_recipes templates, never
-    hand-written. custom_fields is partial,
+    create_work_items Markdown, formats never mix. To add a table, caption,
+    link, or widget, call get_html_recipes first and adapt its template
+    before writing description_html; hand-written table markup is rejected.
+    custom_fields is partial,
     keys outside the type schema rejected, values NOT validated — resolve via
     list_work_item_enum_options first.
 
