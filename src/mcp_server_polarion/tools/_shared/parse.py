@@ -203,7 +203,7 @@ def parse_work_item_detail(
     """JSON:API work-item resource → ``WorkItemDetail``. Expect
     ``WORK_ITEM_DETAIL_FIELDS`` + ``include=assignee,author``; description
     pass through as raw HTML, round-trip unchanged. ``user_names`` map full
-    author id → display name (from included ``users``).
+    user id → display name (author + assignee, from included ``users``).
     """
     attributes = item.get("attributes", {})
     if not isinstance(attributes, dict):
