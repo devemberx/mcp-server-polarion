@@ -263,8 +263,10 @@ class TestListDocuments:
         doc = result.items[0]
         assert doc.status == "draft"
         assert doc.updated == "2026-02-22T14:53:03.244Z"
-        assert doc.author == "System Administrator"
-        assert doc.last_updated_by == "Dev Member"
+        assert doc.author_id == "admin"
+        assert doc.author_name == "System Administrator"
+        assert doc.last_updated_by_id == "72c2462f"
+        assert doc.last_updated_by_name == "Dev Member"
 
     async def test_unresolved_user_yields_empty_name(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -284,7 +286,9 @@ class TestListDocuments:
             page_number=1,
         )
 
-        assert result.items[0].author == ""
+        # Unresolvable name still expose the id — the machine key survives.
+        assert result.items[0].author_id == "ghost"
+        assert result.items[0].author_name == ""
 
     async def test_id_less_included_user_never_matches(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -306,8 +310,8 @@ class TestListDocuments:
         )
 
         doc = result.items[0]
-        assert doc.author == ""
-        assert doc.last_updated_by == ""
+        assert doc.author_name == ""
+        assert doc.last_updated_by_name == ""
 
     async def test_missing_metadata_defaults_empty(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -326,8 +330,10 @@ class TestListDocuments:
         doc = result.items[0]
         assert doc.status == ""
         assert doc.updated == ""
-        assert doc.author == ""
-        assert doc.last_updated_by == ""
+        assert doc.author_id == ""
+        assert doc.author_name == ""
+        assert doc.last_updated_by_id == ""
+        assert doc.last_updated_by_name == ""
 
     async def test_deduplicates_documents(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -645,9 +651,11 @@ class TestGetDocument:
         assert result.type == "req_specification"
         assert result.status == "approved"
         assert result.updated == "2026-02-22T14:53:03.244Z"
-        # Editor names resolved from included users; ids never surface.
-        assert result.author == "System Administrator"
-        assert result.last_updated_by == "Dev Member"
+        # Editor id + name pair both surface for requery and intent matching.
+        assert result.author_id == "admin"
+        assert result.author_name == "System Administrator"
+        assert result.last_updated_by_id == "72c2462f"
+        assert result.last_updated_by_name == "Dev Member"
         # Raw HTML round-trip: <p>/<strong> survive verbatim.
         assert result.content_html == (
             "<p>This is the <strong>SRS</strong> document.</p>"
@@ -672,8 +680,10 @@ class TestGetDocument:
         )
 
         assert result.updated == ""
-        assert result.author == ""
-        assert result.last_updated_by == ""
+        assert result.author_id == ""
+        assert result.author_name == ""
+        assert result.last_updated_by_id == ""
+        assert result.last_updated_by_name == ""
 
     async def test_outline_and_autosuspect_parsed(
         self, mock_ctx: MagicMock, mock_client: AsyncMock

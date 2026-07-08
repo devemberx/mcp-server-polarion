@@ -29,8 +29,10 @@ class TestDocumentSummary:
         d = DocumentSummary(space_id="_default", document_name="SRS")
         assert d.status == ""
         assert d.updated == ""
-        assert d.author == ""
-        assert d.last_updated_by == ""
+        assert d.author_id == ""
+        assert d.author_name == ""
+        assert d.last_updated_by_id == ""
+        assert d.last_updated_by_name == ""
 
 
 class TestDocumentDetail:
@@ -45,8 +47,10 @@ class TestDocumentDetail:
     def test_editor_metadata_defaults_empty(self):
         d = DocumentDetail(title="Doc")
         assert d.updated == ""
-        assert d.author == ""
-        assert d.last_updated_by == ""
+        assert d.author_id == ""
+        assert d.author_name == ""
+        assert d.last_updated_by_id == ""
+        assert d.last_updated_by_name == ""
 
     def test_empty_content(self):
         d = DocumentDetail(

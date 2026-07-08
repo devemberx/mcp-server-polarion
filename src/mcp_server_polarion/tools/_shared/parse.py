@@ -5,6 +5,7 @@ unchanged round-trip.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Literal, TypedDict
 
 from mcp_server_polarion.models import (
@@ -198,10 +199,12 @@ def parse_work_item_detail(
     *,
     project_id: str,
     fallback_id: str = "",
+    user_names: Mapping[str, str] | None = None,
 ) -> WorkItemDetail:
     """JSON:API work-item resource → ``WorkItemDetail``. Expect
-    ``WORK_ITEM_DETAIL_FIELDS`` + ``include=assignee``; description pass
-    through as raw HTML, round-trip unchanged.
+    ``WORK_ITEM_DETAIL_FIELDS`` + ``include=assignee,author``; description
+    pass through as raw HTML, round-trip unchanged. ``user_names`` map full
+    author id → display name (from included ``users``).
     """
     attributes = item.get("attributes", {})
     if not isinstance(attributes, dict):
@@ -219,11 +222,13 @@ def parse_work_item_detail(
     if not summary_kwargs["id"]:
         summary_kwargs["id"] = fallback_id
 
+    author_full = extract_relationship_id(relationships, "author")
     return WorkItemDetail(
         **summary_kwargs,
         description_html=desc_html,
         project_id=project_id,
-        author_id=extract_short_id(extract_relationship_id(relationships, "author")),
+        author_id=extract_short_id(author_full),
+        author_name=(user_names or {}).get(author_full, ""),
         created=safe_str(attributes.get("created", "")),
         resolution=safe_str(attributes.get("resolution", "")),
         severity=safe_str(attributes.get("severity", "")),
@@ -274,6 +279,7 @@ class TestRunSummaryKwargs(TypedDict):
     status: str
     finished_on: str
     updated: str
+    author_id: str
     author_name: str
     is_template: bool
 
@@ -300,6 +306,7 @@ def parse_test_run_summary_kwargs(
         "status": safe_str(attributes.get("status", "")),
         "finished_on": safe_str(attributes.get("finishedOn", "")),
         "updated": safe_str(attributes.get("updated", "")),
+        "author_id": extract_short_id(author_id),
         "author_name": user_names.get(author_id, ""),
         "is_template": bool(attributes.get("isTemplate", False)),
     }
@@ -323,8 +330,10 @@ def parse_test_run_summaries(response: dict[str, object]) -> list[TestRunSummary
     return items
 
 
-def _parse_comment(item: dict[str, object]) -> Comment:
-    """``Comment`` from JSON:API resource (short relationship IDs)."""
+def _parse_comment(item: dict[str, object], user_names: Mapping[str, str]) -> Comment:
+    """``Comment`` from JSON:API resource (short relationship IDs); ``user_names``
+    map full author id → display name (from included ``users``).
+    """
     attributes_raw = item.get("attributes")
     attributes: dict[str, object] = (
         attributes_raw if isinstance(attributes_raw, dict) else {}
@@ -354,6 +363,7 @@ def _parse_comment(item: dict[str, object]) -> Comment:
         text=text_value,
         text_format=text_format,
         author_id=extract_short_id(author_full) or None,
+        author_name=user_names.get(author_full, ""),
         parent_comment_id=extract_short_id(parent_full) or None,
         child_comment_ids=[extract_short_id(c) for c in child_full],
     )
@@ -365,12 +375,13 @@ def parse_comments_page(
     """JSON:API comments response → ``PaginatedResult`` page; shared by
     document- and work-item comment list tools.
     """
+    user_names = parse_included_user_name_map(response)
     raw_data = response.get("data", [])
     comment_items: list[Comment] = []
     if isinstance(raw_data, list):
         for entry in raw_data:
             if isinstance(entry, dict):
-                comment_items.append(_parse_comment(entry))
+                comment_items.append(_parse_comment(entry, user_names))
 
     return make_page(comment_items, response, page_number, page_size)
 

@@ -54,6 +54,7 @@ from mcp_server_polarion.tools._shared.pagination import (
 )
 from mcp_server_polarion.tools._shared.parse import (
     extract_created_short_ids,
+    parse_included_user_name_map,
     parse_work_item_detail,
     parse_work_item_summaries,
 )
@@ -554,7 +555,8 @@ async def get_work_item(
             path,
             params={
                 "fields[workitems]": WORK_ITEM_DETAIL_FIELDS,
-                "include": "assignee",
+                "include": "assignee,author",
+                "fields[users]": "name",
             },
         )
     except PolarionNotFoundError as exc:
@@ -580,6 +582,7 @@ async def get_work_item(
         data,
         project_id=project_id,
         fallback_id=work_item_id,
+        user_names=parse_included_user_name_map(response),
     )
     if not include_description_html:
         # Body always travel over wire; blank it per the False contract.

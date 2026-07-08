@@ -18,6 +18,7 @@ class Comment(BaseModel):
     text: str = ""
     text_format: Literal["text/html", "text/plain"] = "text/html"
     author_id: str | None = None
+    author_name: str = ""
     parent_comment_id: str | None = None
     child_comment_ids: list[str] = Field(default_factory=list)
 
