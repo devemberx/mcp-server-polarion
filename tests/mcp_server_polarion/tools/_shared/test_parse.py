@@ -248,6 +248,7 @@ class TestParseWorkItemDetail:
         assert detail.author_id == "jdoe"
         assert detail.author_name == ""
         assert detail.assignee_ids == ["alice", "bob"]
+        assert detail.assignee_names == ["", ""]
         assert detail.custom_fields == {"riskLevel": "high"}
 
     def test_user_names_resolve_author_name(self) -> None:
@@ -261,6 +262,21 @@ class TestParseWorkItemDetail:
         )
         assert detail.author_id == "jdoe"
         assert detail.author_name == "J Doe"
+
+    def test_user_names_resolve_assignee_names_index_paired(self) -> None:
+        # bob unresolved -> "" at same index; keeps pairing with assignee_ids.
+        item: dict[str, object] = {
+            "id": "proj/MCPT-1",
+            "attributes": {"title": "T", "type": "task", "status": "open"},
+            "relationships": {
+                "assignee": {"data": [{"id": "proj/alice"}, {"id": "proj/bob"}]},
+            },
+        }
+        detail = parse_work_item_detail(
+            item, project_id="proj", user_names={"proj/alice": "Alice A"}
+        )
+        assert detail.assignee_ids == ["alice", "bob"]
+        assert detail.assignee_names == ["Alice A", ""]
 
     def test_fallback_id_used_when_id_missing(self) -> None:
         item: dict[str, object] = {

@@ -1974,7 +1974,12 @@ class TestGetWorkItem:
                 },
             },
             "included": [
-                {"type": "users", "id": "proj1/bob", "attributes": {"name": "Bob B"}}
+                {"type": "users", "id": "proj1/bob", "attributes": {"name": "Bob B"}},
+                {
+                    "type": "users",
+                    "id": "proj1/alice",
+                    "attributes": {"name": "Alice A"},
+                },
             ],
         }
 
@@ -1997,6 +2002,7 @@ class TestGetWorkItem:
         assert result.space_id == "Design"
         assert result.document_name == "SRS"
         assert result.assignee_ids == ["alice"]
+        assert result.assignee_names == ["Alice A"]
         assert result.author_id == "bob"
         assert result.author_name == "Bob B"
         # Entry without uri skipped.

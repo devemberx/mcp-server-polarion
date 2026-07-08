@@ -41,6 +41,7 @@ class WorkItemDetail(WorkItemSummary):
     project_id: str
     author_id: str = ""
     assignee_ids: list[str] = Field(default_factory=list)
+    assignee_names: list[str] = Field(default_factory=list)
     created: str = ""
     resolution: str = ""
     severity: str = ""
@@ -56,6 +57,7 @@ class WorkItemRead(WorkItemSummary):
     project_id: str
     author_id: str = ""
     assignee_ids: list[str] = Field(default_factory=list)
+    assignee_names: list[str] = Field(default_factory=list)
     created: str = ""
     resolution: str = ""
     severity: str = ""

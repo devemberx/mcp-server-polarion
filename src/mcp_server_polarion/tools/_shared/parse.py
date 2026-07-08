@@ -222,16 +222,17 @@ def parse_work_item_detail(
         summary_kwargs["id"] = fallback_id
 
     author_full = extract_relationship_id(relationships, "author")
-    assignee_ids = [
-        extract_short_id(uid)
-        for uid in extract_relationship_ids(relationships, "assignee")
-    ]
+    # user_names keyed full id; resolve name before extract_short_id.
+    assignee_full = extract_relationship_ids(relationships, "assignee")
+    assignee_ids = [extract_short_id(uid) for uid in assignee_full]
+    assignee_names = [(user_names or {}).get(uid, "") for uid in assignee_full]
     return WorkItemDetail(
         **summary_kwargs,
         description_html=desc_html,
         project_id=project_id,
         author_id=extract_short_id(author_full),
         assignee_ids=assignee_ids,
+        assignee_names=assignee_names,
         created=safe_str(attributes.get("created", "")),
         resolution=safe_str(attributes.get("resolution", "")),
         severity=safe_str(attributes.get("severity", "")),
