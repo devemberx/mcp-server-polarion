@@ -16,9 +16,7 @@ class DocumentSummary(BaseModel):
     type: str = ""
     status: str = ""
     updated: str = ""
-    author_id: str = ""
     author_name: str = ""
-    last_updated_by_id: str = ""
     last_updated_by_name: str = ""
 
 

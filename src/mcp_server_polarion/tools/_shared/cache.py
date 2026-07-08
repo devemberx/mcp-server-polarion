@@ -60,9 +60,7 @@ class DiscoveredDocument(NamedTuple):
     type: str = ""
     status: str = ""
     updated: str = ""
-    author_id: str = ""
     author_name: str = ""
-    updated_by_id: str = ""
     updated_by_name: str = ""
 
 

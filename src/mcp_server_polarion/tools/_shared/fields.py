@@ -8,7 +8,7 @@ from typing import Final
 MAX_BULK_ITEMS: Final[int] = 50
 
 # Detail fetches need ``@all`` — explicit field lists drop inline customs.
-WORK_ITEM_LIST_FIELDS: Final[str] = "title,type,status,priority,updated,module,assignee"
+WORK_ITEM_LIST_FIELDS: Final[str] = "title,type,status,priority,updated,module,author"
 WORK_ITEM_DETAIL_FIELDS: Final[str] = "@all"
 WORK_ITEM_PART_FIELDS: Final[str] = "title,type,status,description,outlineNumber"
 # camelCase finishedOn/isTemplate = Polarion attr names; author keep

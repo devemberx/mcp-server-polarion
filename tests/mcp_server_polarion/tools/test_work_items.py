@@ -1681,12 +1681,7 @@ class TestListWorkItems:
                                 "id": "proj1/Design/Software Requirement Specification",
                             }
                         },
-                        "assignee": {
-                            "data": [
-                                {"type": "users", "id": "proj1/alice"},
-                                {"type": "users", "id": "proj1/bob"},
-                            ]
-                        },
+                        "author": {"data": {"type": "users", "id": "proj1/alice"}},
                     },
                 },
                 {
@@ -1699,9 +1694,15 @@ class TestListWorkItems:
                     },
                     "relationships": {
                         "module": {"data": None},
-                        "assignee": {"data": []},
                     },
                 },
+            ],
+            "included": [
+                {
+                    "type": "users",
+                    "id": "proj1/alice",
+                    "attributes": {"name": "Alice A"},
+                }
             ],
             "meta": {"totalCount": 2},
         }
@@ -1725,7 +1726,7 @@ class TestListWorkItems:
         assert first.updated == "2026-04-29T10:23:00Z"
         assert first.space_id == "Design"
         assert first.document_name == "Software Requirement Specification"
-        assert first.assignee_ids == ["alice", "bob"]
+        assert first.author_name == "Alice A"
 
         second = result.items[1]
         assert second.id == "MCPT-002"
@@ -1733,7 +1734,7 @@ class TestListWorkItems:
         assert second.updated == ""
         assert second.space_id == ""
         assert second.document_name == ""
-        assert second.assignee_ids == []
+        assert second.author_name == ""
 
     async def test_sparse_fieldset_requested(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1753,6 +1754,8 @@ class TestListWorkItems:
 
         _, kwargs = mock_client.get.call_args
         assert "fields[workitems]" in kwargs["params"]
+        assert kwargs["params"]["include"] == "author"
+        assert kwargs["params"]["fields[users]"] == "name"
 
     async def test_project_not_found(
         self, mock_ctx: MagicMock, mock_client: AsyncMock

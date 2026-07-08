@@ -192,8 +192,9 @@ async def list_test_runs(  # noqa: PLR0913
     query: str | None = Field(
         default=None,
         description=(
-            "Optional Lucene filter (e.g. 'status:open', 'author.id:devemberx', "
-            "'HAS_VALUE:<field>' to match runs with that field populated)."
+            "Optional Lucene filter (e.g. 'status:open', "
+            "'author.name:\"Jane Doe\"', 'HAS_VALUE:<field>' to match runs "
+            "with that field populated)."
         ),
     ),
     templates: bool = Field(
@@ -207,10 +208,8 @@ async def list_test_runs(  # noqa: PLR0913
 
     Returns actual run instances by default; set templates=True for the reusable
     template blueprints instead. Filter with a Lucene query (status:open,
-    type:manual, author.id:<userid>, HAS_VALUE:<field>) or omit for all.
-
-    Results carry author_id + author_name — to find runs by a person, match
-    their name in an unfiltered page, then requery author.id:<author_id>.
+    type:manual, HAS_VALUE:<field>) or omit for all. To filter by person, match
+    the full author_name exactly and quoted: author.name:"Jane Doe".
     """
     client = get_client(ctx)
     params: dict[str, str | int] = {

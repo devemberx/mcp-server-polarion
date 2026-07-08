@@ -19,7 +19,6 @@ class TestRunSummary(BaseModel):
     status: str
     finished_on: str = ""
     updated: str = ""
-    author_id: str = ""
     author_name: str = ""
     is_template: bool = False
 

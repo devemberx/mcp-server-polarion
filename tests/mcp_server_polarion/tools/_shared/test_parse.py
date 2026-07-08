@@ -169,20 +169,20 @@ class TestParseIncludedUserNameMap:
 class TestParseWorkItemSummaryKwargs:
     """Tests for `parse_work_item_summary_kwargs`."""
 
-    def test_splits_module_and_shortens_assignees(self) -> None:
+    def test_splits_module_and_resolves_author(self) -> None:
         item: dict[str, object] = {
             "id": "proj/MCPT-1",
             "attributes": {"title": "T", "type": "task", "status": "open"},
             "relationships": {
                 "module": {"data": {"id": "proj/Design/Spec"}},
-                "assignee": {"data": [{"id": "proj/jdoe"}]},
+                "author": {"data": {"id": "proj/jdoe"}},
             },
         }
-        kwargs = parse_work_item_summary_kwargs(item)
+        kwargs = parse_work_item_summary_kwargs(item, {"proj/jdoe": "J Doe"})
         assert kwargs["id"] == "MCPT-1"
         assert kwargs["space_id"] == "Design"
         assert kwargs["document_name"] == "Spec"
-        assert kwargs["assignee_ids"] == ["jdoe"]
+        assert kwargs["author_name"] == "J Doe"
 
     def test_non_dict_attributes_and_relationships_default_blank(self) -> None:
         kwargs = parse_work_item_summary_kwargs(
@@ -191,7 +191,7 @@ class TestParseWorkItemSummaryKwargs:
         assert kwargs["id"] == "MCPT-2"
         assert kwargs["title"] == ""
         assert kwargs["space_id"] == ""
-        assert kwargs["assignee_ids"] == []
+        assert kwargs["author_name"] == ""
 
 
 class TestParseHyperlinks:
@@ -228,12 +228,16 @@ class TestParseWorkItemDetail:
                 "description": {"type": "text/html", "value": "<p>raw</p>"},
                 "riskLevel": "high",
             },
-            "relationships": {"author": {"data": {"id": "proj/jdoe"}}},
+            "relationships": {
+                "author": {"data": {"id": "proj/jdoe"}},
+                "assignee": {"data": [{"id": "proj/alice"}, {"id": "proj/bob"}]},
+            },
         }
         detail = parse_work_item_detail(item, project_id="proj")
         assert detail.description_html == "<p>raw</p>"
         assert detail.author_id == "jdoe"
         assert detail.author_name == ""
+        assert detail.assignee_ids == ["alice", "bob"]
         assert detail.custom_fields == {"riskLevel": "high"}
 
     def test_user_names_resolve_author_name(self) -> None:
@@ -316,10 +320,9 @@ class TestParseTestRunSummaries:
         )
         assert kwargs["id"] == "TR-1"
         assert kwargs["title"] == ""
-        assert kwargs["author_id"] == ""
         assert kwargs["author_name"] == ""
 
-    def test_author_id_and_name_pair(self) -> None:
+    def test_author_name_resolved(self) -> None:
         kwargs = parse_test_run_summary_kwargs(
             {
                 "id": "proj/TR-1",
@@ -328,7 +331,6 @@ class TestParseTestRunSummaries:
             },
             user_names={"proj/jdoe": "J Doe"},
         )
-        assert kwargs["author_id"] == "jdoe"
         assert kwargs["author_name"] == "J Doe"
 
     def test_non_list_data_is_empty(self) -> None:
@@ -369,7 +371,6 @@ class TestParseComment:
         assert comment.text == "<p>hi</p>"
         assert comment.text_format == "text/html"
         assert comment.resolved is True
-        assert comment.author_id == "jdoe"
         assert comment.author_name == "J Doe"
         assert comment.child_comment_ids == ["cmt-2"]
 
@@ -380,7 +381,6 @@ class TestParseComment:
             "relationships": {"author": {"data": {"id": "proj/jdoe"}}},
         }
         comment = _parse_comment(item, {})
-        assert comment.author_id == "jdoe"
         assert comment.author_name == ""
 
     def test_plain_format_honored(self) -> None:
@@ -403,12 +403,12 @@ class TestParseComment:
         }
         assert _parse_comment(item, {}).text_format == "text/html"
 
-    def test_absent_author_is_none(self) -> None:
+    def test_absent_author_name_empty(self) -> None:
         item: dict[str, object] = {
             "id": "proj/WI-1/cmt-1",
             "attributes": {"created": "x"},
         }
-        assert _parse_comment(item, {}).author_id is None
+        assert _parse_comment(item, {}).author_name == ""
 
 
 class TestParseCommentsPage:
