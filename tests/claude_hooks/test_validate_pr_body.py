@@ -106,6 +106,9 @@ class TestNonAsciiDetection:
             "ship it 🚀",  # lone emoji
             "done ✅ and 🎉",  # symbol + emoji
             "flags 🇰🇷 and family 👨‍👩‍👧 sequences",  # regional indicators + ZWJ
+            "id → name resolve — see below",  # arrow + em-dash
+            "quotes “curly” and ‘single’ plus …",  # noqa: RUF001  curly quotes
+            "bounds ≤ 100, count ≠ 0, 3 × 4",  # noqa: RUF001  math signs
         ],
     )
     def test_allows_ascii_and_emoji(self, text: str) -> None:
