@@ -94,7 +94,7 @@ On commit-msg hook rejection: surface hook output, redo `git commit` with correc
 AskUserQuestion: "Push commit to origin/main? Makes the bump public but does NOT trigger the publish workflow yet." Options: `push` / `cancel`.
 
 ```bash
-git push origin main
+git push --no-verify origin main
 ```
 
 No auto-retry on failure — surface error, let user decide.
@@ -156,7 +156,7 @@ echo "Watch: https://github.com/${OWNER_REPO}/actions"
 
 ## Hard rules
 
-- NEVER `--no-verify`, `--no-edit`, `-c commit.gpgsign=false`.
+- NEVER `--no-verify` at commit (protects commit-msg hook), nor `--no-edit`, `-c commit.gpgsign=false`. Push-time `--no-verify` allowed ONLY at Step 5 main push (sanctioned pre-push exception).
 - NEVER `git push --force`.
 - NEVER auto-retry a failed push.
 - NEVER `git commit --amend` after a hook rejection.
