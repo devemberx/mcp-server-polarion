@@ -20,7 +20,7 @@ class WorkItemSummary(BaseModel):
     updated: str = ""
     space_id: str = ""
     document_name: str = ""
-    assignee_ids: list[str] = Field(default_factory=list)
+    author_name: str = ""
 
 
 class Hyperlink(BaseModel):
@@ -40,7 +40,7 @@ class WorkItemDetail(WorkItemSummary):
     description_html: str = ""
     project_id: str
     author_id: str = ""
-    author_name: str = ""
+    assignee_ids: list[str] = Field(default_factory=list)
     created: str = ""
     resolution: str = ""
     severity: str = ""
@@ -55,7 +55,7 @@ class WorkItemRead(WorkItemSummary):
     description: str = ""
     project_id: str
     author_id: str = ""
-    author_name: str = ""
+    assignee_ids: list[str] = Field(default_factory=list)
     created: str = ""
     resolution: str = ""
     severity: str = ""

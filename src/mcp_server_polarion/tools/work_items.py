@@ -495,8 +495,9 @@ async def list_work_items(
     client = get_client(ctx)
     params: dict[str, str | int] = {
         "fields[workitems]": WORK_ITEM_LIST_FIELDS,
-        # To-many ``assignee.data`` inlined only when explicitly included.
-        "include": "assignee",
+        # include author resolve display name; fields[users]=name trim payload.
+        "include": "author",
+        "fields[users]": "name",
         "page[size]": page_size,
         "page[number]": page_number,
     }
@@ -520,7 +521,7 @@ async def list_work_items(
         raise RuntimeError(f"Failed to list work items: {exc.message}") from exc
 
     data = response.get("data", [])
-    items = parse_work_item_summaries(data)
+    items = parse_work_item_summaries(data, parse_included_user_name_map(response))
 
     return make_page(items, response, page_number, page_size)
 

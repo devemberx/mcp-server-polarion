@@ -37,7 +37,7 @@ class WorkItemSummaryKwargs(TypedDict):
     updated: str
     space_id: str
     document_name: str
-    assignee_ids: list[str]
+    author_name: str
 
 
 def extract_relationship_id(
@@ -142,9 +142,11 @@ def parse_included_user_name_map(response: dict[str, object]) -> dict[str, str]:
 
 def parse_work_item_summary_kwargs(
     item: dict[str, object],
+    user_names: Mapping[str, str] | None = None,
 ) -> WorkItemSummaryKwargs:
-    """``WorkItemSummary`` kwargs from JSON:API resource; shared so
-    ``WorkItemDetail`` stay strict superset of ``WorkItemSummary``.
+    """``WorkItemSummary`` kwargs from JSON:API resource; shared base so
+    ``WorkItemDetail`` stay superset (author_id/assignee_ids add on detail).
+    ``user_names`` map full author id → display name (from included ``users``).
     """
     attributes = item.get("attributes", {})
     if not isinstance(attributes, dict):
@@ -155,10 +157,7 @@ def parse_work_item_summary_kwargs(
 
     module_id = extract_relationship_id(relationships, "module")
     space_id, document_name = split_module_id(module_id)
-    assignee_ids = [
-        extract_short_id(uid)
-        for uid in extract_relationship_ids(relationships, "assignee")
-    ]
+    author_full = extract_relationship_id(relationships, "author")
 
     return {
         "id": extract_short_id(safe_str(item.get("id", ""))),
@@ -169,7 +168,7 @@ def parse_work_item_summary_kwargs(
         "updated": safe_str(attributes.get("updated", "")),
         "space_id": space_id,
         "document_name": document_name,
-        "assignee_ids": assignee_ids,
+        "author_name": (user_names or {}).get(author_full, ""),
     }
 
 
@@ -218,17 +217,21 @@ def parse_work_item_detail(
     if isinstance(desc_obj, dict):
         desc_html = safe_str(desc_obj.get("value", ""))
 
-    summary_kwargs = parse_work_item_summary_kwargs(item)
+    summary_kwargs = parse_work_item_summary_kwargs(item, user_names)
     if not summary_kwargs["id"]:
         summary_kwargs["id"] = fallback_id
 
     author_full = extract_relationship_id(relationships, "author")
+    assignee_ids = [
+        extract_short_id(uid)
+        for uid in extract_relationship_ids(relationships, "assignee")
+    ]
     return WorkItemDetail(
         **summary_kwargs,
         description_html=desc_html,
         project_id=project_id,
         author_id=extract_short_id(author_full),
-        author_name=(user_names or {}).get(author_full, ""),
+        assignee_ids=assignee_ids,
         created=safe_str(attributes.get("created", "")),
         resolution=safe_str(attributes.get("resolution", "")),
         severity=safe_str(attributes.get("severity", "")),
@@ -257,8 +260,11 @@ def summary_to_back_link(summary: WorkItemSummary) -> WorkItemLink:
 
 def parse_work_item_summaries(
     data: object,
+    user_names: Mapping[str, str] | None = None,
 ) -> list[WorkItemSummary]:
-    """JSON:API ``data`` array → ``WorkItemSummary`` models."""
+    """JSON:API ``data`` array → ``WorkItemSummary`` models. ``user_names``
+    map full author id → display name (from included ``users``).
+    """
     items: list[WorkItemSummary] = []
     if not isinstance(data, list):
         return items
@@ -266,7 +272,8 @@ def parse_work_item_summaries(
     for item in data:
         if not isinstance(item, dict):
             continue
-        items.append(WorkItemSummary(**parse_work_item_summary_kwargs(item)))
+        kwargs = parse_work_item_summary_kwargs(item, user_names)
+        items.append(WorkItemSummary(**kwargs))
     return items
 
 
@@ -279,7 +286,6 @@ class TestRunSummaryKwargs(TypedDict):
     status: str
     finished_on: str
     updated: str
-    author_id: str
     author_name: str
     is_template: bool
 
@@ -306,7 +312,6 @@ def parse_test_run_summary_kwargs(
         "status": safe_str(attributes.get("status", "")),
         "finished_on": safe_str(attributes.get("finishedOn", "")),
         "updated": safe_str(attributes.get("updated", "")),
-        "author_id": extract_short_id(author_id),
         "author_name": user_names.get(author_id, ""),
         "is_template": bool(attributes.get("isTemplate", False)),
     }
@@ -362,7 +367,6 @@ def _parse_comment(item: dict[str, object], user_names: Mapping[str, str]) -> Co
         title=safe_str(attributes.get("title", "")),
         text=text_value,
         text_format=text_format,
-        author_id=extract_short_id(author_full) or None,
         author_name=user_names.get(author_full, ""),
         parent_comment_id=extract_short_id(parent_full) or None,
         child_comment_ids=[extract_short_id(c) for c in child_full],

@@ -88,7 +88,6 @@ class TestListDocumentComments:
         assert comment.resolved is False
         assert comment.text == "<p>Review me</p>"
         assert comment.text_format == "text/html"
-        assert comment.author_id == "alice"
         assert comment.author_name == "Alice A"
         assert comment.parent_comment_id is None
         assert comment.child_comment_ids == []
@@ -211,7 +210,6 @@ class TestListDocumentComments:
         )
 
         comment = result.items[0]
-        assert comment.author_id is None
         assert comment.parent_comment_id is None
         assert comment.child_comment_ids == []
         assert comment.text == ""
@@ -407,7 +405,6 @@ class TestListWorkItemComments:
         assert comment.title == "Needs review"
         assert comment.text == "<p>Review me</p>"
         assert comment.text_format == "text/html"
-        assert comment.author_id == "alice"
         assert comment.author_name == "Alice A"
         assert comment.parent_comment_id is None
         assert comment.child_comment_ids == []
@@ -527,7 +524,6 @@ class TestListWorkItemComments:
         )
 
         comment = result.items[0]
-        assert comment.author_id is None
         assert comment.parent_comment_id is None
         assert comment.child_comment_ids == []
         assert comment.title == ""

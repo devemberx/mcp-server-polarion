@@ -120,7 +120,7 @@ class TestWorkItemSummary:
         assert work_item.updated == ""
         assert work_item.space_id == ""
         assert work_item.document_name == ""
-        assert work_item.assignee_ids == []
+        assert work_item.author_name == ""
 
     def test_full_metadata(self):
         work_item = WorkItemSummary(
@@ -132,13 +132,13 @@ class TestWorkItemSummary:
             updated="2026-04-29T10:23:00Z",
             space_id="Design",
             document_name="Software Requirement Specification",
-            assignee_ids=["alice", "bob"],
+            author_name="Alice A",
         )
         assert work_item.priority == "90.0"
         assert work_item.updated == "2026-04-29T10:23:00Z"
         assert work_item.space_id == "Design"
         assert work_item.document_name == "Software Requirement Specification"
-        assert work_item.assignee_ids == ["alice", "bob"]
+        assert work_item.author_name == "Alice A"
 
     def test_various_types(self):
         for work_item_type in ("requirement", "task", "testCase", "defect"):

@@ -263,9 +263,7 @@ class TestListDocuments:
         doc = result.items[0]
         assert doc.status == "draft"
         assert doc.updated == "2026-02-22T14:53:03.244Z"
-        assert doc.author_id == "admin"
         assert doc.author_name == "System Administrator"
-        assert doc.last_updated_by_id == "72c2462f"
         assert doc.last_updated_by_name == "Dev Member"
 
     async def test_unresolved_user_yields_empty_name(
@@ -286,8 +284,7 @@ class TestListDocuments:
             page_number=1,
         )
 
-        # Unresolvable name still expose the id — the machine key survives.
-        assert result.items[0].author_id == "ghost"
+        # Unresolvable author id → name stay blank.
         assert result.items[0].author_name == ""
 
     async def test_id_less_included_user_never_matches(
@@ -330,9 +327,7 @@ class TestListDocuments:
         doc = result.items[0]
         assert doc.status == ""
         assert doc.updated == ""
-        assert doc.author_id == ""
         assert doc.author_name == ""
-        assert doc.last_updated_by_id == ""
         assert doc.last_updated_by_name == ""
 
     async def test_deduplicates_documents(

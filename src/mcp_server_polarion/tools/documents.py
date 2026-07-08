@@ -392,9 +392,7 @@ async def _discover_documents(
             type=meta.type,
             status=meta.status,
             updated=meta.updated,
-            author_id=extract_short_id(meta.author_id),
             author_name=user_names.get(meta.author_id, ""),
-            updated_by_id=extract_short_id(meta.updated_by_id),
             updated_by_name=user_names.get(meta.updated_by_id, ""),
         )
         for (space, name), meta in documents.items()
@@ -521,9 +519,9 @@ async def list_documents(
     """List a project's documents.
 
     Returns space_id + document_name (inputs to the other document tools) plus
-    type, status, updated timestamp, and id + display name of the creator
-    (author_id/author_name) and last editor (last_updated_by_id/_name).
-    Discovery scan cached 60s.
+    type, status, updated timestamp, and display names of the creator
+    (author_name) and last editor (last_updated_by_name). Use get_document for
+    author/editor IDs. Discovery scan cached 60s.
     """
     client = get_client(ctx)
 
@@ -556,9 +554,7 @@ async def list_documents(
             type=doc.type,
             status=doc.status,
             updated=doc.updated,
-            author_id=doc.author_id,
             author_name=doc.author_name,
-            last_updated_by_id=doc.updated_by_id,
             last_updated_by_name=doc.updated_by_name,
         )
         for doc in page_slice
