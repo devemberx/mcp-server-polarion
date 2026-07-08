@@ -192,7 +192,7 @@ async def list_test_runs(  # noqa: PLR0913
     query: str | None = Field(
         default=None,
         description=(
-            "Optional Lucene filter (e.g. 'status:open', "
+            "Optional Lucene filter (e.g. 'status:open', 'groupId:Release-2.5', "
             "'author.name:\"Jane Doe\"', 'HAS_VALUE:<field>' to match runs "
             "with that field populated)."
         ),
