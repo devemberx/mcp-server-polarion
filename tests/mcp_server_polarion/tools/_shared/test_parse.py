@@ -331,6 +331,8 @@ class TestParseTestRunSummaries:
         assert kwargs["id"] == "TR-1"
         assert kwargs["title"] == ""
         assert kwargs["author_name"] == ""
+        assert kwargs["group_id"] == ""
+        assert kwargs["template_id"] == ""
 
     def test_author_name_resolved(self) -> None:
         kwargs = parse_test_run_summary_kwargs(
@@ -342,6 +344,20 @@ class TestParseTestRunSummaries:
             user_names={"proj/jdoe": "J Doe"},
         )
         assert kwargs["author_name"] == "J Doe"
+
+    def test_group_id_and_template_id_populate(self) -> None:
+        kwargs = parse_test_run_summary_kwargs(
+            {
+                "id": "proj/TR-1",
+                "attributes": {"groupId": "Release-2.5"},
+                "relationships": {
+                    "template": {"data": {"id": "proj/TR-tmpl"}},
+                },
+            },
+            user_names={},
+        )
+        assert kwargs["group_id"] == "Release-2.5"
+        assert kwargs["template_id"] == "TR-tmpl"
 
     def test_non_list_data_is_empty(self) -> None:
         assert parse_test_run_summaries({"data": None}) == []

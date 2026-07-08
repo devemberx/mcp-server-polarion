@@ -21,6 +21,9 @@ class TestRunSummary(BaseModel):
     updated: str = ""
     author_name: str = ""
     is_template: bool = False
+    group_id: str = ""
+    # short id, round-trips into create_test_runs(template_id=...)
+    template_id: str = ""
 
 
 class TestRunCreateSpec(BaseModel):

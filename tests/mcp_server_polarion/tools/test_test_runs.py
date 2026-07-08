@@ -53,9 +53,13 @@ class TestListTestRuns:
                         "finishedOn": "2026-05-02T11:00:00Z",
                         "updated": "2026-05-01T09:00:00Z",
                         "isTemplate": False,
+                        "groupId": "Release-2.5",
                     },
                     "relationships": {
-                        "author": {"data": {"type": "users", "id": "proj1/devemberx"}}
+                        "author": {"data": {"type": "users", "id": "proj1/devemberx"}},
+                        "template": {
+                            "data": {"type": "testruns", "id": "proj1/TR-tmpl"}
+                        },
                     },
                 },
                 {
@@ -102,6 +106,8 @@ class TestListTestRuns:
         assert first.updated == "2026-05-01T09:00:00Z"
         assert first.author_name == "Devember X"
         assert first.is_template is False
+        assert first.group_id == "Release-2.5"
+        assert first.template_id == "TR-tmpl"
 
         second = result.items[1]
         assert second.id == "TR-002"
@@ -109,6 +115,9 @@ class TestListTestRuns:
         assert second.updated == ""
         assert second.author_name == ""
         assert second.is_template is True
+        # No groupId attr / template relationship -> blanks.
+        assert second.group_id == ""
+        assert second.template_id == ""
 
     async def test_missing_author_yields_empty_name(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -159,6 +168,9 @@ class TestListTestRuns:
         _, kwargs = mock_client.get.call_args
         params = kwargs["params"]
         assert "fields[testruns]" in params
+        # groupId attr + template relationship kept under sparse fieldset.
+        assert "groupId" in params["fields[testruns]"]
+        assert "template" in params["fields[testruns]"]
         assert params["include"] == "author"
         assert params["fields[users]"] == "name"
 
