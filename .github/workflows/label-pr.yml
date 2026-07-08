@@ -28,7 +28,7 @@ jobs:
           scope="$(printf '%s' "$PR_TITLE" | sed -nE 's/^[a-z]+\(([^)]*)\)!?:.*/\1/p')"
           bang="$(printf '%s' "$PR_TITLE" | sed -nE 's/^[a-z]+(\([^)]*\))?(!):.*/\2/p')"
 
-          # 2. Map commit type → release-note label.
+          # 2. Resolve release-note labels from type / scope / bang.
           declare -A map=(
             [feat]=feature
             [fix]=bug
@@ -39,7 +39,6 @@ jobs:
             [ci]=ci
             [chore]=chore
           )
-
           labels=()
           case "$scope" in
             deps|deps-dev) labels+=("dependencies") ;;  # dependabot → Dependencies group
@@ -47,12 +46,25 @@ jobs:
           esac
           [ -n "$bang" ] && labels+=("breaking")
 
+          # 3. Find any prior unlabeled-warning comment (drives dedup + cleanup).
+          marker='<!-- label-pr:unlabeled -->'
+          prior="$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate \
+            --jq ".[] | select(.body | contains(\"$marker\")) | .id" | head -n1)"
+
+          # 4. No label: warn once (skip if already warned), then stop.
           if [ ${#labels[@]} -eq 0 ]; then
             echo "Title has no conventional-commit type; nothing to label."
+            if [ -z "$prior" ]; then
+              body="$(printf '%s\n%s\n\n%s\n' \
+                "$marker" \
+                "This PR title does not start with a conventional-commit type, so it is not auto-labeled for release-note grouping." \
+                'Rename it to "type(scope): summary" using one of: feat, fix, docs, refactor, perf, test, ci, chore. Editing the title re-runs this check.')"
+              gh api -X POST "repos/$REPO/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
+            fi
             exit 0
           fi
 
-          # 3. Create missing labels, then apply to the PR.
+          # 5. Create missing labels, apply them, then drop any stale warning.
           for l in "${labels[@]}"; do
             gh label create "$l" --repo "$REPO" --color ededed >/dev/null 2>&1 || true
           done
@@ -60,3 +72,7 @@ jobs:
           args=()
           for l in "${labels[@]}"; do args+=(-f "labels[]=$l"); done
           gh api -X POST "repos/$REPO/issues/$PR_NUMBER/labels" "${args[@]}" >/dev/null
+
+          if [ -n "$prior" ]; then
+            gh api -X DELETE "repos/$REPO/issues/$PR_NUMBER/comments/$prior" >/dev/null
+          fi

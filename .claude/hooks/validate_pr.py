@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PreToolUse hook: block PR/issue body Bash invocations that violate repo conventions.
+"""PreToolUse hook: block PR/issue Bash invocations that violate repo conventions.
 
 Triggered on: gh pr (create|edit|comment), gh issue (create|edit|comment),
 gh api .../pulls/... or .../issues/...
@@ -11,6 +11,9 @@ Rules:
      must appear (PR create/edit only).
   3. ## Changes section — required, with exactly two non-empty bullets, each
      <= 120 chars (PR create/edit only).
+  4. Title — conventional-commit subject "type(scope)!: summary", type from the
+     8 label-pr.yml keys, <= 50 chars (PR create/edit only). Valid title = must
+     get labeled; keeps hook + label-pr.yml in lockstep.
 
 Exit 0 = allow, exit 2 = block.
 """
@@ -43,6 +46,10 @@ NEXT_SECTION_RE = re.compile(r"^##\s", re.MULTILINE)
 TEMPLATE_PATH = Path(".github/PULL_REQUEST_TEMPLATE.md")
 BULLET_LIMIT = 120
 REQUIRED_BULLETS = 2
+# Type set = label-pr.yml map keys exact, so valid title always labels.
+TITLE_TYPES = ("feat", "fix", "docs", "refactor", "perf", "test", "ci", "chore")
+TITLE_RE = re.compile(rf"^(?:{'|'.join(TITLE_TYPES)})(?:\([a-z0-9-]+\))?!?: .+")
+TITLE_LIMIT = 50
 
 PR_CREATE_EDIT_RE = re.compile(r"\bgh\s+pr\s+(create|edit)\b")
 PR_COMMENT_RE = re.compile(r"\bgh\s+pr\s+comment\b")
@@ -65,12 +72,11 @@ def main() -> int:
     if kind is None:
         return 0
 
+    # Body optional: title-only `gh pr edit` still needs title checked.
     body = extract_body(cmd)
-    if body is None:
-        return 0
 
     errors: list[str] = []
-    if has_disallowed_non_ascii(body):
+    if body is not None and has_disallowed_non_ascii(body):
         errors.append(
             "Body contains non-ASCII characters (other than emoji and "
             "typographic punctuation). Per repo convention PR/issue/commit "
@@ -78,17 +84,21 @@ def main() -> int:
         )
 
     if kind == "pr":
-        missing = missing_template_boxes(body)
-        if missing:
-            errors.append(
-                "Body is missing template checkboxes. "
-                "Do NOT delete unchecked options."
-                + "\n".join(f"    - [ ] {m}" for m in missing)
-            )
-        errors.extend(changes_format_errors(body))
+        title = extract_title(cmd)
+        if title is not None:
+            errors.extend(title_errors(title))
+        if body is not None:
+            missing = missing_template_boxes(body)
+            if missing:
+                errors.append(
+                    "Body is missing template checkboxes. "
+                    "Do NOT delete unchecked options."
+                    + "\n".join(f"    - [ ] {m}" for m in missing)
+                )
+            errors.extend(changes_format_errors(body))
 
     if errors:
-        sys.stderr.write("BLOCKED by .claude/hooks/validate-pr-body.py:\n\n")
+        sys.stderr.write("BLOCKED by .claude/hooks/validate_pr.py:\n\n")
         for e in errors:
             sys.stderr.write(f"* {e}\n\n")
         return 2
@@ -155,6 +165,40 @@ def _read_file(path: str) -> str | None:
         return Path(path).read_text()
     except OSError:
         return None
+
+
+def extract_title(cmd: str) -> str | None:
+    try:
+        argv = shlex.split(cmd)
+    except ValueError:
+        return None
+
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        nxt = argv[i + 1] if i + 1 < len(argv) else None
+        if a in {"--title", "-t"} and nxt is not None:
+            return nxt
+        if a.startswith("--title="):
+            return a[len("--title=") :]
+        i += 1
+    return None
+
+
+def title_errors(title: str) -> list[str]:
+    errors: list[str] = []
+    if not TITLE_RE.match(title):
+        errors.append(
+            "Title must be a conventional-commit subject 'type(scope): summary'. "
+            f"type one of: {', '.join(TITLE_TYPES)} (append '!' for breaking). "
+            "Anything else is left unlabeled by label-pr.yml."
+        )
+    if len(title) > TITLE_LIMIT:
+        errors.append(
+            f"Title is {len(title)} chars (limit: {TITLE_LIMIT}); it becomes the "
+            "squash commit subject."
+        )
+    return errors
 
 
 def missing_template_boxes(body: str) -> list[str]:
