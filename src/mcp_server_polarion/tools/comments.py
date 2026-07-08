@@ -64,9 +64,9 @@ def _build_comment_create_payload(
         if spec.resolved is not None:
             attributes["resolved"] = spec.resolved
 
+        # No author relationship: comment author = token user always. Client
+        # cannot attribute to another user (Polarion no-validate = forgery).
         relationships: dict[str, JsonValue] = {}
-        if spec.author_id is not None:
-            relationships["author"] = {"data": {"id": spec.author_id, "type": "users"}}
         if spec.parent_comment_id is not None:
             relationships["parentComment"] = {
                 "data": {
@@ -321,8 +321,8 @@ async def create_document_comments(  # noqa: PLR0913
     """Create one or more comments on a document in a single request.
 
     Reply: set parent_comment_id to a short ID from list_document_comments
-    (None = top-level). 'text/html' text is sent unsanitized; omit author_id
-    for the token's user. NOT idempotent — a retry duplicates.
+    (None = top-level). 'text/html' text is sent unsanitized. Comment is always
+    authored by the token's user. NOT idempotent — a retry duplicates.
     """
     payload = _build_document_comments_payload(
         specs=comments,
@@ -409,8 +409,8 @@ async def create_work_item_comments(
 
     Reply: set parent_comment_id to a short ID from list_work_item_comments
     (None = top-level). Optional title sets the comment heading. 'text/html'
-    text is sent unsanitized; omit author_id for the token's user. NOT
-    idempotent — a retry duplicates.
+    text is sent unsanitized. Comment is always authored by the token's user.
+    NOT idempotent — a retry duplicates.
     """
     payload = _build_work_item_comments_payload(
         specs=comments,

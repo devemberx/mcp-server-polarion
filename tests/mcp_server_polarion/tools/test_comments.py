@@ -715,18 +715,22 @@ class TestBuildDocumentCommentsPayload:
         attrs = payload["data"][0]["attributes"]  # type: ignore[index]
         assert "resolved" not in attrs  # type: ignore[operator]
 
-    def test_author_relationship(self) -> None:
+    def test_author_id_rejected(self) -> None:
+        """author_id dropped: impersonation blocked; extra=forbid rejects key."""
+        with pytest.raises(ValidationError):
+            CommentSpec(text="t", author_id="alice")  # type: ignore[call-arg]
+
+    def test_no_author_relationship_emitted(self) -> None:
+        """Payload never carry author: comment author = token user always."""
         payload = _build_document_comments_payload(
-            specs=[CommentSpec(text="t", author_id="alice")],
+            specs=[CommentSpec(text="t")],
             project_id="P",
             space_id="S",
             document_name="D",
         )
         item = payload["data"][0]  # type: ignore[index]
         assert isinstance(item, dict)
-        assert item["relationships"]["author"] == {  # type: ignore[index]
-            "data": {"id": "alice", "type": "users"}
-        }
+        assert "author" not in item.get("relationships", {})  # type: ignore[operator]
 
     def test_parent_comment_full_path_composed(self) -> None:
         """Short parent_comment_id expanded to full 4-segment path."""
@@ -740,19 +744,6 @@ class TestBuildDocumentCommentsPayload:
         assert isinstance(item, dict)
         rel = item["relationships"]["parentComment"]  # type: ignore[index]
         assert rel == {"data": {"id": "Proj/Space/Doc/c1", "type": "document_comments"}}
-
-    def test_both_relationships_present(self) -> None:
-        payload = _build_document_comments_payload(
-            specs=[CommentSpec(text="t", author_id="bob", parent_comment_id="c5")],
-            project_id="P",
-            space_id="S",
-            document_name="D",
-        )
-        item = payload["data"][0]  # type: ignore[index]
-        assert isinstance(item, dict)
-        rels = item["relationships"]
-        assert "author" in rels  # type: ignore[operator]
-        assert "parentComment" in rels  # type: ignore[operator]
 
     def test_html_format_preserved(self) -> None:
         payload = _build_document_comments_payload(
@@ -833,16 +824,14 @@ class TestCreateDocumentCommentsDryRun:
             project_id="P",
             space_id="S",
             document_name="D",
-            comments=[
-                CommentSpec(text="reply", author_id="bob", parent_comment_id="c5")
-            ],
+            comments=[CommentSpec(text="reply", parent_comment_id="c5")],
             dry_run=True,
         )
         assert result.payload_preview is not None
         item = result.payload_preview["data"][0]  # type: ignore[index]
         assert isinstance(item, dict)
-        assert "author" in item["relationships"]  # type: ignore[index]
         assert "parentComment" in item["relationships"]  # type: ignore[index]
+        assert "author" not in item["relationships"]  # type: ignore[index]
 
 
 class TestCreateDocumentCommentsHappyPath:
@@ -1123,17 +1112,10 @@ class TestBuildWorkItemCommentsPayload:
         attrs = payload["data"][0]["attributes"]  # type: ignore[index]
         assert "resolved" not in attrs  # type: ignore[operator]
 
-    def test_author_relationship(self) -> None:
-        payload = _build_work_item_comments_payload(
-            specs=[WorkItemCommentSpec(text="t", author_id="alice")],
-            project_id="P",
-            work_item_id="MCPT-1",
-        )
-        item = payload["data"][0]  # type: ignore[index]
-        assert isinstance(item, dict)
-        assert item["relationships"]["author"] == {  # type: ignore[index]
-            "data": {"id": "alice", "type": "users"}
-        }
+    def test_author_id_rejected(self) -> None:
+        """Inherited from CommentSpec: author_id key rejected, no impersonation."""
+        with pytest.raises(ValidationError):
+            WorkItemCommentSpec(text="t", author_id="alice")  # type: ignore[call-arg]
 
     def test_parent_comment_full_path_composed(self) -> None:
         """Short parent_comment_id expanded to full 3-segment path."""
