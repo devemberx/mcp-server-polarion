@@ -59,6 +59,9 @@ class TestListDocumentComments:
                     },
                 },
             ],
+            "included": [
+                {"type": "users", "id": "alice", "attributes": {"name": "Alice A"}}
+            ],
             "meta": {"totalCount": 1},
         }
 
@@ -86,6 +89,7 @@ class TestListDocumentComments:
         assert comment.text == "<p>Review me</p>"
         assert comment.text_format == "text/html"
         assert comment.author_id == "alice"
+        assert comment.author_name == "Alice A"
         assert comment.parent_comment_id is None
         assert comment.child_comment_ids == []
 
@@ -270,7 +274,8 @@ class TestListDocumentComments:
         assert params["fields[document_comments]"] == (
             "created,resolved,text,author,parentComment,childComments"
         )
-        assert params["include"] == "childComments"
+        assert params["include"] == "childComments,author"
+        assert params["fields[users]"] == "name"
         assert params["page[size]"] == 25
         assert params["page[number]"] == 3
 
@@ -373,6 +378,9 @@ class TestListWorkItemComments:
                     },
                 },
             ],
+            "included": [
+                {"type": "users", "id": "alice", "attributes": {"name": "Alice A"}}
+            ],
             "meta": {"totalCount": 1},
         }
 
@@ -400,6 +408,7 @@ class TestListWorkItemComments:
         assert comment.text == "<p>Review me</p>"
         assert comment.text_format == "text/html"
         assert comment.author_id == "alice"
+        assert comment.author_name == "Alice A"
         assert comment.parent_comment_id is None
         assert comment.child_comment_ids == []
 
@@ -578,7 +587,8 @@ class TestListWorkItemComments:
         assert params["fields[workitem_comments]"] == (
             "created,resolved,title,text,author,parentComment,childComments"
         )
-        assert params["include"] == "childComments"
+        assert params["include"] == "childComments,author"
+        assert params["fields[users]"] == "name"
         assert params["page[size]"] == 25
         assert params["page[number]"] == 3
 

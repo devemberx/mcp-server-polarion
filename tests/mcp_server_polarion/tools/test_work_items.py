@@ -1972,6 +1972,9 @@ class TestGetWorkItem:
                     "author": {"data": {"type": "users", "id": "proj1/bob"}},
                 },
             },
+            "included": [
+                {"type": "users", "id": "proj1/bob", "attributes": {"name": "Bob B"}}
+            ],
         }
 
         result = await get_work_item(
@@ -1994,6 +1997,7 @@ class TestGetWorkItem:
         assert result.document_name == "SRS"
         assert result.assignee_ids == ["alice"]
         assert result.author_id == "bob"
+        assert result.author_name == "Bob B"
         # Entry without uri is skipped.
         assert len(result.hyperlinks) == 1
         assert result.hyperlinks[0].role == "ref_ext"
@@ -2117,6 +2121,7 @@ class TestGetWorkItem:
         assert result.description_html == ""
         # Default values for new detail-only fields.
         assert result.author_id == ""
+        assert result.author_name == ""
         assert result.created == ""
         assert result.severity == ""
         assert result.resolution == ""
@@ -2241,6 +2246,8 @@ class TestGetWorkItem:
 
         _, kwargs = mock_client.get.call_args
         assert kwargs["params"]["fields[workitems]"] == "@all"
+        assert kwargs["params"]["include"] == "assignee,author"
+        assert kwargs["params"]["fields[users]"] == "name"
 
 
 class TestReadWorkItem:
@@ -2277,6 +2284,9 @@ class TestReadWorkItem:
                     "author": {"data": {"type": "users", "id": "proj1/bob"}},
                 },
             },
+            "included": [
+                {"type": "users", "id": "proj1/bob", "attributes": {"name": "Bob B"}}
+            ],
         }
 
         result = await read_work_item(
@@ -2295,6 +2305,7 @@ class TestReadWorkItem:
         assert result.space_id == "Design"
         assert result.document_name == "SRS"
         assert result.author_id == "bob"
+        assert result.author_name == "Bob B"
         assert result.project_id == "proj1"
 
     async def test_empty_description_yields_empty_markdown(

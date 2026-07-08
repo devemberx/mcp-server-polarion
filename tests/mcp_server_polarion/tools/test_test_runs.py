@@ -100,6 +100,7 @@ class TestListTestRuns:
         assert first.status == "open"
         assert first.finished_on == "2026-05-02T11:00:00Z"
         assert first.updated == "2026-05-01T09:00:00Z"
+        assert first.author_id == "devemberx"
         assert first.author_name == "Devember X"
         assert first.is_template is False
 
@@ -107,6 +108,7 @@ class TestListTestRuns:
         assert second.id == "TR-002"
         assert second.finished_on == ""
         assert second.updated == ""
+        assert second.author_id == ""
         assert second.author_name == ""
         assert second.is_template is True
 
@@ -139,6 +141,8 @@ class TestListTestRuns:
             page_number=1,
         )
 
+        # Unresolvable name still expose the id — the machine key survives.
+        assert result.items[0].author_id == "ghost"
         assert result.items[0].author_name == ""
 
     async def test_sparse_fieldset_and_includes_requested(

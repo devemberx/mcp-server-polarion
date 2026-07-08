@@ -242,6 +242,18 @@ class FakePolarion:
             )
         return resources
 
+    def _author_included(self) -> list[dict[str, Any]]:
+        """``included`` users entry resolving the shared author id to a name;
+        production requests ``include=author&fields[users]=name`` on these reads.
+        """
+        return [
+            {
+                "type": "users",
+                "id": f"{PROJECT}/{AUTHOR}",
+                "attributes": {"name": "Fake Author"},
+            }
+        ]
+
     def _enum_response(self, resource: str, field_id: str) -> dict[str, Any]:
         options = self.seeds.enums.get((resource, field_id), [])
         data = [
@@ -319,7 +331,13 @@ class FakePolarion:
             wi = self.seeds.work_items.get(single_wi.group(1))
             if wi is None:
                 return httpx.Response(404, json={"errors": [{"status": "404"}]})
-            return httpx.Response(200, json={"data": self._work_item_resource(wi)})
+            return httpx.Response(
+                200,
+                json={
+                    "data": self._work_item_resource(wi),
+                    "included": self._author_included(),
+                },
+            )
 
         # Forward links from single source work item (empty if none seeded).
         linked = re.search(r"/workitems/([^/]+)/linkedworkitems$", path)
@@ -339,7 +357,12 @@ class FakePolarion:
                 "workitem_comments",
             )
             return httpx.Response(
-                200, json={"data": data, "meta": {"totalCount": len(data)}}
+                200,
+                json={
+                    "data": data,
+                    "included": self._author_included() if data else [],
+                    "meta": {"totalCount": len(data)},
+                },
             )
 
         # Work item list / discovery: query=type:heading narrow to headings;
@@ -399,17 +422,7 @@ class FakePolarion:
                 if tr.is_template == want_templates
             ]
             data = [self._test_run_resource(tr) for tr in runs]
-            included = (
-                [
-                    {
-                        "type": "users",
-                        "id": f"{PROJECT}/{AUTHOR}",
-                        "attributes": {"name": "Fake Author"},
-                    }
-                ]
-                if data
-                else []
-            )
+            included = self._author_included() if data else []
             return httpx.Response(
                 200,
                 json={
@@ -436,7 +449,12 @@ class FakePolarion:
                 "document_comments",
             )
             return httpx.Response(
-                200, json={"data": data, "meta": {"totalCount": len(data)}}
+                200,
+                json={
+                    "data": data,
+                    "included": self._author_included() if data else [],
+                    "meta": {"totalCount": len(data)},
+                },
             )
 
         # Exact match on seeded doc: broad "/documents/" would claim every

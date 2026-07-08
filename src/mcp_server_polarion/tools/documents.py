@@ -61,6 +61,7 @@ from mcp_server_polarion.tools._shared.pagination import (
 )
 from mcp_server_polarion.tools._shared.parse import (
     extract_relationship_id,
+    extract_short_id,
     parse_included_user_name_map,
     parse_included_work_item_map,
     split_module_id,
@@ -295,8 +296,8 @@ def _decorate_wikiblock(content: str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class _DocumentMeta:
-    """Document attributes + editor user ids (join keys into included
-    ``users``; never surfaced in output — display names only).
+    """Document attributes + editor user ids; ids are join keys into included
+    ``users`` for display names and are also surfaced (short form) for requery.
     """
 
     type: str = ""
@@ -391,7 +392,9 @@ async def _discover_documents(
             type=meta.type,
             status=meta.status,
             updated=meta.updated,
+            author_id=extract_short_id(meta.author_id),
             author_name=user_names.get(meta.author_id, ""),
+            updated_by_id=extract_short_id(meta.updated_by_id),
             updated_by_name=user_names.get(meta.updated_by_id, ""),
         )
         for (space, name), meta in documents.items()
@@ -518,8 +521,9 @@ async def list_documents(
     """List a project's documents.
 
     Returns space_id + document_name (inputs to the other document tools) plus
-    type, status, updated timestamp, and display names of creator (author) and
-    last editor (last_updated_by). Discovery scan cached 60s.
+    type, status, updated timestamp, and id + display name of the creator
+    (author_id/author_name) and last editor (last_updated_by_id/_name).
+    Discovery scan cached 60s.
     """
     client = get_client(ctx)
 
@@ -552,8 +556,10 @@ async def list_documents(
             type=doc.type,
             status=doc.status,
             updated=doc.updated,
-            author=doc.author_name,
-            last_updated_by=doc.updated_by_name,
+            author_id=doc.author_id,
+            author_name=doc.author_name,
+            last_updated_by_id=doc.updated_by_id,
+            last_updated_by_name=doc.updated_by_name,
         )
         for doc in page_slice
     ]
@@ -589,8 +595,9 @@ async def get_document(
     """Get a document's metadata: title/type/status/editors/custom fields.
 
     Also returns outline numbering + autoSuspect (round-trip via update_document).
-    author / last_updated_by are display names (creator, last editor); updated
-    is the last-modified timestamp.
+    author_id/author_name (creator) and last_updated_by_id/last_updated_by_name
+    (last editor) pair the machine id with the display name; updated is the
+    last-modified timestamp.
 
     include_homepage_content_html=True fills content_html with raw
     homePageContent HTML — the required source for
@@ -639,8 +646,10 @@ async def get_document(
     relationships = data.get("relationships", {})
     if not isinstance(relationships, dict):
         relationships = {}
-    # Output carry display names only; ids = join keys into included users.
+    # ids = join keys into included users; surfaced short-form for requery too.
     user_names = parse_included_user_name_map(response)
+    author_full = extract_relationship_id(relationships, "author")
+    updated_by_full = extract_relationship_id(relationships, "updatedBy")
 
     content_html = ""
     if include_homepage_content_html:
@@ -654,10 +663,10 @@ async def get_document(
         type=safe_str(attributes.get("type", "")),
         status=safe_str(attributes.get("status", "")),
         updated=safe_str(attributes.get("updated", "")),
-        author=user_names.get(extract_relationship_id(relationships, "author"), ""),
-        last_updated_by=user_names.get(
-            extract_relationship_id(relationships, "updatedBy"), ""
-        ),
+        author_id=extract_short_id(author_full),
+        author_name=user_names.get(author_full, ""),
+        last_updated_by_id=extract_short_id(updated_by_full),
+        last_updated_by_name=user_names.get(updated_by_full, ""),
         content_html=content_html,
         auto_suspect=bool(attributes.get("autoSuspect", False)),
         uses_outline_numbering=bool(attributes.get("usesOutlineNumbering", False)),
