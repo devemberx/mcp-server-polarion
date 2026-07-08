@@ -4,9 +4,9 @@
 # Refuses direct pushes to main and worktree-* / other non-conforming refs.
 # Activate locally with: git config core.hooksPath .githooks
 
-set -euo pipefail
+set -e
 
-allowed='^(feat|fix|refactor|test|docs|chore|ci)/[a-z0-9][a-z0-9._-]*$'
+allowed='^(feat|fix|refactor|test|docs|chore|ci)/[a-z0-9]+(-[a-z0-9]+)*$'
 bypass='^(dependabot|renovate)/'  # bot branches skip the local convention
 
 fail=0
