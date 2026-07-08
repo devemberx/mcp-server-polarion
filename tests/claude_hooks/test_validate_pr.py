@@ -152,6 +152,16 @@ class TestNonAsciiDetection:
     @pytest.mark.parametrize(
         "text",
         [
+            "maps ↦ here",  # arrow outside allowlist
+            "dagger † not allowlisted",  # punctuation outside allowlist
+        ],
+    )
+    def test_blocks_non_allowlisted_punctuation(self, text: str) -> None:
+        assert body.has_disallowed_non_ascii(text)
+
+    @pytest.mark.parametrize(
+        "text",
+        [
             "plain english only - [x] done!",
             "ship it 🚀",  # lone emoji
             "done ✅ and 🎉",  # symbol + emoji
