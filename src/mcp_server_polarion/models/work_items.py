@@ -40,6 +40,7 @@ class WorkItemDetail(WorkItemSummary):
     description_html: str = ""
     project_id: str
     author_id: str = ""
+    author_name: str = ""
     created: str = ""
     resolution: str = ""
     severity: str = ""
@@ -54,6 +55,7 @@ class WorkItemRead(WorkItemSummary):
     description: str = ""
     project_id: str
     author_id: str = ""
+    author_name: str = ""
     created: str = ""
     resolution: str = ""
     severity: str = ""

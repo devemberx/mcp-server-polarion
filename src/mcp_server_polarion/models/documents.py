@@ -16,8 +16,10 @@ class DocumentSummary(BaseModel):
     type: str = ""
     status: str = ""
     updated: str = ""
-    author: str = ""
-    last_updated_by: str = ""
+    author_id: str = ""
+    author_name: str = ""
+    last_updated_by_id: str = ""
+    last_updated_by_name: str = ""
 
 
 class DocumentDetail(BaseModel):
@@ -27,8 +29,10 @@ class DocumentDetail(BaseModel):
     type: str = ""
     status: str = ""
     updated: str = ""
-    author: str = ""
-    last_updated_by: str = ""
+    author_id: str = ""
+    author_name: str = ""
+    last_updated_by_id: str = ""
+    last_updated_by_name: str = ""
     content_html: str = ""
     auto_suspect: bool = False
     uses_outline_numbering: bool = False

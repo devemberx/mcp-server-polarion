@@ -208,6 +208,9 @@ async def list_test_runs(  # noqa: PLR0913
     Returns actual run instances by default; set templates=True for the reusable
     template blueprints instead. Filter with a Lucene query (status:open,
     type:manual, author.id:<userid>, HAS_VALUE:<field>) or omit for all.
+
+    Results carry author_id + author_name — to find runs by a person, match
+    their name in an unfiltered page, then requery author.id:<author_id>.
     """
     client = get_client(ctx)
     params: dict[str, str | int] = {

@@ -213,7 +213,8 @@ async def list_document_comments(  # noqa: PLR0913
             params={
                 "fields[document_comments]": DOCUMENT_COMMENT_LIST_FIELDS,
                 # To-many ``childComments.data`` inlined only when included.
-                "include": "childComments",
+                "include": "childComments,author",
+                "fields[users]": "name",
                 "page[size]": page_size,
                 "page[number]": page_number,
             },
@@ -265,7 +266,8 @@ async def list_work_item_comments(
             params={
                 "fields[workitem_comments]": WORK_ITEM_COMMENT_LIST_FIELDS,
                 # To-many ``childComments.data`` inlined only when included.
-                "include": "childComments",
+                "include": "childComments,author",
+                "fields[users]": "name",
                 "page[size]": page_size,
                 "page[number]": page_number,
             },

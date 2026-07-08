@@ -233,7 +233,20 @@ class TestParseWorkItemDetail:
         detail = parse_work_item_detail(item, project_id="proj")
         assert detail.description_html == "<p>raw</p>"
         assert detail.author_id == "jdoe"
+        assert detail.author_name == ""
         assert detail.custom_fields == {"riskLevel": "high"}
+
+    def test_user_names_resolve_author_name(self) -> None:
+        item: dict[str, object] = {
+            "id": "proj/MCPT-1",
+            "attributes": {"title": "T", "type": "task", "status": "open"},
+            "relationships": {"author": {"data": {"id": "proj/jdoe"}}},
+        }
+        detail = parse_work_item_detail(
+            item, project_id="proj", user_names={"proj/jdoe": "J Doe"}
+        )
+        assert detail.author_id == "jdoe"
+        assert detail.author_name == "J Doe"
 
     def test_fallback_id_used_when_id_missing(self) -> None:
         item: dict[str, object] = {
@@ -303,7 +316,20 @@ class TestParseTestRunSummaries:
         )
         assert kwargs["id"] == "TR-1"
         assert kwargs["title"] == ""
+        assert kwargs["author_id"] == ""
         assert kwargs["author_name"] == ""
+
+    def test_author_id_and_name_pair(self) -> None:
+        kwargs = parse_test_run_summary_kwargs(
+            {
+                "id": "proj/TR-1",
+                "attributes": {"title": "A", "type": "t", "status": "s"},
+                "relationships": {"author": {"data": {"id": "proj/jdoe"}}},
+            },
+            user_names={"proj/jdoe": "J Doe"},
+        )
+        assert kwargs["author_id"] == "jdoe"
+        assert kwargs["author_name"] == "J Doe"
 
     def test_non_list_data_is_empty(self) -> None:
         assert parse_test_run_summaries({"data": None}) == []
@@ -338,13 +364,24 @@ class TestParseComment:
                 "childComments": {"data": [{"id": "proj/WI-1/cmt-2"}]},
             },
         }
-        comment = _parse_comment(item)
+        comment = _parse_comment(item, {"proj/jdoe": "J Doe"})
         assert comment.id == "cmt-1"
         assert comment.text == "<p>hi</p>"
         assert comment.text_format == "text/html"
         assert comment.resolved is True
         assert comment.author_id == "jdoe"
+        assert comment.author_name == "J Doe"
         assert comment.child_comment_ids == ["cmt-2"]
+
+    def test_author_name_empty_when_unresolved(self) -> None:
+        item: dict[str, object] = {
+            "id": "proj/WI-1/cmt-1",
+            "attributes": {"created": "x"},
+            "relationships": {"author": {"data": {"id": "proj/jdoe"}}},
+        }
+        comment = _parse_comment(item, {})
+        assert comment.author_id == "jdoe"
+        assert comment.author_name == ""
 
     def test_plain_format_honored(self) -> None:
         item: dict[str, object] = {
@@ -354,7 +391,7 @@ class TestParseComment:
                 "text": {"type": "text/plain", "value": "hi"},
             },
         }
-        assert _parse_comment(item).text_format == "text/plain"
+        assert _parse_comment(item, {}).text_format == "text/plain"
 
     def test_unknown_format_falls_back_to_html(self) -> None:
         item: dict[str, object] = {
@@ -364,14 +401,14 @@ class TestParseComment:
                 "text": {"type": "text/weird", "value": "hi"},
             },
         }
-        assert _parse_comment(item).text_format == "text/html"
+        assert _parse_comment(item, {}).text_format == "text/html"
 
     def test_absent_author_is_none(self) -> None:
         item: dict[str, object] = {
             "id": "proj/WI-1/cmt-1",
             "attributes": {"created": "x"},
         }
-        assert _parse_comment(item).author_id is None
+        assert _parse_comment(item, {}).author_id is None
 
 
 class TestParseCommentsPage:
