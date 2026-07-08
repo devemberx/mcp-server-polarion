@@ -495,7 +495,7 @@ async def list_work_items(
     client = get_client(ctx)
     params: dict[str, str | int] = {
         "fields[workitems]": WORK_ITEM_LIST_FIELDS,
-        # author single-include resolve display name; users sparse to name only.
+        # include author resolve display name; fields[users]=name trim payload.
         "include": "author",
         "fields[users]": "name",
         "page[size]": page_size,
