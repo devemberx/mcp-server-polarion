@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PreToolUse hook: block PR/issue body Bash invocations that violate repo conventions.
+"""PreToolUse hook: block PR/issue Bash invocations that violate repo conventions.
 
 Triggered on: gh pr (create|edit|comment), gh issue (create|edit|comment),
 gh api .../pulls/... or .../issues/...
@@ -98,7 +98,7 @@ def main() -> int:
             errors.extend(changes_format_errors(body))
 
     if errors:
-        sys.stderr.write("BLOCKED by .claude/hooks/validate-pr.py:\n\n")
+        sys.stderr.write("BLOCKED by .claude/hooks/validate_pr.py:\n\n")
         for e in errors:
             sys.stderr.write(f"* {e}\n\n")
         return 2
