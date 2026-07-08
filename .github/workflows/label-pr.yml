@@ -47,8 +47,18 @@ jobs:
           esac
           [ -n "$bang" ] && labels+=("breaking")
 
+          # Prior unlabeled-warning comment id, empty if none. Drives dedup + cleanup.
+          marker='<!-- label-pr:unlabeled -->'
+          prior="$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate \
+            --jq ".[] | select(.body | contains(\"$marker\")) | .id" | head -n1)"
+
           if [ ${#labels[@]} -eq 0 ]; then
             echo "Title has no conventional-commit type; nothing to label."
+            # Warn once: skip when marker comment already present.
+            if [ -z "$prior" ]; then
+              body=$'<!-- label-pr:unlabeled -->\nThis PR title does not start with a conventional-commit type, so it is not auto-labeled for release-note grouping.\n\nRename it to "type(scope): summary" using one of: feat, fix, docs, refactor, perf, test, ci, chore. Editing the title re-runs this check.'
+              gh api -X POST "repos/$REPO/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
+            fi
             exit 0
           fi
 
@@ -60,3 +70,8 @@ jobs:
           args=()
           for l in "${labels[@]}"; do args+=(-f "labels[]=$l"); done
           gh api -X POST "repos/$REPO/issues/$PR_NUMBER/labels" "${args[@]}" >/dev/null
+
+          # Title fixed since warning: drop stale unlabeled comment.
+          if [ -n "$prior" ]; then
+            gh api -X DELETE "repos/$REPO/issues/$PR_NUMBER/comments/$prior" >/dev/null
+          fi

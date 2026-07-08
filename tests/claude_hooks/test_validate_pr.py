@@ -1,4 +1,4 @@
-"""`validate_pr_body` hook tests, loaded by path via importlib (script live
+"""`validate_pr` hook tests, loaded by path via importlib (script live
 outside any package). Pure helpers only; `main()` left to e2e.
 """
 
@@ -12,7 +12,7 @@ from tests.conftest import load_module_from_path
 
 HOOKS_DIR = Path(__file__).resolve().parents[2] / ".claude" / "hooks"
 
-body = load_module_from_path(HOOKS_DIR / "validate_pr_body.py", "validate_pr_body")
+body = load_module_from_path(HOOKS_DIR / "validate_pr.py", "validate_pr")
 
 
 class TestBodyClassify:
@@ -84,6 +84,56 @@ class TestBodyExtractBody:
 
     def test_no_body(self) -> None:
         assert body.extract_body("gh pr edit --title only") is None
+
+
+class TestExtractTitle:
+    def test_long_flag(self) -> None:
+        assert body.extract_title("gh pr create --title 'fix: x'") == "fix: x"
+
+    def test_long_flag_equals(self) -> None:
+        assert body.extract_title("gh pr create --title=fix:x") == "fix:x"
+
+    def test_short_flag(self) -> None:
+        assert body.extract_title("gh pr create -t 'fix: x' --body y") == "fix: x"
+
+    def test_absent(self) -> None:
+        assert body.extract_title("gh pr edit 5 --body y") is None
+
+
+class TestTitleErrors:
+    @pytest.mark.parametrize(
+        "title",
+        [
+            "feat: add a tool",
+            "fix(client): retry on 429",
+            "chore(deps): bump fastmcp",
+            "refactor!: drop legacy path",
+            "ci: cache uv deps",
+            "feat: " + "x" * 44,  # exactly 50 chars
+        ],
+    )
+    def test_valid(self, title: str) -> None:
+        # Fixture guard: boundary case on limit, not over.
+        assert len(title) <= body.TITLE_LIMIT
+        assert body.title_errors(title) == []
+
+    @pytest.mark.parametrize(
+        "title",
+        [
+            "add a tool",  # no type prefix
+            "feature: add a tool",  # type outside 8 keys
+            "Fix: capitalized type",  # uppercase type
+            "feat add a tool",  # missing colon
+            "build: not a labeled type",  # conventional but unmapped
+        ],
+    )
+    def test_bad_prefix(self, title: str) -> None:
+        assert any("conventional-commit" in e for e in body.title_errors(title))
+
+    def test_over_limit(self) -> None:
+        title = "feat: " + "x" * 50
+        errs = body.title_errors(title)
+        assert any("limit: 50" in e for e in errs)
 
 
 class TestNonAsciiDetection:
