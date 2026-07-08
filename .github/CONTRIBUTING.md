@@ -61,7 +61,7 @@ git config core.hooksPath .githooks
 
    | Prefix      | For                                          | Example                       |
    | ----------- | -------------------------------------------- | ----------------------------- |
-   | `feature/`  | new tool or user-visible behavior            | `feature/read-fidelity`       |
+   | `feat/`     | new tool or user-visible behavior            | `feat/read-fidelity`          |
    | `fix/`      | bug fix on existing behavior                 | `fix/utils-html-attachments`  |
    | `refactor/` | internal restructuring, no behavior change   | `refactor/tools`              |
    | `test/`     | tests, eval cases, fixtures only             | `test/efficiency-eval-cases`  |
