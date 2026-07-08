@@ -22,8 +22,8 @@ brn = load_module_from_path(SCRIPT, "build_release_notes")
 
 
 def _fake_gh(*, ref_object: dict[str, str], message: str | None = None):
-    """Return a `_gh` stub: the ref lookup yields `ref_object`; the tag lookup
-    (only reached for annotated tags) yields `message`.
+    """`_gh` stub: ref lookup yield `ref_object`; tag lookup (only reached
+    for annotated tags) yield `message`.
     """
 
     def _gh(*args: str) -> str:

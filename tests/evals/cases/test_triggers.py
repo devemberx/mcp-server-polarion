@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import pytest
 
-# The CASES list pulls in ``strands_evals.Case``, only present when the optional
-# ``evals`` dependency group is installed; skip on the bare dev install.
+# CASES list pull in ``strands_evals.Case``, only present when optional
+# ``evals`` dependency group installed; skip on bare dev install.
 pytest.importorskip("strands_evals")
 
 from evals.cases.triggers import CASES, _case

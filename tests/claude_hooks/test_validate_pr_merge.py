@@ -1,5 +1,5 @@
-"""Unit tests for the `validate_pr_merge` hook, loaded by path via importlib
-(script lives outside any package). Pure helpers only; `main()` left to e2e.
+"""`validate_pr_merge` hook tests, loaded by path via importlib (script live
+outside any package). Pure helpers only; `main()` left to e2e.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ class TestIsPrMerge:
             ("gh pr list", False),
             ("gh pr view 72", False),
             ("git fetch && echo done", False),
-            # chained command where an earlier `gh` precedes the merge
+            # Chained command: earlier `gh` precede the merge.
             ("gh pr view 72 && gh pr merge 72 --merge", True),
             ("gh pr checkout 72 && gh pr merge 72", True),
             ("FOO=bar gh pr merge 72 --squash", True),

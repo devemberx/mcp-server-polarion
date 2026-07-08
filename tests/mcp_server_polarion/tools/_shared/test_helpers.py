@@ -1,6 +1,6 @@
-"""Direct tests for core helpers worth pinning beyond transitive per-tool
-coverage — `format_option_list` rendering, `safe_str` coercion, the slash-encoding
-contract of `encode_path_segment`, the Lucene-id guard, and `get_client` lookup.
+"""Core helpers worth pinning beyond transitive per-tool coverage —
+`format_option_list` rendering, `safe_str` coercion, slash-encoding contract
+of `encode_path_segment`, Lucene-id guard, `get_client` lookup.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ class TestFormatOptionList:
         assert format_option_list(["a"]) == repr(["a"])
 
     def test_under_limit_identical_to_repr_sorted(self) -> None:
-        # Byte-identical to the old `sorted(option_ids)` interpolation.
+        # Byte-identical to old `sorted(option_ids)` interpolation.
         ids = ["3", "1", "2", "4"]
         assert format_option_list(ids) == repr(["1", "2", "3", "4"])
 
@@ -65,7 +65,7 @@ class TestSafeStr:
     """Tests for `safe_str`."""
 
     def test_none_becomes_empty_string(self) -> None:
-        # None → "" so absent attributes don't surface as the literal "None".
+        # None → "" so absent attributes not surface as literal "None".
         assert safe_str(None) == ""
 
     def test_str_passes_through(self) -> None:
@@ -87,7 +87,7 @@ class TestEncodePathSegment:
         assert encode_path_segment("My Doc") == "My%20Doc"
 
     def test_encodes_slash(self) -> None:
-        # safe="" is the whole point: a document name with "/" must not split
+        # safe="" is the whole point: document name with "/" must not split
         # into extra path segments.
         assert encode_path_segment("a/b") == "a%2Fb"
 
@@ -102,7 +102,7 @@ class TestValidateWorkItemIdForLucene:
     """Tests for `validate_work_item_id_for_lucene`."""
 
     def test_accepts_alphanumeric_hyphen_underscore(self) -> None:
-        # Returns None (no raise) for the allowed character set.
+        # Return None (no raise) for allowed character set.
         assert validate_work_item_id_for_lucene("MCPT-001_a9") is None
 
     @pytest.mark.parametrize(

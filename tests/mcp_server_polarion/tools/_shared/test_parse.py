@@ -1,6 +1,6 @@
-"""Direct tests for JSON:API parsers worth pinning beyond the transitive
-per-tool coverage — relationship/id extraction edge cases, raw-HTML passthrough,
-comment text-format branches, and the phantom-editor skip.
+"""JSON:API parsers worth pinning beyond transitive per-tool coverage —
+relationship/id extraction edge cases, raw-HTML passthrough, comment
+text-format branches, phantom-editor skip.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ class TestExtractRelationshipId:
         assert extract_relationship_id({}, "author") == ""
 
     def test_to_many_data_list_is_empty(self) -> None:
-        # A to-many `data` is a list, not a dict → no scalar id.
+        # To-many `data` is a list, not dict → no scalar id.
         rels = {"assignee": {"data": [{"id": "proj/u1"}]}}
         assert extract_relationship_id(rels, "assignee") == ""
 
@@ -71,7 +71,7 @@ class TestSplitModuleId:
         assert split_module_id("proj/Design/Spec") == ("Design", "Spec")
 
     def test_document_name_keeps_extra_slashes(self) -> None:
-        # `doc` may contain `/`; only the first two splits are structural.
+        # `doc` may contain `/`; only first two splits structural.
         assert split_module_id("proj/Design/Spec/v2") == ("Design", "Spec/v2")
 
     def test_under_three_segments_is_empty(self) -> None:
@@ -153,7 +153,7 @@ class TestParseIncludedUserNameMap:
         assert parse_included_user_name_map(response) == {"proj/jdoe": "J Doe"}
 
     def test_skips_empty_user_id(self) -> None:
-        # "" key would join with absent-author "" → phantom editor; must be dropped.
+        # "" key would join absent-author "" → phantom editor; must drop.
         response: dict[str, object] = {
             "included": [{"type": "users", "id": "", "attributes": {"name": "Ghost"}}]
         }
@@ -435,7 +435,7 @@ class TestParseEnumOption:
     """Tests for `parse_enum_option` bool coercion."""
 
     def test_coerces_non_bool_flags_to_false(self) -> None:
-        # Non-bool flag values default to False rather than raising.
+        # Non-bool flag values default to False rather than raise.
         option = parse_enum_option(
             {"id": "open", "name": "Open", "default": "yes", "hidden": 1}
         )

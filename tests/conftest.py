@@ -14,8 +14,8 @@ from mcp_server_polarion.core.config import PolarionConfig
 
 
 def load_module_from_path(path: Path, module_name: str) -> ModuleType:
-    """Import a standalone script by file path — hooks and CI scripts live outside
-    the package (some hyphen-named), so normal import fails.
+    """Import standalone script by file path — hooks and CI scripts live
+    outside the package (some hyphen-named), so normal import fail.
     """
     spec = importlib.util.spec_from_file_location(module_name, path)
     assert spec is not None and spec.loader is not None
@@ -26,7 +26,7 @@ def load_module_from_path(path: Path, module_name: str) -> ModuleType:
 
 @pytest.fixture
 def polarion_config() -> PolarionConfig:
-    """Return a ``PolarionConfig`` pointing at a fake local URL."""
+    """``PolarionConfig`` pointing at fake local URL."""
     return PolarionConfig(
         polarion_url="https://polarion.example.com",
         polarion_token="test-token-secret",
@@ -37,9 +37,6 @@ def polarion_config() -> PolarionConfig:
 async def polarion_client(
     polarion_config: PolarionConfig,
 ) -> AsyncIterator[PolarionClient]:
-    """Yield a ``PolarionClient`` with a near-zero write delay.
-
-    The write delay is set to 0 so tests do not sleep unnecessarily.
-    """
+    """Yield ``PolarionClient`` with write delay 0 — tests must not sleep."""
     async with PolarionClient(polarion_config, write_delay=0.0) as client:
         yield client

@@ -1,4 +1,4 @@
-"""Tests for Polarion domain exceptions — hierarchy, attributes, messages."""
+"""Polarion domain exceptions — hierarchy, attributes, messages."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from mcp_server_polarion.core.exceptions import (
 
 
 class TestExceptionHierarchy:
-    """Verify that subclasses inherit from ``PolarionError``."""
+    """Subclasses inherit from ``PolarionError``."""
 
     def test_auth_error_is_polarion_error(self) -> None:
         assert issubclass(PolarionAuthError, PolarionError)
@@ -34,7 +34,7 @@ class TestExceptionHierarchy:
 
 
 class TestExceptionAttributes:
-    """Verify ``status_code`` and ``message`` on each exception."""
+    """``status_code`` and ``message`` on each exception."""
 
     def test_base_error_defaults(self) -> None:
         exc = PolarionError("something broke")
@@ -58,7 +58,7 @@ class TestExceptionAttributes:
 
 
 class TestExceptionRaiseAndCatch:
-    """Verify raise / except patterns used by tool code."""
+    """Raise / except patterns used by tool code."""
 
     def test_raise_auth_catch_base(self) -> None:
         with _raises_polarion_error(PolarionAuthError):
@@ -73,7 +73,7 @@ class TestExceptionRaiseAndCatch:
 def _raises_polarion_error(
     expected_type: type[PolarionError],
 ) -> Iterator[None]:
-    """Assert that PolarionError is raised and is of *expected_type*."""
+    """Assert PolarionError raised and of *expected_type*."""
     try:
         yield
     except PolarionError as exc:

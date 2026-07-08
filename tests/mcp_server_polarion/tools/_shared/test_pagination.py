@@ -1,6 +1,6 @@
-"""Direct tests for pagination math — `make_page` total/has_more derivation,
-`compute_has_more`, `extract_total_count`, and `has_links_next` branch coverage.
-Behavior shared by every list tool.
+"""Pagination math — `make_page` total/has_more derivation, `compute_has_more`,
+`extract_total_count`, `has_links_next` branch coverage. Behavior shared by
+every list tool.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ class TestMakePage:
         assert page.has_more is False  # 2 <= 1 * 10
 
     def test_missing_total_offset_fallback_on_nonempty_page(self) -> None:
-        # No meta.totalCount → estimate from offset + len on a non-empty page.
+        # No meta.totalCount → estimate from offset + len on non-empty page.
         page = make_page(["x", "y", "z"], {}, page_number=2, page_size=10)
         assert page.total_count == 13  # (2 - 1) * 10 + 3
         # raw_total stays 0 → no links.next, 3 != page_size → no more.
@@ -49,12 +49,12 @@ class TestMakePage:
         assert page.has_more is True
 
     def test_has_more_via_full_page_heuristic(self) -> None:
-        # No meta, no links, but a full page implies another may follow.
+        # No meta, no links, but full page imply another may follow.
         page = make_page(["a"] * 10, {}, page_number=1, page_size=10)
         assert page.has_more is True
 
     def test_generic_round_trips_model(self) -> None:
-        # Exercises the PaginatedResult[T] subscript at construction.
+        # Exercise PaginatedResult[T] subscript at construction.
         items = [ProjectSummary(id="p1", name="Proj 1", active=True)]
         page = make_page(items, {"meta": {"totalCount": 1}}, 1, 10)
         assert isinstance(page, PaginatedResult)
@@ -96,7 +96,7 @@ class TestExtractTotalCount:
         assert extract_total_count({"meta": "nope"}) == 0
 
     def test_non_int_total_count_is_zero(self) -> None:
-        # A non-int totalCount (e.g. null/str) coerces to 0, not a raise.
+        # Non-int totalCount (e.g. null/str) coerce to 0, not raise.
         assert extract_total_count({"meta": {"totalCount": None}}) == 0
         assert extract_total_count({"meta": {"totalCount": "12"}}) == 0
 

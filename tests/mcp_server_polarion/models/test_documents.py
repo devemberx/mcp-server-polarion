@@ -1,4 +1,4 @@
-"""Tests for document models in ``mcp_server_polarion.models.documents``."""
+"""Document model tests (``mcp_server_polarion.models.documents``)."""
 
 from __future__ import annotations
 

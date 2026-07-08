@@ -1,5 +1,5 @@
-"""Unit tests for the `validate_pr_body` hook, loaded by path via importlib
-(script lives outside any package). Pure helpers only; `main()` left to e2e.
+"""`validate_pr_body` hook tests, loaded by path via importlib (script live
+outside any package). Pure helpers only; `main()` left to e2e.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ class TestBodyClassify:
         [
             "gh pr list",
             "git commit -m x",
-            # PR review/comment API endpoints are not full-body PR edits
+            # PR review/comment API endpoints are not full-body PR edits.
             "gh api /repos/o/r/pulls/5/comments -f body=z",
             "gh api /repos/o/r/pulls/5/reviews -f body=z",
         ],
@@ -123,7 +123,7 @@ class TestMissingTemplateBoxes:
 
     def test_all_present(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         self._template(tmp_path, monkeypatch)
-        # state flipped, all labels present
+        # State flipped, all labels present.
         full = "- [x] Bug fix\n- [ ] New feature\n- [ ] CI / tooling\n"
         assert body.missing_template_boxes(full) == []
 
@@ -147,7 +147,7 @@ class TestChangesFormatErrors:
         assert body.changes_format_errors(text) == []
 
     def test_section_ends_at_next_header(self) -> None:
-        # bullets under a later section must not be counted toward Changes
+        # Bullets under later section must not count toward Changes.
         text = "## Changes\n\n- one\n- two\n\n## Testing\n\n- not counted\n"
         assert body.changes_format_errors(text) == []
 
@@ -157,7 +157,7 @@ class TestChangesFormatErrors:
         assert any("exactly 2" in e for e in errs)
 
     def test_empty_template_stub_fails(self) -> None:
-        # the unfilled "- \n- " stub has no text, so it counts as zero bullets
+        # Unfilled "- \n- " stub has no text — count as zero bullets.
         text = "## Changes\n\n- \n- \n\n## Testing\n"
         errs = body.changes_format_errors(text)
         assert any("exactly 2" in e for e in errs)
@@ -172,6 +172,6 @@ class TestChangesFormatErrors:
         assert any("Changes" in e for e in errs)
 
     def test_section_at_end_of_body(self) -> None:
-        # no trailing section header after Changes
+        # No trailing section header after Changes.
         text = "## Summary\nx\n\n## Changes\n\n- one\n- two\n"
         assert body.changes_format_errors(text) == []

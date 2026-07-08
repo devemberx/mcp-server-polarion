@@ -1,4 +1,4 @@
-"""Tests for work item link models in ``mcp_server_polarion.models.links``."""
+"""Work item link model tests (``mcp_server_polarion.models.links``)."""
 
 from __future__ import annotations
 

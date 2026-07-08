@@ -1,4 +1,4 @@
-"""Tests for the enum option model in ``mcp_server_polarion.models.enum``."""
+"""Enum option model tests (``mcp_server_polarion.models.enum``)."""
 
 from __future__ import annotations
 

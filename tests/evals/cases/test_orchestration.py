@@ -1,8 +1,7 @@
-"""Orchestration case-definition invariants: the ``ordered_trajectory`` check,
-``min_pass_rate == 0.8``, documented intent, auto-derived covers, and a
-well-formed step DSL (each step names a tool; every ``observed_in`` references a
-tool that appears earlier in the same case's steps, so the threaded id can
-actually have been produced).
+"""Orchestration case-definition invariants: ``ordered_trajectory`` check,
+``min_pass_rate == 0.8``, documented intent, auto-derived covers, well-formed
+step DSL (each step name a tool; every ``observed_in`` reference a tool that
+appear earlier in same case's steps, so threaded id can actually exist).
 """
 
 from __future__ import annotations
@@ -29,7 +28,7 @@ def _tools(step: dict[str, object]) -> list[str]:
 
 
 def _single_tool(step: dict[str, object]) -> set[str]:
-    """A step's tool name only if it names exactly one tool -- the names an
+    """Step tool name only if it names exactly one tool -- the names an
     ``after``/``observed_in`` dep may resolve to unambiguously."""
     tools = _tools(step)
     return set(tools) if len(tools) == 1 else set()
@@ -72,11 +71,11 @@ class TestCases:
                 assert _tools(step), case.name
 
     def test_observed_source_appears_earlier_in_steps(self) -> None:
-        # An ``observed_in`` tool with no earlier matching step can never be
-        # satisfied -- guard against a typo'd sequence. The source must be a
-        # single-tool step: ``name_to_step`` resolves a multi-tool alternative
-        # group ambiguously (a dep could point at a step that matched the *other*
-        # alternative), so the threaded id would not provably come from it.
+        # ``observed_in`` tool with no earlier matching step can never be
+        # satisfied -- guard against typo'd sequence. Source must be
+        # single-tool step: ``name_to_step`` resolve multi-tool alternative
+        # group ambiguously (dep could point at step that matched *other*
+        # alternative), so threaded id not provably from it.
         for case in CASES:
             steps = _params(case)["steps"]
             seen_tools: set[str] = set()
@@ -91,8 +90,8 @@ class TestCases:
                 seen_tools.update(_single_tool(step))
 
     def test_after_references_an_earlier_step_tool(self) -> None:
-        # ``after`` deps must reference a single-tool step for the same reason as
-        # ``observed_in`` -- a multi-tool group's index is ambiguous.
+        # ``after`` deps must reference single-tool step for same reason as
+        # ``observed_in`` -- multi-tool group index ambiguous.
         for case in CASES:
             steps = _params(case)["steps"]
             seen_tools: set[str] = set()

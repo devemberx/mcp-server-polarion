@@ -1,4 +1,4 @@
-"""Tests for ``utils/html.py`` — HTML ↔ Markdown conversion edge cases."""
+"""``utils/html.py`` — HTML ↔ Markdown conversion edge cases."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from mcp_server_polarion.utils.html import (
 
 
 class TestHtmlToMarkdown:
-    """Verify HTML → Markdown conversion."""
+    """HTML → Markdown conversion."""
 
     def test_simple_paragraph(self) -> None:
         result = html_to_markdown("<p>Hello world</p>")
@@ -55,7 +55,7 @@ class TestHtmlToMarkdown:
         result = html_to_markdown(html)
         assert "Item 1" in result
         assert "Item 2" in result
-        # Should use list markers (*, -, or +)
+        # List markers (*, -, or +).
         lines = [line.strip() for line in result.splitlines() if line.strip()]
         assert any(line.startswith(("* ", "- ", "+ ")) for line in lines)
 
@@ -108,8 +108,8 @@ class TestHtmlToMarkdown:
         assert "&" in result
 
     def test_empty_alt_filled_from_title(self) -> None:
-        """``<img title="X">`` (no alt) → ``![X](src)``; ``title`` dropped so the label
-        appears once.
+        """``<img title="X">`` (no alt) → ``![X](src)``; ``title`` dropped so
+        label appear once.
         """
         html = '<img src="attachment:1-shot.png" title="shot.png"/>'
         result = html_to_markdown(html)
@@ -117,8 +117,8 @@ class TestHtmlToMarkdown:
         assert '"shot.png"' not in result
 
     def test_empty_alt_filled_from_src_filename(self) -> None:
-        """No alt, no title → alt from the post-``:`` src segment (clipboard-pasted
-        attachments carry no title; the filename is the only readable label).
+        """No alt, no title → alt from post-``:`` src segment (clipboard-pasted
+        attachments carry no title; filename = only readable label).
         """
         html = (
             '<img src="attachment:1-screenshot-20260512-142738-1.png" '
@@ -131,7 +131,7 @@ class TestHtmlToMarkdown:
         )
 
     def test_existing_alt_preserved(self) -> None:
-        """An img that already carries a non-empty alt is left alone."""
+        """Img already carrying non-empty alt left alone."""
         html = '<img alt="My picture" src="workitemimg:1-foo.png" title="foo.png"/>'
         result = html_to_markdown(html)
         assert "![My picture](workitemimg:1-foo.png" in result
@@ -142,7 +142,7 @@ class TestHtmlToMarkdown:
         result = html_to_markdown(html)
         assert "Before" in result
         assert "After" in result
-        # No alt/title to promote, so src stays in a bare ![](src).
+        # No alt/title to promote — src stay in bare ![](src).
         assert "![](https://example.com/pic.jpg)" in result
 
     def test_nested_formatting(self) -> None:
@@ -244,7 +244,7 @@ class TestHtmlToMarkdownMergedCells:
         assert rows == [["X", "Y"]], result
 
     def test_table_rowspan_overflow_silently_clipped(self) -> None:
-        # rowspan claims 5 rows but only 2 exist — extra reservations dropped.
+        # rowspan claim 5 rows but only 2 exist — extra reservations dropped.
         html = (
             "<table><thead><tr><th>A</th><th>B</th></tr></thead>"
             '<tbody><tr><td rowspan="5">Tall</td><td>X</td></tr>'
@@ -257,9 +257,8 @@ class TestHtmlToMarkdownMergedCells:
         assert rows[2] == ["Tall", "Y"]
 
     def test_table_colspan_skips_rowspan_reservation(self) -> None:
-        """A colspan cell pushed past a previous row's rowspan must not
-        overwrite the reservation — it should land at non-contiguous columns
-        (matching browser rendering).
+        """Colspan cell pushed past previous row's rowspan must not overwrite
+        the reservation — land at non-contiguous columns (match browser).
         """
         # Row 0: A | B(rowspan=2) | C
         # Row 1: D(colspan=2) — should occupy cols 0 and 2 (col 1 reserved)
@@ -289,7 +288,7 @@ class TestHtmlToMarkdownMergedCells:
             "</tbody></table>"
         )
         result = html_to_markdown(html)
-        # Markdownify renders <strong> as **bold**; both duplicates carry it.
+        # Markdownify render <strong> as **bold**; both duplicates carry it.
         assert result.count("**bold**") == 2, result
 
     def test_nested_table_each_rectangularized(self) -> None:
@@ -311,8 +310,8 @@ class TestHtmlToMarkdownMergedCells:
         assert result.count("OUTER") >= 2, result
 
     def test_table_pathological_span_product_bounded(self) -> None:
-        """colspan*rowspan is clamped to keep worst-case allocation bounded."""
-        # Without the product clamp, 1000*1000 spans would materialise 1M clones.
+        """colspan*rowspan clamped — keep worst-case allocation bounded."""
+        # Without product clamp, 1000*1000 spans materialise 1M clones.
         html = (
             '<table><tbody><tr><td colspan="1000" rowspan="1000">M</td>'
             "<td>Z</td></tr></tbody></table>"
@@ -374,7 +373,7 @@ class TestHtmlToMarkdownPolarionRteLinks:
         assert "polarion:Design/%EC%84%A4%EA%B3%84%20%EB%AC%B8%EC%84%9C" in result
 
     def test_span_without_target_metadata_does_not_crash(self) -> None:
-        # Span carries no usable target metadata — surrounding text must still render.
+        # Span carry no usable target metadata — surrounding text must still render.
         html = '<p>Prefix <span class="polarion-rte-link">visible</span> suffix.</p>'
         result = html_to_markdown(html)
         assert "Prefix" in result
@@ -386,7 +385,7 @@ class TestHtmlToMarkdownPolarionRteLinks:
         assert "[x](https://example.com)" in result
 
     def test_work_item_link_with_scope_uses_project_segment(self) -> None:
-        """``data-scope`` becomes a ``project/<scope>/`` URI segment."""
+        """``data-scope`` become ``project/<scope>/`` URI segment."""
         html = (
             '<p><span class="polarion-rte-link" '
             'data-item-id="MCPT-7" data-scope="OtherProj"></span></p>'
@@ -395,14 +394,14 @@ class TestHtmlToMarkdownPolarionRteLinks:
         assert "[MCPT-7](polarion:project/OtherProj/workitem/MCPT-7)" in result
 
     def test_work_item_link_without_scope_keeps_bare_uri(self) -> None:
-        """No ``data-scope`` keeps the bare ``polarion:workitem/<id>`` URI."""
+        """No ``data-scope`` keep bare ``polarion:workitem/<id>`` URI."""
         html = '<p><span class="polarion-rte-link" data-item-id="MCPT-7"></span></p>'
         result = html_to_markdown(html)
         assert "[MCPT-7](polarion:workitem/MCPT-7)" in result
         assert "project/" not in result
 
     def test_label_brackets_are_md_escaped(self) -> None:
-        """``[`` / ``]`` inside the label must not collapse the link syntax."""
+        """``[`` / ``]`` inside label must not collapse link syntax."""
         html = (
             '<p><span class="polarion-rte-link" data-item-id="MCPT-1">'
             "see [draft]</span></p>"
@@ -411,7 +410,7 @@ class TestHtmlToMarkdownPolarionRteLinks:
         assert "[see \\[draft\\]](polarion:workitem/MCPT-1)" in result
 
     def test_label_backslash_is_md_escaped(self) -> None:
-        """A trailing ``\\`` in the label must be doubled to stay literal."""
+        """Trailing ``\\`` in label must double to stay literal."""
         html = (
             '<p><span class="polarion-rte-link" data-item-id="MCPT-1">a\\b</span></p>'
         )
@@ -430,7 +429,7 @@ class TestHtmlToMarkdownPolarionRteLinks:
 
 
 class TestMarkdownToHtml:
-    """Verify Markdown → HTML conversion."""
+    """Markdown → HTML conversion."""
 
     def test_single_paragraph(self) -> None:
         result = markdown_to_html("Hello world")
@@ -475,7 +474,7 @@ class TestMarkdownToHtml:
         """Critical test: LLMs produce 2-space indented nested lists."""
         text = "- Parent\n  - Child 1\n  - Child 2"
         result = markdown_to_html(text)
-        # Must produce nested <ul>, not a flat list
+        # Nested <ul>, not flat list.
         assert result.count("<ul>") == 2
 
     def test_table(self) -> None:
@@ -514,31 +513,31 @@ class TestMarkdownToHtml:
         assert markdown_to_html("\n\n\n") == ""
 
     def test_html_block_not_passed_through(self) -> None:
-        """Raw HTML blocks in Markdown must be escaped, not injected as live HTML."""
+        """Raw HTML blocks in Markdown escaped, not injected live."""
         text = "<script>alert('xss')</script>\n\nSafe"
         result = markdown_to_html(text)
-        # html_block rule is disabled → the tag is HTML-escaped, never a live element
+        # html_block rule disabled → tag HTML-escaped, never live element.
         assert "<script>" not in result  # no executable script tag
         assert "&lt;script&gt;" in result  # tag is safely encoded as text
 
     def test_html_inline_not_passed_through(self) -> None:
-        """Inline raw HTML in Markdown must be escaped, not injected as live HTML."""
+        """Inline raw HTML in Markdown escaped, not injected live."""
         text = 'Click <a onclick="evil()">here</a>'
         result = markdown_to_html(text)
-        # html_inline rule is disabled → inline HTML is HTML-escaped, not live
+        # html_inline rule disabled → inline HTML escaped, not live.
         assert "<a onclick=" not in result  # no executable attribute
         assert "&lt;a" in result  # tag is safely encoded as text
 
 
 class TestSanitizeHtml:
-    """Verify disallowed tag removal while preserving content."""
+    """Disallowed tag removal while preserving content."""
 
     def test_allowed_tags_preserved(self) -> None:
         html = "<p>Hello <strong>world</strong></p>"
         assert sanitize_html(html) == html
 
     def test_script_tag_and_content_removed(self) -> None:
-        """script content (JS code) must be fully discarded, not leaked as text."""
+        """script content (JS) fully discarded, not leaked as text."""
         html = "<p><script>alert('xss')</script>Safe text</p>"
         result = sanitize_html(html)
         assert "<script>" not in result
@@ -546,7 +545,7 @@ class TestSanitizeHtml:
         assert "Safe text" in result
 
     def test_style_tag_and_content_removed(self) -> None:
-        """style content (CSS) must be fully discarded, not leaked as text."""
+        """style content (CSS) fully discarded, not leaked as text."""
         html = "<style>.red{color:red}</style><p>Visible</p>"
         result = sanitize_html(html)
         assert "<style>" not in result
@@ -561,11 +560,11 @@ class TestSanitizeHtml:
         assert "<p>Content</p>" in result
 
     def test_decompose_with_nested_disallowed_child_no_error(self) -> None:
-        """decompose() removes a script subtree; the loop must not crash when it
-        subsequently encounters the already-detached child tag (font inside script).
+        """decompose() remove script subtree; loop must not crash when it later
+        hit the already-detached child tag (font inside script).
         """
         html = "<p><script><font>nested</font></script>After</p>"
-        # Should not raise ValueError; script + its child are silently dropped
+        # No ValueError; script + child silently dropped.
         result = sanitize_html(html)
         assert "<script>" not in result
         assert "nested" not in result
@@ -578,7 +577,7 @@ class TestSanitizeHtml:
         assert sanitize_html("   \n\t  ") == ""
 
     def test_all_allowed_tags_accepted(self) -> None:
-        # Self-closing tags like <br> are rendered as <br/> by BS4
+        # BS4 render self-closing tags like <br> as <br/>.
         self_closing = {"br"}
         for tag in ALLOWED_TAGS:
             if tag in self_closing:
@@ -617,7 +616,7 @@ class TestSanitizeHtml:
         assert "onclick" not in result  # event handler removed
 
     def test_disallowed_attr_stripped_from_allowed_tag(self) -> None:
-        """Arbitrary non-allowlisted attributes are removed from allowed tags."""
+        """Arbitrary non-allowlisted attrs removed from allowed tags."""
         html = '<p class="red" style="color:red">Text</p>'
         result = sanitize_html(html)
         assert "class" not in result
@@ -629,13 +628,13 @@ class TestSanitizeHtml:
         assert "href" in ALLOWED_ATTRS.get("a", frozenset())
 
     def test_table_cell_span_attributes_preserved(self) -> None:
-        """colspan/rowspan on td/th must be preserved as they control table layout."""
+        """colspan/rowspan on td/th preserved — control table layout."""
         html = '<table><tr><td colspan="2">Cell</td></tr></table>'
         result = sanitize_html(html)
         assert 'colspan="2"' in result
 
     def test_javascript_href_stripped(self) -> None:
-        """javascript: URIs in href must be removed to prevent stored XSS."""
+        """javascript: URIs in href removed — prevent stored XSS."""
         html = "<a href=\"javascript:alert('xss')\">Click</a>"
         result = sanitize_html(html)
         assert "javascript:" not in result
@@ -681,7 +680,7 @@ class TestSanitizeHtml:
 
 
 class TestRoundTrip:
-    """Verify that Markdown → HTML → Markdown round-trips preserve content."""
+    """Markdown → HTML → Markdown round-trips preserve content."""
 
     @pytest.mark.parametrize(
         "text",
@@ -695,7 +694,7 @@ class TestRoundTrip:
     def test_roundtrip_preserves_content(self, text: str) -> None:
         html = markdown_to_html(text)
         recovered = html_to_markdown(html)
-        # All original words must appear in the round-tripped text
+        # All original words must appear in round-tripped text.
         for word in text.split():
             word_clean = word.strip("#-*")
             if word_clean:
@@ -703,8 +702,8 @@ class TestRoundTrip:
 
 
 class TestStampBlockIds:
-    """Verify ``stamp_block_ids`` covers exactly the blocks Polarion's
-    ``/parts`` derivation requires and leaves headings alone.
+    """``stamp_block_ids`` cover exactly the blocks Polarion ``/parts``
+    derivation require; headings left alone.
     """
 
     def test_each_block_tag_gets_unique_sequential_id(self) -> None:
@@ -727,13 +726,13 @@ class TestStampBlockIds:
         html = '<p id="existing">a</p><p>b</p>'
         result = stamp_block_ids(html)
         assert '<p id="existing">a</p>' in result
-        # Counter starts at 0 even when the prior block had a caller-provided id.
+        # Counter start at 0 even when prior block had caller-provided id.
         assert '<p id="polarion_mcp_0">b</p>' in result
 
     def test_existing_polarion_mcp_id_avoids_collision(self) -> None:
-        """A pre-existing ``polarion_mcp_N`` anchor (e.g. raw HTML embedded
-        in Markdown) must not be duplicated by the counter, otherwise
-        Polarion rejects the PATCH with HTTP 400.
+        """Pre-existing ``polarion_mcp_N`` anchor (e.g. raw HTML embedded in
+        Markdown) must not be duplicated by counter — Polarion reject the
+        PATCH with HTTP 400.
         """
         html = (
             '<p id="polarion_mcp_0">manual0</p>'
@@ -760,9 +759,9 @@ class TestStampBlockIds:
         assert '<p id="anchor_1">y</p>' in result
 
     def test_clean_input_returned_verbatim(self) -> None:
-        """When every target block already carries a non-blank id, the input
-        is returned byte-for-byte — no BeautifulSoup reserialization, so
-        ``&nbsp;``/``&copy;`` and quote style survive an anchored round-trip.
+        """Every target block already carrying non-blank id → input returned
+        byte-for-byte — no BeautifulSoup reserialization, so ``&nbsp;``/
+        ``&copy;`` and quote style survive anchored round-trip.
         """
         html = '<p id="a">x&nbsp;y</p><table id="t"><tr><td>&copy;</td></tr></table>'
         assert stamp_block_ids(html) == html
@@ -773,8 +772,8 @@ class TestStampBlockIds:
         assert stamp_block_ids(html) == html
 
     def test_whitespace_only_id_is_stamped(self) -> None:
-        # A blank id does not anchor the block (mirrors first_anchorless_block);
-        # it gets restamped rather than skipped.
+        # Blank id not anchor block (mirror first_anchorless_block) —
+        # restamped, not skipped.
         result = stamp_block_ids('<p id="   ">x</p>')
         assert '<p id="polarion_mcp_0">x</p>' in result
 
@@ -784,8 +783,8 @@ class TestStampBlockIds:
 
 
 class TestFirstAnchorlessBlock:
-    """``first_anchorless_block`` is the write-side reject predicate; every
-    block in ``_BLOCK_TAGS_NEEDING_IDS`` must carry a non-empty id.
+    """``first_anchorless_block`` = write-side reject predicate; every
+    block in ``_BLOCK_TAGS_NEEDING_IDS`` must carry non-empty id.
     """
 
     @pytest.mark.parametrize("value", ["", "   ", "\n\t"])
@@ -810,7 +809,7 @@ class TestFirstAnchorlessBlock:
         assert first_anchorless_block(html) is None
 
     def test_returns_first_offender_in_document_order(self) -> None:
-        # The <p> is anchored; the <ul> is not, so the <ul> is reported.
+        # <p> anchored; <ul> not — <ul> reported.
         html = '<p id="a">x</p><ul><li>y</li></ul>'
         assert first_anchorless_block(html) == "ul"
 
@@ -818,11 +817,11 @@ class TestFirstAnchorlessBlock:
         assert first_anchorless_block('<p id="">x</p>') == "p"
 
     def test_whitespace_only_id_is_anchorless(self) -> None:
-        # Stricter than stamp_block_ids: a blank id does not anchor the block.
+        # Stricter than stamp_block_ids: blank id not anchor block.
         assert first_anchorless_block('<p id="   ">x</p>') == "p"
 
     def test_nested_anchorless_block_is_caught(self) -> None:
-        # An anchored outer block does not excuse an anchorless inner block.
+        # Anchored outer block not excuse anchorless inner block.
         html = '<div id="outer"><p>inner</p></div>'
         assert first_anchorless_block(html) == "p"
 
@@ -831,13 +830,13 @@ class TestFirstAnchorlessBlock:
         assert first_anchorless_block(html) == "table"
 
     def test_inline_elements_do_not_count(self) -> None:
-        # <span>/<strong> are not in the block set, so an anchored <p>
-        # wrapping them passes even though the inline tags lack ids.
+        # <span>/<strong> not in block set — anchored <p> wrapping them
+        # pass even though inline tags lack ids.
         assert first_anchorless_block('<p id="a">x <span>y</span></p>') is None
 
 
 class TestPolarionifyTables:
-    """Verify bare-table styling injection."""
+    """Bare-table styling injection."""
 
     def test_bare_table_gets_polarion_class(self) -> None:
         result = polarionify_html("<table><tr><td>x</td></tr></table>")
@@ -890,7 +889,7 @@ class TestPolarionifyTables:
 
 
 class TestPolarionifyCaptions:
-    """Verify Table:/Figure: paragraph → native caption widget."""
+    """Table:/Figure: paragraph → native caption widget."""
 
     def test_table_caption_converted(self) -> None:
         html = "<table><tr><td>x</td></tr></table><p>Table: 병합 테스트</p>"
@@ -904,7 +903,7 @@ class TestPolarionifyCaptions:
     def test_caption_paragraph_shape(self) -> None:
         html = "<table><tr><td>x</td></tr></table><p>Table: cap</p>"
         result = polarionify_html(html)
-        # BS4 serializes class before data-*; Polarion accepts either order.
+        # BS4 serialize class before data-*; Polarion accept either order.
         assert (
             '<p class="polarion-rte-caption-paragraph" style="text-align: left;">'
             'Table <span class="polarion-rte-caption" data-sequence="Table">#</span>'
@@ -956,7 +955,7 @@ class TestPolarionifyPipeline:
         assert "테스트 표" in result
 
     def test_markdown_image_stripped_so_figure_caption_stays_prose(self) -> None:
-        # sanitize_html drops <img>, so the Figure: paragraph loses its anchor.
+        # sanitize_html drop <img> — Figure: paragraph lose anchor.
         markdown = "![alt](https://example.com/x.png)\n\nFigure: 그림 캡션\n"
         result = polarionify_html(sanitize_html(markdown_to_html(markdown)))
         assert "polarion-rte-caption" not in result

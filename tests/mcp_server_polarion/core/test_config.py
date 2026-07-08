@@ -1,4 +1,4 @@
-"""Tests for ``PolarionConfig`` — environment variable loading and validation."""
+"""``PolarionConfig`` — env var loading and validation."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from mcp_server_polarion.core.config import PolarionConfig
 
 
 class TestPolarionConfigLoading:
-    """Verify that config values are loaded and validated correctly."""
+    """Config values loaded and validated correctly."""
 
     def test_loads_from_explicit_kwargs(self) -> None:
         config = PolarionConfig(
@@ -72,7 +72,7 @@ class TestPolarionConfigLoading:
 
 
 class TestBaseApiUrl:
-    """Verify ``base_api_url`` property construction."""
+    """``base_api_url`` property construction."""
 
     def test_base_api_url_normal(self) -> None:
         config = PolarionConfig(

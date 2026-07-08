@@ -17,7 +17,7 @@ from mcp_server_polarion.tools._shared.guard._errors import (
 
 @pytest.fixture(autouse=True)
 def _propagate_package_logs(monkeypatch: pytest.MonkeyPatch) -> None:
-    # setup_logging sets propagate=False, so caplog misses package logs;
+    # setup_logging set propagate=False — caplog miss package logs;
     # re-enable propagation locally for order independence.
     monkeypatch.setattr(logging.getLogger("mcp_server_polarion"), "propagate", True)
 

@@ -1,4 +1,4 @@
-"""Tests for work item models in ``mcp_server_polarion.models.work_items``."""
+"""Work item model tests (``mcp_server_polarion.models.work_items``)."""
 
 from __future__ import annotations
 
@@ -34,8 +34,8 @@ class TestWorkItemUpdateSpec:
         assert "no effective change" in str(exc.value)
 
     def test_none_only_custom_fields_rejected(self):
-        # {"k": None} is truthy but merge_custom_fields drops None values,
-        # which would yield an attribute-less resource that 400s the batch.
+        # {"k": None} truthy but merge_custom_fields drop None values —
+        # would yield attribute-less resource that 400 the batch.
         with pytest.raises(ValidationError, match="no effective change"):
             WorkItemUpdateSpec(work_item_id="MCPT-1", custom_fields={"risk": None})
 
@@ -82,8 +82,8 @@ class TestWorkItemsUpdateResult:
 
 
 class TestInputSpecsForbidUnknownKeys:
-    """LLM-input models must reject typo keys instead of silently dropping
-    the intended field (extra='forbid')."""
+    """LLM-input models must reject typo keys, not silently drop intended
+    field (extra='forbid')."""
 
     def test_create_spec_typo_key_rejected(self):
         with pytest.raises(ValidationError, match="descripion"):
@@ -187,7 +187,7 @@ class TestWorkItemDetail:
         assert detail.description_html == ""
 
     def test_description_defaults_to_empty(self):
-        # Defaults to "" for the include_description_html=False path.
+        # Default "" for include_description_html=False path.
         detail = WorkItemDetail(
             id="MCPT-003",
             title="No desc",
@@ -234,7 +234,7 @@ class TestWorkItemDetail:
         assert detail.custom_fields == {}
 
     def test_custom_fields_round_trip_heterogeneous_values(self):
-        # object-typed customs: primitives and rich-text dicts both round-trip.
+        # Object-typed customs: primitives and rich-text dicts both round-trip.
         rich = {"type": "text/html", "value": "<p>note</p>"}
         detail = WorkItemDetail(
             id="MCPT-999",

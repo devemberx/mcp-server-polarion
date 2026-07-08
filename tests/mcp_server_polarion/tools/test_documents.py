@@ -1,4 +1,4 @@
-"""Tests for the document query/read/create/update tools."""
+"""Document query/read/create/update tool tests."""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ def _make_part(
     work_item_id: str = "",
     outline_number: str = "",
 ) -> DocumentPart:
-    """Build a ``DocumentPart`` with sensible defaults for render-rule tests."""
+    """``DocumentPart`` with sensible defaults for render-rule tests."""
     return DocumentPart(
         id=part_id,
         title=title,
@@ -70,8 +70,8 @@ def _make_part(
 def _stub_parts(
     monkeypatch: pytest.MonkeyPatch, parts: list[DocumentPart]
 ) -> AsyncMock:
-    """Replace ``read_document_parts`` with an AsyncMock returning *parts*; page
-    metadata derived from the list. Returns the mock for call assertions.
+    """Replace ``read_document_parts`` with AsyncMock returning *parts*; page
+    metadata derived from list. Return mock for call assertions.
     """
     stub = AsyncMock(
         return_value=PaginatedResult[DocumentPart](
@@ -87,7 +87,7 @@ def _stub_parts(
 
 
 def _enum_get_response(ids: list[str]) -> dict[str, object]:
-    """Shape a ``getAvailableOptions`` reply for the guard tests."""
+    """``getAvailableOptions`` reply for guard tests."""
     return {
         "data": [{"id": i, "name": i} for i in ids],
         "meta": {"totalCount": len(ids)},
@@ -95,7 +95,7 @@ def _enum_get_response(ids: list[str]) -> dict[str, object]:
 
 
 async def _call_create_doc(mock_ctx: MagicMock, **overrides: object) -> object:
-    """Invoke ``create_document`` with explicit defaults for every Field."""
+    """Invoke ``create_document``, explicit defaults for every Field."""
     defaults: dict[str, object] = {
         "project_id": "MyProj",
         "space_id": "_default",
@@ -112,7 +112,7 @@ async def _call_create_doc(mock_ctx: MagicMock, **overrides: object) -> object:
 
 
 async def _call_update_doc(mock_ctx: MagicMock, **overrides: object) -> object:
-    """Invoke ``update_document`` with explicit defaults for every Field."""
+    """Invoke ``update_document``, explicit defaults for every Field."""
     defaults: dict[str, object] = {
         "project_id": "MyProj",
         "space_id": "_default",
@@ -131,7 +131,7 @@ async def _call_update_doc(mock_ctx: MagicMock, **overrides: object) -> object:
 
 @pytest.fixture
 def reset_enum_guard_caches() -> None:
-    """Drop guard caches between integration tests so each scenario starts cold."""
+    """Drop guard caches between tests — each scenario start cold."""
     _cache_mod._enum_option_cache.clear()
     _cache_mod._project_enum_cache.clear()
     _cache_mod._work_item_custom_key_cache.clear()
@@ -147,7 +147,7 @@ def _module_resource(
     author_id: str = "",
     updated_by_id: str = "",
 ) -> dict:
-    """An ``included`` document resource as returned by ``include=module``."""
+    """``included`` document resource as returned by ``include=module``."""
     attributes: dict = {"type": doc_type}
     if status:
         attributes["status"] = status
@@ -165,7 +165,7 @@ def _module_resource(
 
 
 def _user_resource(user_id: str, name: str) -> dict:
-    """An ``included`` user resource as returned by an ``include=`` user path."""
+    """``included`` user resource from ``include=`` user path."""
     return {"type": "users", "id": user_id, "attributes": {"name": name}}
 
 
@@ -175,10 +175,10 @@ def _discovery_response(
     total: int | None = None,
     data_count: int | None = None,
 ) -> dict:
-    """Build a discovery page: ``data`` drives pagination, ``included`` the docs.
+    """Discovery page: ``data`` drive pagination, ``included`` the docs.
 
-    Discovery reads documents from ``included``; ``data`` (one heading per doc)
-    only feeds the page-walk loop, so its rows are bare placeholders.
+    Discovery read documents from ``included``; ``data`` (one heading per
+    doc) only feed page-walk loop — rows are bare placeholders.
     """
     rows = data_count if data_count is not None else len(included)
     response: dict = {
@@ -191,14 +191,14 @@ def _discovery_response(
 
 
 class TestListDocuments:
-    """Tests for the ``list_documents`` tool."""
+    """``list_documents`` tool."""
 
     @pytest.fixture(autouse=True)
     def _clear_doc_cache(self) -> Iterator[None]:
-        """Reset the module-level TTL cache around every test.
+        """Reset module-level TTL cache around every test.
 
-        Several tests reuse ``project_id='proj1'``, so without this the
-        first test would poison subsequent tests via cache hits.
+        Several tests reuse ``project_id='proj1'`` — without reset, first
+        test poison later ones via cache hits.
         """
         _cache_mod._document_list_cache.clear()
         yield
@@ -271,7 +271,7 @@ class TestListDocuments:
     async def test_unresolved_user_yields_empty_name(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """A relationship pointing at a user missing from ``included`` → ``""``."""
+        """Relationship point at user missing from ``included`` → ``""``."""
         included = [
             _module_resource("proj1/_default/Doc1", author_id="ghost"),
         ]
@@ -293,7 +293,7 @@ class TestListDocuments:
     async def test_id_less_included_user_never_matches(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """An id-less included user must not join with an absent relationship."""
+        """Id-less included user must not join with absent relationship."""
         included = [
             _module_resource("proj1/_default/Doc1"),
             {"type": "users", "attributes": {"name": "Phantom"}},
@@ -396,7 +396,7 @@ class TestListDocuments:
     async def test_linear_scan_walks_all_pages(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Discovery walks every document page exactly once."""
+        """Discovery walk every document page exactly once."""
         page = {
             1: ([_module_resource("p/S/DocA")], 100),
             2: ([_module_resource("p/S/DocA"), _module_resource("p/S/DocB")], 100),
@@ -425,8 +425,8 @@ class TestListDocuments:
     async def test_linear_scan_stops_on_partial_page(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """A short final page (without totalCount/links.next) ends the loop."""
-        # Partial page 2 (50 < 100) with no totalCount stops the scan.
+        """Short final page (no totalCount/links.next) end the loop."""
+        # Partial page 2 (50 < 100), no totalCount — stop scan.
         page = {
             1: ([_module_resource("p/S/DocA")], 100),
             2: ([_module_resource("p/S/DocB")], 50),
@@ -451,7 +451,7 @@ class TestListDocuments:
     async def test_single_page_uses_one_call(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Multiple documents on a single page → one API call."""
+        """Multiple documents on single page → one API call."""
         included = [
             _module_resource("p/S/Alpha"),
             _module_resource("p/S/Bravo"),
@@ -477,7 +477,7 @@ class TestListDocuments:
     async def test_cache_hit_skips_api_calls(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """A second call with the same project_id is served from cache."""
+        """Second call with same project_id served from cache."""
         mock_client.get.return_value = _discovery_response(
             [_module_resource("proj1/_default/Doc1")], total=1
         )
@@ -502,7 +502,7 @@ class TestListDocuments:
         """Different project IDs do not share cache entries."""
 
         async def _mock_get(_path, *, params=None):
-            # Return a distinct document per call so cross-project sharing shows up.
+            # Distinct document per call — cross-project sharing show up.
             return _discovery_response(
                 [_module_resource(f"x/S/Doc{mock_client.get.call_count}")], total=1
             )
@@ -511,7 +511,7 @@ class TestListDocuments:
 
         await list_documents(mock_ctx, project_id="projA", page_size=100, page_number=1)
         await list_documents(mock_ctx, project_id="projB", page_size=100, page_number=1)
-        # Each project triggered its own fetch — no cross-project cache hit.
+        # Each project trigger own fetch — no cross-project cache hit.
         assert mock_client.get.call_count == 2
 
     async def test_cache_expires_after_ttl(
@@ -520,7 +520,7 @@ class TestListDocuments:
         mock_client: AsyncMock,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """After TTL elapses, the next call re-fetches from the API."""
+        """After TTL elapse, next call re-fetch from API."""
         mock_client.get.return_value = _discovery_response(
             [_module_resource("proj1/_default/Doc1")], total=1
         )
@@ -535,7 +535,6 @@ class TestListDocuments:
         await list_documents(mock_ctx, project_id="proj1", page_size=100, page_number=1)
         first_calls = mock_client.get.call_count
 
-        # Advance time past the TTL.
         fake_now[0] += _cache_mod._DOCUMENT_LIST_TTL_SECONDS + 1.0
 
         await list_documents(mock_ctx, project_id="proj1", page_size=100, page_number=1)
@@ -562,20 +561,20 @@ class TestListDocuments:
             call_args[0][1] if len(call_args[0]) > 1 else {},
         )
         query = params["query"]
-        # SQL GROUP BY collapses every heading to one row per document.
+        # SQL GROUP BY collapse headings to one row per document.
         assert query.startswith("SQL:(")
         assert "GROUP BY mod.c_uri" in query
         assert "wi.c_type = 'heading'" in query
-        # Recycle-bin exclusion mirrors the Lucene type:heading default.
+        # Recycle-bin exclusion mirror Lucene type:heading default.
         assert "wi.c_deleted IS NOT TRUE" in query
         assert "p.c_id = 'proj1'" in query
-        # module pulls document attributes, the dot-paths the editors' names;
-        # the intermediate ``module`` must stay listed or documents drop out.
+        # module pull document attrs, dot-paths the editor names;
+        # intermediate ``module`` must stay listed or documents drop out.
         assert params["include"] == "module,module.author,module.updatedBy"
         # Relationship names listed explicitly: sparse fieldsets drop them.
         assert params["fields[documents]"] == "type,status,updated,author,updatedBy"
         assert params["fields[users]"] == "name"
-        # No sort=module: server-side sort costs more than client-side dedup.
+        # No sort=module: server-side sort cost more than client-side dedup.
         assert "sort" not in params
 
     async def test_not_found_raises_value_error(
@@ -608,7 +607,7 @@ class TestListDocuments:
 
 
 class TestGetDocument:
-    """Tests for the ``get_document`` tool."""
+    """``get_document`` tool."""
 
     async def test_returns_document_detail(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -657,7 +656,7 @@ class TestGetDocument:
         assert result.author_name == "System Administrator"
         assert result.last_updated_by_id == "72c2462f"
         assert result.last_updated_by_name == "Dev Member"
-        # Raw HTML round-trip: <p> and <strong> tags survive verbatim.
+        # Raw HTML round-trip: <p>/<strong> survive verbatim.
         assert result.content_html == (
             "<p>This is the <strong>SRS</strong> document.</p>"
         )
@@ -729,7 +728,7 @@ class TestGetDocument:
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         """include_homepage_content_html=False → body hidden even though ``@all``
-        always carries it on the wire.
+        always carry it on wire.
         """
         mock_client.get.return_value = {
             "data": {
@@ -762,7 +761,7 @@ class TestGetDocument:
     async def test_include_homepage_content_html_returns_raw_html(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """include_homepage_content_html=True → raw HTML in content_html (no markdownify)."""  # noqa: E501
+        """include_homepage_content_html=True → raw HTML, no markdownify."""
         mock_client.get.return_value = {
             "data": {
                 "attributes": {
@@ -791,8 +790,8 @@ class TestGetDocument:
     async def test_polarion_specific_markup_round_trips(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Core round-trip guarantee: Polarion spans / data-* attrs survive read, so
-        the string can go back into update_document unchanged.
+        """Core round-trip guarantee: Polarion spans / data-* attrs survive read —
+        string can go back into update_document unchanged.
         """
         raw = (
             '<p>See <span class="polarion-rte-link" '
@@ -881,7 +880,7 @@ class TestGetDocument:
     async def test_no_content_field(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Missing homePageContent → content stays empty even when requested."""
+        """Missing homePageContent → content stay empty even when requested."""
         mock_client.get.return_value = {
             "data": {
                 "attributes": {
@@ -904,7 +903,7 @@ class TestGetDocument:
     async def test_custom_fields_populated_from_response(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Inline non-standard attributes flow through as ``custom_fields``."""
+        """Inline non-standard attrs flow through as ``custom_fields``."""
         rich_value = {"type": "text/html", "value": "<p>note</p>"}
         mock_client.get.return_value = {
             "data": {
@@ -966,7 +965,7 @@ class TestGetDocument:
     async def test_sparse_fieldset_uses_all_token(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """``fields[documents]=@all`` is sent regardless of the include flag."""
+        """``fields[documents]=@all`` sent regardless of include flag."""
         mock_client.get.return_value = {
             "data": {
                 "attributes": {"title": "x", "type": "generic", "status": "draft"},
@@ -982,7 +981,7 @@ class TestGetDocument:
         )
         _, kwargs_a = mock_client.get.call_args
         assert kwargs_a["params"]["fields[documents]"] == "@all"
-        # Editor names ride along on the same request.
+        # Editor names ride same request.
         assert kwargs_a["params"]["include"] == "author,updatedBy"
         assert kwargs_a["params"]["fields[users]"] == "name"
 
@@ -998,7 +997,7 @@ class TestGetDocument:
 
 
 class TestReadDocumentParts:
-    """Tests for the ``read_document_parts`` tool."""
+    """``read_document_parts`` tool."""
 
     async def test_returns_document_parts(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1189,8 +1188,8 @@ class TestReadDocumentParts:
     async def test_uses_tight_workitem_fieldset(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Embedded work items use WORK_ITEM_PART_FIELDS, not ``@all`` — ``@all`` ships
-        KBs of unused inline customs per page.
+        """Embedded work items use WORK_ITEM_PART_FIELDS, not ``@all`` — ``@all``
+        ship KBs of unused inline customs per page.
         """
         mock_client.get.return_value = {
             "data": [],
@@ -1233,7 +1232,7 @@ class TestReadDocumentParts:
     async def test_string_content_field(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Plain string content (not dict) is handled for normal parts."""
+        """Plain string content (not dict) handled for normal parts."""
         mock_client.get.return_value = {
             "data": [
                 {
@@ -1265,7 +1264,7 @@ class TestReadDocumentParts:
     async def test_tof_part_reclassified_from_id_prefix(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Polarion reports TOF as ``type=normal``; the ID prefix wins."""
+        """Polarion report TOF as ``type=normal``; ID prefix win."""
         mock_client.get.return_value = {
             "data": [
                 {
@@ -1295,7 +1294,7 @@ class TestReadDocumentParts:
     async def test_page_break_part_reclassified_from_id_prefix(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """``pagebreak_*`` IDs are surfaced as ``page_break`` parts."""
+        """``pagebreak_*`` IDs surface as ``page_break`` parts."""
         mock_client.get.return_value = {
             "data": [
                 {
@@ -1478,13 +1477,13 @@ class TestReadDocumentParts:
 
 
 class TestReadDocument:
-    """Tests for the ``read_document`` tool."""
+    """``read_document`` tool."""
 
-    # End-to-end wiring: exercises read_document_parts via client.get.
+    # End-to-end wiring: exercise read_document_parts via client.get.
     async def test_end_to_end_renders_document(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Real fetch path: stub the HTTP layer, verify the rendered Markdown."""
+        """Real fetch path: stub HTTP layer, verify rendered Markdown."""
         mock_client.get.return_value = {
             "data": [
                 {
@@ -1536,7 +1535,7 @@ class TestReadDocument:
                     "id": "proj1/_default/SRS/polarion_2",
                     "attributes": {
                         "id": "polarion_2",
-                        # Empty paragraph — should not appear in the render.
+                        # Empty paragraph — must not appear in render.
                         "content": "<p></p>",
                         "type": "normal",
                     },
@@ -1600,7 +1599,7 @@ class TestReadDocument:
     async def test_pagination_params_forwarded_to_http(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """``page_size`` / ``page_number`` reach the underlying client.get call."""
+        """``page_size``/``page_number`` reach underlying client.get call."""
         mock_client.get.return_value = {"data": [], "meta": {"totalCount": 0}}
 
         await read_document(
@@ -1638,7 +1637,7 @@ class TestReadDocument:
     async def test_not_found_propagates_value_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Delegation to ``read_document_parts`` surfaces its ValueError verbatim."""
+        """Delegation to ``read_document_parts`` surface its ValueError verbatim."""
         mock_client.get.side_effect = PolarionNotFoundError(
             "Not found", status_code=404
         )
@@ -1738,7 +1737,7 @@ class TestReadDocument:
     async def test_empty_normal_parts_skipped(
         self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Polarion's empty placeholder paragraphs (polarion_3, _4, ...) drop out."""
+        """Polarion empty placeholder paragraphs (polarion_3, _4, ...) drop out."""
         _stub_parts(
             monkeypatch,
             [
@@ -1862,7 +1861,7 @@ class TestReadDocument:
     async def test_wikiblock_without_macro_falls_back_to_plain_fence(
         self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A wikiblock that doesn't start with ``#name(`` keeps its plain fence."""
+        """Wikiblock not starting with ``#name(`` keep plain fence."""
         _stub_parts(
             monkeypatch,
             [_make_part(type_="wikiblock", content="```\njust text\n```")],
@@ -1882,7 +1881,7 @@ class TestReadDocument:
     async def test_empty_wikiblock_skipped(
         self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Whitespace-only wikiblock is dropped, mirroring empty normal parts."""
+        """Whitespace-only wikiblock dropped, mirror empty normal parts."""
         _stub_parts(
             monkeypatch,
             [
@@ -1906,7 +1905,7 @@ class TestReadDocument:
     async def test_heading_level_clamp_low(
         self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """``level=0`` (the model default for non-headings) becomes ``#``."""
+        """``level=0`` (model default for non-headings) become ``#``."""
         _stub_parts(
             monkeypatch,
             [_make_part(type_="heading", title="Corrupt", level=0)],
@@ -1926,7 +1925,7 @@ class TestReadDocument:
     async def test_heading_level_clamp_high(
         self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """``level`` above 6 clamps to ``######`` to stay valid Markdown."""
+        """``level`` above 6 clamp to ``######`` — stay valid Markdown."""
         _stub_parts(
             monkeypatch,
             [_make_part(type_="heading", title="Deep", level=10)],
@@ -1946,7 +1945,7 @@ class TestReadDocument:
     async def test_heading_with_outline_number_prefix(
         self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Outline number is prefixed before the heading title."""
+        """Outline number prefixed before heading title."""
         _stub_parts(
             monkeypatch,
             [
@@ -1970,7 +1969,7 @@ class TestReadDocument:
     async def test_heading_without_outline_number_unchanged(
         self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Headings without an outline number render as before."""
+        """Headings without outline number render as before."""
         _stub_parts(
             monkeypatch,
             [_make_part(type_="heading", title="Standalone", level=2)],
@@ -1990,7 +1989,7 @@ class TestReadDocument:
     async def test_newline_collapse(
         self, mock_ctx: MagicMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Runs of 3+ blank lines from joined chunks collapse to a single blank."""
+        """Runs of 3+ blank lines from joined chunks collapse to one blank."""
         _stub_parts(
             monkeypatch,
             [
@@ -2042,8 +2041,8 @@ class TestReadDocument:
 
 
 class TestReadDocumentFieldValidation:
-    """Field constraints on ``read_document`` — direct calls bypass FastMCP's JSON
-    Schema gate, so rebuild a ``TypeAdapter`` per parameter.
+    """Field constraints on ``read_document`` — direct calls bypass FastMCP JSON
+    Schema gate, so rebuild ``TypeAdapter`` per parameter.
     """
 
     @staticmethod
@@ -2073,10 +2072,10 @@ class TestReadDocumentFieldValidation:
 
 
 class TestBuildUpdateDocumentPayload:
-    """Tests for the private ``_build_update_document_payload`` helper."""
+    """Private ``_build_update_document_payload`` helper."""
 
     def test_only_set_fields_appear_in_attributes(self) -> None:
-        # None fields stay unserialized so JSON:API omit-preserve applies.
+        # None fields stay unserialized — JSON:API omit-preserve apply.
         payload = _build_update_document_payload(
             project_id="MyProj",
             space_id="Requirements",
@@ -2115,7 +2114,7 @@ class TestBuildUpdateDocumentPayload:
         }
 
     def test_no_attributes_when_all_fields_are_none(self) -> None:
-        # All-None yields no attributes key; the tool rejects this upstream.
+        # All-None yield no attributes key; tool reject upstream.
         payload = _build_update_document_payload(
             project_id="MyProj",
             space_id="S",
@@ -2130,7 +2129,7 @@ class TestBuildUpdateDocumentPayload:
         assert data["id"] == "MyProj/S/D"
 
     def test_homepagecontent_omitted_when_not_passed(self) -> None:
-        # Omitting home_page_content_html leaves the body untouched.
+        # Omit home_page_content_html leave body untouched.
         payload = _build_update_document_payload(
             project_id="MyProj",
             space_id="S",
@@ -2189,7 +2188,7 @@ class TestBuildUpdateDocumentPayload:
         assert attributes == {"complianceLevel": "L3", "reviewerName": "alice"}
 
     def test_custom_fields_collision_raises_for_document_standard(self) -> None:
-        # ``moduleFolder`` is in the document standard set — collision.
+        # ``moduleFolder`` in document standard set — collision.
         with pytest.raises(ValueError, match="custom_fields keys collide"):
             _build_update_document_payload(
                 project_id="MyProj",
@@ -2235,7 +2234,7 @@ class TestBuildUpdateDocumentPayload:
         assert "usesOutlineNumbering" not in body_str
 
     def test_false_autosuspect_and_outline_are_serialised(self) -> None:
-        # False (unlike None) clears the values server-side.
+        # False (unlike None) clear values server-side.
         payload = _build_update_document_payload(
             project_id="MyProj",
             space_id="S",
@@ -2256,7 +2255,7 @@ class TestBuildUpdateDocumentPayload:
 
 
 class TestUpdateDocumentValidation:
-    """Tool-layer validation that protects against empty / no-op PATCHes."""
+    """Tool-layer validation against empty / no-op PATCHes."""
 
     async def test_no_fields_raises_value_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -2303,8 +2302,8 @@ class TestUpdateDocumentValidation:
     async def test_custom_fields_unresolvable_type_raises_runtime_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # Doc exists but carries no type attr: cannot key the schema guard, so the
-        # write is refused rather than validated against an empty "" schema.
+        # Doc exists but no type attr: cannot key schema guard, so write
+        # refused rather than validated against empty "" schema.
         mock_client.get.return_value = {"data": {"attributes": {"title": "D"}}}
         with pytest.raises(RuntimeError, match="no resolvable type"):
             await update_document(
@@ -2325,7 +2324,7 @@ class TestUpdateDocumentValidation:
     async def test_workflow_action_with_status_passes(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # workflow_action paired with at least one attribute is OK.
+        # workflow_action paired with at least one attribute = OK.
         result = await update_document(
             mock_ctx,
             project_id="MyProj",
@@ -2344,7 +2343,7 @@ class TestUpdateDocumentValidation:
     async def test_custom_fields_alone_satisfies_at_least_one_check(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # custom_fields counts as a body field; the type sample knows the key.
+        # custom_fields count as body field; type sample know the key.
         mock_client.get.return_value = {
             "data": {"attributes": {"title": "D", "type": "generic"}}
         }
@@ -2369,7 +2368,7 @@ class TestUpdateDocumentValidation:
     async def test_workflow_action_with_custom_fields_passes(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # workflow_action + custom_fields-only satisfies the body-field check.
+        # workflow_action + custom_fields-only satisfy body-field check.
         mock_client.get.return_value = {
             "data": {"attributes": {"title": "D", "type": "generic"}}
         }
@@ -2396,8 +2395,8 @@ class TestUpdateDocumentValidation:
     ) -> None:
         """workflow_action + home_page_content_html-only is OK.
 
-        home_page_content_html counts as the required attribute, so the
-        body-field check must not regress to title/status/type/customs only.
+        home_page_content_html count as required attribute — body-field
+        check must not regress to title/status/type/customs only.
         """
         result = await update_document(
             mock_ctx,
@@ -2413,7 +2412,7 @@ class TestUpdateDocumentValidation:
             dry_run=True,
         )
         assert result.dry_run is True
-        # Payload carries both the body and the workflow query param.
+        # Payload carry both body and workflow query param.
         assert result.payload_preview is not None
         item = cast(dict[str, object], result.payload_preview["data"])
         attributes = cast(dict[str, object], item["attributes"])
@@ -2444,8 +2443,8 @@ class TestUpdateDocumentValidation:
     async def test_custom_fields_homepagecontent_collision_raises(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """`homePageContent` collision raises — allowing it via custom_fields would
-        bypass the explicit parameter and its empty-string guard.
+        """`homePageContent` collision raise — allow via custom_fields would
+        bypass explicit parameter and its empty-string guard.
         """
         with pytest.raises(ValueError, match="custom_fields keys collide"):
             await update_document(
@@ -2470,7 +2469,7 @@ class TestUpdateDocumentValidation:
 
 
 class TestUpdateDocumentDryRun:
-    """Tests for ``update_document`` with ``dry_run=True``."""
+    """``update_document`` with ``dry_run=True``."""
 
     async def test_dry_run_returns_payload_without_calling_patch(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -2503,7 +2502,7 @@ class TestUpdateDocumentDryRun:
 
 
 class TestUpdateDocumentHappyPath:
-    """Tests for a successful ``update_document`` call."""
+    """Successful ``update_document`` call."""
 
     async def test_returns_updated_true_on_204(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -2585,7 +2584,7 @@ class TestUpdateDocumentHappyPath:
     async def test_home_page_content_html_is_sent_verbatim(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """home_page_content_html passes through with no sanitization."""
+        """home_page_content_html pass through, no sanitization."""
         mock_client.patch.return_value = {}
 
         raw = (
@@ -2641,7 +2640,7 @@ class TestUpdateDocumentHappyPath:
     async def test_home_page_content_html_empty_string_raises(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Empty string is rejected at the tool layer (body-wipe guard)."""
+        """Empty string rejected at tool layer (body-wipe guard)."""
         with pytest.raises(ValueError, match="would wipe"):
             await update_document(
                 mock_ctx,
@@ -2665,7 +2664,7 @@ class TestUpdateDocumentHappyPath:
         mock_client: AsyncMock,
         whitespace: str,
     ) -> None:
-        """Whitespace-only strings strip to '' on the server, so reject too."""
+        """Whitespace-only strings strip to '' server-side — reject too."""
         with pytest.raises(ValueError, match="would wipe"):
             await update_document(
                 mock_ctx,
@@ -2685,7 +2684,7 @@ class TestUpdateDocumentHappyPath:
     async def test_home_page_content_html_alone_passes_has_attrs_guard(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """home_page_content_html alone counts as a body field."""
+        """home_page_content_html alone count as body field."""
         result = await update_document(
             mock_ctx,
             project_id="MyProj",
@@ -2704,7 +2703,7 @@ class TestUpdateDocumentHappyPath:
     async def test_outline_param_alone_passes_has_attrs_guard(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """An outline/suspect param alone satisfies the has_attrs guard."""
+        """Outline/suspect param alone satisfy has_attrs guard."""
         result = await update_document(
             mock_ctx,
             project_id="MyProj",
@@ -2728,7 +2727,7 @@ class TestUpdateDocumentHappyPath:
     async def test_explicit_empty_title_is_serialized(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # title="" (unlike None) is sent in attributes, clearing it server-side.
+        # title="" (unlike None) sent in attributes — clear it server-side.
         mock_client.patch.return_value = {}
 
         await update_document(
@@ -2795,14 +2794,14 @@ class TestUpdateDocumentHappyPath:
 
         args, _ = mock_client.patch.call_args
         path = args[0]
-        # Space encodes to "+" or "%20"; Polarion accepts either.
+        # Space encode to "+" or "%20"; Polarion accept either.
         assert "workflowAction=needs+review" in path or (
             "workflowAction=needs%20review" in path
         )
 
 
 class TestUpdateDocumentErrorMapping:
-    """Tests that domain exceptions are mapped at the tool layer."""
+    """Domain exceptions mapped at tool layer."""
 
     async def test_401_raises_permission_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -2869,7 +2868,7 @@ class TestUpdateDocumentErrorMapping:
 
 
 class TestUpdateDocumentFieldValidation:
-    """Verify ``min_length=1`` constraints on required path parameters."""
+    """``min_length=1`` constraints on required path parameters."""
 
     @staticmethod
     def _adapter_for(param_name: str) -> TypeAdapter[object]:
@@ -2891,7 +2890,7 @@ class TestUpdateDocumentFieldValidation:
             assert self._adapter_for(name).validate_python(None) is None
 
     def test_home_page_content_html_rejects_overlong_input(self) -> None:
-        """``max_length=MAX_BODY_HTML_LEN`` defends against runaway HTML."""
+        """``max_length=MAX_BODY_HTML_LEN`` defend against runaway HTML."""
         adapter = self._adapter_for("home_page_content_html")
         assert adapter.validate_python("<p>ok</p>") == "<p>ok</p>"
         with pytest.raises(ValidationError):
@@ -2899,13 +2898,13 @@ class TestUpdateDocumentFieldValidation:
 
 
 class TestUpdateDocumentPitfallDocumentation:
-    """Lock the macro-div pitfall into ``update_document.__doc__`` — reproduced on
-    the live testdrive server, user-facing (other MCP hosts never load CLAUDE.md).
+    """Lock macro-div pitfall into ``update_document.__doc__`` — reproduced on
+    live testdrive server, user-facing (other MCP hosts never load CLAUDE.md).
     Anchorless-block pitfall intentionally absent: ids now auto-stamped.
     """
 
     def test_docstring_warns_about_macro_div_module_relationship_gap(self) -> None:
-        """Macro <div> reference injected via update_document leaves module unset."""
+        """Macro <div> reference via update_document leave module unset."""
         document = update_document.__doc__ or ""
         assert "polarion_wiki macro" in document, (
             "update_document docstring must mention the polarion_wiki macro pitfall"
@@ -2928,7 +2927,7 @@ class TestUpdateDocumentPitfallDocumentation:
 
 
 class TestBuildCreateDocumentPayload:
-    """Tests for the private ``_build_create_document_payload`` helper."""
+    """Private ``_build_create_document_payload`` helper."""
 
     def test_minimal_payload_has_only_required_attrs(self) -> None:
         payload = _build_create_document_payload(
@@ -3071,7 +3070,7 @@ class TestBuildCreateDocumentPayload:
 
 
 class TestCreateDocumentDryRun:
-    """Tests for ``create_document`` with ``dry_run=True``."""
+    """``create_document`` with ``dry_run=True``."""
 
     async def test_dry_run_returns_payload_without_calling_post(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -3108,7 +3107,7 @@ class TestCreateDocumentDryRun:
 
 
 class TestCreateDocumentHappyPath:
-    """Tests for a successful ``create_document`` call."""
+    """Successful ``create_document`` call."""
 
     async def test_returns_document_name_on_201(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -3250,16 +3249,16 @@ class TestCreateDocumentHappyPath:
         assert caption is not None
         table = soup.find("table")
         assert table is not None
-        # Stamping runs after polarionify, so both new blocks are anchored.
+        # Stamping run after polarionify — both new blocks anchored.
         assert str(caption.get("id", "")).strip()
         assert str(table.get("id", "")).strip()
 
     async def test_home_page_content_stamps_unique_block_ids(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Every block-level element from the target set gets a unique
-        ``polarion_mcp_N`` id; headings are intentionally left bare so
-        Polarion can rewrite them to the macro form on save.
+        """Every block-level element from target set get unique
+        ``polarion_mcp_N`` id; headings intentionally left bare so
+        Polarion can rewrite them to macro form on save.
         """
         mock_client.post.return_value = {
             "data": [{"type": "documents", "id": "MyProj/_default/MySpec"}]
@@ -3292,8 +3291,8 @@ class TestCreateDocumentHappyPath:
         mock_client: AsyncMock,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """A stamp_block_ids regression that leaves a block anchorless is
-        caught by the trailing first_anchorless_block guard before POST.
+        """stamp_block_ids regression leaving block anchorless caught by
+        trailing first_anchorless_block guard before POST.
         """
         monkeypatch.setattr(_mod, "stamp_block_ids", lambda html: html)
         with pytest.raises(RuntimeError, match="anchorless block"):
@@ -3339,7 +3338,7 @@ class TestCreateDocumentHappyPath:
     async def test_document_name_with_slashes_extracted_correctly(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """``split_module_id`` preserves slashes in the document_name segment."""
+        """``split_module_id`` preserve slashes in document_name segment."""
         mock_client.post.return_value = {
             "data": [{"type": "documents", "id": "MyProj/_default/Folder/Sub/Doc"}]
         }
@@ -3362,7 +3361,7 @@ class TestCreateDocumentHappyPath:
     async def test_invalidates_documents_cache_on_success(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """``create_document`` drops the project's docs cache entry on 201."""
+        """``create_document`` drop project docs cache entry on 201."""
         _cache_mod.store_cached_documents("MyProj", [("_default", "OldDoc")])
         mock_client.post.return_value = {
             "data": [{"type": "documents", "id": "MyProj/_default/MySpec"}]
@@ -3386,7 +3385,7 @@ class TestCreateDocumentHappyPath:
     async def test_does_not_invalidate_cache_on_failure(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Cache is preserved when the POST raises — no half-state change."""
+        """Cache preserved when POST raise — no half-state change."""
         _cache_mod.store_cached_documents("MyProj", [("_default", "OldDoc")])
         mock_client.post.side_effect = PolarionError("boom", status_code=500)
 
@@ -3410,7 +3409,7 @@ class TestCreateDocumentHappyPath:
 
 
 class TestCreateDocumentErrorMapping:
-    """Tests that domain exceptions are mapped at the tool layer."""
+    """Domain exceptions mapped at tool layer."""
 
     async def test_401_raises_permission_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -3475,7 +3474,7 @@ class TestCreateDocumentErrorMapping:
 
 
 class TestCreateDocumentResponseParsing:
-    """Tests for unexpected 2xx response shapes from Polarion."""
+    """Unexpected 2xx response shapes from Polarion."""
 
     async def test_empty_data_array_raises_runtime_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -3518,7 +3517,7 @@ class TestCreateDocumentResponseParsing:
     async def test_two_segment_id_raises_runtime_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """``split_module_id`` returns ``('','')`` for under-3-segment IDs."""
+        """``split_module_id`` return ``('','')`` for under-3-segment IDs."""
         mock_client.post.return_value = {
             "data": [{"type": "documents", "id": "MyProj/MySpec"}]
         }
@@ -3539,7 +3538,7 @@ class TestCreateDocumentResponseParsing:
 
 
 class TestCreateDocumentFieldValidation:
-    """Verify ``min_length`` / ``max_length`` constraints on parameters."""
+    """``min_length``/``max_length`` constraints on parameters."""
 
     @staticmethod
     def _adapter_for(param_name: str) -> TypeAdapter[object]:
@@ -3579,7 +3578,7 @@ class TestCreateDocumentFieldValidation:
 
 
 class TestCreateDocumentRegistration:
-    """The tool must be registered on the FastMCP server instance."""
+    """Tool must be registered on FastMCP server instance."""
 
     async def test_create_document_tool_registered(self) -> None:
         tools = await mcp.list_tools()
@@ -3587,10 +3586,10 @@ class TestCreateDocumentRegistration:
 
 
 class TestCreateDocumentDocstringGuidance:
-    """Lock load-bearing steers into the public docstring.
+    """Lock load-bearing steers into public docstring.
 
-    Enum values (standard and custom-field) are tool-guarded, so no
-    enum-resolution steer is needed; uniqueness is not.
+    Enum values (standard and custom-field) tool-guarded, so no
+    enum-resolution steer needed; uniqueness is not.
     """
 
     def test_docstring_mentions_module_name_uniqueness(self) -> None:
@@ -3600,7 +3599,7 @@ class TestCreateDocumentDocstringGuidance:
 
 
 class TestEnumGuardCreateDocument:
-    """Integration: ``create_document`` rejects ghost document types."""
+    """Integration: ``create_document`` reject ghost document types."""
 
     async def test_unlisted_type_raises_before_post(
         self,
@@ -3626,8 +3625,8 @@ class TestEnumGuardCreateDocument:
         mock_client: AsyncMock,
         reset_enum_guard_caches: None,
     ) -> None:
-        # GETs: type options, the heading + include=module sample, then the
-        # enum-value probe for the key (404 = not an enum field, defers).
+        # GETs: type options, heading + include=module sample, enum-value
+        # probe (404 = not enum field, defer).
         dtype = "systemRequirementSpecification"
         mock_client.get.side_effect = [
             _enum_get_response([dtype]),
@@ -3656,8 +3655,8 @@ class TestEnumGuardCreateDocument:
         mock_client: AsyncMock,
         reset_enum_guard_caches: None,
     ) -> None:
-        # GETs: type options, heading sample (knows docRisk), then the
-        # enum-value probe -- 'severe' is not among the field's options.
+        # GETs: type options, heading sample (know docRisk), enum-value
+        # probe -- 'severe' not among field options.
         dtype = "generic"
         mock_client.get.side_effect = [
             _enum_get_response([dtype]),
@@ -3730,7 +3729,7 @@ class TestEnumGuardCreateDocument:
 
 
 class TestEnumGuardUpdateDocument:
-    """Integration: ``update_document`` rejects ghost type / status."""
+    """Integration: ``update_document`` reject ghost type / status."""
 
     async def test_unlisted_status_raises_before_patch(
         self,
@@ -3750,8 +3749,8 @@ class TestEnumGuardUpdateDocument:
         mock_client: AsyncMock,
         reset_enum_guard_caches: None,
     ) -> None:
-        # GETs: resolve the doc's type, then the type sample (+ bypass-retry).
-        # The sample knows only doc_risk, so ghost_key is rejected.
+        # GETs: resolve doc type, then type sample (+ bypass-retry).
+        # Sample know only doc_risk — ghost_key rejected.
         type_resp = {"data": {"attributes": {"title": "x", "type": "generic"}}}
         sample = {
             "data": [{"type": "workitems"}],
@@ -3771,7 +3770,7 @@ class TestEnumGuardUpdateDocument:
         mock_client: AsyncMock,
         reset_enum_guard_caches: None,
     ) -> None:
-        # GETs: resolve the doc's type, type sample (knows doc_risk), enum probe.
+        # GETs: resolve doc type, type sample (know doc_risk), enum probe.
         type_resp = {"data": {"attributes": {"title": "x", "type": "generic"}}}
         sample = {
             "data": [{"type": "workitems"}],
@@ -3798,7 +3797,7 @@ class TestEnumGuardUpdateDocument:
         mock_client: AsyncMock,
         reset_enum_guard_caches: None,
     ) -> None:
-        # Resolve the doc's type; the cached type schema knows doc_risk.
+        # Resolve doc type; cached type schema know doc_risk.
         mock_client.get.return_value = {
             "data": {"attributes": {"title": "x", "type": "generic"}}
         }
@@ -3813,7 +3812,7 @@ class TestEnumGuardUpdateDocument:
 
 
 def _doc_body_value(result: object) -> str:
-    """Pull ``homePageContent.value`` out of an update_document dry-run preview."""
+    """Pull ``homePageContent.value`` from update_document dry-run preview."""
     preview = result.payload_preview  # type: ignore[attr-defined]
     assert preview is not None
     data = cast(dict[str, object], preview["data"])
@@ -3823,7 +3822,7 @@ def _doc_body_value(result: object) -> str:
 
 
 class TestUpdateDocumentAnchorlessGuard:
-    """Integration: ``update_document`` auto-stamps anchorless body blocks."""
+    """Integration: ``update_document`` auto-stamp anchorless body blocks."""
 
     async def test_anchorless_paragraph_is_stamped(
         self,
@@ -3845,8 +3844,8 @@ class TestUpdateDocumentAnchorlessGuard:
         mock_client: AsyncMock,
         reset_enum_guard_caches: None,
     ) -> None:
-        """An already-anchored body round-trips byte-for-byte: stamp_block_ids
-        short-circuits before reserializing, so ``&nbsp;`` is not mangled.
+        """Already-anchored body round-trip byte-for-byte: stamp_block_ids
+        short-circuit before reserializing, so ``&nbsp;`` not mangled.
         """
         raw = '<p id="polarion_mcp_1">Note&nbsp;here</p>'
         result = await _call_update_doc(
@@ -3872,8 +3871,8 @@ class TestUpdateDocumentAnchorlessGuard:
         reset_enum_guard_caches: None,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """If a future stamp_block_ids regression leaves a block anchorless,
-        the trailing first_anchorless_block guard blocks the PATCH.
+        """Future stamp_block_ids regression leaving block anchorless —
+        trailing first_anchorless_block guard block the PATCH.
         """
         monkeypatch.setattr(_mod, "stamp_block_ids", lambda html: html)
         with pytest.raises(RuntimeError, match="anchorless block"):

@@ -1,4 +1,4 @@
-"""Tests for test run models in ``mcp_server_polarion.models.test_runs``."""
+"""Test run model tests (``mcp_server_polarion.models.test_runs``)."""
 
 from __future__ import annotations
 

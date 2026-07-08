@@ -1,4 +1,4 @@
-"""Tests for the work item document-membership move tools."""
+"""Work item document-membership move tool tests."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ from mcp_server_polarion.tools.moves import (
 
 
 class TestBuildMoveToDocumentPayload:
-    """Tests for the private ``_build_move_to_document_payload`` helper."""
+    """Private ``_build_move_to_document_payload`` helper."""
 
     def test_minimal_payload_with_previous_part(self) -> None:
         payload = _build_move_to_document_payload(
@@ -55,7 +55,7 @@ class TestBuildMoveToDocumentPayload:
             "targetDocument": "MyProj/_default/My Doc",
             "nextPart": "MyProj/_default/My Doc/heading_MCPT-9",
         }
-        # previousPart and nextPart are mutually exclusive in the body.
+        # previousPart and nextPart mutually exclusive in body.
         assert "previousPart" not in payload
 
     def test_document_name_with_slashes_preserved_verbatim(self) -> None:
@@ -72,7 +72,7 @@ class TestBuildMoveToDocumentPayload:
         assert payload["previousPart"] == "MyProj/Design/Folder/Sub Doc/workitem_MCPT-2"
 
     def test_payload_omits_position_keys_when_both_none(self) -> None:
-        # Omitting both position keys appends at the end of the target document.
+        # Omit both position keys = append at end of target document.
         payload = _build_move_to_document_payload(
             project_id="MyProj",
             target_space_id="S",
@@ -97,7 +97,7 @@ class TestBuildMoveToDocumentPayload:
 
 
 class TestMoveWorkItemToDocumentPositionValidation:
-    """Tests for the at-most-one-of-position rule."""
+    """At-most-one-of-position rule."""
 
     async def test_neither_position_appends_at_end(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -166,7 +166,7 @@ class TestMoveWorkItemToDocumentPositionValidation:
 
 
 class TestMoveWorkItemToDocumentDryRun:
-    """Tests for ``move_work_item_to_document`` with ``dry_run=True``."""
+    """``move_work_item_to_document`` with ``dry_run=True``."""
 
     async def test_dry_run_returns_payload_without_calling_post(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -192,12 +192,12 @@ class TestMoveWorkItemToDocumentDryRun:
 
 
 class TestMoveWorkItemToDocumentHappyPath:
-    """Tests for a successful ``move_work_item_to_document`` call."""
+    """Successful ``move_work_item_to_document`` call."""
 
     async def test_returns_moved_true_on_204(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # client.post returns {} on 204 No Content.
+        # client.post return {} on 204 No Content.
         mock_client.post.return_value = {}
 
         result = await move_work_item_to_document(
@@ -233,7 +233,7 @@ class TestMoveWorkItemToDocumentHappyPath:
         )
 
         args, kwargs = mock_client.post.call_args
-        # Path uses the work item ID, with URL-encoded segments.
+        # Path use work item ID, URL-encoded segments.
         expected_path = "/projects/MyProj/workitems/MCPT-42/actions/moveToDocument"
         assert args == (expected_path,)
         body = kwargs["json"]
@@ -245,7 +245,7 @@ class TestMoveWorkItemToDocumentHappyPath:
     async def test_path_url_encodes_special_chars_in_project_id(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # project_id is run through encode_path_segment.
+        # project_id run through encode_path_segment.
         mock_client.post.return_value = {}
 
         await move_work_item_to_document(
@@ -264,7 +264,7 @@ class TestMoveWorkItemToDocumentHappyPath:
 
 
 class TestMoveWorkItemToDocumentErrorMapping:
-    """Tests that domain exceptions are mapped at the tool layer."""
+    """Domain exceptions mapped at tool layer."""
 
     async def test_401_raises_permission_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -321,7 +321,7 @@ class TestMoveWorkItemToDocumentErrorMapping:
 
 
 class TestMoveWorkItemToDocumentFieldValidation:
-    """Verify ``min_length=1`` constraints attached to required parameters."""
+    """``min_length=1`` constraints on required parameters."""
 
     @staticmethod
     def _adapter_for(param_name: str) -> TypeAdapter[object]:
@@ -347,7 +347,7 @@ class TestMoveWorkItemToDocumentFieldValidation:
 
 
 class TestMoveWorkItemFromDocumentDryRun:
-    """Tests for ``move_work_item_from_document`` with ``dry_run=True``."""
+    """``move_work_item_from_document`` with ``dry_run=True``."""
 
     async def test_dry_run_returns_empty_payload_without_calling_post(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -363,12 +363,12 @@ class TestMoveWorkItemFromDocumentDryRun:
         assert isinstance(result, WorkItemMoveResult)
         assert result.moved is False
         assert result.dry_run is True
-        # moveFromDocument has no body — payload preview is an empty dict.
+        # moveFromDocument has no body — payload preview = empty dict.
         assert result.payload_preview == {}
 
 
 class TestMoveWorkItemFromDocumentHappyPath:
-    """Tests for a successful ``move_work_item_from_document`` call."""
+    """Successful ``move_work_item_from_document`` call."""
 
     async def test_returns_moved_true_on_204(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -424,7 +424,7 @@ class TestMoveWorkItemFromDocumentHappyPath:
 
 
 class TestMoveWorkItemFromDocumentErrorMapping:
-    """Tests that domain exceptions are mapped at the tool layer."""
+    """Domain exceptions mapped at tool layer."""
 
     async def test_401_raises_permission_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -457,7 +457,7 @@ class TestMoveWorkItemFromDocumentErrorMapping:
     async def test_400_already_detached_raises_runtime_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # Detaching an already free-floating item 400s → RuntimeError.
+        # Detach already free-floating item 400 → RuntimeError.
         mock_client.post.side_effect = PolarionError(
             "Work item is not in a Document", status_code=400
         )
@@ -485,7 +485,7 @@ class TestMoveWorkItemFromDocumentErrorMapping:
 
 
 class TestMoveWorkItemFromDocumentFieldValidation:
-    """Verify ``min_length=1`` on the required ``work_item_id`` parameter."""
+    """``min_length=1`` on required ``work_item_id`` parameter."""
 
     @staticmethod
     def _adapter_for(param_name: str) -> TypeAdapter[object]:

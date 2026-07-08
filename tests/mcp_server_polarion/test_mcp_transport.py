@@ -1,5 +1,5 @@
 """Real MCP transport-path tests via ``fastmcp.Client(mcp)`` in-memory —
-covers registration → JSON Schema → lifespan → client → mocked HTTP, which
+cover registration → JSON Schema → lifespan → client → mocked HTTP, which
 direct-call tool tests bypass.
 """
 
@@ -64,23 +64,23 @@ EXPECTED_TOOL_NAMES: frozenset[str] = _READ_TOOL_NAMES | _WRITE_TOOL_NAMES
 
 @pytest.fixture
 def _polarion_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Set env vars the lifespan reads and zero out write-delay sleeps."""
+    """Set env vars lifespan read; zero out write-delay sleeps."""
     monkeypatch.setenv("POLARION_URL", _POLARION_HOST)
     monkeypatch.setenv("POLARION_TOKEN", "test-token-secret")
-    # The lifespan builds PolarionClient itself, so patch the module default
-    # rather than its write_delay arg to keep write-tool cases fast.
+    # Lifespan build PolarionClient itself — patch module default rather
+    # than write_delay arg to keep write-tool cases fast.
     monkeypatch.setattr(_client_mod, "_WRITE_DELAY_SECONDS", 0.0)
 
 
 @pytest.fixture
 async def mcp_client(_polarion_env: None) -> AsyncIterator[_MCPClient]:
-    """Yield an in-memory fastmcp Client connected to the real server."""
+    """In-memory fastmcp Client connected to real server."""
     async with Client(mcp) as client:
         yield client
 
 
 class TestToolRegistration:
-    """Every expected tool reaches the MCP transport."""
+    """Every expected tool reach MCP transport."""
 
     async def test_all_expected_tools_registered(self, mcp_client: _MCPClient) -> None:
         names = {t.name for t in await mcp_client.list_tools()}
@@ -88,11 +88,11 @@ class TestToolRegistration:
 
 
 class TestSqlRecipeGallery:
-    """The SQL recipe gallery reaches the transport as a callable tool."""
+    """SQL recipe gallery reach transport as callable tool."""
 
     async def test_get_sql_query_recipes_reads(self, mcp_client: _MCPClient) -> None:
-        # list_work_items points the LLM here before hand-writing SQL, so the
-        # payload must not be empty.
+        # list_work_items point LLM here before hand-writing SQL — payload
+        # must not be empty.
         result = await mcp_client.call_tool("get_sql_query_recipes", {})
         body = result.structured_content
         assert body is not None
@@ -102,10 +102,10 @@ class TestSqlRecipeGallery:
 
 
 class TestHtmlRecipeGallery:
-    """The HTML recipe gallery reaches the transport as a callable tool."""
+    """HTML recipe gallery reach transport as callable tool."""
 
     async def test_get_html_recipes_reads(self, mcp_client: _MCPClient) -> None:
-        # The update tools point the LLM here, so the payload must not be empty.
+        # Update tools point LLM here — payload must not be empty.
         result = await mcp_client.call_tool("get_html_recipes", {})
         body = result.structured_content
         assert body is not None
@@ -134,7 +134,7 @@ class TestToolMetadata:
 
 
 class TestSchemaValidation:
-    """Pydantic Field constraints must be enforced at the JSON Schema layer."""
+    """Pydantic Field constraints enforced at JSON Schema layer."""
 
     async def test_page_size_schema_caps_at_100(self, mcp_client: _MCPClient) -> None:
         tool = next(
@@ -161,8 +161,8 @@ class TestSchemaValidation:
     async def test_invalid_args_error_is_compacted(
         self, mcp_client: _MCPClient
     ) -> None:
-        # 10 link entries missing required fields fail validation pre-HTTP; the
-        # middleware must compact the dump, not echo input reprs or pydantic URLs.
+        # 10 link entries missing required fields fail validation pre-HTTP;
+        # middleware must compact dump, not echo input reprs or pydantic URLs.
         with pytest.raises(ToolError) as exc:
             await mcp_client.call_tool(
                 "create_work_item_links",
@@ -181,7 +181,7 @@ class TestSchemaValidation:
 
 
 class TestEndToEndInvocation:
-    """One read + one write traversing the full MCP path."""
+    """One read + one write traversing full MCP path."""
 
     async def test_list_projects_round_trip(self, mcp_client: _MCPClient) -> None:
         with respx.mock(base_url=_BASE, assert_all_called=False) as mock:
@@ -278,10 +278,10 @@ class TestEndToEndInvocation:
 
     @staticmethod
     def _stub_type_options(mock: respx.MockRouter) -> None:
-        """Stub the enum guard's ``getAvailableOptions`` GET for ``type``.
+        """Stub enum guard ``getAvailableOptions`` GET for ``type``.
 
-        The guard runs even on ``dry_run`` and is fail-closed, so the dry_run
-        path now needs the validation endpoint to be reachable.
+        Guard run even on ``dry_run`` and is fail-closed — dry_run path
+        need the validation endpoint reachable.
         """
         mock.get(
             "/projects/MCP_Test_Project/workitems/fields/type/actions/"
@@ -319,9 +319,9 @@ class TestEndToEndInvocation:
         mcp_client: _MCPClient,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        # Regression: recursive-alias fields make a $defs self-reference that
-        # fastmcp's json_schema_to_type can't rebuild, leaving result.data
-        # unmaterialised and logging "Error parsing structured content".
+        # Regression: recursive-alias fields make $defs self-reference that
+        # fastmcp json_schema_to_type can't rebuild — result.data stays
+        # unmaterialised, log "Error parsing structured content".
         with (
             caplog.at_level("WARNING", logger="fastmcp"),
             respx.mock(base_url=_BASE, assert_all_called=False) as mock,

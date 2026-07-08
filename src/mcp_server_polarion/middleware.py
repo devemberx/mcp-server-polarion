@@ -9,6 +9,7 @@ pydantic.dev URLs) would become tool-result text LLM pay for.
 from __future__ import annotations
 
 from fastmcp.exceptions import ToolError
+from fastmcp.exceptions import ValidationError as FastMCPValidationError
 from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 from fastmcp.tools import ToolResult
 from mcp.types import CallToolRequestParams
@@ -47,7 +48,13 @@ class CompactValidationErrorMiddleware(Middleware):
     ) -> ToolResult:
         try:
             return await call_next(context)
-        except ValidationError as exc:
+        except (ValidationError, FastMCPValidationError) as exc:
+            # fastmcp >=3.4.3 wraps tool-arg pydantic errors in its own
+            # ValidationError (original on __cause__); tool-body errors stay raw
+            # pydantic. Normalise to the pydantic error before compacting.
+            pydantic_exc = exc if isinstance(exc, ValidationError) else exc.__cause__
+            if not isinstance(pydantic_exc, ValidationError):
+                raise
             raise ToolError(
-                compact_validation_error(context.message.name, exc)
+                compact_validation_error(context.message.name, pydantic_exc)
             ) from exc

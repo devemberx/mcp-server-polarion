@@ -1,5 +1,5 @@
-"""Tests for the tool-argument ValidationError compaction middleware: the pure
-``compact_validation_error`` seam plus the ``on_call_tool`` wrapper behaviour.
+"""Tool-argument ValidationError compaction middleware: pure
+``compact_validation_error`` seam plus ``on_call_tool`` wrapper behaviour.
 """
 
 from __future__ import annotations
@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastmcp.exceptions import ToolError
+from fastmcp.exceptions import ValidationError as FastMCPValidationError
 from pydantic import BaseModel, ValidationError
 
 from mcp_server_polarion.middleware import (
@@ -35,8 +36,16 @@ def _validation_error(payload: dict[str, object]) -> ValidationError:
     raise AssertionError(msg)
 
 
+def _wrap_fastmcp(cause: Exception | None) -> FastMCPValidationError:
+    # mirror fastmcp >=3.4.3 tool-arg validation: its own ValidationError with
+    # the pydantic original chained on __cause__.
+    exc = FastMCPValidationError("invalid tool arguments")
+    exc.__cause__ = cause
+    return exc
+
+
 class TestCompactValidationError:
-    """Tests for `compact_validation_error(tool_name, exc)`."""
+    """`compact_validation_error(tool_name, exc)`."""
 
     def test_names_tool_and_field(self) -> None:
         exc = _validation_error({"links": []})
@@ -70,7 +79,7 @@ class TestCompactValidationError:
 
 
 class TestCompactValidationErrorMiddleware:
-    """Tests for `CompactValidationErrorMiddleware.on_call_tool`."""
+    """`CompactValidationErrorMiddleware.on_call_tool`."""
 
     async def test_compacts_validation_error_into_tool_error(self) -> None:
         mw = CompactValidationErrorMiddleware()
@@ -85,6 +94,38 @@ class TestCompactValidationErrorMiddleware:
         msg = str(exc.value)
         assert "Invalid arguments for tool 'create_work_items'" in msg
         assert "input_value" not in msg
+
+    async def test_unwraps_fastmcp_validation_error(self) -> None:
+        # fastmcp >=3.4.3 wraps the pydantic error; middleware must unwrap it.
+        mw = CompactValidationErrorMiddleware()
+        context = SimpleNamespace(
+            message=SimpleNamespace(name="create_work_item_links")
+        )
+        pydantic_exc = _validation_error({"project_id": "P", "links": [{}]})
+
+        async def call_next(_ctx: object) -> object:
+            raise _wrap_fastmcp(pydantic_exc)
+
+        with pytest.raises(ToolError) as exc:
+            await mw.on_call_tool(context, call_next)  # type: ignore[arg-type]
+
+        msg = str(exc.value)
+        assert "Invalid arguments for tool 'create_work_item_links'" in msg
+        assert "links.0.role" in msg
+        assert "input_value" not in msg
+
+    async def test_reraises_fastmcp_error_without_pydantic_cause(self) -> None:
+        # No pydantic cause to compact → propagate the original untouched.
+        mw = CompactValidationErrorMiddleware()
+        context = SimpleNamespace(message=SimpleNamespace(name="get_work_item"))
+        original = _wrap_fastmcp(None)
+
+        async def call_next(_ctx: object) -> object:
+            raise original
+
+        with pytest.raises(FastMCPValidationError) as exc:
+            await mw.on_call_tool(context, call_next)  # type: ignore[arg-type]
+        assert exc.value is original
 
     async def test_passes_through_successful_result(self) -> None:
         mw = CompactValidationErrorMiddleware()

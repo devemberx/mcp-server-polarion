@@ -30,7 +30,7 @@ from tests.mcp_server_polarion.tools._shared.guard._builders import (
 
 
 def _tr_list(*attrs: dict[str, object]) -> dict[str, object]:
-    """JSON:API list response of test runs with the given ``attributes`` dicts."""
+    """JSON:API test-run list response with given ``attributes`` dicts."""
     return {
         "data": [
             {"type": "testruns", "id": f"P/TR-{i}", "attributes": a}
@@ -83,8 +83,8 @@ class TestGuardTestRunEnums:
     async def test_testing_context_cached_apart_from_wildcard(
         self, mock_client: AsyncMock
     ) -> None:
-        # Same enum name under "~" must not satisfy the "testing"-context probe;
-        # the composite cache key keeps the two contexts distinct.
+        # Same enum name under "~" must not satisfy "testing"-context probe;
+        # composite cache key keep the two contexts distinct.
         mock_client.get.side_effect = [
             project_enum_response("testrun-type", ["stale"]),
             project_enum_response("testrun-type", ["manual"]),
@@ -102,7 +102,7 @@ class TestGuardTestRunEnums:
 
 
 class TestGuardTestRunTemplates:
-    """Template ids resolved (and ``isTemplate`` proven) before the write."""
+    """Template ids resolved (``isTemplate`` proven) before write."""
 
     @staticmethod
     def _template_response(
@@ -212,7 +212,7 @@ class TestGuardTestRunCustomFieldKeys:
         assert first.kwargs["params"]["fields[testruns]"] == "@all"
         assert "templates" not in first.kwargs["params"]
         assert second.kwargs["params"]["templates"] == "true"
-        # Standard attributes (id/title) stay out of the schema.
+        # Standard attributes (id/title) stay out of schema.
         assert cache_mod._test_run_custom_key_cache.get("P") == frozenset(
             {"goal", "description"}
         )
@@ -244,7 +244,7 @@ class TestGuardTestRunCustomFieldKeys:
     async def test_malformed_data_stops_sampling_and_fails_closed(
         self, mock_client: AsyncMock
     ) -> None:
-        # Non-list ``data`` ends each sampling loop; nothing sampled -> refuse.
+        # Non-list ``data`` end each sampling loop; nothing sampled -> refuse.
         mock_client.get.return_value = {"data": "junk"}
 
         with pytest.raises(RuntimeError, match="Refusing the write"):
@@ -255,7 +255,7 @@ class TestGuardTestRunCustomFieldKeys:
     async def test_cached_unknown_key_refetches_then_passes(
         self, mock_client: AsyncMock
     ) -> None:
-        # Stale cached schema triggers one fresh re-sample before rejecting.
+        # Stale cached schema trigger one fresh re-sample before reject.
         store_test_run_custom_keys("P", frozenset({"goal"}))
         mock_client.get.side_effect = [
             _tr_list({"id": "R1", "goal": "g", "description": "d"}),
@@ -273,7 +273,7 @@ class TestGuardTestRunCustomFieldKeys:
 
         await guard_test_run_custom_fields(mock_client, "P", {"late_key": 9})
 
-        # Full instance page forces page 2; templates add the third GET.
+        # Full instance page force page 2; templates add third GET.
         assert mock_client.get.await_count == 3
         schema = cache_mod._test_run_custom_key_cache.get("P")
         assert schema is not None

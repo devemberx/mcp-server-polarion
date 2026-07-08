@@ -1,4 +1,4 @@
-"""Tests for the recipe gallery models."""
+"""Recipe gallery model tests."""
 
 from __future__ import annotations
 

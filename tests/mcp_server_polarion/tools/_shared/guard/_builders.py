@@ -4,7 +4,7 @@ from __future__ import annotations
 
 
 def enum_response(ids: list[str]) -> dict[str, object]:
-    """A ``getAvailableOptions`` response with one option per id."""
+    """``getAvailableOptions`` response, one option per id."""
     return {
         "data": [{"id": i, "name": i} for i in ids],
         "meta": {"totalCount": len(ids)},
@@ -12,7 +12,7 @@ def enum_response(ids: list[str]) -> dict[str, object]:
 
 
 def project_enum_response(enum_name: str, ids: list[str]) -> dict[str, object]:
-    """A single-enumeration response: ``data`` is a dict, options nested under it."""
+    """Single-enumeration response: ``data`` = dict, options nested under."""
     return {
         "data": {
             "type": "enumerations",
@@ -23,7 +23,7 @@ def project_enum_response(enum_name: str, ids: list[str]) -> dict[str, object]:
 
 
 def workitems_response(project_id: str, short_ids: list[str]) -> dict[str, object]:
-    """A JSON:API workitems list response (ids are ``project/short``)."""
+    """JSON:API workitems list response (ids = ``project/short``)."""
     return {
         "data": [{"type": "workitems", "id": f"{project_id}/{i}"} for i in short_ids],
         "meta": {"totalCount": len(short_ids)},

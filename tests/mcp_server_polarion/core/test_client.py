@@ -32,7 +32,7 @@ def _config() -> PolarionConfig:
 
 
 class TestAuthentication:
-    """Verify that the client sends the correct ``Authorization`` header."""
+    """Client send correct ``Authorization`` header."""
 
     async def test_bearer_token_sent(self) -> None:
         """GET includes ``Authorization: Bearer <token>``."""
@@ -67,7 +67,7 @@ class TestAuthentication:
 
 
 class TestSuccessfulResponses:
-    """Verify correct parsing of 2xx responses."""
+    """Parsing of 2xx responses."""
 
     async def test_get_returns_json_dict(self) -> None:
         with respx.mock(base_url=BASE) as mock:
@@ -169,7 +169,7 @@ class TestSuccessfulResponses:
             assert result == {}
 
     async def test_delete_sends_json_body(self) -> None:
-        """DELETE-with-body: the JSON payload must reach the wire."""
+        """DELETE-with-body: JSON payload must reach wire."""
         with respx.mock(base_url=BASE) as mock:
             route = mock.delete("/projects/P1/workitems/WI-001/linkedworkitems").mock(
                 return_value=httpx.Response(204)
@@ -202,7 +202,7 @@ class TestSuccessfulResponses:
             }
 
     async def test_non_dict_body_wrapped(self) -> None:
-        """If the response body is a list, wrap it in ``{"data": ...}``."""
+        """Response body list → wrap in ``{"data": ...}``."""
         with respx.mock(base_url=BASE) as mock:
             mock.get("/some/list").mock(
                 return_value=httpx.Response(200, json=[1, 2, 3]),
@@ -217,7 +217,7 @@ class TestSuccessfulResponses:
 
 
 class TestErrorMapping:
-    """Verify HTTP status → domain exception mapping."""
+    """HTTP status → domain exception mapping."""
 
     async def test_401_raises_auth_error(self) -> None:
         with respx.mock(base_url=BASE) as mock:
@@ -335,7 +335,7 @@ class TestErrorMapping:
                     await client.get("/projects")
 
     async def test_error_with_non_json_body(self) -> None:
-        """Non-JSON error bodies should still produce an error message."""
+        """Non-JSON error bodies still produce error message."""
         with respx.mock(base_url=BASE) as mock:
             mock.get("/projects").mock(
                 return_value=httpx.Response(
@@ -351,7 +351,7 @@ class TestErrorMapping:
                     await client.get("/projects")
 
     async def test_html_tags_stripped_from_error_message(self) -> None:
-        """HTML in non-JSON error body must be stripped, not exposed raw."""
+        """HTML in non-JSON error body stripped, not exposed raw."""
         with respx.mock(base_url=BASE) as mock:
             mock.get("/projects").mock(
                 return_value=httpx.Response(
@@ -371,7 +371,7 @@ class TestErrorMapping:
         assert "Service Unavailable" in message
 
     async def test_long_error_body_is_truncated(self) -> None:
-        """Very long error detail must be capped at _MAX_ERROR_DETAIL_LEN."""
+        """Long error detail capped at _MAX_ERROR_DETAIL_LEN."""
         long_text = "x" * 500
         with respx.mock(base_url=BASE) as mock:
             mock.get("/projects").mock(
@@ -393,7 +393,7 @@ class TestErrorMapping:
 
 
 class TestTransportErrors:
-    """Verify that httpx transport errors are wrapped in PolarionError."""
+    """httpx transport errors wrapped in PolarionError."""
 
     async def test_connection_error_becomes_polarion_error(self) -> None:
         with respx.mock(base_url=BASE) as mock:
@@ -421,7 +421,7 @@ class TestTransportErrors:
 
 
 class TestRetry:
-    """Verify retry behaviour on 429 and 5xx status codes."""
+    """Retry behaviour on 429 and 5xx."""
 
     async def test_retries_on_429_then_succeeds(self) -> None:
         """First request → 429, second → 200."""
@@ -535,7 +535,7 @@ class TestRetry:
 
 
 class TestSerialization:
-    """Concurrent callers must serialise through PolarionClient's lock."""
+    """Concurrent callers serialise through PolarionClient lock."""
 
     async def test_concurrent_requests_run_sequentially(self) -> None:
         """Two ``client.get`` calls dispatched together must not overlap."""
@@ -546,7 +546,7 @@ class TestSerialization:
             nonlocal in_flight, max_in_flight
             in_flight += 1
             max_in_flight = max(max_in_flight, in_flight)
-            # Yield to the other coroutine; without the lock max_in_flight would hit 2.
+            # Yield to other coroutine; without lock max_in_flight hit 2.
             await asyncio.sleep(0)
             in_flight -= 1
             return httpx.Response(200, json={"data": []})
@@ -566,7 +566,7 @@ class TestSerialization:
             assert max_in_flight == 1
 
     async def test_write_delay_keeps_lock_held(self) -> None:
-        """A GET during a POST's write_delay must wait, not overlap — the sleep runs
+        """GET during POST write_delay must wait, not overlap — sleep run
         inside the request lock.
         """
         post_start: list[float] = []
@@ -595,7 +595,7 @@ class TestSerialization:
                 )
 
         assert post_start and get_start
-        # 0.9 slack absorbs CI scheduling jitter; real margin is full write_delay.
+        # 0.9 slack absorb CI scheduling jitter; real margin = full write_delay.
         assert get_start[0] - post_start[0] >= write_delay * 0.9, (
             f"GET started {get_start[0] - post_start[0]:.3f}s after POST; "
             f"expected ≥ {write_delay * 0.9:.3f}s (write_delay held by lock)."
@@ -621,14 +621,14 @@ class TestSerialization:
                 await client.get("/projects")
 
         assert len(get_start) == 2
-        # 0.9 slack absorbs scheduler jitter (sleep may wake slightly early).
+        # 0.9 slack absorb scheduler jitter (sleep may wake slightly early).
         assert get_start[1] - get_start[0] >= min_interval * 0.9, (
             f"second GET started {get_start[1] - get_start[0]:.3f}s after first; "
             f"expected ≥ {min_interval * 0.9:.3f}s (read pacing)."
         )
 
     async def test_slow_request_adds_no_extra_pacing(self) -> None:
-        """Start-based pacing: a request slower than ``min_interval`` adds no wait."""
+        """Start-based pacing: request slower than ``min_interval`` add no wait."""
         request_time = 0.4
         min_interval = 0.2
         first_end: list[float] = []
@@ -655,14 +655,14 @@ class TestSerialization:
                 await client.get("/projects")
 
         assert first_end and second_start
-        # request_time > min_interval, so the second GET adds no extra sleep.
+        # request_time > min_interval — second GET add no extra sleep.
         assert second_start[0] - first_end[0] < min_interval, (
             f"second GET started {second_start[0] - first_end[0]:.3f}s after the "
             f"first ended; expected < {min_interval:.3f}s (no extra pacing)."
         )
 
     async def test_retry_restamps_pacing(self) -> None:
-        """After a retry, pacing tracks the last attempt sent, not the stale start."""
+        """After retry, pacing track last attempt sent, not stale start."""
         starts: list[float] = []
 
         async def _on_get(request: httpx.Request) -> httpx.Response:
@@ -676,7 +676,7 @@ class TestSerialization:
         with respx.mock(base_url=BASE) as mock:
             mock.get("/projects").mock(side_effect=_on_get)
 
-            # Non-zero backoff so the retry attempt lands measurably after the first.
+            # Non-zero backoff so retry attempt land measurably after first.
             with patch("mcp_server_polarion.core.client._INITIAL_BACKOFF_SECONDS", 0.1):
                 async with PolarionClient(
                     _config(), write_delay=0, min_interval=min_interval
@@ -685,7 +685,7 @@ class TestSerialization:
                     await client.get("/projects")
 
         assert len(starts) == 3  # first 429, retry 200, follow-up 200
-        # Follow-up spaces from the retry attempt (starts[1]), not stale starts[0].
+        # Follow-up space from retry attempt (starts[1]), not stale starts[0].
         assert starts[2] - starts[1] >= min_interval * 0.9, (
             f"follow-up GET started {starts[2] - starts[1]:.3f}s after the retry "
             f"attempt; expected ≥ {min_interval * 0.9:.3f}s (re-stamped pacing)."
@@ -693,24 +693,24 @@ class TestSerialization:
 
 
 class TestContextManager:
-    """Verify async context-manager protocol."""
+    """Async context-manager protocol."""
 
     async def test_context_manager_closes_client(self) -> None:
-        """``async with`` should call ``close()`` on exit."""
+        """``async with`` call ``close()`` on exit."""
         async with PolarionClient(_config(), write_delay=0, min_interval=0) as client:
             assert client.base_url.endswith("/polarion/rest/v1")
 
         assert client.is_closed
 
     async def test_manual_close(self) -> None:
-        """Calling ``close()`` directly also shuts down the client."""
+        """Direct ``close()`` also shut down client."""
         client = PolarionClient(_config(), write_delay=0, min_interval=0)
         await client.close()
         assert client.is_closed
 
 
 class TestConfigWiring:
-    """Verify that ``PolarionConfig`` values are wired correctly."""
+    """``PolarionConfig`` values wired correctly."""
 
     def test_base_url_construction(self) -> None:
         config = PolarionConfig(
