@@ -1,4 +1,4 @@
-"""Document tools — query, read, create, and update."""
+"""Document tools — query, read, create, update, and copy."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from mcp_server_polarion.core.exceptions import (
 )
 from mcp_server_polarion.models import (
     MAX_BODY_HTML_LEN,
+    DocumentCopyResult,
     DocumentCreateResult,
     DocumentDetail,
     DocumentPart,
@@ -47,6 +48,7 @@ from mcp_server_polarion.tools._shared.fields import (
 from mcp_server_polarion.tools._shared.guard import (
     guard_document_custom_fields,
     guard_document_enums,
+    guard_work_item_link_roles,
 )
 from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
@@ -424,6 +426,16 @@ def _extract_created_module_name(response: dict[str, object]) -> str | None:
     return document_name or None
 
 
+def _extract_copied_module_id(response: dict[str, object]) -> str | None:
+    """Full module id from copy-action 201; ``data`` = single dict (not the
+    list create returns), so ``_extract_first_resource_id`` not fit.
+    """
+    data = response.get("data")
+    if not isinstance(data, dict):
+        return None
+    return safe_str(data.get("id", "")) or None
+
+
 def _build_update_document_payload(  # noqa: PLR0913
     *,
     project_id: str,
@@ -503,6 +515,29 @@ def _build_create_document_payload(  # noqa: PLR0913
         "attributes": attributes,
     }
     return {"data": [item]}
+
+
+def _build_copy_document_payload(
+    *,
+    target_document_name: str,
+    target_project_id: str | None,
+    target_space_id: str | None,
+    link_original_items_with_role: str | None,
+    remove_outgoing_links: bool | None,
+) -> dict[str, JsonValue]:
+    """Flat ``copy`` action body (not JSON:API); skip unset. Explicit
+    ``remove_outgoing_links=False`` still sent (``is not None``).
+    """
+    payload: dict[str, JsonValue] = {"targetDocumentName": target_document_name}
+    if target_project_id is not None:
+        payload["targetProjectId"] = target_project_id
+    if target_space_id is not None:
+        payload["targetSpaceId"] = target_space_id
+    if link_original_items_with_role is not None:
+        payload["linkOriginalItemsWithRole"] = link_original_items_with_role
+    if remove_outgoing_links is not None:
+        payload["removeOutgoingLinks"] = remove_outgoing_links
+    return payload
 
 
 @mcp.tool(
@@ -1161,5 +1196,139 @@ async def create_document(  # noqa: PLR0913
         created=True,
         dry_run=False,
         document_name=new_name,
+        payload_preview=None,
+    )
+
+
+@mcp.tool(
+    tags={"write"},
+    timeout=60.0,
+    annotations={
+        # Additive: non-destructive, non-idempotent (duplicate target name 409s).
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    },
+)
+async def copy_document(  # noqa: PLR0913
+    ctx: Context,
+    project_id: str = Field(min_length=1, description="Source project ID."),
+    space_id: str = Field(
+        min_length=1,
+        description="Source space ID ('_default' = default space).",
+    ),
+    document_name: str = Field(min_length=1, description="Source document name."),
+    target_document_name: str = Field(
+        min_length=1,
+        description=(
+            "New document name; must not already exist at the destination "
+            "(duplicate → HTTP 409)."
+        ),
+    ),
+    target_project_id: str | None = Field(
+        default=None,
+        description="Destination project (source project if omitted).",
+    ),
+    target_space_id: str | None = Field(
+        default=None,
+        description="Destination space (source space if omitted).",
+    ),
+    link_original_items_with_role: str | None = Field(
+        default=None,
+        description=(
+            "Link each copied item back to its original with this "
+            "workitem-link-role id (e.g. 'duplicates')."
+        ),
+    ),
+    remove_outgoing_links: bool | None = Field(
+        default=None,
+        description="Strip outgoing links from copied items (kept if omitted).",
+    ),
+    revision: str | None = Field(
+        default=None,
+        description="Copy the source as of this revision (HEAD if omitted).",
+    ),
+    dry_run: bool = Field(
+        default=False,
+        description="Preview payload without writing; guards still query Polarion.",
+    ),
+) -> DocumentCopyResult:
+    """Copy a document, duplicating its structure, body, and contained work items.
+
+    target_document_name must be free at the destination (duplicate → HTTP 409)
+    — check list_documents first. The copy lands in target_project_id /
+    target_space_id, both defaulting to the source.
+
+    link_original_items_with_role is validated against the TARGET project's
+    workitem-link-role enum: Polarion does not check it, so an unknown id
+    stores a silent ghost link on every copied item. remove_outgoing_links
+    strips links carried over from the source.
+    """
+    client = get_client(ctx)
+    if link_original_items_with_role:
+        await guard_work_item_link_roles(
+            client,
+            target_project_id or project_id,
+            [link_original_items_with_role],
+        )
+
+    payload = _build_copy_document_payload(
+        target_document_name=target_document_name,
+        target_project_id=target_project_id,
+        target_space_id=target_space_id,
+        link_original_items_with_role=link_original_items_with_role,
+        remove_outgoing_links=remove_outgoing_links,
+    )
+
+    if dry_run:
+        return DocumentCopyResult(
+            copied=False,
+            dry_run=True,
+            target_project_id=None,
+            target_space_id=None,
+            document_name=None,
+            payload_preview=payload,
+        )
+
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/spaces/{encode_path_segment(space_id)}"
+        f"/documents/{encode_path_segment(document_name)}/actions/copy"
+    )
+    if revision:
+        path = f"{path}?{urlencode({'revision': revision})}"
+    try:
+        response = await client.post(path, json=cast(dict[str, object], payload))
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot copy document -- check your POLARION_TOKEN permissions."
+        ) from exc
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Source document '{document_name}' (space '{space_id}', project "
+            f"'{project_id}') not found. Use `list_documents` to discover valid IDs."
+        ) from exc
+    except PolarionError as exc:
+        raise RuntimeError(f"Failed to copy document: {exc.message}") from exc
+
+    full_id = _extract_copied_module_id(response)
+    if full_id is None:
+        raise RuntimeError(
+            "Polarion accepted the copy request but returned no document id. "
+            "The copy may or may not exist; verify with list_documents."
+        )
+    new_project = full_id.split("/", 2)[0]
+    new_space, new_name = split_module_id(full_id)
+
+    # Drop stale list cache only where copy lands.
+    invalidate_documents_cache(target_project_id or project_id)
+
+    return DocumentCopyResult(
+        copied=True,
+        dry_run=False,
+        target_project_id=new_project or None,
+        target_space_id=new_space or None,
+        document_name=new_name or None,
         payload_preview=None,
     )

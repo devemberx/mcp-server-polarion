@@ -503,6 +503,23 @@ class FakePolarion:
                         },
                     )
                 return httpx.Response(204)
+            if path.endswith("/actions/copy"):
+                # Copy action 201: data = single dict (not list), sparse body.
+                target = (
+                    str(body.get("targetDocumentName") or "")
+                    if isinstance(body, dict)
+                    else ""
+                )
+                return httpx.Response(
+                    201,
+                    json={
+                        "data": {
+                            "type": "documents",
+                            "id": f"{PROJECT}/{SPACE}/{target or DOC + 'Copy'}",
+                            "attributes": {"status": "draft"},
+                        }
+                    },
+                )
             if path.endswith("/workitems"):
                 return httpx.Response(
                     201,

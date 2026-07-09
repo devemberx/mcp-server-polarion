@@ -17,6 +17,7 @@ from mcp_server_polarion.core.exceptions import (
     PolarionNotFoundError,
 )
 from mcp_server_polarion.models import (
+    DocumentCopyResult,
     DocumentCreateResult,
     DocumentDetail,
     DocumentPart,
@@ -28,8 +29,10 @@ from mcp_server_polarion.server import mcp
 from mcp_server_polarion.tools import documents as _mod
 from mcp_server_polarion.tools._shared import cache as _cache_mod
 from mcp_server_polarion.tools.documents import (
+    _build_copy_document_payload,
     _build_create_document_payload,
     _build_update_document_payload,
+    copy_document,
     create_document,
     get_document,
     list_documents,
@@ -127,6 +130,35 @@ async def _call_update_doc(mock_ctx: MagicMock, **overrides: object) -> object:
     }
     defaults.update(overrides)
     return await update_document(mock_ctx, **defaults)  # type: ignore[arg-type]
+
+
+async def _call_copy_doc(mock_ctx: MagicMock, **overrides: object) -> object:
+    """Invoke ``copy_document``, explicit defaults for every Field."""
+    defaults: dict[str, object] = {
+        "project_id": "MyProj",
+        "space_id": "_default",
+        "document_name": "Doc",
+        "target_document_name": "DocCopy",
+        "target_project_id": None,
+        "target_space_id": None,
+        "link_original_items_with_role": None,
+        "remove_outgoing_links": None,
+        "revision": None,
+        "dry_run": False,
+    }
+    defaults.update(overrides)
+    return await copy_document(mock_ctx, **defaults)  # type: ignore[arg-type]
+
+
+def _project_enum_get_response(enum_name: str, ids: list[str]) -> dict[str, object]:
+    """Project enumeration reply: ``data`` = dict, options nested under."""
+    return {
+        "data": {
+            "type": "enumerations",
+            "id": enum_name,
+            "attributes": {"options": [{"id": i, "name": i} for i in ids]},
+        }
+    }
 
 
 @pytest.fixture
@@ -3591,6 +3623,348 @@ class TestCreateDocumentDocstringGuidance:
         document = create_document.__doc__ or ""
         assert "unique" in document.lower()
         assert "409" in document or "conflict" in document.lower()
+
+
+class TestBuildCopyDocumentPayload:
+    """``_build_copy_document_payload`` flat body, skip unset."""
+
+    def test_minimal_only_target_name(self) -> None:
+        payload = _build_copy_document_payload(
+            target_document_name="DocCopy",
+            target_project_id=None,
+            target_space_id=None,
+            link_original_items_with_role=None,
+            remove_outgoing_links=None,
+        )
+        assert payload == {"targetDocumentName": "DocCopy"}
+
+    def test_all_fields_camel_case(self) -> None:
+        payload = _build_copy_document_payload(
+            target_document_name="DocCopy",
+            target_project_id="OtherProj",
+            target_space_id="Design",
+            link_original_items_with_role="duplicates",
+            remove_outgoing_links=True,
+        )
+        assert payload == {
+            "targetDocumentName": "DocCopy",
+            "targetProjectId": "OtherProj",
+            "targetSpaceId": "Design",
+            "linkOriginalItemsWithRole": "duplicates",
+            "removeOutgoingLinks": True,
+        }
+
+    def test_remove_outgoing_links_false_is_sent(self) -> None:
+        # Explicit False differs from omission (None) — must survive.
+        payload = _build_copy_document_payload(
+            target_document_name="DocCopy",
+            target_project_id=None,
+            target_space_id=None,
+            link_original_items_with_role=None,
+            remove_outgoing_links=False,
+        )
+        assert payload["removeOutgoingLinks"] is False
+
+
+class TestCopyDocumentDryRun:
+    """``copy_document`` with ``dry_run=True``."""
+
+    async def test_dry_run_returns_payload_without_post(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        result = await _call_copy_doc(
+            mock_ctx, target_document_name="DocCopy", dry_run=True
+        )
+
+        mock_client.post.assert_not_called()
+        assert isinstance(result, DocumentCopyResult)
+        assert result.copied is False
+        assert result.dry_run is True
+        assert result.document_name is None
+        assert result.target_project_id is None
+        assert result.payload_preview == {"targetDocumentName": "DocCopy"}
+
+    async def test_dry_run_still_guards_bogus_role(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Guard run before dry_run return — ghost role blocked either way.
+        mock_client.get.side_effect = lambda path, **_: (
+            _project_enum_get_response("workitem-link-role", ["duplicates", "parent"])
+            if "/enumerations/" in path
+            else {}
+        )
+
+        with pytest.raises(ValueError, match="ghost_role"):
+            await _call_copy_doc(
+                mock_ctx,
+                link_original_items_with_role="ghost_role",
+                dry_run=True,
+            )
+        mock_client.post.assert_not_called()
+
+
+class TestCopyDocumentHappyPath:
+    """Successful ``copy_document`` call."""
+
+    @staticmethod
+    def _sparse_201(full_id: str) -> dict[str, object]:
+        """Copy 201 body: ``data`` = single dict (not list)."""
+        return {
+            "data": {
+                "type": "documents",
+                "id": full_id,
+                "attributes": {"status": "draft"},
+            }
+        }
+
+    async def test_returns_parsed_location_on_201(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = self._sparse_201("MyProj/_default/DocCopy")
+
+        result = await _call_copy_doc(mock_ctx, target_document_name="DocCopy")
+
+        assert isinstance(result, DocumentCopyResult)
+        assert result.copied is True
+        assert result.dry_run is False
+        assert result.target_project_id == "MyProj"
+        assert result.target_space_id == "_default"
+        assert result.document_name == "DocCopy"
+        assert result.payload_preview is None
+
+    async def test_post_called_with_path_and_flat_body(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = self._sparse_201("MyProj/_default/DocCopy")
+
+        await _call_copy_doc(mock_ctx, target_document_name="DocCopy")
+
+        args, kwargs = mock_client.post.call_args
+        assert args == ("/projects/MyProj/spaces/_default/documents/Doc/actions/copy",)
+        # Flat action body — no JSON:API "data" wrapper.
+        assert kwargs["json"] == {"targetDocumentName": "DocCopy"}
+
+    async def test_path_url_encodes_segments(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = self._sparse_201("MyProj/_default/DocCopy")
+
+        await _call_copy_doc(
+            mock_ctx,
+            project_id="Proj With Space",
+            space_id="My Space",
+            document_name="My Doc",
+        )
+
+        args, _ = mock_client.post.call_args
+        assert args == (
+            "/projects/Proj%20With%20Space/spaces/My%20Space"
+            "/documents/My%20Doc/actions/copy",
+        )
+
+    async def test_revision_appended_as_query(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = self._sparse_201("MyProj/_default/DocCopy")
+
+        await _call_copy_doc(mock_ctx, revision="1234")
+
+        args, _ = mock_client.post.call_args
+        assert args[0].endswith("/actions/copy?revision=1234")
+
+    async def test_no_revision_no_query(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = self._sparse_201("MyProj/_default/DocCopy")
+
+        await _call_copy_doc(mock_ctx, revision=None)
+
+        args, _ = mock_client.post.call_args
+        assert "?" not in args[0]
+
+    async def test_cross_project_target_derived_from_response(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = self._sparse_201("OtherProj/Design/DocCopy")
+
+        result = await _call_copy_doc(
+            mock_ctx,
+            target_project_id="OtherProj",
+            target_space_id="Design",
+        )
+
+        assert isinstance(result, DocumentCopyResult)
+        assert result.target_project_id == "OtherProj"
+        assert result.target_space_id == "Design"
+        assert result.document_name == "DocCopy"
+
+    async def test_missing_id_raises_runtime(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {"data": {"type": "documents"}}
+
+        with pytest.raises(RuntimeError, match="verify with list_documents"):
+            await _call_copy_doc(mock_ctx)
+
+    async def test_list_shaped_data_raises_runtime(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Copy 201 = single dict; a list body is unexpected → no id parsed.
+        mock_client.post.return_value = {"data": [{"id": "MyProj/_default/DocCopy"}]}
+
+        with pytest.raises(RuntimeError, match="verify with list_documents"):
+            await _call_copy_doc(mock_ctx)
+
+    async def test_invalidates_target_project_cache(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        _cache_mod.store_cached_documents("OtherProj", [("Design", "OldDoc")])
+        mock_client.post.return_value = self._sparse_201("OtherProj/Design/DocCopy")
+
+        await _call_copy_doc(mock_ctx, target_project_id="OtherProj")
+
+        assert _cache_mod.get_cached_documents("OtherProj") is None
+
+
+class TestCopyDocumentRoleGuard:
+    """``copy_document`` reject ghost link roles before write."""
+
+    @staticmethod
+    def _stub(valid_roles: list[str], captured: dict[str, str]) -> object:
+        """GET stub serving role enumeration; capture the enum path."""
+
+        def fake_get(path: str, **_: object) -> dict[str, object]:
+            if "/enumerations/" in path:
+                captured["path"] = path
+                return _project_enum_get_response("workitem-link-role", valid_roles)
+            return {}
+
+        return fake_get
+
+    async def test_bogus_role_raises_without_post(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = self._stub(["duplicates", "parent"], {})
+
+        with pytest.raises(ValueError, match="ghost_role") as exc:
+            await _call_copy_doc(mock_ctx, link_original_items_with_role="ghost_role")
+
+        assert "duplicates" in str(exc.value)
+        mock_client.post.assert_not_called()
+
+    async def test_valid_role_proceeds_to_post(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = self._stub(["duplicates", "parent"], {})
+        mock_client.post.return_value = {
+            "data": {"type": "documents", "id": "MyProj/_default/DocCopy"}
+        }
+
+        result = await _call_copy_doc(
+            mock_ctx, link_original_items_with_role="duplicates"
+        )
+
+        assert isinstance(result, DocumentCopyResult)
+        assert result.copied is True
+        mock_client.post.assert_called_once()
+
+    async def test_role_validated_against_target_project(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        captured: dict[str, str] = {}
+        mock_client.get.side_effect = self._stub(["duplicates"], captured)
+        mock_client.post.return_value = {
+            "data": {"type": "documents", "id": "OtherProj/_default/DocCopy"}
+        }
+
+        await _call_copy_doc(
+            mock_ctx,
+            target_project_id="OtherProj",
+            link_original_items_with_role="duplicates",
+        )
+
+        assert captured["path"].startswith("/projects/OtherProj/enumerations/")
+
+    async def test_no_role_skips_enum_probe(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        def fake_get(path: str, **_: object) -> dict[str, object]:
+            if "/enumerations/" in path:
+                raise AssertionError("enum probed despite no role")
+            return {}
+
+        mock_client.get.side_effect = fake_get
+        mock_client.post.return_value = {
+            "data": {"type": "documents", "id": "MyProj/_default/DocCopy"}
+        }
+
+        await _call_copy_doc(mock_ctx, link_original_items_with_role=None)
+
+        mock_client.post.assert_called_once()
+
+
+class TestCopyDocumentErrorMapping:
+    """Domain exceptions mapped at tool layer."""
+
+    async def test_401_raises_permission_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.side_effect = PolarionAuthError("auth", status_code=401)
+
+        with pytest.raises(PermissionError):
+            await _call_copy_doc(mock_ctx)
+
+    async def test_404_raises_value_error_naming_source(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.side_effect = PolarionNotFoundError(
+            "not found", status_code=404
+        )
+
+        with pytest.raises(ValueError, match="not found") as exc:
+            await _call_copy_doc(
+                mock_ctx,
+                project_id="ghost",
+                space_id="ghost_space",
+                document_name="GhostDoc",
+            )
+        assert "GhostDoc" in str(exc.value)
+        assert "ghost_space" in str(exc.value)
+
+    async def test_409_duplicate_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.side_effect = PolarionError("conflict", status_code=409)
+
+        with pytest.raises(RuntimeError, match="conflict"):
+            await _call_copy_doc(mock_ctx)
+
+
+class TestCopyDocumentFieldValidation:
+    """``Field`` constraints bypass direct call — verify via TypeAdapter."""
+
+    @staticmethod
+    def _adapter_for(param_name: str) -> TypeAdapter[object]:
+        hints = get_type_hints(copy_document)
+        sig = inspect.signature(copy_document)
+        field_info = sig.parameters[param_name].default
+        return TypeAdapter(Annotated[hints[param_name], field_info])
+
+    def test_target_document_name_rejects_empty_string(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("target_document_name").validate_python("")
+
+    def test_document_name_rejects_empty_string(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("document_name").validate_python("")
+
+
+class TestCopyDocumentRegistration:
+    """Tool must be registered on FastMCP server instance."""
+
+    async def test_copy_document_tool_registered(self) -> None:
+        tools = await mcp.list_tools()
+        assert any(tool.name == "copy_document" for tool in tools)
 
 
 class TestEnumGuardCreateDocument:
