@@ -542,7 +542,7 @@ def _build_copy_document_payload(
 
 @mcp.tool(
     tags={"read"},
-    timeout=300.0,
+    timeout=60.0,
     annotations={"readOnlyHint": True},
 )
 async def list_documents(
@@ -1261,12 +1261,11 @@ async def copy_document(  # noqa: PLR0913
     target_space_id, both defaulting to the source.
 
     link_original_items_with_role is validated against the TARGET project's
-    workitem-link-role enum: Polarion does not check it, so an unknown id
-    stores a silent ghost link on every copied item. remove_outgoing_links
+    workitem-link-role enum; an unknown id is rejected. remove_outgoing_links
     strips links carried over from the source.
     """
     client = get_client(ctx)
-    if link_original_items_with_role:
+    if link_original_items_with_role is not None:
         await guard_work_item_link_roles(
             client,
             target_project_id or project_id,
@@ -1282,13 +1281,15 @@ async def copy_document(  # noqa: PLR0913
     )
 
     if dry_run:
+        # revision = query param, not body — fold into preview so dry_run reveal it.
+        preview = {**payload, "revision": revision} if revision else payload
         return DocumentCopyResult(
             copied=False,
             dry_run=True,
             target_project_id=None,
             target_space_id=None,
             document_name=None,
-            payload_preview=payload,
+            payload_preview=preview,
         )
 
     path = (
@@ -1310,7 +1311,11 @@ async def copy_document(  # noqa: PLR0913
             f"'{project_id}') not found. Use `list_documents` to discover valid IDs."
         ) from exc
     except PolarionError as exc:
-        raise RuntimeError(f"Failed to copy document: {exc.message}") from exc
+        raise RuntimeError(
+            f"Failed to copy document to '{target_document_name}': {exc.message}. "
+            "If that name already exists at the destination, choose a different "
+            "target_document_name (check list_documents)."
+        ) from exc
 
     full_id = _extract_copied_module_id(response)
     if full_id is None:

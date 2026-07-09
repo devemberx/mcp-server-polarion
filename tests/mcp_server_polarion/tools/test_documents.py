@@ -3684,6 +3684,21 @@ class TestCopyDocumentDryRun:
         assert result.target_project_id is None
         assert result.payload_preview == {"targetDocumentName": "DocCopy"}
 
+    async def test_dry_run_preview_folds_in_revision(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # revision = query param, not body — dry_run preview still surface it.
+        result = await _call_copy_doc(
+            mock_ctx, target_document_name="DocCopy", revision="1234", dry_run=True
+        )
+
+        mock_client.post.assert_not_called()
+        assert isinstance(result, DocumentCopyResult)
+        assert result.payload_preview == {
+            "targetDocumentName": "DocCopy",
+            "revision": "1234",
+        }
+
     async def test_dry_run_still_guards_bogus_role(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
