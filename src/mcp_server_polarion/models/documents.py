@@ -88,3 +88,14 @@ class DocumentUpdateResult(BaseModel):
     updated: bool
     dry_run: bool
     payload_preview: Mapping[str, object] | None
+
+
+class DocumentCopyResult(BaseModel):
+    """``copy_document`` result. Location fields parsed from the copy 201."""
+
+    copied: bool
+    dry_run: bool
+    target_project_id: str | None
+    target_space_id: str | None
+    document_name: str | None
+    payload_preview: Mapping[str, object] | None

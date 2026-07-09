@@ -70,6 +70,15 @@ class TestWriteToolAnnotations:
                 },
             ),
             (
+                "copy_document",
+                {
+                    "readOnlyHint": False,
+                    "destructiveHint": False,
+                    "idempotentHint": False,
+                    "openWorldHint": True,
+                },
+            ),
+            (
                 "create_work_item_links",
                 {
                     "readOnlyHint": False,

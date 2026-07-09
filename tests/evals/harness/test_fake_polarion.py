@@ -304,6 +304,19 @@ class TestMutations:
         )
         assert _json(response)["data"][0]["id"] == MODULE_ID
 
+    def test_post_copy_action_returns_sparse_dict(self) -> None:
+        fake = FakePolarion()
+        response = _mutate(
+            fake,
+            "POST",
+            f"/projects/{PROJECT}/spaces/{SPACE}/documents/{DOC}/actions/copy",
+            {"targetDocumentName": "FakeDocCopy"},
+        )
+        assert response.status_code == 201
+        data = _json(response)["data"]
+        assert isinstance(data, dict)
+        assert data["id"].endswith("/FakeDocCopy")
+
     def test_post_comments_echoes_id(self) -> None:
         fake = FakePolarion()
         response = _mutate(
