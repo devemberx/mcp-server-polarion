@@ -26,6 +26,23 @@ class TestRunSummary(BaseModel):
     template_id: str = ""
 
 
+class TestRunDetail(TestRunSummary):
+    """Full test-run detail from ``get_test_run``."""
+
+    __test__ = False
+
+    project_id: str
+    author_id: str = ""
+    created: str = ""
+    # LiveDoc selection source; empty for non-LiveDoc runs.
+    space_id: str = ""
+    document_name: str = ""
+    query: str = ""
+    select_test_cases_by: str = ""
+    home_page_html: str = ""
+    custom_fields: dict[str, object] = Field(default_factory=dict)
+
+
 class TestRunCreateSpec(BaseModel):
     """One test run to create via ``create_test_runs``."""
 

@@ -13,12 +13,14 @@ from mcp_server_polarion.models import (
     EnumOption,
     Hyperlink,
     PaginatedResult,
+    TestRunDetail,
     TestRunSummary,
     WorkItemDetail,
     WorkItemLink,
     WorkItemSummary,
 )
 from mcp_server_polarion.tools._shared.custom_fields import (
+    STANDARD_TEST_RUN_ATTRIBUTES,
     STANDARD_WORK_ITEM_ATTRIBUTES,
     extract_custom_fields,
 )
@@ -340,6 +342,52 @@ def parse_test_run_summaries(response: dict[str, object]) -> list[TestRunSummary
             continue
         items.append(TestRunSummary(**parse_test_run_summary_kwargs(item, user_names)))
     return items
+
+
+def parse_test_run_detail(
+    item: dict[str, object],
+    *,
+    project_id: str,
+    fallback_id: str = "",
+    user_names: Mapping[str, str] | None = None,
+) -> TestRunDetail:
+    """JSON:API testrun resource → ``TestRunDetail``. Expect
+    ``TEST_RUN_DETAIL_FIELDS`` + ``include=author``; homePageContent pass
+    through as raw HTML, round-trip unchanged. ``user_names`` map full
+    user id → display name (from included ``users``).
+    """
+    attributes = item.get("attributes", {})
+    if not isinstance(attributes, dict):
+        attributes = {}
+    relationships = item.get("relationships", {})
+    if not isinstance(relationships, dict):
+        relationships = {}
+
+    body_obj = attributes.get("homePageContent", {})
+    body_html = ""
+    if isinstance(body_obj, dict):
+        body_html = safe_str(body_obj.get("value", ""))
+
+    summary_kwargs = parse_test_run_summary_kwargs(item, dict(user_names or {}))
+    if not summary_kwargs["id"]:
+        summary_kwargs["id"] = fallback_id
+
+    author_full = extract_relationship_id(relationships, "author")
+    space_id, document_name = split_module_id(
+        extract_relationship_id(relationships, "document")
+    )
+    return TestRunDetail(
+        **summary_kwargs,
+        project_id=project_id,
+        author_id=extract_short_id(author_full),
+        created=safe_str(attributes.get("created", "")),
+        space_id=space_id,
+        document_name=document_name,
+        query=safe_str(attributes.get("query", "")),
+        select_test_cases_by=safe_str(attributes.get("selectTestCasesBy", "")),
+        home_page_html=body_html,
+        custom_fields=extract_custom_fields(attributes, STANDARD_TEST_RUN_ATTRIBUTES),
+    )
 
 
 def _parse_comment(item: dict[str, object], user_names: Mapping[str, str]) -> Comment:

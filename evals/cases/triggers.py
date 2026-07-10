@@ -17,6 +17,7 @@ from evals.harness.fixtures import (
     PARENT_REQ_ID,
     PROJECT,
     SPACE,
+    TEST_RUN_ID,
 )
 
 MIN_PASS_RATE = 1.0
@@ -182,6 +183,16 @@ CASES: list[Case] = [
         covers=["list_test_runs"],
         expect="list_test_runs",
         reject=["list_work_items"],
+    ),
+    _case(
+        "TRIG-GET-TEST-RUN",
+        f"Show the full details of test run '{TEST_RUN_ID}' in project '{PROJECT}'.",
+        "triggers_tool",
+        intent="Fetching one known run's details must call get_test_run, not "
+        "page through list_test_runs.",
+        covers=["get_test_run"],
+        expect="get_test_run",
+        reject=["list_test_runs"],
     ),
     _case(
         "TRIG-CREATE-TEST-RUN",

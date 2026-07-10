@@ -216,6 +216,17 @@ class TestTestRunRouting:
         response = _get(FakePolarion(), f"/projects/{PROJECT}/testruns/Nope")
         assert response.status_code == 404
 
+    def test_single_instance_serves_detail_attributes(self) -> None:
+        # get_test_run consume same endpoint as template guard; serve full
+        # resource so detail fields populate.
+        response = _get(FakePolarion(), f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}")
+        payload = _json(response)
+        attributes = payload["data"]["attributes"]
+        assert attributes["title"] == "Fake Regression Run"
+        assert attributes["status"] == "open"
+        included = payload["included"]
+        assert included and included[0]["type"] == "users"
+
     def test_testing_context_enum_resolves(self) -> None:
         response = _get(
             FakePolarion(),

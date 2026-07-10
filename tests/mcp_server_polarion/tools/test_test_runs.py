@@ -16,10 +16,15 @@ from mcp_server_polarion.core.exceptions import (
     PolarionError,
     PolarionNotFoundError,
 )
-from mcp_server_polarion.models import PaginatedResult, TestRunCreateSpec
+from mcp_server_polarion.models import (
+    PaginatedResult,
+    TestRunCreateSpec,
+    TestRunDetail,
+)
 from mcp_server_polarion.tools.test_runs import (
     _build_create_test_runs_payload,
     create_test_runs,
+    get_test_run,
     list_test_runs,
 )
 
@@ -679,3 +684,170 @@ class TestListTestRunsFieldValidation:
     def test_page_number_below_min_rejected(self) -> None:
         with pytest.raises(ValidationError):
             self._adapter("page_number").validate_python(0)
+
+
+def _detail_response() -> dict[str, object]:
+    """Full single-testrun GET body covering every detail field."""
+    return {
+        "data": {
+            "type": "testruns",
+            "id": "proj1/TR-100",
+            "attributes": {
+                "title": "Regression 2.5",
+                "type": "manual",
+                "status": "open",
+                "created": "2026-06-01T08:00:00Z",
+                "updated": "2026-06-20T10:00:00Z",
+                "finishedOn": "2026-06-19T17:30:00Z",
+                "groupId": "Release-2.5",
+                "isTemplate": False,
+                "query": "type:testcase AND component:auth",
+                "selectTestCasesBy": "dynamicQueryResult",
+                "homePageContent": {
+                    "type": "text/html",
+                    "value": '<p id="polarion_1">Run <strong>notes</strong></p>',
+                },
+                "myCustomField": "custom-value",
+            },
+            "relationships": {
+                "author": {"data": {"type": "users", "id": "proj1/bob"}},
+                "document": {
+                    "data": {"type": "documents", "id": "proj1/Testing/Auth Plan"}
+                },
+                "template": {"data": {"type": "testruns", "id": "proj1/TPL-1"}},
+            },
+        },
+        "included": [
+            {"type": "users", "id": "proj1/bob", "attributes": {"name": "Bob B"}},
+        ],
+    }
+
+
+class TestGetTestRun:
+    """``get_test_run`` tool."""
+
+    async def test_returns_test_run_detail(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _detail_response()
+
+        result = await get_test_run(
+            mock_ctx,
+            project_id="proj1",
+            test_run_id="TR-100",
+            include_home_page_html=True,
+        )
+
+        assert isinstance(result, TestRunDetail)
+        assert result.id == "TR-100"
+        assert result.title == "Regression 2.5"
+        assert result.type == "manual"
+        assert result.status == "open"
+        assert result.created == "2026-06-01T08:00:00Z"
+        assert result.updated == "2026-06-20T10:00:00Z"
+        assert result.finished_on == "2026-06-19T17:30:00Z"
+        assert result.group_id == "Release-2.5"
+        assert result.is_template is False
+        assert result.query == "type:testcase AND component:auth"
+        assert result.select_test_cases_by == "dynamicQueryResult"
+        assert result.project_id == "proj1"
+        assert result.author_id == "bob"
+        assert result.author_name == "Bob B"
+        assert result.space_id == "Testing"
+        assert result.document_name == "Auth Plan"
+        assert result.template_id == "TPL-1"
+        # Raw HTML passthrough — anchor ids survive verbatim.
+        assert result.home_page_html == (
+            '<p id="polarion_1">Run <strong>notes</strong></p>'
+        )
+        assert result.custom_fields == {"myCustomField": "custom-value"}
+
+    async def test_request_params(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _detail_response()
+
+        await get_test_run(
+            mock_ctx,
+            project_id="proj1",
+            test_run_id="TR-100",
+            include_home_page_html=False,
+        )
+
+        args, kwargs = mock_client.get.call_args
+        assert args[0] == "/projects/proj1/testruns/TR-100"
+        assert kwargs["params"]["fields[testruns]"] == "@all"
+        assert kwargs["params"]["include"] == "author"
+        assert kwargs["params"]["fields[users]"] == "name"
+
+    async def test_include_home_page_html_false_blanks_field(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Flag off blank body — body still travel (``@all`` for customs)."""
+        mock_client.get.return_value = _detail_response()
+
+        result = await get_test_run(
+            mock_ctx,
+            project_id="proj1",
+            test_run_id="TR-100",
+            include_home_page_html=False,
+        )
+
+        assert result.home_page_html == ""
+        # Other metadata still populated.
+        assert result.title == "Regression 2.5"
+
+    async def test_not_found_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionNotFoundError(
+            "Not found", status_code=404
+        )
+
+        with pytest.raises(ValueError, match="list_test_runs"):
+            await get_test_run(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="TR-404",
+                include_home_page_html=False,
+            )
+
+    async def test_auth_error_raises_permission_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError("auth", status_code=401)
+
+        with pytest.raises(PermissionError):
+            await get_test_run(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="TR-100",
+                include_home_page_html=False,
+            )
+
+    async def test_other_error_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionError("boom", status_code=500)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            await get_test_run(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="TR-100",
+                include_home_page_html=False,
+            )
+
+    async def test_non_dict_data_falls_back_to_arg_id(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {"data": []}
+
+        result = await get_test_run(
+            mock_ctx,
+            project_id="proj1",
+            test_run_id="TR-100",
+            include_home_page_html=False,
+        )
+
+        assert result.id == "TR-100"

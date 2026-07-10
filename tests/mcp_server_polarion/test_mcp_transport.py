@@ -32,6 +32,7 @@ _READ_TOOL_NAMES: frozenset[str] = frozenset(
         "read_document",
         "list_work_items",
         "list_test_runs",
+        "get_test_run",
         "get_sql_query_recipes",
         "get_html_recipes",
         "get_work_item",
