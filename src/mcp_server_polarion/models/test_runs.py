@@ -39,7 +39,9 @@ class TestRunDetail(TestRunSummary):
     document_name: str = ""
     query: str = ""
     select_test_cases_by: str = ""
-    home_page_html: str = ""
+    # True = report inherit from template; Polarion omit homePageContent then.
+    use_report_from_template: bool = False
+    content_html: str = ""
     custom_fields: dict[str, object] = Field(default_factory=dict)
 
 

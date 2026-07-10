@@ -385,7 +385,8 @@ def parse_test_run_detail(
         document_name=document_name,
         query=safe_str(attributes.get("query", "")),
         select_test_cases_by=safe_str(attributes.get("selectTestCasesBy", "")),
-        home_page_html=body_html,
+        use_report_from_template=bool(attributes.get("useReportFromTemplate", False)),
+        content_html=body_html,
         custom_fields=extract_custom_fields(attributes, STANDARD_TEST_RUN_ATTRIBUTES),
     )
 

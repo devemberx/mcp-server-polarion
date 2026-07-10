@@ -395,7 +395,7 @@ class TestParseTestRunSummaries:
 class TestParseTestRunDetail:
     """Tests for `parse_test_run_detail`."""
 
-    def test_passes_home_page_html_verbatim_and_extracts_customs(self) -> None:
+    def test_passes_content_html_verbatim_and_extracts_customs(self) -> None:
         item: dict[str, object] = {
             "id": "proj/TR-1",
             "attributes": {
@@ -411,14 +411,25 @@ class TestParseTestRunDetail:
             "relationships": {"author": {"data": {"id": "proj/jdoe"}}},
         }
         detail = parse_test_run_detail(item, project_id="proj")
-        assert detail.home_page_html == "<p>raw</p>"
+        assert detail.content_html == "<p>raw</p>"
         assert detail.created == "2026-06-01T08:00:00Z"
         assert detail.query == "type:testcase"
         assert detail.select_test_cases_by == "staticQueryResult"
+        assert detail.use_report_from_template is False
         assert detail.project_id == "proj"
         assert detail.author_id == "jdoe"
         assert detail.author_name == ""
         assert detail.custom_fields == {"myCustomField": "x"}
+
+    def test_use_report_from_template_true_with_absent_body(self) -> None:
+        # Polarion omit homePageContent when report inherit from template.
+        item: dict[str, object] = {
+            "id": "proj/TR-1",
+            "attributes": {"title": "T", "useReportFromTemplate": True},
+        }
+        detail = parse_test_run_detail(item, project_id="proj")
+        assert detail.use_report_from_template is True
+        assert detail.content_html == ""
 
     def test_user_names_resolve_author_name(self) -> None:
         item: dict[str, object] = {
@@ -457,7 +468,7 @@ class TestParseTestRunDetail:
             "attributes": {"title": "T", "homePageContent": "nope"},
         }
         detail = parse_test_run_detail(item, project_id="proj")
-        assert detail.home_page_html == ""
+        assert detail.content_html == ""
 
     def test_fallback_id_used_when_id_missing(self) -> None:
         item: dict[str, object] = {"attributes": {"title": "T"}}
@@ -472,7 +483,7 @@ class TestParseTestRunDetail:
         }
         detail = parse_test_run_detail(item, project_id="proj")
         assert detail.id == "TR-1"
-        assert detail.home_page_html == ""
+        assert detail.content_html == ""
         assert detail.author_id == ""
         assert detail.custom_fields == {}
 

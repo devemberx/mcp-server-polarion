@@ -259,9 +259,9 @@ async def get_test_run(
     ctx: Context,
     project_id: str = Field(description="Polarion project ID."),
     test_run_id: str = Field(description="Test run ID (e.g. 'TR-2026-01')."),
-    include_home_page_html: bool = Field(
+    include_homepage_content_html: bool = Field(
         default=False,
-        description="Fill ``home_page_html`` with the run's raw HTML report body.",
+        description="Fill ``content_html`` with the run's raw HTML report body.",
     ),
 ) -> TestRunDetail:
     """Get full details of one test run by ID.
@@ -270,9 +270,10 @@ async def get_test_run(
     read-only context: how test cases are selected (select_test_cases_by with
     its query or source document space_id/document_name), template provenance
     (is_template, template_id), author, and timestamps.
-    include_home_page_html=True fills home_page_html with the raw HTML report
-    body (empty when the run inherits its report from a template); keep it
-    verbatim — never feed back a blanked (flag=False) body.
+    include_homepage_content_html=True fills content_html with the raw HTML
+    report body; it stays empty when use_report_from_template is true (the run
+    inherits its report from its template). Keep it verbatim — never feed back
+    a blanked (flag=False) body.
     """
     client = get_client(ctx)
     path = (
@@ -312,7 +313,7 @@ async def get_test_run(
         fallback_id=test_run_id,
         user_names=parse_included_user_name_map(response),
     )
-    if not include_home_page_html:
+    if not include_homepage_content_html:
         # Body always travel over wire; blank per flag=False contract.
-        detail = detail.model_copy(update={"home_page_html": ""})
+        detail = detail.model_copy(update={"content_html": ""})
     return detail

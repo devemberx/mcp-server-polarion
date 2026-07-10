@@ -703,6 +703,7 @@ def _detail_response() -> dict[str, object]:
                 "isTemplate": False,
                 "query": "type:testcase AND component:auth",
                 "selectTestCasesBy": "dynamicQueryResult",
+                "useReportFromTemplate": False,
                 "homePageContent": {
                     "type": "text/html",
                     "value": '<p id="polarion_1">Run <strong>notes</strong></p>',
@@ -735,7 +736,7 @@ class TestGetTestRun:
             mock_ctx,
             project_id="proj1",
             test_run_id="TR-100",
-            include_home_page_html=True,
+            include_homepage_content_html=True,
         )
 
         assert isinstance(result, TestRunDetail)
@@ -750,6 +751,7 @@ class TestGetTestRun:
         assert result.is_template is False
         assert result.query == "type:testcase AND component:auth"
         assert result.select_test_cases_by == "dynamicQueryResult"
+        assert result.use_report_from_template is False
         assert result.project_id == "proj1"
         assert result.author_id == "bob"
         assert result.author_name == "Bob B"
@@ -757,7 +759,7 @@ class TestGetTestRun:
         assert result.document_name == "Auth Plan"
         assert result.template_id == "TPL-1"
         # Raw HTML passthrough — anchor ids survive verbatim.
-        assert result.home_page_html == (
+        assert result.content_html == (
             '<p id="polarion_1">Run <strong>notes</strong></p>'
         )
         assert result.custom_fields == {"myCustomField": "custom-value"}
@@ -771,7 +773,7 @@ class TestGetTestRun:
             mock_ctx,
             project_id="proj1",
             test_run_id="TR-100",
-            include_home_page_html=False,
+            include_homepage_content_html=False,
         )
 
         args, kwargs = mock_client.get.call_args
@@ -780,7 +782,7 @@ class TestGetTestRun:
         assert kwargs["params"]["include"] == "author"
         assert kwargs["params"]["fields[users]"] == "name"
 
-    async def test_include_home_page_html_false_blanks_field(
+    async def test_include_homepage_content_html_false_blanks_field(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         """Flag off blank body — body still travel (``@all`` for customs)."""
@@ -790,10 +792,10 @@ class TestGetTestRun:
             mock_ctx,
             project_id="proj1",
             test_run_id="TR-100",
-            include_home_page_html=False,
+            include_homepage_content_html=False,
         )
 
-        assert result.home_page_html == ""
+        assert result.content_html == ""
         # Other metadata still populated.
         assert result.title == "Regression 2.5"
 
@@ -809,7 +811,7 @@ class TestGetTestRun:
                 mock_ctx,
                 project_id="proj1",
                 test_run_id="TR-404",
-                include_home_page_html=False,
+                include_homepage_content_html=False,
             )
 
     async def test_auth_error_raises_permission_error(
@@ -822,7 +824,7 @@ class TestGetTestRun:
                 mock_ctx,
                 project_id="proj1",
                 test_run_id="TR-100",
-                include_home_page_html=False,
+                include_homepage_content_html=False,
             )
 
     async def test_other_error_raises_runtime_error(
@@ -835,7 +837,7 @@ class TestGetTestRun:
                 mock_ctx,
                 project_id="proj1",
                 test_run_id="TR-100",
-                include_home_page_html=False,
+                include_homepage_content_html=False,
             )
 
     async def test_non_dict_data_falls_back_to_arg_id(
@@ -847,7 +849,7 @@ class TestGetTestRun:
             mock_ctx,
             project_id="proj1",
             test_run_id="TR-100",
-            include_home_page_html=False,
+            include_homepage_content_html=False,
         )
 
         assert result.id == "TR-100"
