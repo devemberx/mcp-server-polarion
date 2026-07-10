@@ -91,6 +91,16 @@ CASES: list[Case] = [
         reject=["update_document"],
     ),
     _case(
+        "TRIG-COPY-DOC",
+        f"Duplicate the document '{DOC}' in space '{SPACE}' as 'FakeDocCopy'.",
+        "triggers_tool",
+        intent="Duplicating an existing document must call copy_document; "
+        "rebuilding it via create_document/update_document loses contained items.",
+        covers=["copy_document"],
+        expect="copy_document",
+        reject=["create_document", "update_document"],
+    ),
+    _case(
         "TRIG-WI-COMMENT",
         f"Add a comment 'Looks good' to work item {FLOATING_TASK_ID}.",
         "triggers_tool",
