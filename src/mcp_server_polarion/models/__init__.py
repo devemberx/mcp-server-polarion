@@ -44,6 +44,8 @@ from mcp_server_polarion.models.test_runs import (
     TestRunCreateSpec,
     TestRunsCreateResult,
     TestRunSummary,
+    TestRunsUpdateResult,
+    TestRunUpdateSpec,
 )
 from mcp_server_polarion.models.work_items import (
     Hyperlink,
@@ -78,7 +80,9 @@ __all__: list[str] = [
     "SqlRecipeGallery",
     "TestRunCreateSpec",
     "TestRunSummary",
+    "TestRunUpdateSpec",
     "TestRunsCreateResult",
+    "TestRunsUpdateResult",
     "WorkItemCommentSpec",
     "WorkItemCreateSpec",
     "WorkItemDetail",
