@@ -332,7 +332,7 @@ async def list_test_runs(  # noqa: PLR0913
 ) -> PaginatedResult[TestRunSummary]:
     """List / search test runs in a project.
 
-    Returns actual run instances by default; set templates=True for the
+    Returns run instances by default; set templates=True for the
     reusable template blueprints. Filter by person with author.name (exact,
     quoted) — author.id does not match on test runs; discover the full name
     from an unfiltered page first.

@@ -320,7 +320,7 @@ async def create_document_comments(  # noqa: PLR0913
         description="Preview payload without calling Polarion.",
     ),
 ) -> CommentsCreateResult:
-    """Create one or more comments on a document in a single request.
+    """Create one or more comments on a document in one request.
 
     Reply: set parent_comment_id to a short id from list_document_comments
     (None = top-level). 'text/html' text is sent unsanitized. Always
@@ -407,7 +407,7 @@ async def create_work_item_comments(
         description="Preview payload without calling Polarion.",
     ),
 ) -> CommentsCreateResult:
-    """Create one or more comments on a work item in a single request.
+    """Create one or more comments on a work item in one request.
 
     Reply: set parent_comment_id to a short id from list_work_item_comments
     (None = top-level). Optional title sets the comment heading. 'text/html'

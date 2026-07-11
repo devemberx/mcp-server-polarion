@@ -185,10 +185,10 @@ async def move_work_item_from_document(
 ) -> WorkItemMoveResult:
     """Detach a work item from its document — the ONLY detach path.
 
-    NOT idempotent: an already free-floating item fails — first confirm it
-    is in a document (get_work_item: non-empty space_id) and skip the call
-    when already detached. The item is preserved and re-attachable via
-    move_work_item_to_document. Headings are detachable too.
+    NOT idempotent: an already free-floating item fails — confirm attachment
+    first (get_work_item: non-empty space_id). The item is preserved and
+    re-attachable via move_work_item_to_document. Headings are detachable
+    too.
     """
     if dry_run:
         return WorkItemMoveResult(
