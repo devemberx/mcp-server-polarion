@@ -53,6 +53,10 @@ SECTION_A_PART_ID = f"heading_{DOC_HEADING_ID}"
 # Test run instance served by list_test_runs (TRIG-LIST-TEST-RUNS).
 TEST_RUN_ID = "Fake-TR-001"
 
+# Extra run instances so 3-item bulk update prompt possible (EFF-BULK-UPDATE-RUNS).
+TEST_RUN_ID_2 = "Fake-TR-002"
+TEST_RUN_ID_3 = "Fake-TR-003"
+
 # Template blueprint; create_test_runs resolve it via template guard.
 TEST_RUN_TEMPLATE_ID = "Fake-TR-Template"
 
@@ -211,6 +215,7 @@ SEEDS = Seeds(
         ),
     },
     test_runs={
+        # TEST_RUN_ID stay data[0] — test_fake_polarion assert on it.
         TEST_RUN_ID: TestRun(
             TEST_RUN_ID,
             "Fake Regression Run",
@@ -218,6 +223,8 @@ SEEDS = Seeds(
             status="open",
             finished_on=TS,
         ),
+        TEST_RUN_ID_2: TestRun(TEST_RUN_ID_2, "Fake Smoke Run"),
+        TEST_RUN_ID_3: TestRun(TEST_RUN_ID_3, "Fake Sanity Run"),
         TEST_RUN_TEMPLATE_ID: TestRun(
             TEST_RUN_TEMPLATE_ID,
             "Fake Run Template",
