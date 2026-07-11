@@ -18,6 +18,7 @@ from mcp_server_polarion.models.common import (
     PaginatedResult,
 )
 from mcp_server_polarion.models.documents import (
+    DocumentCopyResult,
     DocumentCreateResult,
     DocumentDetail,
     DocumentPart,
@@ -65,6 +66,7 @@ __all__: list[str] = [
     "CommentSpec",
     "CommentUpdateResult",
     "CommentsCreateResult",
+    "DocumentCopyResult",
     "DocumentCreateResult",
     "DocumentDetail",
     "DocumentPart",
