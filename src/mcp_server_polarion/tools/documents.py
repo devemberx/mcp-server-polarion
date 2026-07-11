@@ -1105,9 +1105,9 @@ async def create_document(  # noqa: PLR0913
 ) -> DocumentCreateResult:
     """Create a new Polarion document in a space.
 
-    module_name must be unique in the space — check list_documents first.
-    type/status and custom_fields keys are validated on write — resolve ids
-    via list_document_enum_options first.
+    module_name must be unique in the space — a duplicate name conflicts;
+    check list_documents first. type/status and custom_fields keys are
+    validated on write — resolve ids via list_document_enum_options first.
 
     home_page_content is Markdown (greenfield only), converted to sanitized
     HTML. Markdown tables get native Polarion styling; a paragraph starting
