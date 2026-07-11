@@ -46,7 +46,7 @@ class TestRunDetail(TestRunSummary):
 
 
 class TestRunCreateSpec(BaseModel):
-    """One test run to create via ``create_test_runs``."""
+    """One test run to create via create_test_runs."""
 
     __test__ = False
 
@@ -76,8 +76,7 @@ class TestRunsCreateResult(BaseModel):
 
 
 class TestRunUpdateSpec(BaseModel):
-    """One test run's changes in an ``update_test_runs`` batch; unset
-    fields stay unchanged."""
+    """One update_test_runs batch entry; unset fields stay unchanged."""
 
     __test__ = False
 

@@ -190,7 +190,7 @@ async def list_document_comments(  # noqa: PLR0913
     ctx: Context,
     project_id: str = Field(description="Polarion project ID."),
     space_id: str = Field(description="Space ID ('_default' = default space)."),
-    document_name: str = Field(description="Document name within ``space_id``."),
+    document_name: str = Field(description="Document name within space_id."),
     page_size: int = Field(default=DEFAULT_PAGE_SIZE, ge=1, le=100),
     page_number: int = Field(default=1, ge=1),
 ) -> PaginatedResult[Comment]:
