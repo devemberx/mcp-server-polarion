@@ -391,25 +391,21 @@ class FakePolarion:
                 200, json={"data": data, "meta": {"totalCount": len(data)}}
             )
 
-        # Single test run (template-guard pre-read); isTemplate served only on
-        # templates, mirror live Polarion omitting it on instances.
+        # Single test run (template guard + get_test_run); isTemplate served
+        # only on templates, mirror live Polarion omitting it on instances.
         single_tr = re.search(r"/testruns/([^/]+)$", path)
         if single_tr:
             tr = self.seeds.test_runs.get(single_tr.group(1))
             if tr is None:
                 return httpx.Response(404, json={"errors": [{"status": "404"}]})
-            attributes: dict[str, Any] = {"id": tr.short_id}
-            if tr.is_template:
-                attributes["isTemplate"] = True
+            resource = self._test_run_resource(tr)
+            attributes = resource["attributes"]
+            attributes["id"] = tr.short_id
+            if not tr.is_template:
+                del attributes["isTemplate"]
             return httpx.Response(
                 200,
-                json={
-                    "data": {
-                        "type": "testruns",
-                        "id": f"{PROJECT}/{tr.short_id}",
-                        "attributes": attributes,
-                    }
-                },
+                json={"data": resource, "included": self._author_included()},
             )
 
         # Test runs: templates=true return blueprints, else actual instances;

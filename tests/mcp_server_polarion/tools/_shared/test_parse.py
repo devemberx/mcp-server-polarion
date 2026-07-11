@@ -17,6 +17,7 @@ from mcp_server_polarion.tools._shared.parse import (
     parse_hyperlinks,
     parse_included_user_name_map,
     parse_included_work_item_map,
+    parse_test_run_detail,
     parse_test_run_summaries,
     parse_test_run_summary_kwargs,
     parse_work_item_detail,
@@ -389,6 +390,102 @@ class TestParseTestRunSummaries:
             ]
         }
         assert [s.id for s in parse_test_run_summaries(response)] == ["TR-2"]
+
+
+class TestParseTestRunDetail:
+    """Tests for `parse_test_run_detail`."""
+
+    def test_passes_content_html_verbatim_and_extracts_customs(self) -> None:
+        item: dict[str, object] = {
+            "id": "proj/TR-1",
+            "attributes": {
+                "title": "T",
+                "type": "manual",
+                "status": "open",
+                "created": "2026-06-01T08:00:00Z",
+                "query": "type:testcase",
+                "selectTestCasesBy": "staticQueryResult",
+                "homePageContent": {"type": "text/html", "value": "<p>raw</p>"},
+                "myCustomField": "x",
+            },
+            "relationships": {"author": {"data": {"id": "proj/jdoe"}}},
+        }
+        detail = parse_test_run_detail(item, project_id="proj")
+        assert detail.content_html == "<p>raw</p>"
+        assert detail.created == "2026-06-01T08:00:00Z"
+        assert detail.query == "type:testcase"
+        assert detail.select_test_cases_by == "staticQueryResult"
+        assert detail.use_report_from_template is False
+        assert detail.project_id == "proj"
+        assert detail.author_id == "jdoe"
+        assert detail.author_name == ""
+        assert detail.custom_fields == {"myCustomField": "x"}
+
+    def test_use_report_from_template_true_with_absent_body(self) -> None:
+        # Polarion omit homePageContent when report inherit from template.
+        item: dict[str, object] = {
+            "id": "proj/TR-1",
+            "attributes": {"title": "T", "useReportFromTemplate": True},
+        }
+        detail = parse_test_run_detail(item, project_id="proj")
+        assert detail.use_report_from_template is True
+        assert detail.content_html == ""
+
+    def test_user_names_resolve_author_name(self) -> None:
+        item: dict[str, object] = {
+            "id": "proj/TR-1",
+            "attributes": {"title": "T"},
+            "relationships": {"author": {"data": {"id": "proj/jdoe"}}},
+        }
+        detail = parse_test_run_detail(
+            item, project_id="proj", user_names={"proj/jdoe": "J Doe"}
+        )
+        assert detail.author_id == "jdoe"
+        assert detail.author_name == "J Doe"
+
+    def test_document_relationship_splits_space_and_name(self) -> None:
+        # Doc names may contain '/' — split_module_id keep tail intact.
+        item: dict[str, object] = {
+            "id": "proj/TR-1",
+            "attributes": {"title": "T"},
+            "relationships": {
+                "document": {"data": {"id": "proj/Testing/Auth/Plan"}},
+            },
+        }
+        detail = parse_test_run_detail(item, project_id="proj")
+        assert detail.space_id == "Testing"
+        assert detail.document_name == "Auth/Plan"
+
+    def test_no_document_relationship_defaults_empty(self) -> None:
+        item: dict[str, object] = {"id": "proj/TR-1", "attributes": {"title": "T"}}
+        detail = parse_test_run_detail(item, project_id="proj")
+        assert detail.space_id == ""
+        assert detail.document_name == ""
+
+    def test_non_dict_home_page_content_defaults_empty(self) -> None:
+        item: dict[str, object] = {
+            "id": "proj/TR-1",
+            "attributes": {"title": "T", "homePageContent": "nope"},
+        }
+        detail = parse_test_run_detail(item, project_id="proj")
+        assert detail.content_html == ""
+
+    def test_fallback_id_used_when_id_missing(self) -> None:
+        item: dict[str, object] = {"attributes": {"title": "T"}}
+        detail = parse_test_run_detail(item, project_id="proj", fallback_id="TR-9")
+        assert detail.id == "TR-9"
+
+    def test_non_dict_attributes_and_relationships_default_empty(self) -> None:
+        item: dict[str, object] = {
+            "id": "proj/TR-1",
+            "attributes": [],
+            "relationships": "nope",
+        }
+        detail = parse_test_run_detail(item, project_id="proj")
+        assert detail.id == "TR-1"
+        assert detail.content_html == ""
+        assert detail.author_id == ""
+        assert detail.custom_fields == {}
 
 
 class TestParseComment:

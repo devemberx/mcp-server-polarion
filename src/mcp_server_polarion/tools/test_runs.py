@@ -1,4 +1,4 @@
-"""Test run tools — list, search, and create test runs in a project."""
+"""Test run tools — list, search, get, and create test runs in a project."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from mcp_server_polarion.models import (
     JsonValue,
     PaginatedResult,
     TestRunCreateSpec,
+    TestRunDetail,
     TestRunsCreateResult,
     TestRunSummary,
 )
@@ -26,6 +27,7 @@ from mcp_server_polarion.tools._shared.custom_fields import (
 )
 from mcp_server_polarion.tools._shared.fields import (
     MAX_BULK_ITEMS,
+    TEST_RUN_DETAIL_FIELDS,
     TEST_RUN_LIST_FIELDS,
 )
 from mcp_server_polarion.tools._shared.guard import (
@@ -44,6 +46,8 @@ from mcp_server_polarion.tools._shared.pagination import (
 )
 from mcp_server_polarion.tools._shared.parse import (
     extract_created_short_ids,
+    parse_included_user_name_map,
+    parse_test_run_detail,
     parse_test_run_summaries,
 )
 
@@ -244,3 +248,72 @@ async def list_test_runs(  # noqa: PLR0913
     items = parse_test_run_summaries(response)
 
     return make_page(items, response, page_number, page_size)
+
+
+@mcp.tool(
+    tags={"read"},
+    timeout=60.0,
+    annotations={"readOnlyHint": True},
+)
+async def get_test_run(
+    ctx: Context,
+    project_id: str = Field(description="Polarion project ID."),
+    test_run_id: str = Field(description="Test run ID (e.g. 'TR-2026-01')."),
+    include_homepage_content_html: bool = Field(
+        default=False,
+        description="Fill ``content_html`` with the run's raw HTML report body.",
+    ),
+) -> TestRunDetail:
+    """Get full details of one test run by ID.
+
+    Returns writable fields (title, status, group_id, custom_fields) plus
+    read-only context: how test cases are selected (select_test_cases_by with
+    its query or source document space_id/document_name), template provenance
+    (is_template, template_id), author, and timestamps.
+    include_homepage_content_html=True fills content_html with the raw HTML
+    report body; it stays empty when use_report_from_template is true (the run
+    inherits its report from its template). Keep it verbatim — never feed back
+    a blanked (flag=False) body.
+    """
+    client = get_client(ctx)
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/testruns/{encode_path_segment(test_run_id)}"
+    )
+    try:
+        response = await client.get(
+            path,
+            params={
+                "fields[testruns]": TEST_RUN_DETAIL_FIELDS,
+                "include": "author",
+                "fields[users]": "name",
+            },
+        )
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Test run '{test_run_id}' not found in project '{project_id}'. "
+            "Use `list_test_runs` to discover valid IDs."
+        ) from exc
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot access test run -- check your POLARION_TOKEN permissions."
+        ) from exc
+    except PolarionError as exc:
+        raise RuntimeError(
+            f"Failed to get test run '{test_run_id}': {exc.message}"
+        ) from exc
+
+    data = response.get("data", {})
+    if not isinstance(data, dict):
+        data = {}
+
+    detail = parse_test_run_detail(
+        data,
+        project_id=project_id,
+        fallback_id=test_run_id,
+        user_names=parse_included_user_name_map(response),
+    )
+    if not include_homepage_content_html:
+        # Body always travel over wire; blank per flag=False contract.
+        detail = detail.model_copy(update={"content_html": ""})
+    return detail

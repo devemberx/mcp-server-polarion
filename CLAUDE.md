@@ -54,7 +54,7 @@ CI: `ruff check` → `ruff format --check` → `mypy` → `pytest` (`--cov-fail-
 - `/backlinkedworkitems` unsupported — back direction via `query=linkedWorkItems:{wi}`, so back results have `role=None`.
 - Polarion validate neither custom-field ids (unknown keys persist; wrong-type 400), nor enum values, nor link targets/roles — `guard/` validate pre-write. `getAvailableOptions` = only key→enum-options API (non-enum/unknown → 404). Link/hyperlink roles not there — use `GET /projects/{p}/enumerations/~/{enumName}/~` (`data` = dict, not list).
 - Custom fields inline under `attributes` (no `customFields` container; `@all` tokens dropped). `GET /projects/{p}/documents` absent on some builds.
-- Testruns: POST require explicit `id` (400 without; UI-only autofill); enums resolve only under `testing` context (`~` 404); no `getAvailableOptions` → custom-field enum values unguardable (keys only); `isTemplate` served only on templates.
+- Testruns: POST require explicit `id` (400 without; UI-only autofill); enums resolve only under `testing` context (`~` 404); no `getAvailableOptions` → custom-field enum values unguardable (keys only); `isTemplate` served only on templates; `homePageContent` served only on runs owning report — absent under `useReportFromTemplate` (even when requested explicit).
 - `documents/.../actions/copy`: flat body, 201 `data` = single dict (not list); `linkOriginalItemsWithRole` unvalidated → ghost link per copied item, guard vs **target** project `workitem-link-role`; documents not REST-deletable (405).
 
 ## Testing

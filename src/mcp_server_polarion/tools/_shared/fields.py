@@ -16,6 +16,7 @@ WORK_ITEM_PART_FIELDS: Final[str] = "title,type,status,description,outlineNumber
 TEST_RUN_LIST_FIELDS: Final[str] = (
     "title,type,status,finishedOn,updated,author,isTemplate,groupId,template"
 )
+TEST_RUN_DETAIL_FIELDS: Final[str] = "@all"
 DOCUMENT_DETAIL_FIELDS: Final[str] = "@all"
 # Sparse fieldset filters relationships too — name them explicitly.
 DOCUMENT_COMMENT_LIST_FIELDS: Final[str] = (
@@ -30,6 +31,7 @@ __all__: list[str] = [
     "DOCUMENT_COMMENT_LIST_FIELDS",
     "DOCUMENT_DETAIL_FIELDS",
     "MAX_BULK_ITEMS",
+    "TEST_RUN_DETAIL_FIELDS",
     "TEST_RUN_LIST_FIELDS",
     "WORK_ITEM_COMMENT_LIST_FIELDS",
     "WORK_ITEM_DETAIL_FIELDS",
