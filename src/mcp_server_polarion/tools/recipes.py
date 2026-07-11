@@ -45,9 +45,9 @@ async def get_html_recipes() -> HtmlRecipeGallery:
     """Fetch the required HTML templates for tables, captions, links, and
     widgets written via update_work_items / update_document.
 
-    Any new <table>, numbered caption, link, or TOC / Table-of-Figures
-    widget must be adapted from these templates — hand-written markup
-    renders unstyled and breaks numbering. Also covers macro-id and
-    metadata-scope caveats.
+    Any new <table>, numbered caption, work-item / cross-reference / wiki-page
+    link, or TOC / Table-of-Figures widget must be adapted from these
+    templates — plain hand-written markup renders unstyled and breaks
+    numbering. Also covers macro-id and metadata-scope caveats.
     """
     return HtmlRecipeGallery(recipes=_HTML_RECIPES)
