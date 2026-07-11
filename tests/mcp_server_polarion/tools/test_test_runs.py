@@ -455,6 +455,22 @@ class TestCreateTestRuns:
         mock_client.get.assert_not_awaited()
         mock_client.post.assert_not_awaited()
 
+    async def test_shadowing_custom_key_raises_before_network(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # title via custom_fields collide standard attr -- local build check
+        # raise clear param hint before any guard round-trip.
+        with pytest.raises(ValueError, match="standard Polarion attributes"):
+            await create_test_runs(
+                mock_ctx,
+                project_id="proj1",
+                items=[TestRunCreateSpec(id="TR-1", custom_fields={"title": "shadow"})],
+                dry_run=False,
+            )
+
+        mock_client.get.assert_not_awaited()
+        mock_client.post.assert_not_awaited()
+
     async def test_minimal_create_posts_and_returns_ids(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
@@ -815,6 +831,26 @@ class TestUpdateTestRuns:
         assert result.test_run_ids == ["TR-5"]
         # Sampled instances then templates before PATCH.
         assert mock_client.get.await_count == 2
+
+    async def test_shadowing_custom_key_raises_before_network(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # title via custom_fields collide standard attr -- local build check
+        # raise clear param hint before any guard round-trip.
+        with pytest.raises(ValueError, match="standard Polarion attributes"):
+            await update_test_runs(
+                mock_ctx,
+                project_id="proj1",
+                items=[
+                    TestRunUpdateSpec(
+                        test_run_id="TR-9", custom_fields={"title": "shadow"}
+                    )
+                ],
+                dry_run=False,
+            )
+
+        mock_client.get.assert_not_awaited()
+        mock_client.patch.assert_not_awaited()
 
     async def test_custom_field_guard_error_names_offending_item(
         self, mock_ctx: MagicMock, mock_client: AsyncMock

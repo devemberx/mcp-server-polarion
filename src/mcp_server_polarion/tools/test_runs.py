@@ -136,6 +136,11 @@ async def create_test_runs(
     """
     client = get_client(ctx)
     ensure_unique_ids((spec.id for spec in items), label="id")
+
+    # Build pre-guards -- standard-attr shadow collision raise locally,
+    # clearer than vaguer network key-guard message.
+    payload = _build_create_test_runs_payload(project_id=project_id, specs=items)
+
     for spec in items:
         await guard_test_run_enums(
             client, project_id, type=spec.type, status=spec.status
@@ -146,8 +151,6 @@ async def create_test_runs(
     for spec in items:
         if spec.custom_fields:
             await guard_test_run_custom_fields(client, project_id, spec.custom_fields)
-
-    payload = _build_create_test_runs_payload(project_id=project_id, specs=items)
 
     if dry_run:
         return TestRunsCreateResult(
@@ -262,6 +265,10 @@ async def update_test_runs(
     client = get_client(ctx)
     ensure_unique_ids((spec.test_run_id for spec in items), label="test_run_id")
 
+    # Build pre-guards -- standard-attr shadow collision raise locally,
+    # clearer than vaguer network key-guard message.
+    payload = _build_update_test_runs_payload(project_id=project_id, specs=items)
+
     for index, spec in enumerate(items):
         with reraise_with_item_context(index, spec.test_run_id):
             if spec.status:
@@ -270,8 +277,6 @@ async def update_test_runs(
                 await guard_test_run_custom_fields(
                     client, project_id, spec.custom_fields
                 )
-
-    payload = _build_update_test_runs_payload(project_id=project_id, specs=items)
 
     if dry_run:
         return TestRunsUpdateResult(
