@@ -20,12 +20,15 @@ from mcp_server_polarion.models import (
     PaginatedResult,
     TestRunCreateSpec,
     TestRunDetail,
+    TestRunUpdateSpec,
 )
 from mcp_server_polarion.tools.test_runs import (
     _build_create_test_runs_payload,
+    _build_update_test_runs_payload,
     create_test_runs,
     get_test_run,
     list_test_runs,
+    update_test_runs,
 )
 
 
@@ -452,6 +455,22 @@ class TestCreateTestRuns:
         mock_client.get.assert_not_awaited()
         mock_client.post.assert_not_awaited()
 
+    async def test_shadowing_custom_key_raises_before_network(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # title via custom_fields collide standard attr -- local build check
+        # raise clear param hint before guard round-trip.
+        with pytest.raises(ValueError, match="standard Polarion attributes"):
+            await create_test_runs(
+                mock_ctx,
+                project_id="proj1",
+                items=[TestRunCreateSpec(id="TR-1", custom_fields={"title": "shadow"})],
+                dry_run=False,
+            )
+
+        mock_client.get.assert_not_awaited()
+        mock_client.post.assert_not_awaited()
+
     async def test_minimal_create_posts_and_returns_ids(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
@@ -620,6 +639,340 @@ class TestCreateTestRuns:
                 items=[TestRunCreateSpec(id="TR-9")],
                 dry_run=False,
             )
+
+
+class TestBuildUpdateTestRunsPayload:
+    """``_build_update_test_runs_payload`` unit seam."""
+
+    def test_full_spec_builds_attributes(self) -> None:
+        spec = TestRunUpdateSpec(
+            test_run_id="TR-100",
+            title="New Title",
+            status="finished",
+            group_id="Release-2.5",
+            custom_fields={"goal": "regression"},
+        )
+
+        payload = _build_update_test_runs_payload(project_id="proj1", specs=[spec])
+
+        data = payload["data"]
+        assert isinstance(data, list)
+        resource = data[0]
+        assert isinstance(resource, dict)
+        assert resource["type"] == "testruns"
+        assert resource["id"] == "proj1/TR-100"
+        assert resource["attributes"] == {
+            "title": "New Title",
+            "status": "finished",
+            "groupId": "Release-2.5",
+            "goal": "regression",
+        }
+        assert "relationships" not in resource
+
+    def test_partial_spec_skips_unset(self) -> None:
+        spec = TestRunUpdateSpec(test_run_id="TR-101", title="Only Title")
+
+        payload = _build_update_test_runs_payload(project_id="proj1", specs=[spec])
+
+        data = payload["data"]
+        assert isinstance(data, list)
+        resource = data[0]
+        assert isinstance(resource, dict)
+        assert resource["attributes"] == {"title": "Only Title"}
+
+    def test_multiple_specs_keep_order(self) -> None:
+        specs = [
+            TestRunUpdateSpec(test_run_id="TR-1", title="A"),
+            TestRunUpdateSpec(test_run_id="TR-2", title="B"),
+        ]
+
+        payload = _build_update_test_runs_payload(project_id="proj1", specs=specs)
+
+        data = payload["data"]
+        assert isinstance(data, list)
+        ids = [entry["id"] for entry in data if isinstance(entry, dict)]
+        assert ids == ["proj1/TR-1", "proj1/TR-2"]
+
+    def test_custom_field_shadowing_standard_attribute_raises(self) -> None:
+        spec = TestRunUpdateSpec(
+            test_run_id="TR-102", custom_fields={"title": "shadow"}
+        )
+
+        with pytest.raises(ValueError, match="standard Polarion attributes"):
+            _build_update_test_runs_payload(project_id="proj1", specs=[spec])
+
+
+class TestUpdateTestRuns:
+    """``update_test_runs`` tool."""
+
+    async def test_duplicate_ids_rejected_before_any_request(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        items = [
+            TestRunUpdateSpec(test_run_id="TR-1", title="A"),
+            TestRunUpdateSpec(test_run_id="TR-1", title="B"),
+        ]
+
+        with pytest.raises(ValueError, match=r"Duplicate test_run_id\(s\)"):
+            await update_test_runs(
+                mock_ctx, project_id="proj1", items=items, dry_run=False
+            )
+
+        mock_client.get.assert_not_awaited()
+        mock_client.patch.assert_not_awaited()
+
+    async def test_minimal_update_patches_and_returns_ids(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.return_value = None
+
+        result = await update_test_runs(
+            mock_ctx,
+            project_id="proj1",
+            items=[TestRunUpdateSpec(test_run_id="TR-1", title="Renamed")],
+            dry_run=False,
+        )
+
+        assert result.updated is True
+        assert result.dry_run is False
+        assert result.test_run_ids == ["TR-1"]
+        assert result.payload_preview is None
+        # Title-only update need zero guard traffic.
+        mock_client.get.assert_not_awaited()
+        args, kwargs = mock_client.patch.await_args
+        assert args[0] == "/projects/proj1/testruns"
+        data = kwargs["json"]["data"]
+        assert data[0]["id"] == "proj1/TR-1"
+
+    async def test_dry_run_returns_payload_without_patching(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        result = await update_test_runs(
+            mock_ctx,
+            project_id="proj1",
+            items=[TestRunUpdateSpec(test_run_id="TR-2", title="Preview")],
+            dry_run=True,
+        )
+
+        assert result.updated is False
+        assert result.dry_run is True
+        assert result.test_run_ids == []
+        assert result.payload_preview is not None
+        data = result.payload_preview["data"]
+        assert isinstance(data, list)
+        mock_client.patch.assert_not_awaited()
+
+    async def test_unknown_status_blocks_before_patch(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": {
+                "type": "enumerations",
+                "id": "testrun-status",
+                "attributes": {"options": [{"id": "open"}, {"id": "finished"}]},
+            }
+        }
+
+        with pytest.raises(ValueError, match=r"items\[0\].*test run status"):
+            await update_test_runs(
+                mock_ctx,
+                project_id="proj1",
+                items=[TestRunUpdateSpec(test_run_id="TR-3", status="ghost")],
+                dry_run=False,
+            )
+
+        mock_client.patch.assert_not_awaited()
+
+    async def test_dry_run_still_runs_guards(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": {
+                "type": "enumerations",
+                "id": "testrun-status",
+                "attributes": {"options": [{"id": "open"}]},
+            }
+        }
+
+        with pytest.raises(ValueError, match="test run status"):
+            await update_test_runs(
+                mock_ctx,
+                project_id="proj1",
+                items=[TestRunUpdateSpec(test_run_id="TR-4", status="ghost")],
+                dry_run=True,
+            )
+
+        mock_client.patch.assert_not_awaited()
+
+    async def test_custom_fields_guarded_against_sample(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = [
+            {
+                "data": [
+                    {
+                        "type": "testruns",
+                        "id": "proj1/R1",
+                        "attributes": {"id": "R1", "goal": "g"},
+                    }
+                ]
+            },
+            {"data": []},
+        ]
+        mock_client.patch.return_value = None
+
+        result = await update_test_runs(
+            mock_ctx,
+            project_id="proj1",
+            items=[TestRunUpdateSpec(test_run_id="TR-5", custom_fields={"goal": "x"})],
+            dry_run=False,
+        )
+
+        assert result.test_run_ids == ["TR-5"]
+        # Sampled instances then templates before PATCH.
+        assert mock_client.get.await_count == 2
+
+    async def test_shadowing_custom_key_raises_before_network(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # title via custom_fields collide standard attr -- local build check
+        # raise clear param hint before guard round-trip.
+        with pytest.raises(ValueError, match="standard Polarion attributes"):
+            await update_test_runs(
+                mock_ctx,
+                project_id="proj1",
+                items=[
+                    TestRunUpdateSpec(
+                        test_run_id="TR-9", custom_fields={"title": "shadow"}
+                    )
+                ],
+                dry_run=False,
+            )
+
+        mock_client.get.assert_not_awaited()
+        mock_client.patch.assert_not_awaited()
+
+    async def test_custom_field_guard_error_names_offending_item(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # First item title-only (no guard); second's unknown custom key trips
+        # guard -- error must carry its batch position, not items[0].
+        mock_client.get.side_effect = [
+            {
+                "data": [
+                    {
+                        "type": "testruns",
+                        "id": "proj1/R1",
+                        "attributes": {"id": "R1", "goal": "g"},
+                    }
+                ]
+            },
+            {"data": []},
+        ]
+
+        with pytest.raises(ValueError, match=r"items\[1\].*bogus"):
+            await update_test_runs(
+                mock_ctx,
+                project_id="proj1",
+                items=[
+                    TestRunUpdateSpec(test_run_id="TR-A", title="ok"),
+                    TestRunUpdateSpec(test_run_id="TR-B", custom_fields={"bogus": "x"}),
+                ],
+                dry_run=False,
+            )
+
+        mock_client.patch.assert_not_awaited()
+
+    async def test_run_not_found_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.side_effect = PolarionNotFoundError(
+            "Not found", status_code=404
+        )
+
+        with pytest.raises(ValueError, match="list_test_runs"):
+            await update_test_runs(
+                mock_ctx,
+                project_id="proj1",
+                items=[TestRunUpdateSpec(test_run_id="TR-6", title="X")],
+                dry_run=False,
+            )
+
+    async def test_auth_error_raises_permission_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.side_effect = PolarionAuthError("auth", status_code=401)
+
+        with pytest.raises(PermissionError):
+            await update_test_runs(
+                mock_ctx,
+                project_id="proj1",
+                items=[TestRunUpdateSpec(test_run_id="TR-7", title="X")],
+                dry_run=False,
+            )
+
+    async def test_other_error_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.side_effect = PolarionError("boom", status_code=500)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            await update_test_runs(
+                mock_ctx,
+                project_id="proj1",
+                items=[TestRunUpdateSpec(test_run_id="TR-8", title="X")],
+                dry_run=False,
+            )
+
+
+class TestUpdateTestRunsFieldValidation:
+    """Bulk bounds + spec constraints via ``TypeAdapter`` rebuild."""
+
+    @staticmethod
+    def _adapter(param_name: str) -> TypeAdapter[object]:
+        hints = get_type_hints(update_test_runs)
+        sig = inspect.signature(update_test_runs)
+        field_info = sig.parameters[param_name].default
+        return TypeAdapter(Annotated[hints[param_name], field_info])
+
+    def test_empty_items_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter("items").validate_python([])
+
+    def test_items_above_max_rejected(self) -> None:
+        specs = [{"test_run_id": f"TR-{i}", "title": "t"} for i in range(51)]
+        with pytest.raises(ValidationError):
+            self._adapter("items").validate_python(specs)
+
+    def test_items_at_max_accepted(self) -> None:
+        specs = [{"test_run_id": f"TR-{i}", "title": "t"} for i in range(50)]
+        validated = self._adapter("items").validate_python(specs)
+        assert isinstance(validated, list)
+        assert len(validated) == 50
+
+    def test_empty_project_id_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter("project_id").validate_python("")
+
+    def test_spec_requires_non_empty_id(self) -> None:
+        with pytest.raises(ValidationError):
+            TestRunUpdateSpec(test_run_id="", title="t")
+
+    def test_spec_without_change_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="no effective change"):
+            TestRunUpdateSpec(test_run_id="TR-1")
+
+    def test_none_custom_values_not_effective(self) -> None:
+        with pytest.raises(ValidationError, match="no effective change"):
+            TestRunUpdateSpec(test_run_id="TR-1", custom_fields={"goal": None})
+
+    def test_group_id_alone_is_effective(self) -> None:
+        spec = TestRunUpdateSpec(test_run_id="TR-1", group_id="Release-1")
+        assert spec.group_id == "Release-1"
+
+    def test_unknown_key_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            TestRunUpdateSpec(test_run_id="TR-1", bogus="x")  # type: ignore[call-arg]
 
 
 class TestCreateTestRunsFieldValidation:
