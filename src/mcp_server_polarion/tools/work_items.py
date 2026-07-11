@@ -234,17 +234,17 @@ async def create_work_items(
 ) -> WorkItemsCreateResult:
     """Create 1-50 work items in one project in a single bulk request.
 
-    Standard enums (type/status/severity/priority) are validated — unknown ids
-    raise ValueError with valid options. custom_fields keys are validated
-    against the type's schema. Atomic: one bad item rejects the whole batch; an
-    id-count mismatch raises — re-query list_work_items before retrying.
+    Items are created free-floating — place into a document with
+    move_work_item_to_document (this tool cannot). Atomic: one bad item
+    rejects the whole batch.
 
-    Items are created free-floating; place into a document with
-    move_work_item_to_document (this tool cannot). description is Markdown →
-    sanitized HTML; later edits are raw-HTML round-trip via
-    get_work_item(include_description_html=True) ↔ update_work_items.
-    Markdown tables get native Polarion styling; a paragraph starting
-    'Table:' directly after a table becomes a numbered caption widget.
+    description is Markdown (greenfield only); later edits are raw-HTML
+    round-trip via get_work_item(include_description_html=True) and
+    update_work_items — formats never mix. Markdown tables get native
+    Polarion styling; a paragraph starting 'Table:' directly after a table
+    becomes a numbered caption widget. Enum values and custom_fields keys
+    are validated on write — resolve ids via list_work_item_enum_options
+    first. Returns the new work item ids.
     """
     client = get_client(ctx)
     for spec in items:
@@ -355,27 +355,26 @@ async def update_work_items(  # noqa: PLR0913
     ),
 ) -> WorkItemsUpdateResult:
     """Update fields on 1-50 existing work items in one bulk PATCH; unset
-    fields stay unchanged. Per-item hyperlinks/assignee_ids REPLACE the
-    stored lists: even to add ONE entry, call get_work_item on the target
-    BEFORE updating and resubmit every existing entry plus the new one —
-    anything omitted is silently deleted.
+    fields stay unchanged. Atomic: one bad item rejects the whole batch.
+
+    hyperlinks/assignee_ids REPLACE the stored lists: even to add ONE
+    entry, call get_work_item on the target BEFORE updating and resubmit
+    every existing entry plus the new one — anything omitted is silently
+    deleted.
 
     description_html is raw Polarion HTML, sent verbatim — source from
     get_work_item(include_description_html=True); greenfield bodies use
     create_work_items Markdown, formats never mix. To add a table, caption,
     link, or widget, call get_html_recipes first and adapt its template
-    before writing description_html; hand-written table markup is rejected.
-    custom_fields is partial,
-    keys outside the type schema rejected, values NOT validated — resolve via
-    list_work_item_enum_options first.
+    before writing description_html — hand-written table markup is
+    rejected.
 
-    module not settable here — use move_work_item_to_document /
+    custom_fields is partial; keys outside the type schema are rejected,
+    values are not validated — resolve via list_work_item_enum_options
+    first. module is not settable here — use move_work_item_to_document /
     move_work_item_from_document. workflow_action/change_type_to apply to
-    EVERY item; each item needs ≥1 body field (else 400); change_type_to
-    scopes status/severity/resolution to the target type and resets status.
-    Unknown enum ids and missing/duplicate work_item_ids raise ValueError.
-    Atomic: one bad item rejects the whole batch. Returns ids only — re-read
-    via get_work_item if needed.
+    EVERY item; change_type_to rescopes enums to the target type and
+    resets status. Returns ids only — re-read via get_work_item if needed.
     """
     client = get_client(ctx)
 
@@ -484,14 +483,11 @@ async def list_work_items(
 ) -> PaginatedResult[WorkItemSummary]:
     """List / search work items in a project.
 
-    Lucene query (type:requirement, title:SRS*; leading wildcards 400) or omit
-    for all. module and body text are NOT Lucene-indexed — scope by document
-    via SQL:(...) or read_document_parts, never a Lucene module term.
-
-    SQL:(...) runs native SQL: call get_sql_query_recipes first and adapt a
-    recipe (document scope, custom-field, traceability), do not hand-write.
-    Escape ' as ''; keep LIKE top-level via INNER JOIN (rejected inside EXISTS;
-    C_DESCRIPTION LIKE never matches).
+    Leading Lucene wildcards are rejected; module and body text are NOT
+    Lucene-indexed — scope by document via SQL:(...) or
+    read_document_parts, never a Lucene module term. For SQL:(...), call
+    get_sql_query_recipes first and adapt a recipe — never hand-write SQL.
+    For one known id, use get_work_item instead of scanning.
     """
     client = get_client(ctx)
     params: dict[str, str | int] = {
@@ -538,7 +534,7 @@ async def get_work_item(
     work_item_id: str = Field(description="Work item ID (e.g. 'MCPT-001')."),
     include_description_html: bool = Field(
         default=False,
-        description="Fill ``description_html`` with raw HTML for round-trip editing.",
+        description="Fill description_html with raw HTML for round-trip editing.",
     ),
 ) -> WorkItemDetail:
     """Get full details of one work item by ID.
@@ -604,9 +600,9 @@ async def read_work_item(
 ) -> WorkItemRead:
     """Read one work item with its body rendered as Markdown.
 
-    get_work_item plus description as Markdown. Synthesis output (collapses
-    Polarion anchors) — NEVER feed to update_work_items; round-trip via the HTML
-    pair instead.
+    Synthesis output — collapses Polarion anchors; NEVER feed it to
+    update_work_items. Edits round-trip via
+    get_work_item(include_description_html=True) instead.
     """
     # Pull raw HTML from get_work_item — conversion need no second round trip.
     detail = await get_work_item(
