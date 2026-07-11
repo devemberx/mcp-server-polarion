@@ -15,6 +15,7 @@ from mcp_server_polarion.core.exceptions import (
 from mcp_server_polarion.models import (
     JsonValue,
     PaginatedResult,
+    TestRecordSummary,
     TestRunCreateSpec,
     TestRunDetail,
     TestRunsCreateResult,
@@ -29,6 +30,7 @@ from mcp_server_polarion.tools._shared.custom_fields import (
 )
 from mcp_server_polarion.tools._shared.fields import (
     MAX_BULK_ITEMS,
+    TEST_RECORD_LIST_FIELDS,
     TEST_RUN_DETAIL_FIELDS,
     TEST_RUN_LIST_FIELDS,
 )
@@ -50,6 +52,7 @@ from mcp_server_polarion.tools._shared.pagination import (
 from mcp_server_polarion.tools._shared.parse import (
     extract_created_short_ids,
     parse_included_user_name_map,
+    parse_test_record_summaries,
     parse_test_run_detail,
     parse_test_run_summaries,
 )
@@ -370,6 +373,63 @@ async def list_test_runs(  # noqa: PLR0913
         raise RuntimeError(f"Failed to list test runs: {exc.message}") from exc
 
     items = parse_test_run_summaries(response)
+
+    return make_page(items, response, page_number, page_size)
+
+
+@mcp.tool(
+    tags={"read"},
+    timeout=60.0,
+    annotations={"readOnlyHint": True},
+)
+async def list_test_records(  # noqa: PLR0913
+    ctx: Context,
+    project_id: str = Field(description="Polarion project ID."),
+    test_run_id: str = Field(description="Test run ID (e.g. 'TR-2026-01')."),
+    result: str | None = Field(
+        default=None,
+        description="Filter by result enum ID (e.g. 'passed', 'failed', 'blocked').",
+    ),
+    page_size: int = Field(default=DEFAULT_PAGE_SIZE, ge=1, le=100),
+    page_number: int = Field(default=1, ge=1),
+) -> PaginatedResult[TestRecordSummary]:
+    """List execution records of one test run — one row per test case
+    iteration.
+
+    Filter by result (e.g. 'failed') or omit for all; not-yet-executed
+    records have empty result. Lucene query is NOT supported here. Returns
+    summaries — test_case_id + iteration identify a record; defect_id links
+    the failure work item.
+    """
+    client = get_client(ctx)
+    params: dict[str, str | int] = {
+        "fields[testrecords]": TEST_RECORD_LIST_FIELDS,
+        "include": "executedBy",
+        "fields[users]": "name",
+        "page[size]": page_size,
+        "page[number]": page_number,
+    }
+    if result is not None:
+        params["testResultId"] = result
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/testruns/{encode_path_segment(test_run_id)}/testrecords"
+    )
+    try:
+        response = await client.get(path, params=params)
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Test run '{test_run_id}' not found in project '{project_id}'. "
+            "Use `list_test_runs` to discover valid IDs."
+        ) from exc
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot list test records -- check your POLARION_TOKEN permissions."
+        ) from exc
+    except PolarionError as exc:
+        raise RuntimeError(f"Failed to list test records: {exc.message}") from exc
+
+    items = parse_test_record_summaries(response)
 
     return make_page(items, response, page_number, page_size)
 

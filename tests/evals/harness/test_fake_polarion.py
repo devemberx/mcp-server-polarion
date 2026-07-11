@@ -245,6 +245,47 @@ class TestTestRunRouting:
         assert response.status_code == 404
 
 
+class TestTestRecordRouting:
+    def test_records_carry_test_case_and_executed_by(self) -> None:
+        response = _get(
+            FakePolarion(), f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}/testrecords"
+        )
+        assert response.status_code == 200
+        payload = _json(response)
+        record = payload["data"][0]
+        assert record["type"] == "testrecords"
+        assert record["attributes"]["result"] == "failed"
+        rel = record["relationships"]
+        assert rel["testCase"]["data"]["id"] == f"{PROJECT}/{TESTCASE_ID}"
+        assert rel["executedBy"]["data"]["type"] == "users"
+        assert payload["included"][0]["attributes"]["name"] == "Fake Author"
+        # Live endpoint omit meta.totalCount; mirror it so pagination
+        # fallback path exercised.
+        assert "meta" not in payload
+
+    def test_records_of_missing_run_is_404(self) -> None:
+        response = _get(
+            FakePolarion(), f"/projects/{PROJECT}/testruns/Nope/testrecords"
+        )
+        assert response.status_code == 404
+
+    def test_result_filter_matches(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}/testrecords",
+            testResultId="failed",
+        )
+        assert len(_json(response)["data"]) == 1
+
+    def test_result_filter_excludes(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}/testrecords",
+            testResultId="passed",
+        )
+        assert _json(response)["data"] == []
+
+
 class TestWorkItemResource:
     def test_module_relationship_only_for_module_items(self) -> None:
         fake = FakePolarion()

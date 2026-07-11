@@ -17,6 +17,8 @@ from mcp_server_polarion.tools._shared.parse import (
     parse_hyperlinks,
     parse_included_user_name_map,
     parse_included_work_item_map,
+    parse_test_record_summaries,
+    parse_test_record_summary_kwargs,
     parse_test_run_detail,
     parse_test_run_summaries,
     parse_test_run_summary_kwargs,
@@ -390,6 +392,85 @@ class TestParseTestRunSummaries:
             ]
         }
         assert [s.id for s in parse_test_run_summaries(response)] == ["TR-2"]
+
+
+class TestParseTestRecordSummaries:
+    """Tests for `parse_test_record_summaries` and its kwargs helper."""
+
+    def test_full_record_resolves_relationships(self) -> None:
+        kwargs = parse_test_record_summary_kwargs(
+            {
+                "id": "proj/TR-1/proj/TC-42/0",
+                "attributes": {
+                    "executed": "2026-06-01T10:00:00Z",
+                    "duration": 12.5,
+                    "result": "failed",
+                    "iteration": 3,
+                },
+                "relationships": {
+                    "testCase": {"data": {"id": "proj/TC-42"}},
+                    "executedBy": {"data": {"id": "proj/jdoe"}},
+                    "defect": {"data": {"id": "proj/DEF-7"}},
+                },
+            },
+            user_names={"proj/jdoe": "J Doe"},
+        )
+        # Full ids kept -- no extract_short_id on work-item targets.
+        assert kwargs["test_case_id"] == "proj/TC-42"
+        assert kwargs["defect_id"] == "proj/DEF-7"
+        assert kwargs["executed_by_name"] == "J Doe"
+        assert kwargs["iteration"] == 3
+        assert kwargs["duration"] == 12.5
+        assert kwargs["result"] == "failed"
+        assert kwargs["executed"] == "2026-06-01T10:00:00Z"
+
+    def test_non_dict_attributes_and_relationships_default_empty(self) -> None:
+        kwargs = parse_test_record_summary_kwargs(
+            {"id": "proj/TR-1/proj/TC-1/0", "attributes": [], "relationships": "nope"},
+            user_names={},
+        )
+        assert kwargs["test_case_id"] == ""
+        assert kwargs["result"] == ""
+        assert kwargs["executed"] == ""
+        assert kwargs["duration"] == 0.0
+        assert kwargs["iteration"] == 0
+        assert kwargs["executed_by_name"] == ""
+        assert kwargs["defect_id"] == ""
+
+    def test_non_numeric_duration_and_iteration_default_zero(self) -> None:
+        kwargs = parse_test_record_summary_kwargs(
+            {
+                "id": "proj/TR-1/proj/TC-1/0",
+                "attributes": {"duration": "fast", "iteration": True},
+            },
+            user_names={},
+        )
+        # bool is int subclass -- reject as iteration.
+        assert kwargs["duration"] == 0.0
+        assert kwargs["iteration"] == 0
+
+    def test_int_duration_coerced_to_float(self) -> None:
+        kwargs = parse_test_record_summary_kwargs(
+            {"id": "proj/TR-1/proj/TC-1/0", "attributes": {"duration": 7}},
+            user_names={},
+        )
+        assert kwargs["duration"] == 7.0
+
+    def test_non_list_data_is_empty(self) -> None:
+        assert parse_test_record_summaries({"data": None}) == []
+
+    def test_skips_non_dict_entries(self) -> None:
+        response = {
+            "data": [
+                "nope",
+                {
+                    "id": "proj/TR-1/proj/TC-2/0",
+                    "relationships": {"testCase": {"data": {"id": "proj/TC-2"}}},
+                },
+            ]
+        }
+        parsed = parse_test_record_summaries(response)
+        assert [r.test_case_id for r in parsed] == ["proj/TC-2"]
 
 
 class TestParseTestRunDetail:

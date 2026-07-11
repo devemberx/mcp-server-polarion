@@ -54,6 +54,15 @@ def safe_str(value: object) -> str:
     return str(value)
 
 
+def safe_float(value: object) -> float:
+    """``float(value)`` for numbers; ``0.0`` otherwise. bool excluded —
+    int subclass, would read as 1.0.
+    """
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        return float(value)
+    return 0.0
+
+
 def encode_path_segment(segment: str) -> str:
     """URL-encode single path segment (e.g. document name with spaces)."""
     return quote(segment, safe="")
@@ -108,6 +117,7 @@ __all__: list[str] = [
     "format_option_list",
     "get_client",
     "reraise_with_item_context",
+    "safe_float",
     "safe_str",
     "validate_work_item_id_for_lucene",
 ]
