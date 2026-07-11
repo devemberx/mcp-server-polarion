@@ -72,6 +72,6 @@ CI: `ruff check` → `ruff format --check` → `mypy` → `pytest` (`--cov-fail-
 
 Full rules in [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md); enforced by `.githooks/commit-msg` + `.claude/hooks/`.
 
-- Branches off `main`: `<type>/<short-kebab-summary>`. Commits: `type(scope): summary` ≤50 chars + 2-bullet body (motivation, change).
+- Branches off `main`: `<type>/<short-kebab-summary>`; type = feat|fix|refactor|test|docs|chore|ci (pre-push enforce; `feature/` reject). Commits: `type(scope): summary` ≤50 chars + 2-bullet body (motivation, change).
 - PR checklist: flip `[ ]`→`[x]`; don't delete unchecked options.
 - Squash merge only; NEVER `--subject` to `gh pr merge`. Force-push feature branches only with explicit authorization; never `main`.
