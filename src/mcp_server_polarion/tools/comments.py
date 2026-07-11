@@ -309,7 +309,7 @@ async def create_document_comments(  # noqa: PLR0913
     ),
     document_name: str = Field(
         min_length=1,
-        description="Document name within ``space_id``.",
+        description="Document name within space_id.",
     ),
     comments: list[CommentSpec] = Field(  # noqa: B008
         min_length=1,
@@ -322,9 +322,9 @@ async def create_document_comments(  # noqa: PLR0913
 ) -> CommentsCreateResult:
     """Create one or more comments on a document in a single request.
 
-    Reply: set parent_comment_id to a short ID from list_document_comments
-    (None = top-level). 'text/html' text is sent unsanitized. Comment is always
-    authored by the token's user. NOT idempotent — a retry duplicates.
+    Reply: set parent_comment_id to a short id from list_document_comments
+    (None = top-level). 'text/html' text is sent unsanitized. Comments are
+    always authored by the token's user. NOT idempotent — a retry duplicates.
     """
     payload = _build_document_comments_payload(
         specs=comments,
@@ -409,10 +409,10 @@ async def create_work_item_comments(
 ) -> CommentsCreateResult:
     """Create one or more comments on a work item in a single request.
 
-    Reply: set parent_comment_id to a short ID from list_work_item_comments
+    Reply: set parent_comment_id to a short id from list_work_item_comments
     (None = top-level). Optional title sets the comment heading. 'text/html'
-    text is sent unsanitized. Comment is always authored by the token's user.
-    NOT idempotent — a retry duplicates.
+    text is sent unsanitized. Comments are always authored by the token's
+    user. NOT idempotent — a retry duplicates.
     """
     payload = _build_work_item_comments_payload(
         specs=comments,
@@ -484,7 +484,7 @@ async def update_document_comment(  # noqa: PLR0913
     ),
     document_name: str = Field(
         min_length=1,
-        description="Document name within ``space_id``.",
+        description="Document name within space_id.",
     ),
     comment_id: str = Field(
         min_length=1,
@@ -498,9 +498,9 @@ async def update_document_comment(  # noqa: PLR0913
 ) -> CommentUpdateResult:
     """Resolve or re-open one document comment thread.
 
-    Root comments only (a reply 400s) — pick a root id (parent_comment_id=None)
-    from list_document_comments; resolving the root resolves the whole thread.
-    Idempotent.
+    Root comments only — replies cannot be updated; pick a root id
+    (parent_comment_id=None) from list_document_comments. Resolving the root
+    resolves the whole thread. Idempotent.
     """
     payload = _build_document_comment_update_payload(
         project_id=project_id,
@@ -579,9 +579,9 @@ async def update_work_item_comment(  # noqa: PLR0913
 ) -> CommentUpdateResult:
     """Resolve or re-open one work item comment.
 
-    Root comments only (a reply 400s) — pick a root id (parent_comment_id=None)
-    from list_work_item_comments; resolving a root flips only that comment.
-    Idempotent.
+    Root comments only — replies cannot be updated; pick a root id
+    (parent_comment_id=None) from list_work_item_comments. Resolving a root
+    flips only that comment. Idempotent.
     """
     payload = _build_work_item_comment_update_payload(
         project_id=project_id,
