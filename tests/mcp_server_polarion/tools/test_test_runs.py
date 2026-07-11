@@ -459,7 +459,7 @@ class TestCreateTestRuns:
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         # title via custom_fields collide standard attr -- local build check
-        # raise clear param hint before any guard round-trip.
+        # raise clear param hint before guard round-trip.
         with pytest.raises(ValueError, match="standard Polarion attributes"):
             await create_test_runs(
                 mock_ctx,
@@ -836,7 +836,7 @@ class TestUpdateTestRuns:
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         # title via custom_fields collide standard attr -- local build check
-        # raise clear param hint before any guard round-trip.
+        # raise clear param hint before guard round-trip.
         with pytest.raises(ValueError, match="standard Polarion attributes"):
             await update_test_runs(
                 mock_ctx,

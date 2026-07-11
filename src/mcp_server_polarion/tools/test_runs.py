@@ -138,7 +138,7 @@ async def create_test_runs(
     ensure_unique_ids((spec.id for spec in items), label="id")
 
     # Build pre-guards -- standard-attr shadow collision raise locally,
-    # clearer than vaguer network key-guard message.
+    # clearer than network key-guard message.
     payload = _build_create_test_runs_payload(project_id=project_id, specs=items)
 
     for spec in items:
@@ -266,7 +266,7 @@ async def update_test_runs(
     ensure_unique_ids((spec.test_run_id for spec in items), label="test_run_id")
 
     # Build pre-guards -- standard-attr shadow collision raise locally,
-    # clearer than vaguer network key-guard message.
+    # clearer than network key-guard message.
     payload = _build_update_test_runs_payload(project_id=project_id, specs=items)
 
     for index, spec in enumerate(items):

@@ -1,4 +1,4 @@
-"""Test run models — summaries, create specs, write results."""
+"""Test run models — summaries, create/update specs, write results."""
 
 from __future__ import annotations
 
