@@ -126,13 +126,12 @@ async def create_test_runs(
 ) -> TestRunsCreateResult:
     """Create 1-50 test runs in one project in a single bulk request.
 
-    id is required per item (Polarion REST does not auto-generate one).
+    id is required per item — Polarion REST does not auto-generate one.
     type/status are validated against the project's testing enumerations and
-    template_id against existing templates (list_test_runs(templates=True)) —
-    unknown ids raise ValueError. custom_fields keys are validated against a
-    sample of existing runs; enum-typed custom values are not (test runs have
-    no options API). Atomic: one bad item rejects the whole batch; an id-count
-    mismatch raises — re-query list_test_runs before retrying.
+    template_id against existing templates (list_test_runs(templates=True)).
+    custom_fields keys are validated against a sample of existing runs;
+    enum-typed custom values are not (test runs have no options API).
+    Atomic: one bad item rejects the whole batch.
     """
     client = get_client(ctx)
     ensure_unique_ids((spec.id for spec in items), label="id")
@@ -253,14 +252,13 @@ async def update_test_runs(
     ),
 ) -> TestRunsUpdateResult:
     """Update fields on 1-50 existing test runs in one bulk PATCH; unset
-    fields stay unchanged.
+    fields stay unchanged. Atomic: one bad item rejects the whole batch.
 
     Writable: title, status, group_id, custom_fields. status is validated
-    against the project's testing enumerations — unknown ids raise ValueError.
-    custom_fields is partial; keys are validated against a sample of existing
-    runs, values are NOT (test runs have no options API). finishedOn is
-    server-managed and not settable. Atomic: one bad item rejects the whole
-    batch. Returns ids only — re-read via list_test_runs if needed.
+    against the project's testing enumerations. custom_fields is partial;
+    keys are validated against a sample of existing runs, values are not
+    (test runs have no options API). finishedOn is server-managed — not
+    settable. Returns ids only — re-read via list_test_runs if needed.
     """
     client = get_client(ctx)
     ensure_unique_ids((spec.test_run_id for spec in items), label="test_run_id")
@@ -334,11 +332,10 @@ async def list_test_runs(  # noqa: PLR0913
 ) -> PaginatedResult[TestRunSummary]:
     """List / search test runs in a project.
 
-    Returns actual run instances by default; set templates=True for the reusable
-    template blueprints instead. Filter with a Lucene query (status:open,
-    type:manual, HAS_VALUE:<field>) or omit for all. Filter by person with
-    author.name (exact, quoted) -- author.id does not match on test runs;
-    discover the full name from an unfiltered page first.
+    Returns actual run instances by default; set templates=True for the
+    reusable template blueprints. Filter by person with author.name (exact,
+    quoted) — author.id does not match on test runs; discover the full name
+    from an unfiltered page first.
     """
     client = get_client(ctx)
     params: dict[str, str | int] = {
@@ -385,19 +382,17 @@ async def get_test_run(
     test_run_id: str = Field(description="Test run ID (e.g. 'TR-2026-01')."),
     include_homepage_content_html: bool = Field(
         default=False,
-        description="Fill ``content_html`` with the run's raw HTML report body.",
+        description="Fill content_html with the run's raw HTML report body.",
     ),
 ) -> TestRunDetail:
     """Get full details of one test run by ID.
 
     Returns writable fields (title, status, group_id, custom_fields) plus
-    read-only context: how test cases are selected (select_test_cases_by with
-    its query or source document space_id/document_name), template provenance
-    (is_template, template_id), author, and timestamps.
-    include_homepage_content_html=True fills content_html with the raw HTML
-    report body; it stays empty when use_report_from_template is true (the run
-    inherits its report from its template). Keep it verbatim — never feed back
-    a blanked (flag=False) body.
+    read-only context: test-case selection, template provenance, author, and
+    timestamps. include_homepage_content_html=True fills content_html with
+    the raw HTML report body; it stays empty when use_report_from_template
+    is true (the run inherits its template's report). Never feed back a
+    blanked (flag=False) body.
     """
     client = get_client(ctx)
     path = (
