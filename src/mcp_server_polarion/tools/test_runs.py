@@ -1,4 +1,4 @@
-"""Test run tools — list, search, get, and create test runs in a project."""
+"""Test run tools — list, search, get, create, and update test runs in a project."""
 
 from __future__ import annotations
 
@@ -19,6 +19,8 @@ from mcp_server_polarion.models import (
     TestRunDetail,
     TestRunsCreateResult,
     TestRunSummary,
+    TestRunsUpdateResult,
+    TestRunUpdateSpec,
 )
 from mcp_server_polarion.server import mcp
 from mcp_server_polarion.tools._shared.custom_fields import (
@@ -39,6 +41,7 @@ from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
     ensure_unique_ids,
     get_client,
+    reraise_with_item_context,
 )
 from mcp_server_polarion.tools._shared.pagination import (
     DEFAULT_PAGE_SIZE,
@@ -181,6 +184,122 @@ async def create_test_runs(
         created=True,
         dry_run=False,
         test_run_ids=new_ids,
+        payload_preview=None,
+    )
+
+
+def _build_update_test_run_resource(
+    *,
+    project_id: str,
+    spec: TestRunUpdateSpec,
+) -> dict[str, JsonValue]:
+    """One ``testruns`` resource for bulk PATCH; skip unset so update
+    never blank existing attribute. Spec validator guarantee at least one
+    attribute survive; all writables live under ``attributes``.
+    """
+    attributes: dict[str, JsonValue] = {}
+    if spec.title:
+        attributes["title"] = spec.title
+    if spec.status:
+        attributes["status"] = spec.status
+    if spec.group_id:
+        attributes["groupId"] = spec.group_id
+    merge_custom_fields(attributes, spec.custom_fields, STANDARD_TEST_RUN_ATTRIBUTES)
+
+    return {
+        "type": "testruns",
+        "id": f"{project_id}/{spec.test_run_id}",
+        "attributes": attributes,
+    }
+
+
+def _build_update_test_runs_payload(
+    *,
+    project_id: str,
+    specs: list[TestRunUpdateSpec],
+) -> dict[str, JsonValue]:
+    """JSON:API body for bulk ``PATCH /projects/{p}/testruns``."""
+    data: list[JsonValue] = [
+        _build_update_test_run_resource(project_id=project_id, spec=spec)
+        for spec in specs
+    ]
+    return {"data": data}
+
+
+@mcp.tool(
+    tags={"write"},
+    timeout=60.0,
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def update_test_runs(
+    ctx: Context,
+    project_id: str = Field(min_length=1, description="Polarion project ID."),
+    items: list[TestRunUpdateSpec] = Field(  # noqa: B008
+        min_length=1,
+        max_length=MAX_BULK_ITEMS,
+        description="Per-run changes (1-50); unset fields stay unchanged.",
+    ),
+    dry_run: bool = Field(
+        default=False,
+        description="Preview payload without writing; guards still query Polarion.",
+    ),
+) -> TestRunsUpdateResult:
+    """Update fields on 1-50 existing test runs in one bulk PATCH; unset
+    fields stay unchanged.
+
+    Writable: title, status, group_id, custom_fields. status is validated
+    against the project's testing enumerations — unknown ids raise ValueError.
+    custom_fields is partial; keys are validated against a sample of existing
+    runs, values are NOT (test runs have no options API). finishedOn is
+    server-managed and not settable. Atomic: one bad item rejects the whole
+    batch. Returns ids only — re-read via list_test_runs if needed.
+    """
+    client = get_client(ctx)
+    ensure_unique_ids((spec.test_run_id for spec in items), label="test_run_id")
+
+    for index, spec in enumerate(items):
+        with reraise_with_item_context(index, spec.test_run_id):
+            if spec.status:
+                await guard_test_run_enums(client, project_id, status=spec.status)
+            if spec.custom_fields:
+                await guard_test_run_custom_fields(
+                    client, project_id, spec.custom_fields
+                )
+
+    payload = _build_update_test_runs_payload(project_id=project_id, specs=items)
+
+    if dry_run:
+        return TestRunsUpdateResult(
+            updated=False,
+            dry_run=True,
+            test_run_ids=[],
+            payload_preview=payload,
+        )
+
+    path = f"/projects/{encode_path_segment(project_id)}/testruns"
+    try:
+        await client.patch(path, json=cast(dict[str, object], payload))
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot update test runs -- check your POLARION_TOKEN permissions."
+        ) from exc
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"A test run in the batch was not found in project '{project_id}': "
+            f"{exc.message} Use `list_test_runs` to discover valid IDs."
+        ) from exc
+    except PolarionError as exc:
+        raise RuntimeError(f"Failed to update test runs: {exc.message}") from exc
+
+    return TestRunsUpdateResult(
+        updated=True,
+        dry_run=False,
+        test_run_ids=[spec.test_run_id for spec in items],
         payload_preview=None,
     )
 

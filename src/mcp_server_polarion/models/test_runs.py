@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class TestRunSummary(BaseModel):
@@ -70,6 +70,60 @@ class TestRunsCreateResult(BaseModel):
     __test__ = False
 
     created: bool
+    dry_run: bool
+    test_run_ids: list[str] = Field(default_factory=list)
+    payload_preview: Mapping[str, object] | None = None
+
+
+class TestRunUpdateSpec(BaseModel):
+    """One test run's changes in an ``update_test_runs`` batch; unset
+    fields stay unchanged."""
+
+    __test__ = False
+
+    # LLM input model: reject typo keys, not silent-drop.
+    model_config = ConfigDict(extra="forbid")
+
+    test_run_id: str = Field(
+        min_length=1, description="Test run ID (e.g. 'TR-2024-01')."
+    )
+    title: str | None = None
+    status: str | None = None
+    group_id: str | None = Field(
+        default=None, description="Free-form grouping label (e.g. 'Release-2.5')."
+    )
+    custom_fields: dict[str, object] | None = Field(
+        default=None,
+        description="Partial; rich-text values as {'type':'text/html','value':...}.",
+    )
+
+    @model_validator(mode="after")
+    def _require_effective_change(self) -> TestRunUpdateSpec:
+        # None custom entries drop at payload build; attribute-less item 400 batch.
+        effective = (
+            self.title
+            or self.status
+            or self.group_id
+            or (
+                self.custom_fields
+                and any(value is not None for value in self.custom_fields.values())
+            )
+        )
+        if not effective:
+            msg = (
+                f"test run '{self.test_run_id}': no effective change -- set "
+                "at least one field (custom_fields values of None are dropped)."
+            )
+            raise ValueError(msg)
+        return self
+
+
+class TestRunsUpdateResult(BaseModel):
+    """``update_test_runs`` result."""
+
+    __test__ = False
+
+    updated: bool
     dry_run: bool
     test_run_ids: list[str] = Field(default_factory=list)
     payload_preview: Mapping[str, object] | None = None

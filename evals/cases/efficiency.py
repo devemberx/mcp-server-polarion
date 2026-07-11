@@ -13,6 +13,9 @@ from evals.harness.fixtures import (
     DOC,
     FLOATING_TASK_ID,
     SPACE,
+    TEST_RUN_ID,
+    TEST_RUN_ID_2,
+    TEST_RUN_ID_3,
     UNCOVERED_REQ_ID,
 )
 
@@ -59,6 +62,19 @@ CASES: list[Case] = [
         "zero commits fails.",
         covers=["update_work_items"],
         tool="update_work_items",
+        min_total_items=3,
+    ),
+    _case(
+        "EFF-BULK-UPDATE-RUNS",
+        f"Rename these test runs: {TEST_RUN_ID} to 'Fake Regression Run v2', "
+        f"{TEST_RUN_ID_2} to 'Fake Smoke Run v2', and "
+        f"{TEST_RUN_ID_3} to 'Fake Sanity Run v2'.",
+        "single_bulk_write",
+        intent="Metadata changes to several known test runs use ONE committed "
+        "update_test_runs call covering all of them; a per-item split or "
+        "zero commits fails.",
+        covers=["update_test_runs"],
+        tool="update_test_runs",
         min_total_items=3,
     ),
     _case(
