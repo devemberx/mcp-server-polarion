@@ -26,7 +26,7 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for **P
 
 - **33 tools** covering read and write across documents, work items, test runs, traceability links, and comments.
 - **Read** — render documents as Markdown, search with Lucene or SQL, walk incoming/outgoing links, resolve enum options.
-- **Write** — create and update work items and documents, create test runs, manage links, reorganize document structure, post comments.
+- **Write** — create and update work items, documents, and test runs, manage links, reorganize document structure, post comments.
 - **Safe writes** — every write tool supports `dry_run`, and pre-write guards validate fields, enum values, and link targets before hitting Polarion.
 - **Plays nice with your server** — requests are paced to Polarion's rate limits, with automatic retries on 429/5xx responses.
 - **Built for LLMs** — strict async, fully typed, pagination on every list tool, docstrings written as the assistant's manual.
