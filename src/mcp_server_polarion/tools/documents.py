@@ -913,8 +913,7 @@ async def update_document(  # noqa: PLR0913
     via get_document BEFORE updating. home_page_content_html is raw Polarion
     HTML, sent verbatim — source from
     get_document(include_homepage_content_html=True). An empty string is
-    rejected (wipes the body, orphans headings) — pass '<p></p>' for
-    near-empty.
+    rejected — pass '<p></p>' for near-empty.
 
     Body rules:
 
@@ -1110,9 +1109,8 @@ async def create_document(  # noqa: PLR0913
     validated on write — resolve ids via list_document_enum_options first.
 
     home_page_content is Markdown (greenfield only), converted to sanitized
-    HTML. Markdown tables get native Polarion styling; a paragraph starting
-    'Table:' directly after a table becomes a numbered caption widget.
-    Post-create edits round-trip raw HTML via
+    HTML. A paragraph starting 'Table:' directly after a Markdown table
+    becomes its numbered caption. Post-create edits round-trip raw HTML via
     get_document(include_homepage_content_html=True) and update_document;
     add work items via move_work_item_to_document.
     """

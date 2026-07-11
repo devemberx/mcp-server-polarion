@@ -402,10 +402,9 @@ async def create_work_item_links(
     batch — re-query list_work_item_links before retrying. link_ids are the
     delete-path ids, input order.
 
-    Phantom success: when the source sits in a document,
-    move_work_item_to_document already auto-created one heading link; a NEW
-    same-role link reports created but is NOT persisted — verify with
-    list_work_item_links.
+    Phantom success: a document-attached source already has an auto-created
+    heading link; a NEW same-role link reports created but is NOT
+    persisted — verify with list_work_item_links.
     """
     payload = _build_create_links_payload(
         source_project_id=project_id,

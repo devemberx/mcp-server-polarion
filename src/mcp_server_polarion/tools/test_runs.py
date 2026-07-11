@@ -391,8 +391,7 @@ async def get_test_run(
     read-only context: test-case selection, template provenance, author, and
     timestamps. include_homepage_content_html=True fills content_html with
     the raw HTML report body; it stays empty when use_report_from_template
-    is true (the run inherits its template's report). Never feed back a
-    blanked (flag=False) body.
+    is true. Never feed back a blanked (flag=False) body.
     """
     client = get_client(ctx)
     path = (

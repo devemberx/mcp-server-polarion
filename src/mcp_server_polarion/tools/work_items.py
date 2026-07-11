@@ -240,9 +240,9 @@ async def create_work_items(
 
     description is Markdown (greenfield only); later edits are raw-HTML
     round-trip via get_work_item(include_description_html=True) and
-    update_work_items — formats never mix. Markdown tables get native
-    Polarion styling; a paragraph starting 'Table:' directly after a table
-    becomes a numbered caption widget. Enum values and custom_fields keys
+    update_work_items — formats never mix. A paragraph starting 'Table:'
+    directly after a Markdown table becomes its numbered caption. Enum
+    values and custom_fields keys
     are validated on write — resolve ids via list_work_item_enum_options
     first. Returns the new work item ids.
     """
