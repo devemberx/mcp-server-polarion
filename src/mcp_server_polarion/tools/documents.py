@@ -627,8 +627,8 @@ async def get_document(
     include_homepage_content_html=True fills content_html with raw
     homePageContent HTML — the required source for
     update_document(home_page_content_html=...). That body is inline prose
-    only; headings and embedded work items live elsewhere — read_document
-    renders all. Never feed back a blanked (flag=False) body.
+    only — headings and embedded work items render via read_document.
+    Never feed back a blanked (flag=False) body.
     """
     client = get_client(ctx)
     path = (
@@ -928,8 +928,8 @@ async def update_document(  # noqa: PLR0913
       hand-written.
 
     workflow_action must pair with at least one attribute. Unknown
-    status/type ids are rejected; custom_fields keys outside the document
-    type's schema are rejected, values are not validated — resolve via
+    status/type ids and custom_fields keys outside the type schema are
+    rejected, values are not validated — resolve via
     list_document_enum_options first.
     """
     if home_page_content_html is not None and not home_page_content_html.strip():
@@ -1103,7 +1103,7 @@ async def create_document(  # noqa: PLR0913
         description="Preview payload without writing; guards still query Polarion.",
     ),
 ) -> DocumentCreateResult:
-    """Create a new Polarion document in a space.
+    """Create a document in a space.
 
     module_name must be unique in the space — a duplicate name conflicts;
     check list_documents first. type/status and custom_fields keys are
@@ -1247,9 +1247,8 @@ async def copy_document(  # noqa: PLR0913
 ) -> DocumentCopyResult:
     """Copy a document, duplicating its structure, body, and contained work items.
 
-    Use this to duplicate an existing document — rebuilding it via
-    create_document/update_document loses the contained items.
-    target_document_name must be free at the destination — check
+    Rebuilding via create_document/update_document loses the contained
+    items. target_document_name must be free at the destination — check
     list_documents first. Destination defaults to the source project/space.
 
     link_original_items_with_role is validated against the TARGET project's

@@ -124,9 +124,9 @@ async def create_test_runs(
         description="Preview payload without writing; guards still query Polarion.",
     ),
 ) -> TestRunsCreateResult:
-    """Create 1-50 test runs in one project in a single bulk request.
+    """Create 1-50 test runs in one project in one bulk request.
 
-    id is required per item — Polarion REST does not auto-generate one.
+    id is required per item — never auto-generated.
     type/status are validated against the project's testing enumerations and
     template_id against existing templates (list_test_runs(templates=True)).
     custom_fields keys are validated against a sample of existing runs;
@@ -258,7 +258,7 @@ async def update_test_runs(
     against the project's testing enumerations. custom_fields is partial;
     keys are validated against a sample of existing runs, values are not
     (test runs have no options API). finishedOn is server-managed — not
-    settable. Returns ids only — re-read via list_test_runs if needed.
+    settable. Returns ids only — re-read via list_test_runs.
     """
     client = get_client(ctx)
     ensure_unique_ids((spec.test_run_id for spec in items), label="test_run_id")

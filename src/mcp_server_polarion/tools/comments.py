@@ -323,8 +323,8 @@ async def create_document_comments(  # noqa: PLR0913
     """Create one or more comments on a document in a single request.
 
     Reply: set parent_comment_id to a short id from list_document_comments
-    (None = top-level). 'text/html' text is sent unsanitized. Comments are
-    always authored by the token's user. NOT idempotent — a retry duplicates.
+    (None = top-level). 'text/html' text is sent unsanitized. Always
+    authored by the token's user. NOT idempotent — a retry duplicates.
     """
     payload = _build_document_comments_payload(
         specs=comments,
@@ -411,8 +411,8 @@ async def create_work_item_comments(
 
     Reply: set parent_comment_id to a short id from list_work_item_comments
     (None = top-level). Optional title sets the comment heading. 'text/html'
-    text is sent unsanitized. Comments are always authored by the token's
-    user. NOT idempotent — a retry duplicates.
+    text is sent unsanitized. Always authored by the token's user. NOT
+    idempotent — a retry duplicates.
     """
     payload = _build_work_item_comments_payload(
         specs=comments,

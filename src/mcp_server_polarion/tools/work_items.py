@@ -232,11 +232,11 @@ async def create_work_items(
         description="Preview payload without writing; guards still query Polarion.",
     ),
 ) -> WorkItemsCreateResult:
-    """Create 1-50 work items in one project in a single bulk request.
+    """Create 1-50 work items in one project in one bulk request.
 
     Items are created free-floating — place into a document with
-    move_work_item_to_document (this tool cannot). Atomic: one bad item
-    rejects the whole batch.
+    move_work_item_to_document. Atomic: one bad item rejects the whole
+    batch.
 
     description is Markdown (greenfield only); later edits are raw-HTML
     round-trip via get_work_item(include_description_html=True) and
@@ -356,10 +356,9 @@ async def update_work_items(  # noqa: PLR0913
 ) -> WorkItemsUpdateResult:
     """Update fields on 1-50 existing work items in one bulk PATCH; unset
     fields stay unchanged. hyperlinks/assignee_ids REPLACE the stored
-    lists: even to add ONE entry, call get_work_item on the target BEFORE
-    updating and resubmit every existing entry plus the new one — anything
-    omitted is silently deleted. Atomic: one bad item rejects the whole
-    batch.
+    lists: even to add ONE entry, call get_work_item BEFORE updating and
+    resubmit every existing entry plus the new one — anything omitted is
+    silently deleted. Atomic: one bad item rejects the whole batch.
 
     description_html is raw Polarion HTML, sent verbatim — source from
     get_work_item(include_description_html=True); greenfield bodies use
@@ -368,12 +367,12 @@ async def update_work_items(  # noqa: PLR0913
     before writing description_html — hand-written table markup is
     rejected.
 
-    custom_fields is partial; keys outside the type schema are rejected,
-    values are not validated — resolve via list_work_item_enum_options
-    first. module is not settable here — use move_work_item_to_document /
+    custom_fields is partial; unknown keys are rejected, values are not
+    validated — resolve via list_work_item_enum_options first. module is
+    not settable here — use move_work_item_to_document /
     move_work_item_from_document. workflow_action/change_type_to apply to
     EVERY item; change_type_to rescopes enums to the target type and
-    resets status. Returns ids only — re-read via get_work_item if needed.
+    resets status. Returns ids only — re-read via get_work_item.
     """
     client = get_client(ctx)
 
