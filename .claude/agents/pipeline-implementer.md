@@ -1,6 +1,7 @@
 ---
 name: pipeline-implementer
-description: Executes one bounded implementation task from an approved dev-pipeline plan, strictly TDD (failing test seen before production code). Invoke during dev-pipeline Stage 3 with a plan excerpt, and Stage 6 with review findings to fix. Refuses scope outside the given task.
+description: Executes one bounded implementation task from an approved dev-pipeline plan, strictly TDD (failing test seen before production code). Invoke during dev-pipeline Stage 3 with a plan excerpt, and Stage 6 with review findings to fix. Refuses scope outside the given task. Tool list is code-work only — no live Polarion MCP tools; verification runs through the test suite, never the real server.
+tools: Read, Edit, Write, Grep, Glob, Bash
 model: sonnet
 ---
 

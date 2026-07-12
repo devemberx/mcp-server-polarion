@@ -1,6 +1,6 @@
 ---
 name: dev-pipeline
-description: Full feature-development pipeline for this repo — isolated worktree, spec, implementation plan, TDD build, quality gates, then a review→fix loop that only stops when review passes. Each stage delegates to a named project subagent (spec-researcher, pattern-scout, pipeline-implementer, pipeline-reviewer) with a stage-appropriate model. Use when starting any new MCP tool, feature, or multi-file change from scratch; when the user says "새 도구", "new tool/feature", "run the pipeline", or asks to develop something "the same way as list_test_records". Triggers on `/dev-pipeline`. NOT for one-file tweaks, doc edits, or work already mid-flight — jump to the matching stage instead.
+description: Full feature-development pipeline for this repo — isolated worktree, spec, implementation plan, TDD build, quality gates, then a review→fix loop that only stops when review passes. Each stage delegates to a named project subagent (spec-researcher, pattern-scout, pipeline-implementer, pipeline-reviewer) with a stage-appropriate model. Use when starting any new MCP tool, feature, or multi-file change from scratch; when the user says "new tool/feature" (any language), "run the pipeline", or asks to develop something "the same way as list_test_records". Triggers on `/dev-pipeline`. NOT for one-file tweaks, doc edits, or work already mid-flight — jump to the matching stage instead.
 ---
 
 # Dev Pipeline
