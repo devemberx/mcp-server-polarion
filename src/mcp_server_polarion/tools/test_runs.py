@@ -394,7 +394,7 @@ async def list_test_records(  # noqa: PLR0913
     page_number: int = Field(default=1, ge=1),
 ) -> PaginatedResult[TestRecordSummary]:
     """List execution records of one test run — one row per test case
-    iteration.
+    iteration. For run metadata use get_test_run.
 
     Filter by result (e.g. 'failed') or omit for all; not-yet-executed
     records have empty result. Lucene query is NOT supported here. Returns

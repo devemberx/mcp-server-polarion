@@ -285,6 +285,15 @@ class TestTestRecordRouting:
         )
         assert _json(response)["data"] == []
 
+    def test_template_run_has_no_records(self) -> None:
+        # Blueprints never executed -- mirror live empty page.
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_TEMPLATE_ID}/testrecords",
+        )
+        assert response.status_code == 200
+        assert _json(response)["data"] == []
+
 
 class TestWorkItemResource:
     def test_module_relationship_only_for_module_items(self) -> None:

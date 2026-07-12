@@ -419,7 +419,8 @@ class FakePolarion:
             tr = self.seeds.test_runs.get(records.group(1))
             if tr is None:
                 return httpx.Response(404, json={"errors": [{"status": "404"}]})
-            data = [self._test_record_resource(tr)]
+            # Blueprints never executed -- empty page for templates.
+            data = [] if tr.is_template else [self._test_record_resource(tr)]
             wanted = params.get("testResultId", "")
             if wanted:
                 data = [r for r in data if r["attributes"]["result"] == wanted]

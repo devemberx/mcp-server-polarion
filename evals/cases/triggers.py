@@ -203,7 +203,7 @@ CASES: list[Case] = [
         "list_test_runs.",
         covers=["list_test_records"],
         expect="list_test_records",
-        reject=["list_test_runs"],
+        reject=["list_test_runs", "get_test_run"],
     ),
     _case(
         "TRIG-GET-TEST-RUN",
