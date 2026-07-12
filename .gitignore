@@ -42,3 +42,4 @@ evals/reports/
 .vscode/*
 .DS_Store
 Thumbs.db
+.pipeline/
