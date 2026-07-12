@@ -24,6 +24,7 @@ from .fixtures import (
     PROJECT,
     SEEDS,
     SPACE,
+    TESTCASE_ID,
     TS,
     Comment,
     Seeds,
@@ -82,6 +83,26 @@ class FakePolarion:
             },
             "relationships": {
                 "author": {"data": {"type": "users", "id": f"{PROJECT}/{AUTHOR}"}},
+            },
+        }
+
+    def _test_record_resource(self, tr: TestRun) -> dict[str, Any]:
+        # One failed TESTCASE_ID execution per run -- enough for trigger +
+        # result-filter behavior.
+        return {
+            "type": "testrecords",
+            "id": f"{PROJECT}/{tr.short_id}/{PROJECT}/{TESTCASE_ID}/0",
+            "attributes": {
+                "executed": TS,
+                "duration": 1.5,
+                "result": "failed",
+                "iteration": 0,
+            },
+            "relationships": {
+                "testCase": {
+                    "data": {"type": "workitems", "id": f"{PROJECT}/{TESTCASE_ID}"}
+                },
+                "executedBy": {"data": {"type": "users", "id": f"{PROJECT}/{AUTHOR}"}},
             },
         }
 
@@ -389,6 +410,26 @@ class FakePolarion:
             data = [self._work_item_resource(w) for w in items]
             return httpx.Response(
                 200, json={"data": data, "meta": {"totalCount": len(data)}}
+            )
+
+        # Test records of one run; testResultId filter server-side. No meta
+        # block -- live endpoint omit totalCount (verified 2026-07-12).
+        records = re.search(r"/testruns/([^/]+)/testrecords$", path)
+        if records:
+            tr = self.seeds.test_runs.get(records.group(1))
+            if tr is None:
+                return httpx.Response(404, json={"errors": [{"status": "404"}]})
+            # Blueprints never executed -- empty page for templates.
+            data = [] if tr.is_template else [self._test_record_resource(tr)]
+            wanted = params.get("testResultId", "")
+            if wanted:
+                data = [r for r in data if r["attributes"]["result"] == wanted]
+            return httpx.Response(
+                200,
+                json={
+                    "data": data,
+                    "included": self._author_included() if data else [],
+                },
             )
 
         # Single test run (template guard + get_test_run); isTemplate served
