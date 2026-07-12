@@ -2,7 +2,7 @@
 name: spec-researcher
 description: Gathers verified external-contract facts (endpoints, params, schemas, id formats, quirks) for a new feature spec. Invoke during dev-pipeline Stage 1, or any time exact vendor-API facts are needed before designing a tool. Never designs the tool itself or touches repo files; Write is for scratchpad extraction only.
 tools: Bash, Read, Write, Grep, Glob, WebFetch
-model: sonnet
+model: opus
 ---
 
 # Spec Researcher

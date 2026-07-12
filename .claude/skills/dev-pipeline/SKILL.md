@@ -45,7 +45,7 @@ a fresh Agent call starts cold and re-derives everything.
 | Stage | Invoke | Model | Why |
 |---|---|---|---|
 | 0 Worktree setup | main thread | — | harness tools (EnterWorktree), no judgment needed |
-| 1 Spec research | `spec-researcher` | sonnet | verified contract facts; conclusions matter, not transcripts |
+| 1 Spec research | `spec-researcher` | opus | wrong contract fact poisons every later stage; judgment on source trust worth the cost |
 | 1 Spec writing | main thread | — | needs full user context + approval dialogue |
 | 2 Plan exploration | `pattern-scout` | sonnet | file:line reuse hunting, read-only |
 | 2 Plan design | main thread (Plan agent for big scope) | opus for Plan agent | architecture trade-offs |
