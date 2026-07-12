@@ -9,7 +9,7 @@ Encode the sequence that shipped `list_test_records` (PR #170): worktree → spe
 plan → TDD implement → gates → review loop → ship. Main session is the
 **orchestrator**: it sequences stages, holds user approvals, spawns the stage
 agents, and merges their reports. Subagents never spawn other subagents
-(platform constraint, and paraphrase hops lose information).
+(hard rule here — every paraphrase hop loses information).
 
 ```
  0.Worktree → 1.Spec →(approve)→ 2.Plan →(approve)→ 3.Implement(TDD) → 4.Gates
@@ -181,7 +181,8 @@ mocks so tests mirror reality (e.g. an endpoint that omits `meta.totalCount`).
 - [ ] Worktree isolated, branch `<type>/<kebab>`, baseline was green at start
 - [ ] Spec and plan each got explicit user approval, then landed in `.pipeline/`
 - [ ] Every implementer report carried RED-then-GREEN evidence
-- [ ] All four gate commands pass; diff-cover ≥90% on changed lines
+- [ ] All five gate commands pass (pytest, ruff check, ruff format --check,
+      mypy, diff-cover); diff-cover ≥90% on changed lines
 - [ ] Live test done for contract-boundary changes, findings folded into mocks
 - [ ] Final `pipeline-reviewer` verdict is PASS (zero CRITICAL/MEDIUM)
 - [ ] PR open with template filled, LOW/NIT + live evidence recorded

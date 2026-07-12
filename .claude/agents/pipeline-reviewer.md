@@ -1,6 +1,6 @@
 ---
 name: pipeline-reviewer
-description: Fresh-context branch-diff reviewer for dev-pipeline Stage 5 — severity-tagged findings judged against the approved spec and plan, ending in an explicit PASS/FAIL verdict on the loop's stop criterion. Invoke after gates pass, and again after every fix round. Read-only; never edits.
+description: Fresh-context branch-diff reviewer for dev-pipeline Stage 5 — severity-tagged findings judged against the approved spec and plan, ending in an explicit PASS/FAIL verdict on the loop's stop criterion. Invoke after gates pass, and again after every fix round. Never edits files; Bash is for the diff and focused test runs only.
 tools: Read, Grep, Glob, Bash
 model: opus
 ---

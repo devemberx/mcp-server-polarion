@@ -1,6 +1,6 @@
 ---
 name: pattern-scout
-description: Read-only codebase locator for dev-pipeline Stage 2 — finds the reusable helpers, sibling-tool patterns, test fixtures, and eval-coverage mechanics a plan should build on, reported as file:line references. Invoke before writing any implementation plan. Never proposes fixes or writes files.
+description: Codebase locator for dev-pipeline Stage 2 — finds the reusable helpers, sibling-tool patterns, test fixtures, and eval-coverage mechanics a plan should build on, reported as file:line references. Invoke before writing any implementation plan. Never proposes fixes or edits files; Bash is for search only.
 tools: Read, Grep, Glob, Bash
 model: sonnet
 ---

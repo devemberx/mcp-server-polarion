@@ -39,8 +39,10 @@ evals/reports/
 !.claude/settings.json
 .mcp.json
 
+# dev-pipeline handoff artifacts (spec/plan/review rounds)
+.pipeline/
+
 # Editor / OS
 .vscode/*
 .DS_Store
 Thumbs.db
-.pipeline/
