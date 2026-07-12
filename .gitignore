@@ -33,6 +33,7 @@ evals/reports/
 
 # Claude / MCP configuration
 .claude/*
+!.claude/agents/
 !.claude/skills/
 !.claude/hooks/
 !.claude/settings.json
