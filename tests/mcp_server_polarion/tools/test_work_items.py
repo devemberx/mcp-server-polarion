@@ -1266,6 +1266,14 @@ class TestUpdateWorkItemsDocstringGuidance:
         items_field = inspect.signature(update_work_items).parameters["items"].default
         assert "REPLACE" in (items_field.description or "")
 
+    def test_table_steer_keeps_eval_proven_phrasing(self) -> None:
+        # EFF-TABLE-RECIPE-SOURCED: reword "To add a table" to "For a new
+        # table" drop get_html_recipes triggering 3/3 to 0/3 — task-verb
+        # phrasing load-bearing, keep byte-close.
+        document = " ".join((update_work_items.__doc__ or "").split())
+        assert "To add a table" in document
+        assert "call get_html_recipes first" in document
+
 
 class TestEnumGuardCreateWorkItem:
     """Integration: ``create_work_items`` reject ghost enum ids before POST."""
