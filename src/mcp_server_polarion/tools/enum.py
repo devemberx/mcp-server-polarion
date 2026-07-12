@@ -99,9 +99,9 @@ async def list_work_item_enum_options(  # noqa: PLR0913
 ) -> PaginatedResult[EnumOption]:
     """List valid enum option ids for a work item field of a given type.
 
-    Resolve enum ids here before create_work_items / update_work_items — enums
-    are validated on write, invalid ids raise with this set. An unknown
-    work_item_type silently falls back to ~, so verify the type id first.
+    Call this before create_work_items / update_work_items — invalid enum ids
+    are rejected on write. An unknown work_item_type silently falls back to
+    '~', so verify the type id first.
     """
     return await _list_enum_options(
         ctx,
@@ -134,9 +134,9 @@ async def list_document_enum_options(  # noqa: PLR0913
 ) -> PaginatedResult[EnumOption]:
     """List valid enum option ids for a document field of a given type.
 
-    Resolve enum ids here before create_document / update_document — enums are
-    validated on write, invalid ids raise with this set. An unknown
-    document_type silently falls back to ~, so verify the type id first.
+    Call this before create_document / update_document — invalid enum ids are
+    rejected on write. An unknown document_type silently falls back to '~',
+    so verify the type id first.
     """
     return await _list_enum_options(
         ctx,

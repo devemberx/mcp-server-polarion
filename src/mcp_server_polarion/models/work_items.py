@@ -67,7 +67,7 @@ class WorkItemRead(WorkItemSummary):
 
 
 class WorkItemCreateSpec(BaseModel):
-    """One work item to create via ``create_work_items``."""
+    """One work item to create via create_work_items."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -94,8 +94,7 @@ class WorkItemsCreateResult(BaseModel):
 
 
 class WorkItemUpdateSpec(BaseModel):
-    """One work item's changes in an ``update_work_items`` batch; unset
-    fields stay unchanged."""
+    """One update_work_items batch entry; unset fields stay unchanged."""
 
     model_config = ConfigDict(extra="forbid")
 
