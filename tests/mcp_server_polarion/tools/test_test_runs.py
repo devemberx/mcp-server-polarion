@@ -27,6 +27,7 @@ from mcp_server_polarion.tools.test_runs import (
     _build_update_test_runs_payload,
     create_test_runs,
     get_test_run,
+    list_test_records,
     list_test_runs,
     update_test_runs,
 )
@@ -362,6 +363,220 @@ class TestListTestRunsQueryDocumentation:
         assert "SQL" not in (list_test_runs.__doc__ or ""), (
             "list_test_runs docstring must not mention SQL"
         )
+
+
+class TestListTestRecords:
+    """``list_test_records`` tool."""
+
+    async def test_returns_test_records(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "type": "testrecords",
+                    "id": "proj1/TR-001/proj1/TC-42/0",
+                    "attributes": {
+                        "executed": "2026-06-01T10:00:00Z",
+                        "duration": 12.5,
+                        "result": "failed",
+                        "iteration": 0,
+                    },
+                    "relationships": {
+                        "testCase": {
+                            "data": {"type": "workitems", "id": "proj1/TC-42"}
+                        },
+                        "executedBy": {
+                            "data": {"type": "users", "id": "proj1/devemberx"}
+                        },
+                        "defect": {"data": {"type": "workitems", "id": "proj1/DEF-7"}},
+                    },
+                },
+                {
+                    "type": "testrecords",
+                    "id": "proj1/TR-001/proj1/TC-43/1",
+                    "attributes": {"iteration": 1},
+                    "relationships": {
+                        "testCase": {
+                            "data": {"type": "workitems", "id": "proj1/TC-43"}
+                        },
+                    },
+                },
+            ],
+            "included": [
+                {
+                    "type": "users",
+                    "id": "proj1/devemberx",
+                    "attributes": {"name": "Devember X"},
+                }
+            ],
+            # Live endpoint omit meta.totalCount -- total falls back to
+            # offset estimate.
+        }
+
+        result = await list_test_records(
+            mock_ctx,
+            project_id="proj1",
+            test_run_id="TR-001",
+            result=None,
+            page_size=100,
+            page_number=1,
+        )
+
+        assert isinstance(result, PaginatedResult)
+        assert len(result.items) == 2
+        assert result.total_count == 2
+
+        first = result.items[0]
+        # Full work-item ids preserved -- never derived from 5-segment record id.
+        assert first.test_case_id == "proj1/TC-42"
+        assert first.iteration == 0
+        assert first.result == "failed"
+        assert first.executed == "2026-06-01T10:00:00Z"
+        assert first.duration == 12.5
+        assert first.executed_by_name == "Devember X"
+        assert first.defect_id == "proj1/DEF-7"
+
+        second = result.items[1]
+        # Not-yet-executed record -> blanks and zeros.
+        assert second.test_case_id == "proj1/TC-43"
+        assert second.iteration == 1
+        assert second.result == ""
+        assert second.executed == ""
+        assert second.duration == 0.0
+        assert second.executed_by_name == ""
+        assert second.defect_id == ""
+
+    async def test_sparse_fieldset_and_includes_requested(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {"data": []}
+
+        await list_test_records(
+            mock_ctx,
+            project_id="proj1",
+            test_run_id="TR-001",
+            result=None,
+            page_size=100,
+            page_number=1,
+        )
+
+        args, kwargs = mock_client.get.call_args
+        assert args[0] == "/projects/proj1/testruns/TR-001/testrecords"
+        params = kwargs["params"]
+        # Sparse fieldset drop relationships -- all three named explicit.
+        assert "testCase" in params["fields[testrecords]"]
+        assert "executedBy" in params["fields[testrecords]"]
+        assert "defect" in params["fields[testrecords]"]
+        assert params["include"] == "executedBy"
+        assert params["fields[users]"] == "name"
+
+    async def test_result_filter_forwarded(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {"data": []}
+
+        await list_test_records(
+            mock_ctx,
+            project_id="proj1",
+            test_run_id="TR-001",
+            result="failed",
+            page_size=100,
+            page_number=1,
+        )
+
+        _, kwargs = mock_client.get.call_args
+        assert kwargs["params"]["testResultId"] == "failed"
+
+    async def test_result_none_omits_param(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {"data": []}
+
+        await list_test_records(
+            mock_ctx,
+            project_id="proj1",
+            test_run_id="TR-001",
+            result=None,
+            page_size=100,
+            page_number=1,
+        )
+
+        _, kwargs = mock_client.get.call_args
+        assert "testResultId" not in kwargs["params"]
+
+    async def test_run_not_found_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionNotFoundError(
+            "Not found", status_code=404
+        )
+
+        with pytest.raises(ValueError, match="not found"):
+            await list_test_records(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="missing",
+                result=None,
+                page_size=100,
+                page_number=1,
+            )
+
+    async def test_auth_error_raises_permission_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError("auth", status_code=401)
+
+        with pytest.raises(PermissionError):
+            await list_test_records(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="TR-001",
+                result=None,
+                page_size=100,
+                page_number=1,
+            )
+
+    async def test_other_error_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionError("boom", status_code=500)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            await list_test_records(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="TR-001",
+                result=None,
+                page_size=100,
+                page_number=1,
+            )
+
+
+class TestListTestRecordsFieldValidation:
+    """``page_size`` bounds — direct calls bypass JSON Schema; proven via
+    ``TypeAdapter`` rebuild from signature.
+    """
+
+    @staticmethod
+    def _adapter(param_name: str) -> TypeAdapter[object]:
+        hints = get_type_hints(list_test_records)
+        sig = inspect.signature(list_test_records)
+        field_info = sig.parameters[param_name].default
+        return TypeAdapter(Annotated[hints[param_name], field_info])
+
+    def test_page_size_boundaries_accepted(self) -> None:
+        adapter = self._adapter("page_size")
+        assert adapter.validate_python(1) == 1
+        assert adapter.validate_python(100) == 100
+
+    def test_page_size_above_max_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter("page_size").validate_python(101)
+
+    def test_page_number_below_min_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter("page_number").validate_python(0)
 
 
 class TestBuildCreateTestRunsPayload:

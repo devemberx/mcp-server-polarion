@@ -24,9 +24,9 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for **P
 
 ## Features
 
-- **31 tools** covering read and write across documents, work items, test runs, traceability links, and comments.
+- **34 tools** covering read and write across documents, work items, test runs, traceability links, and comments.
 - **Read** — render documents as Markdown, search with Lucene or SQL, walk incoming/outgoing links, resolve enum options.
-- **Write** — create and update work items and documents, create test runs, manage links, reorganize document structure, post comments.
+- **Write** — create and update work items, documents, and test runs, manage links, reorganize document structure, post comments.
 - **Safe writes** — every write tool supports `dry_run`, and pre-write guards validate fields, enum values, and link targets before hitting Polarion.
 - **Plays nice with your server** — requests are paced to Polarion's rate limits, with automatic retries on 429/5xx responses.
 - **Built for LLMs** — strict async, fully typed, pagination on every list tool, docstrings written as the assistant's manual.
@@ -54,6 +54,8 @@ Other clients (VS Code, Claude Desktop, Cursor) — see [Client Configuration](#
 | `list_documents` | List documents in a project |
 | `list_work_items` | List work items in a project (Lucene/SQL query) |
 | `list_test_runs` | List test runs in a project (Lucene query, templates filter) |
+| `get_test_run` | Get test run details, optionally with the raw HTML report body |
+| `list_test_records` | List a test run's execution records, one per test case iteration |
 | `get_sql_query_recipes` | Fetch copy-paste SQL recipes for advanced queries |
 | `get_html_recipes` | Fetch copy-paste Polarion HTML templates for raw-HTML body edits |
 | `get_document` | Get document metadata, optionally with the raw body HTML |
@@ -79,6 +81,7 @@ All list tools support pagination via `page_size` (1–100) and `page_number` pa
 | `update_document` | Update document metadata, body, or workflow status |
 | `copy_document` | Copy a document to a new name, space, or project |
 | `create_test_runs` | Create one or more test runs, optionally from a template |
+| `update_test_runs` | Update title, status, group, or custom fields on one or more test runs |
 | `create_work_item_links` | Create one or more outgoing links from a source work item |
 | `update_work_item_link` | Update `suspect` / `revision` on one outgoing link |
 | `delete_work_item_links` | Delete one or more outgoing links from a source work item |

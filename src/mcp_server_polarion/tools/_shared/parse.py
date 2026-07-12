@@ -13,6 +13,7 @@ from mcp_server_polarion.models import (
     EnumOption,
     Hyperlink,
     PaginatedResult,
+    TestRecordSummary,
     TestRunDetail,
     TestRunSummary,
     WorkItemDetail,
@@ -24,7 +25,7 @@ from mcp_server_polarion.tools._shared.custom_fields import (
     STANDARD_WORK_ITEM_ATTRIBUTES,
     extract_custom_fields,
 )
-from mcp_server_polarion.tools._shared.helpers import safe_str
+from mcp_server_polarion.tools._shared.helpers import safe_float, safe_str
 from mcp_server_polarion.tools._shared.pagination import make_page
 
 
@@ -277,6 +278,71 @@ def parse_work_item_summaries(
             continue
         kwargs = parse_work_item_summary_kwargs(item, user_names)
         items.append(WorkItemSummary(**kwargs))
+    return items
+
+
+class TestRecordSummaryKwargs(TypedDict):
+    """Kwargs shape from ``parse_test_record_summary_kwargs``."""
+
+    test_case_id: str
+    iteration: int
+    result: str
+    executed: str
+    duration: float
+    executed_by_name: str
+    defect_id: str
+
+
+def parse_test_record_summary_kwargs(
+    item: dict[str, object],
+    user_names: dict[str, str],
+) -> TestRecordSummaryKwargs:
+    """``TestRecordSummary`` kwargs from JSON:API resource; ``user_names``
+    map full user id → display name (from included ``users``). Work-item
+    targets keep full ids — record 5-segment id never parsed.
+    """
+    attributes = item.get("attributes", {})
+    if not isinstance(attributes, dict):
+        attributes = {}
+    relationships = item.get("relationships", {})
+    if not isinstance(relationships, dict):
+        relationships = {}
+
+    iteration = attributes.get("iteration", 0)
+    executed_by_id = extract_relationship_id(relationships, "executedBy")
+    return {
+        "test_case_id": extract_relationship_id(relationships, "testCase"),
+        # bool is int subclass -- reject as iteration.
+        "iteration": iteration
+        if isinstance(iteration, int) and not isinstance(iteration, bool)
+        else 0,
+        "result": safe_str(attributes.get("result", "")),
+        "executed": safe_str(attributes.get("executed", "")),
+        "duration": safe_float(attributes.get("duration", 0.0)),
+        "executed_by_name": user_names.get(executed_by_id, ""),
+        "defect_id": extract_relationship_id(relationships, "defect"),
+    }
+
+
+def parse_test_record_summaries(
+    response: dict[str, object],
+) -> list[TestRecordSummary]:
+    """Test-records list response → ``TestRecordSummary`` models. Take whole
+    response (not just ``data``) to resolve executedBy names from included
+    ``users``.
+    """
+    user_names = parse_included_user_name_map(response)
+    data = response.get("data", [])
+    items: list[TestRecordSummary] = []
+    if not isinstance(data, list):
+        return items
+
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        items.append(
+            TestRecordSummary(**parse_test_record_summary_kwargs(item, user_names))
+        )
     return items
 
 

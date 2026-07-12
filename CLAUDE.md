@@ -40,6 +40,11 @@ CI: `ruff check` → `ruff format --check` → `mypy` → `pytest` (`--cov-fail-
 - Error mapping: `PolarionNotFoundError`→`ValueError`, `PolarionAuthError`→`PermissionError`, `PolarionError`→`RuntimeError`.
 - Guards fail closed: validation GET error block write; only successful empty option set defer to Polarion.
 - Docstrings = LLM manual, Google-style; only prose above `Args:` ship — keep tight; return-field bullets sync with model. Field descriptions one line, skip when name + type say all.
+- Tool description template (order, skip empty):
+  - [1] verb-first what + hard limits; [2] sibling routing ("— use X instead"); [3] call strategy only if behavior-change (REPLACE / "Call X first" / Atomic).
+  - [4] round-trip format rules; [5] returns + follow-up; [6] errors as prevention-form ("resolve via list_*_enum_options first").
+  - Shipped text = docstring prose + `Field(description=...)` + input spec-model class docstrings (`$defs` ship them) — NEVER exception class names / raw HTTP codes / RST double-backticks; caps only NEVER/REPLACE/Atomic; `dry_run` = approved byte-exact variants.
+  - Budget: read ≤~50, write ≤~150 words. Gate `test_tool_description_style.py`; eval-FAIL-restored phrase = lock via docstring contract test.
 - No `WARNING:`/`NOTE:` prefixes, no dev-narrative, no banner dividers. CLAUDE.md dev-only — MCP-user info live in `@mcp.tool` docstring. Module docstrings = why module exists; constraints inline next to what they constrain.
 - Comments + dev docstrings caveman-style: drop articles/filler, compress verbs — `# Custom key match standard attr = silent shadow.` One line per point, why not what; never restate self-evident code; multi-line only when each line carry distinct fact. Technical terms/ids/API names/numbers exact; no invented abbreviations. Exempt (LLM-facing, eval-gated): `@mcp.tool` docstrings + `Field(description=...)` — normal prose per Docstrings rule above. `TODO` = `# TODO(#issue): concrete action`, never stray. No dead code; keep comments sync when code change.
 
@@ -72,6 +77,6 @@ CI: `ruff check` → `ruff format --check` → `mypy` → `pytest` (`--cov-fail-
 
 Full rules in [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md); enforced by `.githooks/commit-msg` + `.claude/hooks/`.
 
-- Branches off `main`: `<type>/<short-kebab-summary>`. Commits: `type(scope): summary` ≤50 chars + 2-bullet body (motivation, change).
+- Branches off `main`: `<type>/<short-kebab-summary>`; type = feat|fix|refactor|test|docs|chore|ci (pre-push enforce; `feature/` reject). Commits: `type(scope): summary` ≤50 chars + 2-bullet body (motivation, change).
 - PR checklist: flip `[ ]`→`[x]`; don't delete unchecked options.
 - Squash merge only; NEVER `--subject` to `gh pr merge`. Force-push feature branches only with explicit authorization; never `main`.

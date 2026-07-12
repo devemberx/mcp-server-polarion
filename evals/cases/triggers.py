@@ -195,6 +195,17 @@ CASES: list[Case] = [
         reject=["list_work_items"],
     ),
     _case(
+        "TRIG-LIST-TEST-RECORDS",
+        f"Which test cases failed in test run '{TEST_RUN_ID}' of project '{PROJECT}'?",
+        "triggers_tool",
+        intent="Reading per-test-case execution results of a run must call "
+        "list_test_records, not fetch run metadata via get_test_run or "
+        "list_test_runs.",
+        covers=["list_test_records"],
+        expect="list_test_records",
+        reject=["list_test_runs", "get_test_run"],
+    ),
+    _case(
         "TRIG-GET-TEST-RUN",
         f"Show the full details of test run '{TEST_RUN_ID}' in project '{PROJECT}'.",
         "triggers_tool",

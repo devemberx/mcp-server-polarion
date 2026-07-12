@@ -7,6 +7,23 @@ from collections.abc import Mapping
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
+class TestRecordSummary(BaseModel):
+    """Compact test-record representation for list results."""
+
+    # pytest collect Test*-named classes on import; opt out.
+    __test__ = False
+
+    # Full "project/WI-id" from relationships.testCase; record 5-segment id
+    # never parsed. test_case_id + iteration = record identity within run.
+    test_case_id: str
+    iteration: int = 0
+    result: str = ""
+    executed: str = ""
+    duration: float = 0.0
+    executed_by_name: str = ""
+    defect_id: str = ""
+
+
 class TestRunSummary(BaseModel):
     """Compact test-run representation for list results."""
 
@@ -46,7 +63,7 @@ class TestRunDetail(TestRunSummary):
 
 
 class TestRunCreateSpec(BaseModel):
-    """One test run to create via ``create_test_runs``."""
+    """One test run to create via create_test_runs."""
 
     __test__ = False
 
@@ -76,8 +93,7 @@ class TestRunsCreateResult(BaseModel):
 
 
 class TestRunUpdateSpec(BaseModel):
-    """One test run's changes in an ``update_test_runs`` batch; unset
-    fields stay unchanged."""
+    """One update_test_runs batch entry; unset fields stay unchanged."""
 
     __test__ = False
 

@@ -553,10 +553,9 @@ async def list_documents(
 ) -> PaginatedResult[DocumentSummary]:
     """List a project's documents.
 
-    Returns space_id + document_name (inputs to the other document tools) plus
-    type, status, updated timestamp, and display names of the creator
-    (author_name) and last editor (last_updated_by_name). Use get_document for
-    author/editor IDs. Discovery scan cached 60s.
+    Returns space_id + document_name — the inputs to every other document
+    tool — plus type, status, updated, and creator/editor display names.
+    Use get_document for author/editor ids. Discovery scan cached 60s.
     """
     client = get_client(ctx)
 
@@ -625,15 +624,10 @@ async def get_document(
 ) -> DocumentDetail:
     """Get a document's metadata: title/type/status/editors/custom fields.
 
-    Also returns outline numbering + autoSuspect (round-trip via update_document).
-    author_id/author_name (creator) and last_updated_by_id/last_updated_by_name
-    (last editor) pair the machine id with the display name; updated is the
-    last-modified timestamp.
-
     include_homepage_content_html=True fills content_html with raw
     homePageContent HTML — the required source for
-    update_document(home_page_content_html=...). That body is inline prose only
-    (headings / embedded work items live elsewhere; read_document renders all).
+    update_document(home_page_content_html=...). That body is inline prose
+    only — headings and embedded work items render via read_document.
     Never feed back a blanked (flag=False) body.
     """
     client = get_client(ctx)
@@ -721,9 +715,9 @@ async def read_document_parts(  # noqa: PLR0913
 ) -> PaginatedResult[DocumentPart]:
     """List a document's structural parts in order.
 
-    Use for structure: part IDs (positions for move_work_item_to_document),
-    heading levels, per-part Markdown. Plain reading → read_document; a
-    document's work items → list_work_items.
+    Use for structure: part ids (move_work_item_to_document anchors),
+    heading levels, per-part Markdown. For plain reading use read_document;
+    for a document's work items use list_work_items.
     """
     client = get_client(ctx)
     path = (
@@ -787,10 +781,10 @@ async def read_document(  # noqa: PLR0913
 ) -> DocumentReadResult:
     """Render a document end-to-end as flowing Markdown — THE way to read a body.
 
-    Interleaves headings, work-item descriptions, and prose. Synthesis output:
-    NEVER feed to update_document (anchors collapse, headings orphan) —
-    round-trip via get_document(include_homepage_content_html=True). For
-    metadata-only extraction prefer list_work_items SQL.
+    Interleaves headings, work-item descriptions, and prose. Synthesis
+    output: NEVER feed it to update_document — round-trip via
+    get_document(include_homepage_content_html=True). For metadata-only
+    extraction use list_work_items with SQL.
     """
     # read_document_parts handle fetch + error mapping (@mcp.tool return
     # original function).
@@ -873,7 +867,7 @@ async def update_document(  # noqa: PLR0913
         min_length=1,
         description="Document name within space_id.",
     ),
-    title: str | None = None,
+    title: str | None = Field(default=None, description="New document title."),
     status: str | None = Field(
         default=None,
         description="New status; prefer workflow_action for real transitions.",
@@ -913,14 +907,13 @@ async def update_document(  # noqa: PLR0913
         description="Preview payload without writing; guards still query Polarion.",
     ),
 ) -> DocumentUpdateResult:
-    """Update a Polarion document's metadata or body.
+    """Update a document's metadata or body.
 
-    PATCHes only supplied attributes (omitted preserved); no follow-up GET.
-    Fetch via get_document BEFORE updating. home_page_content_html is never
-    sanitized or converted — source from
-    get_document(include_homepage_content_html=True); blocks lacking an id= get
-    one auto-stamped, a fully anchored body is sent byte-for-byte. Empty string
-    rejected (orphans headings) — pass '<p></p>' for near-empty.
+    PATCHes only supplied attributes — omitted fields stay unchanged. Fetch
+    via get_document BEFORE updating. home_page_content_html is raw Polarion
+    HTML, sent verbatim — source from
+    get_document(include_homepage_content_html=True). An empty string is
+    rejected — pass '<p></p>' for near-empty.
 
     Body rules:
 
@@ -933,10 +926,10 @@ async def update_document(  # noqa: PLR0913
       page breaks) must be adapted from get_html_recipes templates, never
       hand-written.
 
-    workflow_action must pair with ≥1 attribute (else 400). Unknown status/type
-    raise ValueError; custom_fields keys outside the document type's schema are
-    rejected, values NOT validated — resolve via list_document_enum_options
-    first.
+    workflow_action must pair with at least one attribute. Unknown
+    status/type ids and custom_fields keys outside the type schema are
+    rejected, values are not validated — resolve via
+    list_document_enum_options first.
     """
     if home_page_content_html is not None and not home_page_content_html.strip():
         raise ValueError(
@@ -1109,18 +1102,18 @@ async def create_document(  # noqa: PLR0913
         description="Preview payload without writing; guards still query Polarion.",
     ),
 ) -> DocumentCreateResult:
-    """Create a new Polarion document in a space.
+    """Create a document in a space.
 
-    module_name must be unique in the space (duplicate → HTTP 409) — check
-    list_documents first. type/status validated — unknown ids raise ValueError
-    with options; custom_fields keys validated against the document type schema.
+    module_name must be unique in the space — a duplicate name conflicts;
+    check list_documents first. type/status and custom_fields keys are
+    validated on write — resolve ids via list_document_enum_options first.
 
-    home_page_content is Markdown → sanitized HTML, blocks auto-stamped with
-    unique ids. Markdown tables get native Polarion styling; a paragraph
-    starting 'Table:' directly after a table becomes a numbered caption
-    widget. Post-create edits round-trip raw HTML via
-    get_document(include_homepage_content_html=True) ↔ update_document; add work
-    items via move_work_item_to_document.
+    home_page_content is Markdown (greenfield only), converted to sanitized
+    HTML. Markdown tables get native Polarion styling; a paragraph starting
+    'Table:' directly after a table becomes a numbered caption widget.
+    Post-create edits round-trip raw HTML via
+    get_document(include_homepage_content_html=True) and update_document;
+    add work items via move_work_item_to_document.
     """
     client = get_client(ctx)
     await guard_document_enums(
@@ -1221,10 +1214,7 @@ async def copy_document(  # noqa: PLR0913
     document_name: str = Field(min_length=1, description="Source document name."),
     target_document_name: str = Field(
         min_length=1,
-        description=(
-            "New document name; must not already exist at the destination "
-            "(duplicate → HTTP 409)."
-        ),
+        description="New document name; must not already exist at the destination.",
     ),
     target_project_id: str | None = Field(
         default=None,
@@ -1256,13 +1246,13 @@ async def copy_document(  # noqa: PLR0913
 ) -> DocumentCopyResult:
     """Copy a document, duplicating its structure, body, and contained work items.
 
-    target_document_name must be free at the destination (duplicate → HTTP 409)
-    — check list_documents first. The copy lands in target_project_id /
-    target_space_id, both defaulting to the source.
+    Rebuilding via create_document/update_document loses the contained
+    items. target_document_name must be free at the destination — check
+    list_documents first. Destination defaults to the source project/space.
 
     link_original_items_with_role is validated against the TARGET project's
-    workitem-link-role enum; an unknown id is rejected. remove_outgoing_links
-    strips links carried over from the source.
+    workitem-link-role enum; remove_outgoing_links strips links carried over
+    from the source.
     """
     client = get_client(ctx)
     if link_original_items_with_role is not None:

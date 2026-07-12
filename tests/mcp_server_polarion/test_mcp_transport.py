@@ -32,6 +32,7 @@ _READ_TOOL_NAMES: frozenset[str] = frozenset(
         "read_document",
         "list_work_items",
         "list_test_runs",
+        "list_test_records",
         "get_test_run",
         "get_sql_query_recipes",
         "get_html_recipes",
@@ -265,6 +266,55 @@ class TestEndToEndInvocation:
         assert body["has_more"] is False
         assert body["items"][0]["id"] == "TR-1"
         assert body["items"][0]["author_name"] == "Devember X"
+
+    async def test_list_test_records_round_trip(self, mcp_client: _MCPClient) -> None:
+        with respx.mock(base_url=_BASE, assert_all_called=False) as mock:
+            mock.get("/projects/P1/testruns/TR-1/testrecords").mock(
+                return_value=httpx.Response(
+                    200,
+                    json={
+                        "data": [
+                            {
+                                "type": "testrecords",
+                                "id": "P1/TR-1/P1/TC-9/0",
+                                "attributes": {
+                                    "result": "passed",
+                                    "duration": 3.5,
+                                    "iteration": 0,
+                                },
+                                "relationships": {
+                                    "testCase": {
+                                        "data": {"type": "workitems", "id": "P1/TC-9"}
+                                    },
+                                    "executedBy": {
+                                        "data": {"type": "users", "id": "P1/devemberx"}
+                                    },
+                                },
+                            }
+                        ],
+                        "included": [
+                            {
+                                "type": "users",
+                                "id": "P1/devemberx",
+                                "attributes": {"name": "Devember X"},
+                            }
+                        ],
+                        # Live endpoint omit meta.totalCount.
+                    },
+                )
+            )
+            result = await mcp_client.call_tool(
+                "list_test_records",
+                {"project_id": "P1", "test_run_id": "TR-1"},
+            )
+
+        body = result.structured_content
+        assert body is not None
+        assert body["total_count"] == 1
+        assert body["has_more"] is False
+        assert body["items"][0]["test_case_id"] == "P1/TC-9"
+        assert body["items"][0]["result"] == "passed"
+        assert body["items"][0]["executed_by_name"] == "Devember X"
 
     async def test_polarion_not_found_surfaces_as_tool_error(
         self, mcp_client: _MCPClient

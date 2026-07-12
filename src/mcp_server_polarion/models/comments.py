@@ -35,7 +35,7 @@ class CommentSpec(BaseModel):
 
 
 class WorkItemCommentSpec(CommentSpec):
-    """Work item comment to create; adds ``title`` (document comments have none)."""
+    """Work item comment to create; adds title (document comments have none)."""
 
     title: str | None = Field(default=None, description="Comment heading.")
 

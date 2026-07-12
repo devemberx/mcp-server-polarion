@@ -15,6 +15,7 @@ from mcp_server_polarion.core.exceptions import (
 from mcp_server_polarion.models import (
     JsonValue,
     PaginatedResult,
+    TestRecordSummary,
     TestRunCreateSpec,
     TestRunDetail,
     TestRunsCreateResult,
@@ -29,6 +30,7 @@ from mcp_server_polarion.tools._shared.custom_fields import (
 )
 from mcp_server_polarion.tools._shared.fields import (
     MAX_BULK_ITEMS,
+    TEST_RECORD_LIST_FIELDS,
     TEST_RUN_DETAIL_FIELDS,
     TEST_RUN_LIST_FIELDS,
 )
@@ -50,6 +52,7 @@ from mcp_server_polarion.tools._shared.pagination import (
 from mcp_server_polarion.tools._shared.parse import (
     extract_created_short_ids,
     parse_included_user_name_map,
+    parse_test_record_summaries,
     parse_test_run_detail,
     parse_test_run_summaries,
 )
@@ -124,15 +127,14 @@ async def create_test_runs(
         description="Preview payload without writing; guards still query Polarion.",
     ),
 ) -> TestRunsCreateResult:
-    """Create 1-50 test runs in one project in a single bulk request.
+    """Create 1-50 test runs in one project in one bulk request.
 
-    id is required per item (Polarion REST does not auto-generate one).
+    id is required per item — never auto-generated.
     type/status are validated against the project's testing enumerations and
-    template_id against existing templates (list_test_runs(templates=True)) —
-    unknown ids raise ValueError. custom_fields keys are validated against a
-    sample of existing runs; enum-typed custom values are not (test runs have
-    no options API). Atomic: one bad item rejects the whole batch; an id-count
-    mismatch raises — re-query list_test_runs before retrying.
+    template_id against existing templates (list_test_runs(templates=True)).
+    custom_fields keys are validated against a sample of existing runs;
+    enum-typed custom values are not (test runs have no options API).
+    Atomic: one bad item rejects the whole batch.
     """
     client = get_client(ctx)
     ensure_unique_ids((spec.id for spec in items), label="id")
@@ -253,14 +255,13 @@ async def update_test_runs(
     ),
 ) -> TestRunsUpdateResult:
     """Update fields on 1-50 existing test runs in one bulk PATCH; unset
-    fields stay unchanged.
+    fields stay unchanged. Atomic: one bad item rejects the whole batch.
 
     Writable: title, status, group_id, custom_fields. status is validated
-    against the project's testing enumerations — unknown ids raise ValueError.
-    custom_fields is partial; keys are validated against a sample of existing
-    runs, values are NOT (test runs have no options API). finishedOn is
-    server-managed and not settable. Atomic: one bad item rejects the whole
-    batch. Returns ids only — re-read via list_test_runs if needed.
+    against the project's testing enumerations. custom_fields is partial;
+    keys are validated against a sample of existing runs, values are not
+    (test runs have no options API). finishedOn is server-managed — not
+    settable. Returns ids only — re-read via list_test_runs.
     """
     client = get_client(ctx)
     ensure_unique_ids((spec.test_run_id for spec in items), label="test_run_id")
@@ -334,11 +335,10 @@ async def list_test_runs(  # noqa: PLR0913
 ) -> PaginatedResult[TestRunSummary]:
     """List / search test runs in a project.
 
-    Returns actual run instances by default; set templates=True for the reusable
-    template blueprints instead. Filter with a Lucene query (status:open,
-    type:manual, HAS_VALUE:<field>) or omit for all. Filter by person with
-    author.name (exact, quoted) -- author.id does not match on test runs;
-    discover the full name from an unfiltered page first.
+    Returns run instances by default; set templates=True for the
+    reusable template blueprints. Filter by person with author.name (exact,
+    quoted) — author.id does not match on test runs; discover the full name
+    from an unfiltered page first.
     """
     client = get_client(ctx)
     params: dict[str, str | int] = {
@@ -379,25 +379,79 @@ async def list_test_runs(  # noqa: PLR0913
     timeout=60.0,
     annotations={"readOnlyHint": True},
 )
+async def list_test_records(  # noqa: PLR0913
+    ctx: Context,
+    project_id: str = Field(description="Polarion project ID."),
+    test_run_id: str = Field(description="Test run ID (e.g. 'TR-2026-01')."),
+    result: str | None = Field(
+        default=None,
+        description="Filter by result enum ID (e.g. 'passed', 'failed', 'blocked').",
+    ),
+    page_size: int = Field(default=DEFAULT_PAGE_SIZE, ge=1, le=100),
+    page_number: int = Field(default=1, ge=1),
+) -> PaginatedResult[TestRecordSummary]:
+    """List execution records of one test run — one row per test case
+    iteration. For run metadata use get_test_run.
+
+    Filter by result (e.g. 'failed') or omit for all; not-yet-executed
+    records have empty result. Lucene query is NOT supported here. Returns
+    summaries — test_case_id + iteration identify a record; defect_id links
+    the failure work item.
+    """
+    client = get_client(ctx)
+    params: dict[str, str | int] = {
+        "fields[testrecords]": TEST_RECORD_LIST_FIELDS,
+        "include": "executedBy",
+        "fields[users]": "name",
+        "page[size]": page_size,
+        "page[number]": page_number,
+    }
+    if result is not None:
+        params["testResultId"] = result
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/testruns/{encode_path_segment(test_run_id)}/testrecords"
+    )
+    try:
+        response = await client.get(path, params=params)
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Test run '{test_run_id}' not found in project '{project_id}'. "
+            "Use `list_test_runs` to discover valid IDs."
+        ) from exc
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot list test records -- check your POLARION_TOKEN permissions."
+        ) from exc
+    except PolarionError as exc:
+        raise RuntimeError(f"Failed to list test records: {exc.message}") from exc
+
+    items = parse_test_record_summaries(response)
+
+    return make_page(items, response, page_number, page_size)
+
+
+@mcp.tool(
+    tags={"read"},
+    timeout=60.0,
+    annotations={"readOnlyHint": True},
+)
 async def get_test_run(
     ctx: Context,
     project_id: str = Field(description="Polarion project ID."),
     test_run_id: str = Field(description="Test run ID (e.g. 'TR-2026-01')."),
     include_homepage_content_html: bool = Field(
         default=False,
-        description="Fill ``content_html`` with the run's raw HTML report body.",
+        description="Fill content_html with the run's raw HTML report body.",
     ),
 ) -> TestRunDetail:
     """Get full details of one test run by ID.
 
     Returns writable fields (title, status, group_id, custom_fields) plus
-    read-only context: how test cases are selected (select_test_cases_by with
-    its query or source document space_id/document_name), template provenance
-    (is_template, template_id), author, and timestamps.
-    include_homepage_content_html=True fills content_html with the raw HTML
-    report body; it stays empty when use_report_from_template is true (the run
-    inherits its report from its template). Keep it verbatim — never feed back
-    a blanked (flag=False) body.
+    read-only context: test-case selection, template provenance, author, and
+    timestamps. include_homepage_content_html=True fills content_html with
+    the raw HTML report body; it stays empty when use_report_from_template
+    is true. Never feed back a blanked (flag=False) body.
     """
     client = get_client(ctx)
     path = (

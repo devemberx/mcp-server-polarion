@@ -1,6 +1,7 @@
 """Core helpers worth pinning beyond transitive per-tool coverage —
-`format_option_list` rendering, `safe_str` coercion, slash-encoding contract
-of `encode_path_segment`, Lucene-id guard, `get_client` lookup.
+`format_option_list` rendering, `safe_str`/`safe_float` coercion,
+slash-encoding contract of `encode_path_segment`, Lucene-id guard,
+`get_client` lookup.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from mcp_server_polarion.tools._shared.helpers import (
     format_option_list,
     get_client,
     reraise_with_item_context,
+    safe_float,
     safe_str,
     validate_work_item_id_for_lucene,
 )
@@ -78,6 +80,24 @@ class TestSafeStr:
         assert safe_str(42) == "42"
         assert safe_str(1.5) == "1.5"
         assert safe_str(False) == "False"
+
+
+class TestSafeFloat:
+    """Tests for `safe_float`."""
+
+    def test_float_passes_through(self) -> None:
+        assert safe_float(12.5) == 12.5
+
+    def test_int_coerced(self) -> None:
+        assert safe_float(7) == 7.0
+
+    def test_bool_rejected(self) -> None:
+        # bool is int subclass -- must not read as 1.0.
+        assert safe_float(True) == 0.0
+
+    def test_none_and_str_default_zero(self) -> None:
+        assert safe_float(None) == 0.0
+        assert safe_float("fast") == 0.0
 
 
 class TestEncodePathSegment:
