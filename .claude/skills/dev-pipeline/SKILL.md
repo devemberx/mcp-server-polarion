@@ -33,8 +33,8 @@ Subagents share **no memory and no conversation history**. Three channels only:
 
    | File | Written by | Read by |
    |---|---|---|
-   | `.pipeline/spec.md` | orchestrator (Stage 1, after approval) | pattern-scout, pipeline-implementer, pipeline-reviewer |
-   | `.pipeline/plan.md` | orchestrator (Stage 2, after approval) | pipeline-implementer, pipeline-reviewer |
+   | `.pipeline/spec.md` | orchestrator (Stage 1, draft before approval; approval freezes it) | pattern-scout, pipeline-implementer, pipeline-reviewer |
+   | `.pipeline/plan.md` | orchestrator (Stage 2, full text shown before approval — via ExitPlanMode or quoted draft; approval freezes it) | pipeline-implementer, pipeline-reviewer |
    | `.pipeline/review-round-N.md` | orchestrator (Stage 5, from reviewer report) | pipeline-implementer (Stage 6), user on escalation |
 
 Follow-up questions to an agent you already spawned: `SendMessage` to its id —
@@ -77,23 +77,29 @@ sequentially, in one Agent call each.
 1. **Invoke `spec-researcher`** with: the feature ask, the vendor doc URL(s),
    and which sibling tools to read for conventions. Expect its
    CONTRACT FACTS / QUIRKS / UNVERIFIED report back.
-2. Write the spec in the main thread from that report: tool signature, response
-   model fields (minimal — defer detail to a future `get_*`), request params,
-   error mapping, files to touch, and the UNVERIFIED items as open
-   live-verification questions.
-3. **Stop and get user approval.** Then write the approved spec to
-   `.pipeline/spec.md`. Spec changes are cheap here, expensive later.
+2. Copy [spec-template.md](references/spec-template.md) to `.pipeline/spec.md`
+   and fill its slots from the report. The template fixes the required
+   sections — don't invent a new shape; they are the standard
+   pipeline-reviewer judges the diff against.
+3. **Show the user the full spec, then ask approval.** The approval request
+   quotes the spec content (or the revised sections on a redo) in the reply —
+   the user approves text they have read, never a bare "spec ready, approve?"
+   prompt. Fold feedback back into `.pipeline/spec.md`; approval freezes it.
+   Spec changes are cheap here, expensive later.
 
 ## Stage 2 — Plan
 
 1. **Invoke `pattern-scout`** with: `.pipeline/spec.md` path and the areas to
    sweep (helpers, sibling tool, test mechanics, eval coverage). Expect its
    REUSE / MIRROR / GAPS report. One scout unless scope spans unrelated areas.
-2. Draft the plan in the main thread (or a Plan agent for large scope):
-   Context / Branch / Changes (per file, citing the scout's file:line refs) /
-   Verification (incl. live-test items from the spec's UNVERIFIED list) /
-   Commit-PR. Use plan mode when available; get approval; write the approved
-   plan to `.pipeline/plan.md`.
+2. Draft the plan in the main thread (or a Plan agent for large scope) in the
+   shape of [plan-template.md](references/plan-template.md) — one implementer task per
+   Changes entry, live-test items from the spec's UNVERIFIED list under
+   Verification. Use plan mode when available — ExitPlanMode already puts the
+   full plan in front of the user for approval; write it to
+   `.pipeline/plan.md` right after. Without plan mode, copy the template to
+   `.pipeline/plan.md`, fill it, and quote it in the approval request — same
+   rule as the spec: the user approves text they have read.
 
 ## Stage 3 — Implement (TDD)
 
@@ -168,6 +174,7 @@ mocks so tests mirror reality (e.g. an endpoint that omits `meta.totalCount`).
 
 - Production code written before its failing test exists.
 - Implementer report accepted without RED evidence.
+- Approval requested without the full spec/plan text in front of the user.
 - Reviewer given implementer reports or conversation summaries (context bleed).
 - Review round 4+ still producing MEDIUM findings — escalate, don't grind.
 - `.pipeline/` files committed, or a subagent prompted without the file paths
@@ -179,7 +186,7 @@ mocks so tests mirror reality (e.g. an endpoint that omits `meta.totalCount`).
 ## Verification (pipeline exit checklist)
 
 - [ ] Worktree isolated, branch `<type>/<kebab>`, baseline was green at start
-- [ ] Spec and plan each got explicit user approval, then landed in `.pipeline/`
+- [ ] Spec and plan each shown in full to the user, approved, frozen in `.pipeline/`
 - [ ] Every implementer report carried RED-then-GREEN evidence
 - [ ] All five gate commands pass (pytest, ruff check, ruff format --check,
       mypy, diff-cover); diff-cover ≥90% on changed lines
