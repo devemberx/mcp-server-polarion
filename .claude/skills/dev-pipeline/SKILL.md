@@ -163,6 +163,8 @@ mocks so tests mirror reality (e.g. an endpoint that omits `meta.totalCount`).
 - CI: after opening the PR, `gh pr checks <PR#> --watch --fail-fast` until
   every check is green — merge is blocked on red anyway, but an unwatched red
   PR rots until a human notices; catch it while the session context is hot.
+  Right after `gh pr create` it can exit "no checks reported" before check
+  runs register — wait a few seconds and rerun, don't skip the watch.
   A red check is a Stage 4 gate failure, not a review finding: fix, re-run
   gates, and if code changed re-enter Stage 5. Protection is strict-mode, so
   if main moved, update the branch and let checks re-run.
@@ -203,4 +205,5 @@ mocks so tests mirror reality (e.g. an endpoint that omits `meta.totalCount`).
 - [ ] Live test done for contract-boundary changes, findings folded into mocks
 - [ ] Final `pipeline-reviewer` verdict is PASS (zero CRITICAL/MEDIUM)
 - [ ] PR open with template filled, LOW/NIT + live evidence recorded
-- [ ] PR CI checks all green (`gh pr checks`), branch up to date with main
+- [ ] PR CI checks all green (`gh pr checks <PR#> --watch --fail-fast`),
+      branch up to date with main
