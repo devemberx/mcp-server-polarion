@@ -402,7 +402,8 @@ class TestEndToEndInvocation:
 
 _README_PATH = Path(__file__).parents[2] / "README.md"
 # First-column backtick name only — description prose may cite tool names.
-_TOOL_ROW_RE = re.compile(r"^\| `([a-z_]+)` \|", re.MULTILINE)
+# \s* tolerate column-align padding; digits allowed in future tool names.
+_TOOL_ROW_RE = re.compile(r"^\|\s*`([a-z0-9_]+)`\s*\|", re.MULTILINE)
 
 
 def _readme_table_names(section: str) -> set[str]:
@@ -414,7 +415,11 @@ def _readme_table_names(section: str) -> set[str]:
     assert readme.count(start) == 1, f"README marker {start!r} missing or duplicated"
     assert readme.count(end) == 1, f"README marker {end!r} missing or duplicated"
     block = readme.split(start, 1)[1].split(end, 1)[0]
-    return set(_TOOL_ROW_RE.findall(block))
+    names = _TOOL_ROW_RE.findall(block)
+    # Set-equality alone hide duplicated row — catch before dedup.
+    dupes = sorted({n for n in names if names.count(n) > 1})
+    assert not dupes, f"README {section} tool table duplicate rows: {dupes}"
+    return set(names)
 
 
 class TestReadmeToolTable:
