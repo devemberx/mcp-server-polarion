@@ -156,6 +156,12 @@ mocks so tests mirror reality (e.g. an endpoint that omits `meta.totalCount`).
   change), bullets ≤120 chars — hook enforces. `.pipeline/` stays uncommitted.
 - PR: flip template checkboxes `[ ]`→`[x]`, keep unchecked options, record
   live-test evidence and unfixed LOW/NIT findings in Notes. Squash merge only.
+- CI: after opening the PR, `gh pr checks <PR#> --watch --fail-fast` until
+  every check is green — merge is blocked on red anyway, but an unwatched red
+  PR rots until a human notices; catch it while the session context is hot.
+  A red check is a Stage 4 gate failure, not a review finding: fix, re-run
+  gates, and if code changed re-enter Stage 5. Protection is strict-mode, so
+  if main moved, update the branch and let checks re-run.
 
 ## Common Rationalizations
 
@@ -193,3 +199,4 @@ mocks so tests mirror reality (e.g. an endpoint that omits `meta.totalCount`).
 - [ ] Live test done for contract-boundary changes, findings folded into mocks
 - [ ] Final `pipeline-reviewer` verdict is PASS (zero CRITICAL/MEDIUM)
 - [ ] PR open with template filled, LOW/NIT + live evidence recorded
+- [ ] PR CI checks all green (`gh pr checks`), branch up to date with main
