@@ -5,7 +5,9 @@ direct-call tool tests bypass.
 
 from __future__ import annotations
 
+import re
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import httpx
 import pytest
@@ -396,3 +398,47 @@ class TestEndToEndInvocation:
         assert result.data.dry_run is True
         assert result.data.work_item_ids == []
         assert result.data.payload_preview is not None
+
+
+_README_PATH = Path(__file__).parents[2] / "README.md"
+# First-column backtick name only — description prose may cite tool names.
+# \s* tolerate column-align padding; digits allowed in future tool names.
+_TOOL_ROW_RE = re.compile(r"^\|\s*`([a-z0-9_]+)`\s*\|", re.MULTILINE)
+
+
+def _readme_table_names(section: str) -> set[str]:
+    """Tool names inside README marker-fenced table block."""
+    readme = _README_PATH.read_text(encoding="utf-8")
+    start = f"<!-- tool-table:{section}:start -->"
+    end = f"<!-- tool-table:{section}:end -->"
+    # Marker anchor, not heading — README prose free to restructure.
+    assert readme.count(start) == 1, f"README marker {start!r} missing or duplicated"
+    assert readme.count(end) == 1, f"README marker {end!r} missing or duplicated"
+    block = readme.split(start, 1)[1].split(end, 1)[0]
+    names = _TOOL_ROW_RE.findall(block)
+    # Set-equality alone hide duplicated row — catch before dedup.
+    dupes = sorted({n for n in names if names.count(n) > 1})
+    assert not dupes, f"README {section} tool table duplicate rows: {dupes}"
+    return set(names)
+
+
+class TestReadmeToolTable:
+    """README tool tables sync with registration — set equality per table."""
+
+    @pytest.mark.parametrize(
+        ("section", "expected"),
+        [
+            pytest.param("read", _READ_TOOL_NAMES, id="read"),
+            pytest.param("write", _WRITE_TOOL_NAMES, id="write"),
+        ],
+    )
+    def test_table_matches_registration(
+        self, section: str, expected: frozenset[str]
+    ) -> None:
+        actual = _readme_table_names(section)
+        missing = sorted(expected - actual)
+        stale = sorted(actual - expected)
+        assert not missing and not stale, (
+            f"README {section} tool table out of sync — "
+            f"add rows for {missing}; drop stale rows {stale}"
+        )

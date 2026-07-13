@@ -48,6 +48,7 @@ Other clients (VS Code, Claude Desktop, Cursor) — see [Client Configuration](#
 
 ### Read
 
+<!-- tool-table:read:start -->
 | Tool | Description |
 |---|---|
 | `list_projects` | List accessible projects |
@@ -68,11 +69,13 @@ Other clients (VS Code, Claude Desktop, Cursor) — see [Client Configuration](#
 | `list_work_item_comments` | List a work item's comments with thread relationships |
 | `list_document_enum_options` | Resolve valid enum ids for a document field |
 | `list_work_item_enum_options` | Resolve valid enum ids for a work item field |
+<!-- tool-table:read:end -->
 
 All list tools support pagination via `page_size` (1–100) and `page_number` parameters.
 
 ### Write
 
+<!-- tool-table:write:start -->
 | Tool | Description |
 |---|---|
 | `create_work_items` | Create one or more work items in a single request |
@@ -91,6 +94,7 @@ All list tools support pagination via `page_size` (1–100) and `page_number` pa
 | `create_work_item_comments` | Add one or more comments or replies to a work item |
 | `update_document_comment` | Resolve or re-open a document comment |
 | `update_work_item_comment` | Resolve or re-open a work item comment |
+<!-- tool-table:write:end -->
 
 ## Example Prompts
 
