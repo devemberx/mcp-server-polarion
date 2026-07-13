@@ -21,6 +21,10 @@ from mcp_server_polarion.tools._shared.guard.links import (
     guard_work_item_link_targets,
     partition_delete_links,
 )
+from mcp_server_polarion.tools._shared.guard.test_records import (
+    guard_test_record_defects,
+    guard_test_record_results,
+)
 from mcp_server_polarion.tools._shared.guard.test_runs import (
     guard_test_run_custom_fields,
     guard_test_run_enums,
@@ -36,6 +40,8 @@ __all__ = [
     "guard_document_custom_fields",
     "guard_document_enums",
     "guard_hyperlink_roles",
+    "guard_test_record_defects",
+    "guard_test_record_results",
     "guard_test_run_custom_fields",
     "guard_test_run_enums",
     "guard_test_run_templates",

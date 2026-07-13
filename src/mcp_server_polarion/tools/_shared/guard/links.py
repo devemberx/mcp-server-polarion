@@ -69,7 +69,7 @@ async def guard_hyperlink_roles(
     )
 
 
-async def _existing_target_ids(
+async def existing_target_ids(
     client: PolarionClient,
     project_id: str,
     target_ids: frozenset[str],
@@ -117,7 +117,7 @@ async def guard_work_item_link_targets(
     missing: list[str] = []
     for project_id, requested in by_project.items():
         try:
-            existing = await _existing_target_ids(
+            existing = await existing_target_ids(
                 client, project_id, frozenset(requested)
             )
         except PolarionNotFoundError:

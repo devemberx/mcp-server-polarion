@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -142,4 +143,55 @@ class TestRunsUpdateResult(BaseModel):
     updated: bool
     dry_run: bool
     test_run_ids: list[str] = Field(default_factory=list)
+    payload_preview: Mapping[str, object] | None = None
+
+
+class TestRecordUpdateSpec(BaseModel):
+    """One update_test_records batch entry; unset fields stay unchanged."""
+
+    __test__ = False
+
+    # LLM input model: reject typo keys, not silent-drop.
+    model_config = ConfigDict(extra="forbid")
+
+    record_id: str = Field(
+        description=(
+            "Full 5-segment id exactly as returned by list_test_records; "
+            "never decomposed."
+        )
+    )
+    result: str | None = Field(
+        default=None,
+        description="Result option id (e.g. 'passed', 'failed', 'blocked').",
+    )
+    comment: str | None = Field(
+        default=None, description="Comment text, sent verbatim."
+    )
+    comment_format: Literal["text/plain", "text/html"] = "text/plain"
+    defect_work_item_id: str | None = Field(
+        default=None,
+        description="2-segment '{projectId}/{workItemId}' defect link.",
+    )
+
+    @model_validator(mode="after")
+    def _require_effective_change(self) -> TestRecordUpdateSpec:
+        # comment_format alone carries no intent -- needs comment/result/defect too.
+        effective = self.result or self.comment or self.defect_work_item_id
+        if not effective:
+            msg = (
+                f"test record '{self.record_id}': no effective change -- set "
+                "at least one of result/comment/defect_work_item_id."
+            )
+            raise ValueError(msg)
+        return self
+
+
+class TestRecordsUpdateResult(BaseModel):
+    """``update_test_records`` result."""
+
+    __test__ = False
+
+    updated: bool
+    dry_run: bool
+    record_ids: list[str] = Field(default_factory=list)
     payload_preview: Mapping[str, object] | None = None

@@ -43,6 +43,8 @@ from mcp_server_polarion.models.recipes import (
 )
 from mcp_server_polarion.models.test_runs import (
     TestRecordSummary,
+    TestRecordsUpdateResult,
+    TestRecordUpdateSpec,
     TestRunCreateSpec,
     TestRunDetail,
     TestRunsCreateResult,
@@ -83,6 +85,8 @@ __all__: list[str] = [
     "ProjectSummary",
     "SqlRecipeGallery",
     "TestRecordSummary",
+    "TestRecordUpdateSpec",
+    "TestRecordsUpdateResult",
     "TestRunCreateSpec",
     "TestRunDetail",
     "TestRunSummary",

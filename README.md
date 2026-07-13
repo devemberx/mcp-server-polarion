@@ -85,6 +85,7 @@ All list tools support pagination via `page_size` (1–100) and `page_number` pa
 | `copy_document` | Copy a document to a new name, space, or project |
 | `create_test_runs` | Create one or more test runs, optionally from a template |
 | `update_test_runs` | Update title, status, group, or custom fields on one or more test runs |
+| `update_test_records` | Update result, comment, or defect link on one or more test records of a test run |
 | `create_work_item_links` | Create one or more outgoing links from a source work item |
 | `update_work_item_link` | Update `suspect` / `revision` on one outgoing link |
 | `delete_work_item_links` | Delete one or more outgoing links from a source work item |

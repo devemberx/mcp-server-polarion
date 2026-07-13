@@ -16,6 +16,8 @@ from mcp_server_polarion.models import (
     JsonValue,
     PaginatedResult,
     TestRecordSummary,
+    TestRecordsUpdateResult,
+    TestRecordUpdateSpec,
     TestRunCreateSpec,
     TestRunDetail,
     TestRunsCreateResult,
@@ -35,6 +37,8 @@ from mcp_server_polarion.tools._shared.fields import (
     TEST_RUN_LIST_FIELDS,
 )
 from mcp_server_polarion.tools._shared.guard import (
+    guard_test_record_defects,
+    guard_test_record_results,
     guard_test_run_custom_fields,
     guard_test_run_enums,
     guard_test_run_templates,
@@ -306,6 +310,148 @@ async def update_test_runs(
         updated=True,
         dry_run=False,
         test_run_ids=[spec.test_run_id for spec in items],
+        payload_preview=None,
+    )
+
+
+# record_id = projectId/testRunId/testCaseProjectId/testCaseId/iteration.
+_RECORD_ID_SEGMENTS = 5
+
+
+def _build_update_test_record_resource(
+    *,
+    spec: TestRecordUpdateSpec,
+) -> dict[str, JsonValue]:
+    """One ``testrecords`` resource for bulk PATCH; skip unset so update
+    never blank existing attribute. ``id`` = ``spec.record_id`` verbatim --
+    record ids never parsed. Spec validator guarantee at least one effective
+    field survive.
+    """
+    attributes: dict[str, JsonValue] = {}
+    if spec.result:
+        attributes["result"] = spec.result
+    if spec.comment:
+        attributes["comment"] = {"type": spec.comment_format, "value": spec.comment}
+
+    resource: dict[str, JsonValue] = {
+        "type": "testrecords",
+        "id": spec.record_id,
+        "attributes": attributes,
+    }
+    if spec.defect_work_item_id:
+        resource["relationships"] = {
+            "defect": {"data": {"type": "workitems", "id": spec.defect_work_item_id}}
+        }
+    return resource
+
+
+def _build_update_test_records_payload(
+    *,
+    specs: list[TestRecordUpdateSpec],
+) -> dict[str, JsonValue]:
+    """JSON:API body for bulk ``PATCH /projects/{p}/testruns/{r}/testrecords``."""
+    data: list[JsonValue] = [
+        _build_update_test_record_resource(spec=spec) for spec in specs
+    ]
+    return {"data": data}
+
+
+@mcp.tool(
+    tags={"write"},
+    timeout=60.0,
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def update_test_records(
+    ctx: Context,
+    project_id: str = Field(min_length=1, description="Polarion project ID."),
+    test_run_id: str = Field(
+        min_length=1, description="Test run ID (e.g. 'TR-2026-01')."
+    ),
+    records: list[TestRecordUpdateSpec] = Field(  # noqa: B008
+        min_length=1,
+        max_length=MAX_BULK_ITEMS,
+        description="Per-record changes (1-50); unset fields stay unchanged.",
+    ),
+    dry_run: bool = Field(
+        default=False,
+        description="Preview payload without writing; guards still query Polarion.",
+    ),
+) -> TestRecordsUpdateResult:
+    """Set result, comment, and/or defect link on 1-50 test records of one
+    test run in a single bulk PATCH.
+
+    Run-level fields (title, status, group_id) — use update_test_runs
+    instead. Atomic: one bad item rejects the whole batch; no record changes.
+
+    record_id must be copied verbatim from list_test_records — never
+    decomposed. comment is sent verbatim; Polarion stores it as text/html
+    regardless of the comment_format sent, so a later read always shows
+    text/html.
+
+    Returns the echoed record_ids only — re-read via list_test_records.
+    result must already be a value the run uses (discover via
+    list_test_records) or the write is rejected; defect_work_item_id must
+    reference an existing work item or the write is rejected.
+    """
+    client = get_client(ctx)
+    ensure_unique_ids((spec.record_id for spec in records), label="record_id")
+
+    payload = _build_update_test_records_payload(specs=records)
+
+    prefix = f"{project_id}/{test_run_id}/"
+    for index, spec in enumerate(records):
+        with reraise_with_item_context(index, spec.record_id):
+            segments = spec.record_id.split("/")
+            if len(segments) != _RECORD_ID_SEGMENTS or not spec.record_id.startswith(
+                prefix
+            ):
+                raise ValueError(
+                    f"record_id '{spec.record_id}' must be the full 5-segment id "
+                    f"from list_test_records, starting with '{prefix}'."
+                )
+            if spec.result:
+                await guard_test_record_results(client, project_id, [spec.result])
+
+    await guard_test_record_defects(
+        client,
+        [spec.defect_work_item_id for spec in records if spec.defect_work_item_id],
+    )
+
+    if dry_run:
+        return TestRecordsUpdateResult(
+            updated=False,
+            dry_run=True,
+            record_ids=[],
+            payload_preview=payload,
+        )
+
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/testruns/{encode_path_segment(test_run_id)}/testrecords"
+    )
+    try:
+        await client.patch(path, json=cast(dict[str, object], payload))
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot update test records -- check your POLARION_TOKEN permissions."
+        ) from exc
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Test run '{test_run_id}' not found in project '{project_id}'. "
+            "Use `list_test_runs` to discover valid IDs."
+        ) from exc
+    except PolarionError as exc:
+        raise RuntimeError(f"Failed to update test records: {exc.message}") from exc
+
+    return TestRecordsUpdateResult(
+        updated=True,
+        dry_run=False,
+        record_ids=[spec.record_id for spec in records],
         payload_preview=None,
     )
 

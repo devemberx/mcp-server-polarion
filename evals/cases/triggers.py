@@ -18,6 +18,7 @@ from evals.harness.fixtures import (
     PROJECT,
     SPACE,
     TEST_RUN_ID,
+    TESTCASE_ID,
 )
 
 MIN_PASS_RATE = 1.0
@@ -214,6 +215,18 @@ CASES: list[Case] = [
         covers=["get_test_run"],
         expect="get_test_run",
         reject=["list_test_runs"],
+    ),
+    _case(
+        "TRIG-UPDATE-TEST-RECORDS",
+        f"Mark test record '{PROJECT}/{TEST_RUN_ID}/{PROJECT}/{TESTCASE_ID}/0' in "
+        f"test run '{TEST_RUN_ID}' of project '{PROJECT}' as passed, with the "
+        f"comment 'Retested after fix.'",
+        "triggers_tool",
+        intent="Setting a test record's result/comment must call "
+        "update_test_records, not update_test_runs (run-level fields only).",
+        covers=["update_test_records"],
+        expect="update_test_records",
+        reject=["update_test_runs"],
     ),
     _case(
         "TRIG-CREATE-TEST-RUN",
