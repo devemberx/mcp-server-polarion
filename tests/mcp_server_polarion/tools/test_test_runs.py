@@ -1510,12 +1510,17 @@ class TestUpdateTestRecords:
                 dry_run=False,
             )
 
-    async def test_auth_error_raises_permission_error(
+    async def test_auth_error_raises_permission_error_with_detail(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.patch.side_effect = PolarionAuthError("auth", status_code=401)
+        # Polarion 403 detail must surface: e-signature-configured run types
+        # reject record writes with portal-only remedy — generic token hint
+        # alone misleads.
+        mock_client.patch.side_effect = PolarionAuthError(
+            "cannot be executed without providing an e-signature", status_code=403
+        )
 
-        with pytest.raises(PermissionError):
+        with pytest.raises(PermissionError, match="without providing an e-signature"):
             await update_test_records(
                 mock_ctx,
                 project_id="proj1",

@@ -437,9 +437,9 @@ async def update_test_records(
     try:
         await client.patch(path, json=cast(dict[str, object], payload))
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot update test records -- check your POLARION_TOKEN permissions."
-        ) from exc
+        # Surface Polarion detail whole: e-signature-configured run types 403
+        # record writes with portal-only remedy — token hint alone mislead.
+        raise PermissionError(f"Cannot update test records -- {exc.message}") from exc
     except PolarionNotFoundError as exc:
         raise ValueError(
             f"Test run '{test_run_id}' not found in project '{project_id}'. "
