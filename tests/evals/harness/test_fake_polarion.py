@@ -358,6 +358,80 @@ class TestMutations:
         assert response.status_code == 201
         assert len(_json(response)["data"]) == 1
 
+    def test_post_testrecords_composes_five_segment_ids(self) -> None:
+        fake = FakePolarion()
+        response = _mutate(
+            fake,
+            "POST",
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}/testrecords",
+            {
+                "data": [
+                    {
+                        "type": "testrecords",
+                        "relationships": {
+                            "testCase": {
+                                "data": {
+                                    "type": "workitems",
+                                    "id": f"{PROJECT}/{TESTCASE_ID}",
+                                }
+                            }
+                        },
+                    },
+                    {
+                        "type": "testrecords",
+                        "relationships": {
+                            "testCase": {
+                                "data": {
+                                    "type": "workitems",
+                                    "id": f"{PROJECT}/{CHILD_REQ_ID}",
+                                }
+                            }
+                        },
+                    },
+                ]
+            },
+        )
+        assert response.status_code == 201
+        ids = [entry["id"] for entry in _json(response)["data"]]
+        assert ids == [
+            f"{PROJECT}/{TEST_RUN_ID}/{PROJECT}/{TESTCASE_ID}/0",
+            f"{PROJECT}/{TEST_RUN_ID}/{PROJECT}/{CHILD_REQ_ID}/0",
+        ]
+
+    def test_post_testrecords_unknown_test_case_is_400(self) -> None:
+        # Live-verified server message; tool relies on it flowing through.
+        fake = FakePolarion()
+        response = _mutate(
+            fake,
+            "POST",
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}/testrecords",
+            {
+                "data": [
+                    {
+                        "type": "testrecords",
+                        "relationships": {
+                            "testCase": {
+                                "data": {"type": "workitems", "id": f"{PROJECT}/Nope"}
+                            }
+                        },
+                    }
+                ]
+            },
+        )
+        assert response.status_code == 400
+        detail = _json(response)["errors"][0]["detail"]
+        assert detail == "Test Case is missing, or the one specified is invalid."
+
+    def test_post_testrecords_missing_test_case_relationship_is_400(self) -> None:
+        fake = FakePolarion()
+        response = _mutate(
+            fake,
+            "POST",
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}/testrecords",
+            {"data": [{"type": "testrecords"}]},
+        )
+        assert response.status_code == 400
+
     def test_post_documents_echoes_module_id(self) -> None:
         fake = FakePolarion()
         response = _mutate(

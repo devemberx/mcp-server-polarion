@@ -15,6 +15,8 @@ from mcp_server_polarion.core.exceptions import (
 from mcp_server_polarion.models import (
     JsonValue,
     PaginatedResult,
+    TestRecordCreateSpec,
+    TestRecordsCreateResult,
     TestRecordSummary,
     TestRunCreateSpec,
     TestRunDetail,
@@ -35,6 +37,8 @@ from mcp_server_polarion.tools._shared.fields import (
     TEST_RUN_LIST_FIELDS,
 )
 from mcp_server_polarion.tools._shared.guard import (
+    guard_test_record_defect_targets,
+    guard_test_record_results,
     guard_test_run_custom_fields,
     guard_test_run_enums,
     guard_test_run_templates,
@@ -43,6 +47,7 @@ from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
     ensure_unique_ids,
     get_client,
+    qualify_work_item_id,
     reraise_with_item_context,
 )
 from mcp_server_polarion.tools._shared.pagination import (
@@ -50,6 +55,7 @@ from mcp_server_polarion.tools._shared.pagination import (
     make_page,
 )
 from mcp_server_polarion.tools._shared.parse import (
+    extract_created_full_ids,
     extract_created_short_ids,
     parse_included_user_name_map,
     parse_test_record_summaries,
@@ -306,6 +312,161 @@ async def update_test_runs(
         updated=True,
         dry_run=False,
         test_run_ids=[spec.test_run_id for spec in items],
+        payload_preview=None,
+    )
+
+
+def _build_test_record_resource(
+    *,
+    project_id: str,
+    spec: TestRecordCreateSpec,
+) -> dict[str, JsonValue]:
+    """One ``testrecords`` resource for bulk create POST. No client-set
+    ``id`` -- server compose the 5-segment id (testCase + auto-incremented
+    iteration).
+    """
+    attributes: dict[str, JsonValue] = {}
+    if spec.result:
+        attributes["result"] = spec.result
+    if spec.comment:
+        # Verbatim passthrough, no Markdown conversion (comments pattern).
+        attributes["comment"] = {"type": spec.comment_format, "value": spec.comment}
+
+    relationships: dict[str, JsonValue] = {
+        "testCase": {
+            "data": {
+                "id": qualify_work_item_id(spec.test_case_id, project_id),
+                "type": "workitems",
+            }
+        }
+    }
+    if spec.defect_id:
+        relationships["defect"] = {
+            "data": {
+                "id": qualify_work_item_id(spec.defect_id, project_id),
+                "type": "workitems",
+            }
+        }
+
+    resource: dict[str, JsonValue] = {"type": "testrecords"}
+    if attributes:
+        resource["attributes"] = attributes
+    resource["relationships"] = relationships
+    return resource
+
+
+def _build_create_test_records_payload(
+    *,
+    project_id: str,
+    specs: list[TestRecordCreateSpec],
+) -> dict[str, JsonValue]:
+    """JSON:API body for bulk ``POST .../testruns/{tr}/testrecords``."""
+    data: list[JsonValue] = [
+        _build_test_record_resource(project_id=project_id, spec=spec) for spec in specs
+    ]
+    return {"data": data}
+
+
+@mcp.tool(
+    tags={"write"},
+    timeout=60.0,
+    annotations={
+        # Additive: non-destructive; repeat testCase starts a new iteration.
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    },
+)
+async def create_test_records(
+    ctx: Context,
+    project_id: str = Field(min_length=1, description="Polarion project ID."),
+    test_run_id: str = Field(min_length=1, description="Test run ID."),
+    items: list[TestRecordCreateSpec] = Field(  # noqa: B008
+        min_length=1,
+        max_length=MAX_BULK_ITEMS,
+        description="Test records to create in one request (1-50).",
+    ),
+    dry_run: bool = Field(
+        default=False,
+        description="Preview payload without writing; guards still query Polarion.",
+    ),
+) -> TestRecordsCreateResult:
+    """Create 1-50 test records on one test run, recording which test cases
+    were executed with what result.
+
+    Use list_test_records to read them back; create_test_runs creates the
+    run itself. Atomic: one bad item rejects the whole batch. Posting the
+    same test_case_id again starts a new iteration rather than replacing it
+    -- use separate calls, not duplicates in one batch. comment is sent
+    verbatim in comment_format, no Markdown conversion.
+
+    Returns record_ids as full 5-segment ids -- never shortened. result is
+    validated against the project's testing enumerations; defect must
+    reference an existing work item. An invalid test_case_id is rejected by
+    Polarion -- resolve via list_work_items first.
+    """
+    client = get_client(ctx)
+    qualified_test_case_ids = [
+        qualify_work_item_id(spec.test_case_id, project_id) for spec in items
+    ]
+    ensure_unique_ids(qualified_test_case_ids, label="test_case_id")
+
+    payload = _build_create_test_records_payload(project_id=project_id, specs=items)
+
+    await guard_test_record_results(
+        client,
+        project_id,
+        (spec.result for spec in items if spec.result is not None),
+    )
+    await guard_test_record_defect_targets(
+        client,
+        project_id,
+        (
+            qualify_work_item_id(spec.defect_id, project_id)
+            for spec in items
+            if spec.defect_id
+        ),
+    )
+
+    if dry_run:
+        return TestRecordsCreateResult(
+            created=False,
+            dry_run=True,
+            record_ids=[],
+            payload_preview=payload,
+        )
+
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/testruns/{encode_path_segment(test_run_id)}/testrecords"
+    )
+    try:
+        response = await client.post(path, json=cast(dict[str, object], payload))
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot create test records -- check your POLARION_TOKEN permissions."
+        ) from exc
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Test run '{test_run_id}' not found in project '{project_id}'. "
+            "Use `list_test_runs` to discover valid test run IDs."
+        ) from exc
+    except PolarionError as exc:
+        raise RuntimeError(f"Failed to create test records: {exc.message}") from exc
+
+    new_ids = extract_created_full_ids(response)
+    if len(new_ids) != len(items):
+        raise RuntimeError(
+            f"Polarion accepted the bulk create but returned {len(new_ids)} "
+            f"ids for {len(items)} requested records. The batch may be "
+            "partially created; verify with list_test_records before retrying."
+        )
+
+    return TestRecordsCreateResult(
+        created=True,
+        dry_run=False,
+        record_ids=new_ids,
         payload_preview=None,
     )
 

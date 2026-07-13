@@ -16,6 +16,7 @@ from mcp_server_polarion.tools._shared.helpers import (
     ensure_unique_ids,
     format_option_list,
     get_client,
+    qualify_work_item_id,
     reraise_with_item_context,
     safe_float,
     safe_str,
@@ -172,6 +173,19 @@ class TestEnsureUniqueIds:
     def test_accepts_generator(self) -> None:
         with pytest.raises(ValueError, match=r"\['X'\]"):
             ensure_unique_ids((i for i in ["X", "X"]), label="id")
+
+
+class TestQualifyWorkItemId:
+    """Tests for `qualify_work_item_id`."""
+
+    def test_bare_id_gets_qualified(self) -> None:
+        assert qualify_work_item_id("WI-1", "Proj") == "Proj/WI-1"
+
+    def test_already_qualified_id_stays_verbatim(self) -> None:
+        assert qualify_work_item_id("Proj/WI-1", "Other") == "Proj/WI-1"
+
+    def test_id_with_slash_anywhere_stays_verbatim(self) -> None:
+        assert qualify_work_item_id("a/b", "Proj") == "a/b"
 
 
 class TestReraiseWithItemContext:

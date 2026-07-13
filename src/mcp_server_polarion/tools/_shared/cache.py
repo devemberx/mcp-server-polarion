@@ -158,6 +158,29 @@ def store_cached_project_enum(
     _project_enum_cache.set((project_id, enum_name), option_ids)
 
 
+# (project, work_item_id) -> True once confirmed existing. Positives only --
+# a missing WI may be created later, so absence never cache as a negative.
+_confirmed_work_item_cache: TTLCache[tuple[str, str], bool] = TTLCache(
+    _GUARD_TTL_SECONDS
+)
+
+
+def get_cached_confirmed_work_item(project_id: str, work_item_id: str) -> bool | None:
+    """``True`` if ``(project, work_item)`` confirmed existing, else
+    ``None`` -- ``None`` also cover expired/never-checked, both treated
+    as a cache miss by callers.
+    """
+    return _confirmed_work_item_cache.get((project_id, work_item_id))
+
+
+def store_cached_confirmed_work_item(project_id: str, work_item_id: str) -> None:
+    """Mark ``(project, work_item)`` confirmed existing for
+    ``_GUARD_TTL_SECONDS`` -- partial batches merge naturally since each
+    id is its own entry.
+    """
+    _confirmed_work_item_cache.set((project_id, work_item_id), True)
+
+
 # (project, work_item_type) -> full custom-field key schema (MIN-per-key sample).
 _work_item_custom_key_cache: TTLCache[tuple[str, str], frozenset[str]] = TTLCache(
     _GUARD_TTL_SECONDS
@@ -243,6 +266,7 @@ __all__ = [
     "DiscoveredDocument",
     "Resource",
     "TTLCache",
+    "get_cached_confirmed_work_item",
     "get_cached_documents",
     "get_cached_enum_options",
     "get_cached_project_enum",
@@ -253,6 +277,7 @@ __all__ = [
     "invalidate_documents_cache",
     "invalidate_test_run_custom_keys",
     "invalidate_work_item_custom_keys",
+    "store_cached_confirmed_work_item",
     "store_cached_documents",
     "store_cached_enum_options",
     "store_cached_project_enum",

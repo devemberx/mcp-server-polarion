@@ -68,6 +68,15 @@ def encode_path_segment(segment: str) -> str:
     return quote(segment, safe="")
 
 
+def qualify_work_item_id(id_: str, project_id: str) -> str:
+    """Prefix bare work item id with *project_id*; id already carrying a
+    ``/`` (e.g. ``Proj/WI-1``) pass through verbatim.
+    """
+    if "/" in id_:
+        return id_
+    return f"{project_id}/{id_}"
+
+
 # Thin guard before Lucene substitution, not a format validator.
 _WORK_ITEM_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -116,6 +125,7 @@ __all__: list[str] = [
     "ensure_unique_ids",
     "format_option_list",
     "get_client",
+    "qualify_work_item_id",
     "reraise_with_item_context",
     "safe_float",
     "safe_str",
