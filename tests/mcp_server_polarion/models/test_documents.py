@@ -44,6 +44,7 @@ class TestDocumentDetail:
 
     def test_editor_metadata_defaults_empty(self):
         d = DocumentDetail(title="Doc")
+        assert d.created == ""
         assert d.updated == ""
         assert d.author_id == ""
         assert d.author_name == ""
