@@ -26,6 +26,7 @@ class DocumentDetail(BaseModel):
     title: str
     type: str = ""
     status: str = ""
+    created: str = ""
     updated: str = ""
     author_id: str = ""
     author_name: str = ""
