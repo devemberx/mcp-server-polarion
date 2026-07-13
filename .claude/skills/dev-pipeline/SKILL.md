@@ -77,10 +77,9 @@ sequentially, in one Agent call each.
 1. **Invoke `spec-researcher`** with: the feature ask, the vendor doc URL(s),
    and which sibling tools to read for conventions. Expect its
    CONTRACT FACTS / QUIRKS / UNVERIFIED report back.
-2. Write the spec draft from that report straight to `.pipeline/spec.md`: tool
-   signature, response model fields (minimal — defer detail to a future
-   `get_*`), request params, error mapping, files to touch, and the UNVERIFIED
-   items as open live-verification questions.
+2. Copy [spec-template.md](spec-template.md) to `.pipeline/spec.md` and fill
+   its slots from the report. The template fixes the required sections —
+   don't invent a new shape; downstream agents parse it section by section.
 3. **Show the user the full spec, then ask approval.** The approval request
    quotes the spec content (or the revised sections on a redo) in the reply —
    the user approves text they have read, never a bare "spec ready, approve?"
@@ -92,14 +91,14 @@ sequentially, in one Agent call each.
 1. **Invoke `pattern-scout`** with: `.pipeline/spec.md` path and the areas to
    sweep (helpers, sibling tool, test mechanics, eval coverage). Expect its
    REUSE / MIRROR / GAPS report. One scout unless scope spans unrelated areas.
-2. Draft the plan in the main thread (or a Plan agent for large scope):
-   Context / Branch / Changes (per file, citing the scout's file:line refs) /
-   Verification (incl. live-test items from the spec's UNVERIFIED list) /
-   Commit-PR. Use plan mode when available — ExitPlanMode already puts the
+2. Draft the plan in the main thread (or a Plan agent for large scope) in the
+   shape of [plan-template.md](plan-template.md) — one implementer task per
+   Changes entry, live-test items from the spec's UNVERIFIED list under
+   Verification. Use plan mode when available — ExitPlanMode already puts the
    full plan in front of the user for approval; write it to
-   `.pipeline/plan.md` right after. Without plan mode, write the draft to
-   `.pipeline/plan.md` first and quote it in the approval request — same rule
-   as the spec: the user approves text they have read.
+   `.pipeline/plan.md` right after. Without plan mode, copy the template to
+   `.pipeline/plan.md`, fill it, and quote it in the approval request — same
+   rule as the spec: the user approves text they have read.
 
 ## Stage 3 — Implement (TDD)
 
