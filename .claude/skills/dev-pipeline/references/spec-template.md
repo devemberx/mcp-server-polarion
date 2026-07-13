@@ -1,10 +1,12 @@
 # Spec — <tool name or feature>
 
 Copy this file to `.pipeline/spec.md` and fill every slot from the
-spec-researcher report. Sections marked **required** must survive — the
-reviewer judges spec fidelity section by section. Delete optional sections
-that don't apply. For a non-tool feature (refactor, multi-file change),
-replace Signature/Params/Response with a single **Behavior contract** section.
+spec-researcher report. Sections marked **required** must survive — they are
+the standard pipeline-reviewer judges the diff against. Delete optional
+sections that don't apply, and delete this instruction paragraph once filled —
+downstream agents read the filled file verbatim. One exception to "required
+must survive": for a non-tool feature (refactor, multi-file change), replace
+Signature/Params/Response with a single **Behavior contract** section.
 
 ## Goal — required
 

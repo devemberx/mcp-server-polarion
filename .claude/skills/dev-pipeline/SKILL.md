@@ -34,7 +34,7 @@ Subagents share **no memory and no conversation history**. Three channels only:
    | File | Written by | Read by |
    |---|---|---|
    | `.pipeline/spec.md` | orchestrator (Stage 1, draft before approval; approval freezes it) | pattern-scout, pipeline-implementer, pipeline-reviewer |
-   | `.pipeline/plan.md` | orchestrator (Stage 2, draft before approval; approval freezes it) | pipeline-implementer, pipeline-reviewer |
+   | `.pipeline/plan.md` | orchestrator (Stage 2, full text shown before approval — via ExitPlanMode or quoted draft; approval freezes it) | pipeline-implementer, pipeline-reviewer |
    | `.pipeline/review-round-N.md` | orchestrator (Stage 5, from reviewer report) | pipeline-implementer (Stage 6), user on escalation |
 
 Follow-up questions to an agent you already spawned: `SendMessage` to its id —
@@ -77,9 +77,10 @@ sequentially, in one Agent call each.
 1. **Invoke `spec-researcher`** with: the feature ask, the vendor doc URL(s),
    and which sibling tools to read for conventions. Expect its
    CONTRACT FACTS / QUIRKS / UNVERIFIED report back.
-2. Copy [spec-template.md](spec-template.md) to `.pipeline/spec.md` and fill
-   its slots from the report. The template fixes the required sections —
-   don't invent a new shape; downstream agents parse it section by section.
+2. Copy [spec-template.md](references/spec-template.md) to `.pipeline/spec.md`
+   and fill its slots from the report. The template fixes the required
+   sections — don't invent a new shape; they are the standard
+   pipeline-reviewer judges the diff against.
 3. **Show the user the full spec, then ask approval.** The approval request
    quotes the spec content (or the revised sections on a redo) in the reply —
    the user approves text they have read, never a bare "spec ready, approve?"
@@ -92,7 +93,7 @@ sequentially, in one Agent call each.
    sweep (helpers, sibling tool, test mechanics, eval coverage). Expect its
    REUSE / MIRROR / GAPS report. One scout unless scope spans unrelated areas.
 2. Draft the plan in the main thread (or a Plan agent for large scope) in the
-   shape of [plan-template.md](plan-template.md) — one implementer task per
+   shape of [plan-template.md](references/plan-template.md) — one implementer task per
    Changes entry, live-test items from the spec's UNVERIFIED list under
    Verification. Use plan mode when available — ExitPlanMode already puts the
    full plan in front of the user for approval; write it to

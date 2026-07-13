@@ -1,9 +1,10 @@
 # Plan — <feature>
 
-Copy this file to `.pipeline/plan.md` and fill every slot. Each Changes task
-is exactly one `pipeline-implementer` spawn — keep tasks bounded, ordered by
-dependency, and self-contained (the implementer sees only the task excerpt
-plus the spec/plan files, never this conversation).
+Copy this file to `.pipeline/plan.md` and fill every slot, then delete this
+instruction paragraph — downstream agents read the filled file verbatim.
+Each Changes task is exactly one `pipeline-implementer` spawn — keep tasks
+bounded, ordered by dependency, and self-contained (the implementer sees only
+the task excerpt plus the spec/plan files, never this conversation).
 
 ## Context
 
@@ -30,7 +31,7 @@ stays in the main thread — list it here as its own unnumbered item.
 
 ## Verification
 
-- [ ] Gates: pytest+cov, ruff check, ruff format --check, mypy, diff-cover ≥90
+- [ ] Gates: pytest+cov, ruff check, ruff format --check, mypy, diff-cover ≥90%
 - [ ] Live test (one per spec UNVERIFIED item): <what to check against real server>
 - [ ] Registration verified: tool listed, eval coverage green
 
