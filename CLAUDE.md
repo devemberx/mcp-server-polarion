@@ -66,7 +66,7 @@ CI: `ruff check` → `ruff format --check` → `mypy` → `pytest` (`--cov-fail-
 
 - `tests/` mirror source one-to-one; shared fixtures in `tests/` `conftest.py`; `mock_client`/`mock_ctx` + autouse guard-cache reset in `tools/conftest.py`.
 - `pytest-asyncio` `mode=auto`. Tool tests call functions directly (`@mcp.tool` return original); client tests use `respx`. Pydantic `Field` constraints bypass JSON Schema on direct call — verify via `TypeAdapter` reconstruction.
-- New `@mcp.tool` needs update `EXPECTED_TOOL_NAMES` in `test_mcp_transport.py`.
+- New `@mcp.tool` needs update `EXPECTED_TOOL_NAMES` in `test_mcp_transport.py` + README tool-table row (marker-anchored sync test, same file).
 - `tests/evals/` open with `pytest.importorskip` (`evals` group; CI sync `--group evals`).
 
 ## Evals — deploy gate
