@@ -85,7 +85,15 @@ sequentially, in one Agent call each.
    and fill its slots from the report. The template fixes the required
    sections — don't invent a new shape; they are the standard
    pipeline-reviewer judges the diff against.
-3. **Show the user the full spec, then ask approval.** The approval request
+3. **If live credentials work, burn down UNVERIFIED before approval.** Probe a
+   project-scoped endpoint first (global ones can 403 on a scoped token), then
+   settle the researcher's UNVERIFIED items with cheap reads and scratch
+   writes (create a disposable resource, probe, delete it). A fact settled at
+   spec time is a design decision made once; the same fact discovered after
+   implementation is a review-fix round. (Run 2026-07-13: a pre-approval probe
+   found the real enum path and two silent-ghost writes — flipped a guard from
+   "deferred" to "shipped" before any code existed.)
+4. **Show the user the full spec, then ask approval.** The approval request
    quotes the spec content (or the revised sections on a redo) in the reply —
    the user approves text they have read, never a bare "spec ready, approve?"
    prompt. Fold feedback back into `.pipeline/spec.md`; approval freezes it.
@@ -113,7 +121,10 @@ For each plan task, in dependency order: **invoke `pipeline-implementer`**
 with the `.pipeline/spec.md` + `.pipeline/plan.md` paths, the single task
 excerpt, and its file:line references. Expect CHANGED / EVIDENCE (RED then
 GREEN output) / DEVIATIONS back — a report without RED evidence means the task
-was not done TDD; reject it and rerun.
+was not done TDD; reject it and rerun. RED form depends on the task: a
+brand-new symbol or module may show a collection-time ImportError as its RED;
+changed behavior on existing code needs an assertion-level failure — an
+ImportError there means the test never exercised the behavior.
 
 Keep cross-task integration (imports, registration lists like
 `EXPECTED_TOOL_NAMES`, eval coverage entry) in the main thread, where the
@@ -134,12 +145,15 @@ mocks so tests mirror reality (e.g. an endpoint that omits `meta.totalCount`).
 
 ## Stage 5 — Review (loop entry)
 
-1. **Invoke `pipeline-reviewer`** with: `.pipeline/spec.md` and
+1. **Commit the work first**, in Stage 7's message format — the reviewer
+   diffs `origin/main...HEAD`, and uncommitted changes are invisible to that
+   range. Fix rounds add commits; squash merge collapses them at the end.
+2. **Invoke `pipeline-reviewer`** with: `.pipeline/spec.md` and
    `.pipeline/plan.md` paths and the diff scope (`git diff origin/main...HEAD`).
    Give it the spec and plan — **never** the implementer reports or your
    implementation narrative (context bleed defeats the fresh eyes).
-2. Save its report to `.pipeline/review-round-N.md`; relay findings to the user.
-3. **Stop criterion — the only exit:** verdict PASS (zero CRITICAL/MEDIUM
+3. Save its report to `.pipeline/review-round-N.md`; relay findings to the user.
+4. **Stop criterion — the only exit:** verdict PASS (zero CRITICAL/MEDIUM
    actionable findings). LOW/NIT go to PR notes, not necessarily fixed.
    PASS → Stage 7. FAIL → Stage 6.
 
