@@ -622,7 +622,7 @@ async def get_document(
         description="Fill content_html with raw HTML for round-trip editing.",
     ),
 ) -> DocumentDetail:
-    """Get a document's metadata: title/type/status/created/editors/custom fields.
+    """Get a document's metadata: title/type/status/timestamps/editors/custom fields.
 
     include_homepage_content_html=True fills content_html with raw
     homePageContent HTML — the required source for
