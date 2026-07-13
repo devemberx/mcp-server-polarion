@@ -648,6 +648,7 @@ class TestGetDocument:
                     "title": "Software Requirement Spec",
                     "type": "req_specification",
                     "status": "approved",
+                    "created": "2025-11-30T09:00:00.000Z",
                     "updated": "2026-02-22T14:53:03.244Z",
                     "homePageContent": {
                         "type": "text/html",
@@ -677,6 +678,8 @@ class TestGetDocument:
         assert result.title == "Software Requirement Spec"
         assert result.type == "req_specification"
         assert result.status == "approved"
+        # get_* expose created; list_* summaries stay updated-only.
+        assert result.created == "2025-11-30T09:00:00.000Z"
         assert result.updated == "2026-02-22T14:53:03.244Z"
         # Editor id + name pair both surface for requery and intent matching.
         assert result.author_id == "admin"
@@ -706,6 +709,7 @@ class TestGetDocument:
             document_name="Doc",
         )
 
+        assert result.created == ""
         assert result.updated == ""
         assert result.author_id == ""
         assert result.author_name == ""

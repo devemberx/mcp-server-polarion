@@ -36,6 +36,7 @@ CI: `ruff check` → `ruff format --check` → `mypy` → `pytest` (`--cov-fail-
   - Synthesis (READ-ONLY): `read_*` convert HTML→Markdown; feed output back to writes lose Polarion markup.
 - Write payloads skip `None`/empty (Polarion read empty as "clear default"). Resource POSTs wrap in `{"data": [...]}`; action endpoints (`.../actions/<name>`) take flat object.
 - Every list tool: `page_size` (max 100) + `page_number` → `PaginatedResult[T]` with `has_more`.
+- Timestamps (where Polarion serve both): `list_*` summary = `updated` only; metadata-bearing `get_*`/`read_*` detail add `created` (read_document body-only synthesis — exempt). Domain without `get_*` tool: list expose what API serve (comments `created`-only). API without timestamps: omit.
 - Every write tool: `dry_run: bool = False` — return payload, no hit Polarion.
 - Error mapping: `PolarionNotFoundError`→`ValueError`, `PolarionAuthError`→`PermissionError`, `PolarionError`→`RuntimeError`.
 - Guards fail closed: validation GET error block write; only successful empty option set defer to Polarion.
@@ -66,7 +67,7 @@ CI: `ruff check` → `ruff format --check` → `mypy` → `pytest` (`--cov-fail-
 
 - `tests/` mirror source one-to-one; shared fixtures in `tests/` `conftest.py`; `mock_client`/`mock_ctx` + autouse guard-cache reset in `tools/conftest.py`.
 - `pytest-asyncio` `mode=auto`. Tool tests call functions directly (`@mcp.tool` return original); client tests use `respx`. Pydantic `Field` constraints bypass JSON Schema on direct call — verify via `TypeAdapter` reconstruction.
-- New `@mcp.tool` needs update `EXPECTED_TOOL_NAMES` in `test_mcp_transport.py`.
+- New `@mcp.tool` needs update `EXPECTED_TOOL_NAMES` in `test_mcp_transport.py` + README tool-table row (marker-anchored sync test, same file).
 - `tests/evals/` open with `pytest.importorskip` (`evals` group; CI sync `--group evals`).
 
 ## Evals — deploy gate
