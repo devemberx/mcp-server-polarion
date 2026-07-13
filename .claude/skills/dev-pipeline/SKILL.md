@@ -62,15 +62,19 @@ sequentially, in one Agent call each.
 
 ## Stage 0 — Worktree (main thread)
 
-1. `EnterWorktree` (never bare `git worktree add` — native tool tracks cleanup).
-2. Rename the generated branch to `<type>/<kebab-summary>` — pre-push hook
+1. `git fetch origin` first — EnterWorktree branches from `origin/main`
+   (default `worktree.baseRef: fresh`), a remote-tracking ref that moves only
+   on fetch; skip this and parallel sessions branch from a stale base, hitting
+   conflicts and strict-mode update-branch churn at merge time.
+2. `EnterWorktree` (never bare `git worktree add` — native tool tracks cleanup).
+3. Rename the generated branch to `<type>/<kebab-summary>` — pre-push hook
    accepts only `feat|fix|refactor|test|docs|chore|ci` prefixes (`feat/`, not
    `feature/`).
-3. Symlink untracked configs from the main checkout: `.env`, `.mcp.json`,
+4. Symlink untracked configs from the main checkout: `.env`, `.mcp.json`,
    `.claude/settings.local.json`, `.vscode/settings.json`.
-4. `uv sync --dev --group evals`, then baseline `uv run pytest` — must be green
+5. `uv sync --dev --group evals`, then baseline `uv run pytest` — must be green
    before any change, else you can't tell new breakage from old.
-5. `mkdir -p .pipeline` for the handoff files.
+6. `mkdir -p .pipeline` for the handoff files.
 
 ## Stage 1 — Spec
 
