@@ -62,15 +62,19 @@ sequentially, in one Agent call each.
 
 ## Stage 0 — Worktree (main thread)
 
-1. `EnterWorktree` (never bare `git worktree add` — native tool tracks cleanup).
-2. Rename the generated branch to `<type>/<kebab-summary>` — pre-push hook
+1. `git fetch origin` first — EnterWorktree branches from `origin/main`
+   (default `worktree.baseRef: fresh`), a remote-tracking ref that moves only
+   on fetch; skip this and parallel sessions branch from a stale base, hitting
+   conflicts and strict-mode update-branch churn at merge time.
+2. `EnterWorktree` (never bare `git worktree add` — native tool tracks cleanup).
+3. Rename the generated branch to `<type>/<kebab-summary>` — pre-push hook
    accepts only `feat|fix|refactor|test|docs|chore|ci` prefixes (`feat/`, not
    `feature/`).
-3. Symlink untracked configs from the main checkout: `.env`, `.mcp.json`,
+4. Symlink untracked configs from the main checkout: `.env`, `.mcp.json`,
    `.claude/settings.local.json`, `.vscode/settings.json`.
-4. `uv sync --dev --group evals`, then baseline `uv run pytest` — must be green
+5. `uv sync --dev --group evals`, then baseline `uv run pytest` — must be green
    before any change, else you can't tell new breakage from old.
-5. `mkdir -p .pipeline` for the handoff files.
+6. `mkdir -p .pipeline` for the handoff files.
 
 ## Stage 1 — Spec
 
@@ -156,6 +160,14 @@ mocks so tests mirror reality (e.g. an endpoint that omits `meta.totalCount`).
   change), bullets ≤120 chars — hook enforces. `.pipeline/` stays uncommitted.
 - PR: flip template checkboxes `[ ]`→`[x]`, keep unchecked options, record
   live-test evidence and unfixed LOW/NIT findings in Notes. Squash merge only.
+- CI: after opening the PR, `gh pr checks <PR#> --watch --fail-fast` until
+  every check is green — merge is blocked on red anyway, but an unwatched red
+  PR rots until a human notices; catch it while the session context is hot.
+  Right after `gh pr create` it can exit "no checks reported" before check
+  runs register — wait a few seconds and rerun, don't skip the watch.
+  A red check is a Stage 4 gate failure, not a review finding: fix, re-run
+  gates, and if code changed re-enter Stage 5. Protection is strict-mode, so
+  if main moved, update the branch and let checks re-run.
 
 ## Common Rationalizations
 
@@ -193,3 +205,5 @@ mocks so tests mirror reality (e.g. an endpoint that omits `meta.totalCount`).
 - [ ] Live test done for contract-boundary changes, findings folded into mocks
 - [ ] Final `pipeline-reviewer` verdict is PASS (zero CRITICAL/MEDIUM)
 - [ ] PR open with template filled, LOW/NIT + live evidence recorded
+- [ ] PR CI checks all green (`gh pr checks <PR#> --watch --fail-fast`),
+      branch up to date with main
