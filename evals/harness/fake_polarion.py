@@ -624,19 +624,19 @@ class FakePolarion:
         if request.method == "PATCH":
             testrecords = re.search(r"/testruns/([^/]+)/testrecords$", path)
             if testrecords:
-                return self._patch_testrecords(body)
+                return self._patch_testrecords(testrecords.group(1), body)
         return httpx.Response(204)
 
-    def _patch_testrecords(self, body: Any) -> httpx.Response:
-        """Bulk test-record PATCH: every submitted id must be a seeded,
-        non-template run's record -- one unknown id 400s the whole batch
-        (live-verified atomic; mirror moveFromDocument existence-validating
-        shape).
+    def _patch_testrecords(self, run_id: str, body: Any) -> httpx.Response:
+        """Bulk test-record PATCH: every submitted id must be the path run's
+        seeded, non-template record -- other run's record or unknown id 400s
+        the whole batch (live-verified atomic; mirror moveFromDocument
+        existence-validating shape).
         """
         valid_ids = {
             f"{PROJECT}/{tr.short_id}/{PROJECT}/{TESTCASE_ID}/0"
             for tr in self.seeds.test_runs.values()
-            if not tr.is_template
+            if not tr.is_template and tr.short_id == run_id
         }
         entries = body.get("data") if isinstance(body, dict) else None
         entries = entries if isinstance(entries, list) else []

@@ -336,8 +336,11 @@ def _build_update_test_record_resource(
     resource: dict[str, JsonValue] = {
         "type": "testrecords",
         "id": spec.record_id,
-        "attributes": attributes,
     }
+    # Defect-only spec: omit empty attributes -- live-verified 204, defect
+    # store, prior values keep.
+    if attributes:
+        resource["attributes"] = attributes
     if spec.defect_work_item_id:
         resource["relationships"] = {
             "defect": {"data": {"type": "workitems", "id": spec.defect_work_item_id}}

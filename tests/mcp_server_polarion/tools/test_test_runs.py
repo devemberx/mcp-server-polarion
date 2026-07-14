@@ -1261,7 +1261,9 @@ class TestBuildUpdateTestRecordsPayload:
             "comment": {"type": "text/plain", "value": "Note"}
         }
 
-    def test_defect_only_spec_sets_relationship_no_attributes(self) -> None:
+    def test_defect_only_spec_omits_empty_attributes(self) -> None:
+        # Live-verified: attributes key absent -- 204, defect store, prior
+        # result keep.
         spec = TestRecordUpdateSpec(
             record_id="proj1/TR-1/proj1/WI-1/0", defect_work_item_id="proj1/WI-9"
         )
@@ -1272,7 +1274,7 @@ class TestBuildUpdateTestRecordsPayload:
         assert isinstance(data, list)
         resource = data[0]
         assert isinstance(resource, dict)
-        assert resource["attributes"] == {}
+        assert "attributes" not in resource
         assert resource["relationships"] == {
             "defect": {"data": {"type": "workitems", "id": "proj1/WI-9"}}
         }
@@ -1556,7 +1558,9 @@ class TestUpdateTestRecords:
 
 
 class TestUpdateTestRecordsFieldValidation:
-    """Bulk bounds + spec constraints via ``TypeAdapter`` rebuild."""
+    """Bulk bounds via ``TypeAdapter`` rebuild; spec constraints live in
+    ``tests/mcp_server_polarion/models/test_test_runs.py``.
+    """
 
     @staticmethod
     def _adapter(param_name: str) -> TypeAdapter[object]:
@@ -1585,24 +1589,6 @@ class TestUpdateTestRecordsFieldValidation:
         validated = self._adapter("records").validate_python(specs)
         assert isinstance(validated, list)
         assert len(validated) == 50
-
-    def test_spec_requires_effective_change(self) -> None:
-        with pytest.raises(ValidationError, match="no effective change"):
-            TestRecordUpdateSpec(record_id="proj1/TR-1/proj1/WI-1/0")
-
-    def test_comment_format_alone_not_effective(self) -> None:
-        with pytest.raises(ValidationError, match="no effective change"):
-            TestRecordUpdateSpec(
-                record_id="proj1/TR-1/proj1/WI-1/0", comment_format="text/html"
-            )
-
-    def test_unknown_key_rejected(self) -> None:
-        with pytest.raises(ValidationError):
-            TestRecordUpdateSpec(
-                record_id="proj1/TR-1/proj1/WI-1/0",
-                result="passed",
-                bogus="x",  # type: ignore[call-arg]
-            )
 
 
 class TestCreateTestRunsFieldValidation:

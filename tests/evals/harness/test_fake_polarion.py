@@ -27,6 +27,7 @@ from evals.harness.fixtures import (
     SEEDS,
     SPACE,
     TEST_RUN_ID,
+    TEST_RUN_ID_2,
     TEST_RUN_TEMPLATE_ID,
     TESTCASE_ID,
 )
@@ -488,6 +489,26 @@ class TestTestRecordMutations:
             },
         )
         assert response.status_code == 400
+
+    def test_patch_other_runs_record_is_400(self) -> None:
+        # Record id valid for TEST_RUN_ID -- PATCH via TEST_RUN_ID_2 path 400s.
+        fake = FakePolarion()
+        response = _mutate(
+            fake,
+            "PATCH",
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_ID_2}/testrecords",
+            {
+                "data": [
+                    {
+                        "type": "testrecords",
+                        "id": self._RECORD_ID,
+                        "attributes": {"result": "passed"},
+                    }
+                ]
+            },
+        )
+        assert response.status_code == 400
+        assert "was not found" in _json(response)["errors"][0]["detail"]
 
 
 class TestOrchestrationSeeding:
