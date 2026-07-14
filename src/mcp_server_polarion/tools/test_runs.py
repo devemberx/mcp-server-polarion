@@ -449,8 +449,8 @@ async def create_test_records(
         ) from exc
     except PolarionNotFoundError as exc:
         raise ValueError(
-            f"Test run '{test_run_id}' not found in project '{project_id}'. "
-            "Use `list_test_runs` to discover valid test run IDs."
+            f"Test run '{test_run_id}' or project '{project_id}' not found. "
+            "Use `list_test_runs` (or `list_projects`) to discover valid IDs."
         ) from exc
     except PolarionError as exc:
         raise RuntimeError(f"Failed to create test records: {exc.message}") from exc

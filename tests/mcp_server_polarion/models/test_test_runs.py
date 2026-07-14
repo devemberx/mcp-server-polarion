@@ -50,7 +50,7 @@ class TestTestRecordCreateSpec:
     def test_typo_key_rejected(self):
         # extra='forbid': typo key must error, not silently drop.
         with pytest.raises(ValidationError, match="tets_case_id"):
-            TestRecordCreateSpec.model_validate({"tets_case_id": "WI-1"}, strict=False)
+            TestRecordCreateSpec.model_validate({"tets_case_id": "WI-1"})
 
     def test_empty_test_case_id_rejected(self):
         with pytest.raises(ValidationError):

@@ -1669,7 +1669,10 @@ class TestCreateTestRecords:
             "Not found", status_code=404
         )
 
-        with pytest.raises(ValueError, match="not found"):
+        # 404 ambiguous: run or project may be missing -- message names both.
+        with pytest.raises(
+            ValueError, match=r"Test run 'missing' or project 'proj1' not found"
+        ):
             await create_test_records(
                 mock_ctx,
                 project_id="proj1",
