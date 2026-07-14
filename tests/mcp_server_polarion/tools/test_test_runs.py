@@ -18,14 +18,17 @@ from mcp_server_polarion.core.exceptions import (
 )
 from mcp_server_polarion.models import (
     PaginatedResult,
+    TestRecordDetail,
     TestRunCreateSpec,
     TestRunDetail,
     TestRunUpdateSpec,
 )
+from mcp_server_polarion.tools._shared.fields import TEST_RECORD_DETAIL_FIELDS
 from mcp_server_polarion.tools.test_runs import (
     _build_create_test_runs_payload,
     _build_update_test_runs_payload,
     create_test_runs,
+    get_test_record,
     get_test_run,
     list_test_records,
     list_test_runs,
@@ -1421,3 +1424,214 @@ class TestGetTestRun:
         )
 
         assert result.id == "TR-100"
+
+
+def _record_detail_response() -> dict[str, object]:
+    """Full single-testrecord GET body covering every detail field."""
+    return {
+        "data": {
+            "type": "testrecords",
+            "id": "proj1/TR-100/proj1/TC-42/0",
+            "attributes": {
+                "executed": "2026-06-01T10:00:00Z",
+                "duration": 12.5,
+                "result": "failed",
+                "iteration": 0,
+                "testCaseRevision": "42",
+                "comment": {
+                    "type": "text/html",
+                    "value": (
+                        '<p id="polarion_1">Investigate <strong>timeout</strong></p>'
+                    ),
+                },
+            },
+            "relationships": {
+                "testCase": {"data": {"type": "workitems", "id": "proj1/TC-42"}},
+                "executedBy": {"data": {"type": "users", "id": "proj1/devemberx"}},
+                "defect": {"data": {"type": "workitems", "id": "proj1/DEF-7"}},
+            },
+        },
+        "included": [
+            {
+                "type": "users",
+                "id": "proj1/devemberx",
+                "attributes": {"name": "Devember X"},
+            }
+        ],
+    }
+
+
+class TestGetTestRecord:
+    """``get_test_record`` tool."""
+
+    async def test_returns_test_record_detail_with_comment_html(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _record_detail_response()
+
+        result = await get_test_record(
+            mock_ctx,
+            project_id="proj1",
+            test_run_id="TR-100",
+            test_case_id="proj1/TC-42",
+            iteration=0,
+            include_comment_html=True,
+        )
+
+        assert isinstance(result, TestRecordDetail)
+        assert result.project_id == "proj1"
+        assert result.test_run_id == "TR-100"
+        assert result.test_case_id == "proj1/TC-42"
+        assert result.iteration == 0
+        assert result.result == "failed"
+        assert result.executed == "2026-06-01T10:00:00Z"
+        assert result.duration == 12.5
+        assert result.executed_by_id == "proj1/devemberx"
+        assert result.executed_by_name == "Devember X"
+        assert result.defect_id == "proj1/DEF-7"
+        assert result.test_case_revision == "42"
+        # Raw HTML passthrough -- anchor ids survive verbatim.
+        assert result.comment_html == (
+            '<p id="polarion_1">Investigate <strong>timeout</strong></p>'
+        )
+
+    async def test_request_params_and_encoded_path(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _record_detail_response()
+
+        await get_test_record(
+            mock_ctx,
+            project_id="proj1",
+            test_run_id="TR-100",
+            test_case_id="proj1/TC-42",
+            iteration=0,
+            include_comment_html=False,
+        )
+
+        args, kwargs = mock_client.get.call_args
+        assert args[0] == "/projects/proj1/testruns/TR-100/testrecords/proj1/TC-42/0"
+        params = kwargs["params"]
+        assert params["fields[testrecords]"] == TEST_RECORD_DETAIL_FIELDS
+        assert params["include"] == "executedBy"
+        assert params["fields[users]"] == "name"
+
+    async def test_include_comment_html_false_blanks_field(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Flag off blank comment -- other fields still populated."""
+        mock_client.get.return_value = _record_detail_response()
+
+        result = await get_test_record(
+            mock_ctx,
+            project_id="proj1",
+            test_run_id="TR-100",
+            test_case_id="proj1/TC-42",
+            iteration=0,
+            include_comment_html=False,
+        )
+
+        assert result.comment_html == ""
+        assert result.result == "failed"
+        assert result.test_case_revision == "42"
+
+    async def test_test_case_id_without_slash_raises_before_http(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        with pytest.raises(ValueError, match="project/WI-id"):
+            await get_test_record(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="TR-100",
+                test_case_id="TC-42",
+                iteration=0,
+                include_comment_html=False,
+            )
+
+        mock_client.get.assert_not_called()
+
+    async def test_not_found_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionNotFoundError(
+            "Not found", status_code=404
+        )
+
+        with pytest.raises(ValueError, match="list_test_records"):
+            await get_test_record(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="TR-100",
+                test_case_id="proj1/TC-42",
+                iteration=0,
+                include_comment_html=False,
+            )
+
+    async def test_auth_error_raises_permission_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError("auth", status_code=401)
+
+        with pytest.raises(PermissionError):
+            await get_test_record(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="TR-100",
+                test_case_id="proj1/TC-42",
+                iteration=0,
+                include_comment_html=False,
+            )
+
+    async def test_other_error_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionError("boom", status_code=500)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            await get_test_record(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="TR-100",
+                test_case_id="proj1/TC-42",
+                iteration=0,
+                include_comment_html=False,
+            )
+
+    async def test_non_dict_data_falls_back_to_empty_detail(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {"data": []}
+
+        result = await get_test_record(
+            mock_ctx,
+            project_id="proj1",
+            test_run_id="TR-100",
+            test_case_id="proj1/TC-42",
+            iteration=0,
+            include_comment_html=False,
+        )
+
+        assert result.project_id == "proj1"
+        assert result.test_run_id == "TR-100"
+        assert result.test_case_id == ""
+
+
+class TestGetTestRecordFieldValidation:
+    """``iteration`` bound -- direct calls bypass JSON Schema; proven via
+    ``TypeAdapter`` rebuild from signature.
+    """
+
+    @staticmethod
+    def _adapter(param_name: str) -> TypeAdapter[object]:
+        hints = get_type_hints(get_test_record)
+        sig = inspect.signature(get_test_record)
+        field_info = sig.parameters[param_name].default
+        return TypeAdapter(Annotated[hints[param_name], field_info])
+
+    def test_iteration_zero_accepted(self) -> None:
+        adapter = self._adapter("iteration")
+        assert adapter.validate_python(0) == 0
+
+    def test_iteration_below_zero_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter("iteration").validate_python(-1)

@@ -57,6 +57,7 @@ Other clients (VS Code, Claude Desktop, Cursor) — see [Client Configuration](#
 | `list_test_runs` | List test runs in a project (Lucene query, templates filter) |
 | `get_test_run` | Get test run details, optionally with the raw HTML report body |
 | `list_test_records` | List a test run's execution records, one per test case iteration |
+| `get_test_record` | Get one test record's execution comment and test-case revision |
 | `get_sql_query_recipes` | Fetch copy-paste SQL recipes for advanced queries |
 | `get_html_recipes` | Fetch copy-paste Polarion HTML templates for raw-HTML body edits |
 | `get_document` | Get document metadata, optionally with the raw body HTML |

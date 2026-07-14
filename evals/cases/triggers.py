@@ -18,6 +18,7 @@ from evals.harness.fixtures import (
     PROJECT,
     SPACE,
     TEST_RUN_ID,
+    TESTCASE_ID,
 )
 
 MIN_PASS_RATE = 1.0
@@ -214,6 +215,19 @@ CASES: list[Case] = [
         covers=["get_test_run"],
         expect="get_test_run",
         reject=["list_test_runs"],
+    ),
+    _case(
+        "TRIG-GET-TEST-RECORD",
+        f"Get the execution comment and test-case revision for test case "
+        f"'{PROJECT}/{TESTCASE_ID}' iteration 0 in test run '{TEST_RUN_ID}' "
+        f"of project '{PROJECT}'.",
+        "triggers_tool",
+        intent="Fetching one test case's execution detail inside a run must "
+        "call get_test_record, not page through list_test_records or fetch "
+        "run metadata via get_test_run.",
+        covers=["get_test_record"],
+        expect="get_test_record",
+        reject=["list_test_records", "get_test_run"],
     ),
     _case(
         "TRIG-CREATE-TEST-RUN",

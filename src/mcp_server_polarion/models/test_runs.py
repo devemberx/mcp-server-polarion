@@ -43,6 +43,20 @@ class TestRunSummary(BaseModel):
     template_id: str = ""
 
 
+class TestRecordDetail(TestRecordSummary):
+    """Full single test-record detail from ``get_test_record``."""
+
+    __test__ = False
+
+    project_id: str
+    test_run_id: str
+    # Full relationships.executedBy.data.id, kept whole (name-lookup key);
+    # unlike TestRunDetail.author_id this is NOT extract_short_id-shortened.
+    executed_by_id: str = ""
+    test_case_revision: str = ""
+    comment_html: str = ""
+
+
 class TestRunDetail(TestRunSummary):
     """Full test-run detail from ``get_test_run``."""
 
