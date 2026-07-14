@@ -18,21 +18,29 @@ from mcp_server_polarion.core.exceptions import (
 )
 from mcp_server_polarion.models import (
     PaginatedResult,
+    TestRecordCreateSpec,
     TestRecordUpdateSpec,
     TestRunCreateSpec,
     TestRunDetail,
     TestRunUpdateSpec,
 )
 from mcp_server_polarion.tools.test_runs import (
+    _build_create_test_records_payload,
     _build_create_test_runs_payload,
+    _build_test_record_resource,
     _build_update_test_records_payload,
     _build_update_test_runs_payload,
+    create_test_records,
     create_test_runs,
     get_test_run,
     list_test_records,
     list_test_runs,
     update_test_records,
     update_test_runs,
+)
+from tests.mcp_server_polarion.tools._shared.guard._builders import (
+    project_enum_response,
+    workitems_response,
 )
 
 
@@ -1822,3 +1830,342 @@ class TestGetTestRun:
         )
 
         assert result.id == "TR-100"
+
+
+class TestBuildTestRecordResource:
+    """``_build_test_record_resource`` unit seam."""
+
+    def test_minimal_spec_sends_test_case_only(self) -> None:
+        resource = _build_test_record_resource(
+            project_id="proj1",
+            spec=TestRecordCreateSpec(test_case_id="MCPT-1"),
+        )
+
+        assert resource == {
+            "type": "testrecords",
+            "relationships": {
+                "testCase": {"data": {"id": "proj1/MCPT-1", "type": "workitems"}}
+            },
+        }
+
+    def test_full_spec_builds_attributes_and_defect(self) -> None:
+        resource = _build_test_record_resource(
+            project_id="proj1",
+            spec=TestRecordCreateSpec(
+                test_case_id="MCPT-1",
+                result="passed",
+                comment="looks good",
+                comment_format="text/plain",
+                defect_id="MCPT-99",
+            ),
+        )
+
+        assert resource == {
+            "type": "testrecords",
+            "attributes": {
+                "result": "passed",
+                "comment": {"type": "text/plain", "value": "looks good"},
+            },
+            "relationships": {
+                "testCase": {"data": {"id": "proj1/MCPT-1", "type": "workitems"}},
+                "defect": {"data": {"id": "proj1/MCPT-99", "type": "workitems"}},
+            },
+        }
+
+    def test_bare_ids_qualified_with_project_id(self) -> None:
+        resource = _build_test_record_resource(
+            project_id="proj1",
+            spec=TestRecordCreateSpec(test_case_id="MCPT-1", defect_id="MCPT-99"),
+        )
+
+        relationships = resource["relationships"]
+        assert relationships["testCase"]["data"]["id"] == "proj1/MCPT-1"  # type: ignore[index,call-overload]
+        assert relationships["defect"]["data"]["id"] == "proj1/MCPT-99"  # type: ignore[index,call-overload]
+
+    def test_already_qualified_ids_pass_through(self) -> None:
+        resource = _build_test_record_resource(
+            project_id="proj1",
+            spec=TestRecordCreateSpec(
+                test_case_id="OtherProj/MCPT-1", defect_id="OtherProj/MCPT-99"
+            ),
+        )
+
+        relationships = resource["relationships"]
+        assert relationships["testCase"]["data"]["id"] == "OtherProj/MCPT-1"  # type: ignore[index,call-overload]
+        assert relationships["defect"]["data"]["id"] == "OtherProj/MCPT-99"  # type: ignore[index,call-overload]
+
+    def test_comment_format_passthrough_no_conversion(self) -> None:
+        resource = _build_test_record_resource(
+            project_id="proj1",
+            spec=TestRecordCreateSpec(
+                test_case_id="MCPT-1",
+                comment="**not markdown**",
+                comment_format="text/html",
+            ),
+        )
+
+        assert resource["attributes"]["comment"] == {  # type: ignore[index,call-overload]
+            "type": "text/html",
+            "value": "**not markdown**",
+        }
+
+    def test_no_result_or_comment_omits_attributes_key(self) -> None:
+        resource = _build_test_record_resource(
+            project_id="proj1",
+            spec=TestRecordCreateSpec(test_case_id="MCPT-1"),
+        )
+
+        assert "attributes" not in resource
+
+
+class TestBuildCreateTestRecordsPayload:
+    """``_build_create_test_records_payload`` unit seam."""
+
+    def test_wraps_resources_in_data_list(self) -> None:
+        payload = _build_create_test_records_payload(
+            project_id="proj1",
+            specs=[
+                TestRecordCreateSpec(test_case_id="MCPT-1"),
+                TestRecordCreateSpec(test_case_id="MCPT-2", result="passed"),
+            ],
+        )
+
+        data = payload["data"]
+        assert isinstance(data, list)
+        assert len(data) == 2
+        first, second = data[0], data[1]
+        assert isinstance(first, dict)
+        assert isinstance(second, dict)
+        assert first["relationships"]["testCase"]["data"]["id"] == "proj1/MCPT-1"  # type: ignore[index,call-overload]
+        assert second["attributes"]["result"] == "passed"  # type: ignore[index,call-overload]
+
+
+class TestCreateTestRecords:
+    """``create_test_records`` tool."""
+
+    async def test_duplicate_test_case_id_rejected_before_any_request(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        with pytest.raises(ValueError, match=r"Duplicate test_case_id\(s\)"):
+            await create_test_records(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="run1",
+                items=[
+                    TestRecordCreateSpec(test_case_id="MCPT-1"),
+                    TestRecordCreateSpec(test_case_id="MCPT-1"),
+                ],
+                dry_run=False,
+            )
+        mock_client.get.assert_not_awaited()
+        mock_client.post.assert_not_awaited()
+
+    async def test_bare_and_qualified_same_id_collide(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # "WI-1" bare qualifies to "proj1/WI-1" -- same identity as explicit.
+        with pytest.raises(ValueError, match=r"Duplicate test_case_id\(s\)"):
+            await create_test_records(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="run1",
+                items=[
+                    TestRecordCreateSpec(test_case_id="WI-1"),
+                    TestRecordCreateSpec(test_case_id="proj1/WI-1"),
+                ],
+                dry_run=False,
+            )
+        mock_client.post.assert_not_awaited()
+
+    async def test_minimal_create_posts_and_returns_full_ids(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # 201 body per live findings: id only, no attributes echoed.
+        mock_client.post.return_value = {
+            "data": [
+                {
+                    "type": "testrecords",
+                    "id": "MCP_Test_Project/run1/MCP_Test_Project/MCPT-568/0",
+                }
+            ]
+        }
+
+        result = await create_test_records(
+            mock_ctx,
+            project_id="MCP_Test_Project",
+            test_run_id="run1",
+            items=[TestRecordCreateSpec(test_case_id="MCPT-568")],
+            dry_run=False,
+        )
+
+        assert result.created is True
+        assert result.dry_run is False
+        assert result.record_ids == [
+            "MCP_Test_Project/run1/MCP_Test_Project/MCPT-568/0"
+        ]
+        assert result.payload_preview is None
+        path = mock_client.post.await_args.args[0]
+        assert path == "/projects/MCP_Test_Project/testruns/run1/testrecords"
+
+    async def test_result_guard_blocks_before_post(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = project_enum_response(
+            "test-result", ["passed", "failed", "blocked"]
+        )
+
+        with pytest.raises(ValueError, match="ghost"):
+            await create_test_records(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="run1",
+                items=[TestRecordCreateSpec(test_case_id="MCPT-1", result="ghost")],
+                dry_run=False,
+            )
+
+        mock_client.post.assert_not_awaited()
+
+    async def test_defect_guard_blocks_before_post(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = workitems_response("proj1", [])
+
+        with pytest.raises(ValueError, match="dangling"):
+            await create_test_records(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="run1",
+                items=[
+                    TestRecordCreateSpec(test_case_id="MCPT-1", defect_id="MCPT-99999")
+                ],
+                dry_run=False,
+            )
+
+        mock_client.post.assert_not_awaited()
+
+    async def test_dry_run_returns_preview_and_still_runs_guards(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = project_enum_response("test-result", ["passed"])
+
+        result = await create_test_records(
+            mock_ctx,
+            project_id="proj1",
+            test_run_id="run1",
+            items=[TestRecordCreateSpec(test_case_id="MCPT-1", result="passed")],
+            dry_run=True,
+        )
+
+        assert result.created is False
+        assert result.dry_run is True
+        assert result.record_ids == []
+        assert result.payload_preview is not None
+        mock_client.get.assert_awaited()
+        mock_client.post.assert_not_awaited()
+
+    async def test_run_not_found_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.side_effect = PolarionNotFoundError(
+            "Not found", status_code=404
+        )
+
+        # 404 ambiguous: run or project may be missing -- message names both.
+        with pytest.raises(
+            ValueError, match=r"Test run 'missing' or project 'proj1' not found"
+        ):
+            await create_test_records(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="missing",
+                items=[TestRecordCreateSpec(test_case_id="MCPT-1")],
+                dry_run=False,
+            )
+
+    async def test_auth_error_raises_permission_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.side_effect = PolarionAuthError("auth", status_code=401)
+
+        with pytest.raises(PermissionError):
+            await create_test_records(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="run1",
+                items=[TestRecordCreateSpec(test_case_id="MCPT-1")],
+                dry_run=False,
+            )
+
+    async def test_other_error_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Server validates testCase itself; 400 detail must flow through.
+        mock_client.post.side_effect = PolarionError(
+            "Test Case is missing, or the one specified is invalid.",
+            status_code=400,
+        )
+
+        with pytest.raises(RuntimeError, match="Test Case is missing"):
+            await create_test_records(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="run1",
+                items=[TestRecordCreateSpec(test_case_id="MCPT-1")],
+                dry_run=False,
+            )
+
+    async def test_id_count_mismatch_raises(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {"data": []}
+
+        with pytest.raises(RuntimeError, match="list_test_records"):
+            await create_test_records(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="run1",
+                items=[TestRecordCreateSpec(test_case_id="MCPT-1")],
+                dry_run=False,
+            )
+
+
+class TestCreateTestRecordsFieldValidation:
+    """Bulk bounds + spec constraints via ``TypeAdapter`` rebuild."""
+
+    @staticmethod
+    def _adapter(param_name: str) -> TypeAdapter[object]:
+        hints = get_type_hints(create_test_records)
+        sig = inspect.signature(create_test_records)
+        field_info = sig.parameters[param_name].default
+        return TypeAdapter(Annotated[hints[param_name], field_info])
+
+    def test_empty_items_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter("items").validate_python([])
+
+    def test_items_above_max_rejected(self) -> None:
+        specs = [{"test_case_id": f"MCPT-{i}"} for i in range(51)]
+        with pytest.raises(ValidationError):
+            self._adapter("items").validate_python(specs)
+
+    def test_items_at_max_accepted(self) -> None:
+        specs = [{"test_case_id": f"MCPT-{i}"} for i in range(50)]
+        validated = self._adapter("items").validate_python(specs)
+        assert isinstance(validated, list)
+        assert len(validated) == 50
+
+    def test_empty_project_id_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter("project_id").validate_python("")
+
+    def test_empty_test_run_id_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter("test_run_id").validate_python("")
+
+    def test_spec_requires_non_empty_test_case_id(self) -> None:
+        with pytest.raises(ValidationError):
+            TestRecordCreateSpec(test_case_id="")
+
+    def test_extra_spec_key_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            TestRecordCreateSpec(test_case_id="MCPT-1", bogus="x")  # type: ignore[call-arg]

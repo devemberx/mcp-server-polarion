@@ -49,6 +49,7 @@ _WRITE_TOOL_NAMES: frozenset[str] = frozenset(
     {
         "create_work_items",
         "create_test_runs",
+        "create_test_records",
         "update_test_runs",
         "update_test_records",
         "update_work_items",

@@ -239,4 +239,16 @@ CASES: list[Case] = [
         expect="create_test_runs",
         reject=["create_work_items"],
     ),
+    _case(
+        "TRIG-CREATE-TEST-RECORDS",
+        f"Record that test case '{TESTCASE_ID}' passed in test run "
+        f"'{TEST_RUN_ID}' of project '{PROJECT}'.",
+        "triggers_tool",
+        intent="Recording a test-case execution result must call "
+        "create_test_records, not update_test_runs (run metadata) or "
+        "create_work_items.",
+        covers=["create_test_records"],
+        expect="create_test_records",
+        reject=["update_test_runs", "create_work_items"],
+    ),
 ]

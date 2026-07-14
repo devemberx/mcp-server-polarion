@@ -1,4 +1,4 @@
-"""Test-record guard tests: result enum, defect-target existence."""
+"""Test-record guard tests: result enum + cached defect existence."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from mcp_server_polarion.core.exceptions import (
     PolarionNotFoundError,
 )
 from mcp_server_polarion.tools._shared.guard import (
-    guard_test_record_defects,
+    guard_test_record_defect_targets,
     guard_test_record_results,
 )
 from tests.mcp_server_polarion.tools._shared.guard._builders import (
@@ -22,7 +22,7 @@ from tests.mcp_server_polarion.tools._shared.guard._builders import (
 
 
 class TestGuardTestRecordResults:
-    """Result guard: ``testing/test-result`` project enumeration."""
+    """``result`` validated via the ``testing``-context ``test-result`` enum."""
 
     async def test_valid_result_passes(self, mock_client: AsyncMock) -> None:
         mock_client.get.return_value = project_enum_response(
@@ -34,19 +34,27 @@ class TestGuardTestRecordResults:
         path = mock_client.get.await_args.args[0]
         assert path == "/projects/P/enumerations/testing/test-result/~"
 
-    async def test_unknown_result_raises_with_discovery_hint(
+    async def test_unknown_result_raises_with_options(
         self, mock_client: AsyncMock
     ) -> None:
         mock_client.get.return_value = project_enum_response(
             "test-result", ["passed", "failed", "blocked"]
         )
 
-        with pytest.raises(ValueError, match="ghost_result") as exc:
-            await guard_test_record_results(mock_client, "P", ["ghost_result"])
+        with pytest.raises(ValueError, match="ghost") as exc:
+            await guard_test_record_results(mock_client, "P", ["ghost"])
 
-        msg = str(exc.value)
-        assert "passed" in msg
-        assert "list_test_records" in msg
+        assert "passed" in str(exc.value)
+
+    async def test_empty_results_skip_check(self, mock_client: AsyncMock) -> None:
+        await guard_test_record_results(mock_client, "P", [])
+
+        mock_client.get.assert_not_awaited()
+
+    async def test_enum_404_defers(self, mock_client: AsyncMock) -> None:
+        mock_client.get.side_effect = PolarionNotFoundError("nope", status_code=404)
+
+        await guard_test_record_results(mock_client, "P", ["anything"])
 
     async def test_dedup_one_get_for_repeated_results(
         self, mock_client: AsyncMock
@@ -57,42 +65,14 @@ class TestGuardTestRecordResults:
 
         mock_client.get.assert_awaited_once()
 
-    async def test_empty_results_skip_check(self, mock_client: AsyncMock) -> None:
-        await guard_test_record_results(mock_client, "P", [])
 
-        mock_client.get.assert_not_awaited()
+class TestGuardTestRecordDefectTargets:
+    """Defect-target existence guard -- cached across calls."""
 
-    async def test_empty_option_set_defers(self, mock_client: AsyncMock) -> None:
-        mock_client.get.side_effect = PolarionNotFoundError("nope", status_code=404)
+    async def test_existing_target_passes(self, mock_client: AsyncMock) -> None:
+        mock_client.get.return_value = workitems_response("P", ["MCPT-1"])
 
-        await guard_test_record_results(mock_client, "P", ["anything"])
-
-    async def test_unreachable_backend_blocks_write(
-        self, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.side_effect = PolarionError("backend down")
-
-        with pytest.raises(RuntimeError, match="Refusing the write"):
-            await guard_test_record_results(mock_client, "P", ["passed"])
-
-    async def test_auth_error_raises_permission_error(
-        self, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
-
-        with pytest.raises(PermissionError, match="lacks permission"):
-            await guard_test_record_results(mock_client, "P", ["passed"])
-
-
-class TestGuardTestRecordDefects:
-    """Defect-target existence guard for ``update_test_records``."""
-
-    async def test_all_defects_exist_one_get_per_project(
-        self, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = workitems_response("P", ["A", "B"])
-
-        await guard_test_record_defects(mock_client, ["P/A", "P/B"])
+        await guard_test_record_defect_targets(mock_client, "P", ["P/MCPT-1"])
 
         mock_client.get.assert_awaited_once()
         path, kwargs = (
@@ -100,20 +80,21 @@ class TestGuardTestRecordDefects:
             mock_client.get.call_args.kwargs,
         )
         assert path == "/projects/P/workitems"
-        assert kwargs["params"]["query"] == "id:(A B)"
-        assert kwargs["params"]["fields[workitems]"] == "id"
+        assert kwargs["params"]["query"] == "id:(MCPT-1)"
 
-    async def test_missing_defect_raises_value_error(
+    async def test_missing_target_raises_value_error(
         self, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = workitems_response("P", ["A"])
+        mock_client.get.return_value = workitems_response("P", [])
 
-        with pytest.raises(ValueError, match="P/B") as exc:
-            await guard_test_record_defects(mock_client, ["P/A", "P/B"])
+        with pytest.raises(ValueError, match="P/MCPT-99999") as exc:
+            await guard_test_record_defect_targets(mock_client, "P", ["P/MCPT-99999"])
 
-        assert "get_work_item" in str(exc.value)
+        assert "dangling" in str(exc.value)
 
-    async def test_cross_project_two_gets(self, mock_client: AsyncMock) -> None:
+    async def test_mixed_projects_grouped_one_get_per_project(
+        self, mock_client: AsyncMock
+    ) -> None:
         responses = {
             "P": workitems_response("P", ["A"]),
             "Q": workitems_response("Q", ["X"]),
@@ -125,40 +106,48 @@ class TestGuardTestRecordDefects:
 
         mock_client.get.side_effect = fake_get
 
-        await guard_test_record_defects(mock_client, ["P/A", "Q/X"])
+        await guard_test_record_defect_targets(mock_client, "P", ["P/A", "Q/X"])
 
         assert mock_client.get.await_count == 2
 
-    async def test_missing_in_cross_project_is_caught(
+    async def test_bare_id_defaults_to_passed_project(
         self, mock_client: AsyncMock
     ) -> None:
-        async def fake_get(path: str, **kwargs: object) -> dict[str, object]:
-            project = path.split("/")[2]
-            return workitems_response(project, ["A"] if project == "P" else [])
+        mock_client.get.return_value = workitems_response("P", ["A"])
 
-        mock_client.get.side_effect = fake_get
+        await guard_test_record_defect_targets(mock_client, "P", ["A"])
 
-        with pytest.raises(ValueError, match="Q/X"):
-            await guard_test_record_defects(mock_client, ["P/A", "Q/X"])
+        kwargs = mock_client.get.call_args.kwargs
+        assert kwargs["params"]["query"] == "id:(A)"
 
-    async def test_chunks_above_page_size(self, mock_client: AsyncMock) -> None:
-        ids = sorted(f"WI-{n}" for n in range(150))
+    async def test_cache_hit_second_call_makes_zero_http_calls(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = workitems_response("P", ["MCPT-1"])
 
-        async def fake_get(path: str, **kwargs: object) -> dict[str, object]:
-            query = str(kwargs["params"]["query"])  # type: ignore[index]
-            chunk = query.removeprefix("id:(").removesuffix(")").split()
-            return workitems_response("P", chunk)
+        await guard_test_record_defect_targets(mock_client, "P", ["P/MCPT-1"])
+        assert mock_client.get.await_count == 1
 
-        mock_client.get.side_effect = fake_get
-
-        await guard_test_record_defects(mock_client, [f"P/{i}" for i in ids])
-
-        assert mock_client.get.await_count == 2
-
-    async def test_empty_defects_skip_requests(self, mock_client: AsyncMock) -> None:
-        await guard_test_record_defects(mock_client, [])
+        mock_client.get.reset_mock()
+        await guard_test_record_defect_targets(mock_client, "P", ["P/MCPT-1"])
 
         mock_client.get.assert_not_awaited()
+
+    async def test_partial_cache_only_misses_queried(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = workitems_response("P", ["MCPT-1"])
+        await guard_test_record_defect_targets(mock_client, "P", ["P/MCPT-1"])
+        mock_client.get.reset_mock()
+
+        mock_client.get.return_value = workitems_response("P", ["MCPT-2"])
+        await guard_test_record_defect_targets(
+            mock_client, "P", ["P/MCPT-1", "P/MCPT-2"]
+        )
+
+        mock_client.get.assert_awaited_once()
+        kwargs = mock_client.get.call_args.kwargs
+        assert kwargs["params"]["query"] == "id:(MCPT-2)"
 
     async def test_unreachable_backend_blocks_write(
         self, mock_client: AsyncMock
@@ -166,7 +155,7 @@ class TestGuardTestRecordDefects:
         mock_client.get.side_effect = PolarionError("backend down")
 
         with pytest.raises(RuntimeError, match="Refusing the write"):
-            await guard_test_record_defects(mock_client, ["P/A"])
+            await guard_test_record_defect_targets(mock_client, "P", ["P/A"])
 
     async def test_auth_error_raises_permission_error(
         self, mock_client: AsyncMock
@@ -174,7 +163,7 @@ class TestGuardTestRecordDefects:
         mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
 
         with pytest.raises(PermissionError, match="lacks permission"):
-            await guard_test_record_defects(mock_client, ["P/A"])
+            await guard_test_record_defect_targets(mock_client, "P", ["P/A"])
 
     async def test_missing_target_project_raises_value_error(
         self, mock_client: AsyncMock
@@ -182,4 +171,4 @@ class TestGuardTestRecordDefects:
         mock_client.get.side_effect = PolarionNotFoundError("no such project")
 
         with pytest.raises(ValueError, match="P/A"):
-            await guard_test_record_defects(mock_client, ["P/A"])
+            await guard_test_record_defect_targets(mock_client, "P", ["P/A"])

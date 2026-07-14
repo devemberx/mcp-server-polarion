@@ -12,18 +12,13 @@ from mcp_server_polarion.core.exceptions import (
     PolarionNotFoundError,
 )
 from mcp_server_polarion.models import WorkItemLinkSpec
-from mcp_server_polarion.tools._shared.guard._http import (
-    GUARD_PAGE_SIZE,
-    guarded_get,
-    paged_responses,
-)
+from mcp_server_polarion.tools._shared.guard._http import paged_responses
+from mcp_server_polarion.tools._shared.guard._targets import missing_work_item_targets
 from mcp_server_polarion.tools._shared.guard.enums import check_project_enum_roles
 from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
     format_option_list,
-    safe_str,
 )
-from mcp_server_polarion.tools._shared.parse import extract_short_id
 
 logger = logging.getLogger("mcp_server_polarion.tools._shared.guard.links")
 
@@ -69,37 +64,6 @@ async def guard_hyperlink_roles(
     )
 
 
-async def existing_target_ids(
-    client: PolarionClient,
-    project_id: str,
-    target_ids: frozenset[str],
-) -> frozenset[str]:
-    """Subset of *target_ids* existing in *project_id*, via chunked
-    ``id:(...)`` queries. 404 (project missing) propagate to caller;
-    auth/other failures translate fail-closed.
-    """
-    ordered = sorted(target_ids)
-    found: set[str] = set()
-    for start in range(0, len(ordered), GUARD_PAGE_SIZE):
-        chunk = ordered[start : start + GUARD_PAGE_SIZE]
-        params: dict[str, str | int] = {
-            "query": f"id:({' '.join(chunk)})",
-            "fields[workitems]": "id",
-            "page[size]": GUARD_PAGE_SIZE,
-            "page[number]": 1,
-        }
-        path = f"/projects/{encode_path_segment(project_id)}/workitems"
-        response = await guarded_get(
-            client, path, params, what="link targets", project_id=project_id
-        )
-        data = response.get("data", [])
-        if isinstance(data, list):
-            for entry in data:
-                if isinstance(entry, dict):
-                    found.add(extract_short_id(safe_str(entry.get("id", ""))))
-    return frozenset(found)
-
-
 async def guard_work_item_link_targets(
     client: PolarionClient,
     source_project_id: str,
@@ -107,24 +71,15 @@ async def guard_work_item_link_targets(
 ) -> None:
     """Reject links whose target work item not exist — Polarion store
     nonexistent target as silent dangling link (HTTP 201, empty
-    title/type/status). One ``id:(...)`` query per target project.
+    title/type/status). Confirmed targets cache across calls; only cache
+    misses reach Polarion, one ``id:(...)`` query per target project.
     """
     by_project: dict[str, set[str]] = {}
     for spec in links:
         target_project = spec.target_project_id or source_project_id
         by_project.setdefault(target_project, set()).add(spec.target_work_item_id)
 
-    missing: list[str] = []
-    for project_id, requested in by_project.items():
-        try:
-            existing = await existing_target_ids(
-                client, project_id, frozenset(requested)
-            )
-        except PolarionNotFoundError:
-            missing.extend(f"{project_id}/{wi}" for wi in sorted(requested))
-            continue
-        missing.extend(f"{project_id}/{wi}" for wi in sorted(requested - existing))
-
+    missing = await missing_work_item_targets(client, by_project)
     if missing:
         raise ValueError(
             f"Link target work item(s) {format_option_list(missing)} do not exist. "

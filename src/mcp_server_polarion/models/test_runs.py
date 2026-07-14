@@ -25,6 +25,43 @@ class TestRecordSummary(BaseModel):
     defect_id: str = ""
 
 
+class TestRecordCreateSpec(BaseModel):
+    """One test record to create via create_test_records."""
+
+    __test__ = False
+
+    # LLM input model: reject typo keys, not silent-drop.
+    model_config = ConfigDict(extra="forbid")
+
+    test_case_id: str = Field(
+        min_length=1,
+        description=(
+            "'WorkItemId' or 'ProjectId/WorkItemId'; bare id qualified with "
+            "the tool's project_id."
+        ),
+    )
+    result: str | None = None
+    comment: str | None = None
+    comment_format: Literal["text/html", "text/plain"] = "text/plain"
+    defect_id: str | None = Field(
+        default=None,
+        description=(
+            "'WorkItemId' or 'ProjectId/WorkItemId', qualified like test_case_id."
+        ),
+    )
+
+
+class TestRecordsCreateResult(BaseModel):
+    """``create_test_records`` result."""
+
+    __test__ = False
+
+    created: bool
+    dry_run: bool
+    record_ids: list[str] = Field(default_factory=list)
+    payload_preview: Mapping[str, object] | None = None
+
+
 class TestRunSummary(BaseModel):
     """Compact test-run representation for list results."""
 
