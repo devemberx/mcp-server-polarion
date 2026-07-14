@@ -155,9 +155,11 @@ mocks so tests mirror reality (e.g. an endpoint that omits `meta.totalCount`).
 
 ## Stage 5 — Review (loop entry)
 
-1. **Commit the work first**, in Stage 7's message format — the reviewer
-   diffs `origin/main...HEAD`, and uncommitted changes are invisible to that
-   range. Fix rounds add commits; squash merge collapses them at the end.
+1. **Commit the work first**, in the repo commit format (CLAUDE.md Repo
+   Conventions; full rules `.github/CONTRIBUTING.md`, commit-msg hook
+   enforces) — the reviewer diffs `origin/main...HEAD`, and uncommitted
+   changes are invisible to that range. Fix rounds add commits; squash merge
+   collapses them at the end.
 2. **Invoke `pipeline-reviewer`** with: `.pipeline/spec.md` and
    `.pipeline/plan.md` paths and the diff scope (`git diff origin/main...HEAD`).
    Give it the spec and plan — **never** the implementer reports or your
@@ -182,13 +184,11 @@ mocks so tests mirror reality (e.g. an endpoint that omits `meta.totalCount`).
 
 ## Stage 7 — Ship (main thread)
 
-- Commit message format — defined here, used from Stage 5.1 onward:
-  `type(scope): summary` ≤50 chars + 2-bullet body (motivation, change),
-  bullets ≤120 chars — hook enforces. Work is already committed by review
-  time; commit here only what is still uncommitted. `.pipeline/` stays
-  uncommitted.
-- PR: flip template checkboxes `[ ]`→`[x]`, keep unchecked options, record
-  live-test evidence and unfixed LOW/NIT findings in Notes. Squash merge only.
+- Work is already committed by review time (Stage 5.1); commit here only what
+  is still uncommitted. Commit format, PR checklist handling, squash-merge
+  rule: CLAUDE.md Repo Conventions / `.github/CONTRIBUTING.md` — restating
+  them here would be a third copy that drifts. `.pipeline/` stays uncommitted.
+- PR Notes: record live-test evidence and unfixed LOW/NIT findings.
 - CI: after opening the PR, `gh pr checks <PR#> --watch --fail-fast` until
   every check is green — merge is blocked on red anyway, but an unwatched red
   PR rots until a human notices; catch it while the session context is hot.
@@ -225,7 +225,8 @@ mocks so tests mirror reality (e.g. an endpoint that omits `meta.totalCount`).
 - `.pipeline/` files committed, or a subagent prompted without the file paths
   it needs (it cannot see the conversation).
 - `git worktree add` or bare `git stash` in a session that has native tools.
-- Branch named `feature/…` (hook rejects) or commit bullets over 120 chars.
+- Branch named `feature/…` — pre-push hook rejects it, but only at push time;
+  rename at Stage 0.
 - Findings "fixed" without gates re-run before re-review.
 - Main-thread integration code (eval-harness handler, registration) written
   before its failing test.
