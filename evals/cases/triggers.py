@@ -230,6 +230,18 @@ CASES: list[Case] = [
         reject=["list_test_records", "get_test_run"],
     ),
     _case(
+        "TRIG-UPDATE-TEST-RECORDS",
+        f"Mark test record '{PROJECT}/{TEST_RUN_ID}/{PROJECT}/{TESTCASE_ID}/0' in "
+        f"test run '{TEST_RUN_ID}' of project '{PROJECT}' as passed, with the "
+        f"comment 'Retested after fix.'",
+        "triggers_tool",
+        intent="Setting a test record's result/comment must call "
+        "update_test_records, not update_test_runs (run-level fields only).",
+        covers=["update_test_records"],
+        expect="update_test_records",
+        reject=["update_test_runs"],
+    ),
+    _case(
         "TRIG-CREATE-TEST-RUN",
         f"Create a new manual test run with id 'Fake-TR-Sprint9' in project "
         f"'{PROJECT}'.",
@@ -239,5 +251,17 @@ CASES: list[Case] = [
         covers=["create_test_runs"],
         expect="create_test_runs",
         reject=["create_work_items"],
+    ),
+    _case(
+        "TRIG-CREATE-TEST-RECORDS",
+        f"Record that test case '{TESTCASE_ID}' passed in test run "
+        f"'{TEST_RUN_ID}' of project '{PROJECT}'.",
+        "triggers_tool",
+        intent="Recording a test-case execution result must call "
+        "create_test_records, not update_test_runs (run metadata) or "
+        "create_work_items.",
+        covers=["create_test_records"],
+        expect="create_test_records",
+        reject=["update_test_runs", "create_work_items"],
     ),
 ]

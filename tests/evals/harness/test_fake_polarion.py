@@ -27,6 +27,7 @@ from evals.harness.fixtures import (
     SEEDS,
     SPACE,
     TEST_RUN_ID,
+    TEST_RUN_ID_2,
     TEST_RUN_TEMPLATE_ID,
     TESTCASE_ID,
 )
@@ -412,6 +413,80 @@ class TestMutations:
         assert response.status_code == 201
         assert len(_json(response)["data"]) == 1
 
+    def test_post_testrecords_composes_five_segment_ids(self) -> None:
+        fake = FakePolarion()
+        response = _mutate(
+            fake,
+            "POST",
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}/testrecords",
+            {
+                "data": [
+                    {
+                        "type": "testrecords",
+                        "relationships": {
+                            "testCase": {
+                                "data": {
+                                    "type": "workitems",
+                                    "id": f"{PROJECT}/{TESTCASE_ID}",
+                                }
+                            }
+                        },
+                    },
+                    {
+                        "type": "testrecords",
+                        "relationships": {
+                            "testCase": {
+                                "data": {
+                                    "type": "workitems",
+                                    "id": f"{PROJECT}/{CHILD_REQ_ID}",
+                                }
+                            }
+                        },
+                    },
+                ]
+            },
+        )
+        assert response.status_code == 201
+        ids = [entry["id"] for entry in _json(response)["data"]]
+        assert ids == [
+            f"{PROJECT}/{TEST_RUN_ID}/{PROJECT}/{TESTCASE_ID}/0",
+            f"{PROJECT}/{TEST_RUN_ID}/{PROJECT}/{CHILD_REQ_ID}/0",
+        ]
+
+    def test_post_testrecords_unknown_test_case_is_400(self) -> None:
+        # Live-verified server message; tool relies on it flowing through.
+        fake = FakePolarion()
+        response = _mutate(
+            fake,
+            "POST",
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}/testrecords",
+            {
+                "data": [
+                    {
+                        "type": "testrecords",
+                        "relationships": {
+                            "testCase": {
+                                "data": {"type": "workitems", "id": f"{PROJECT}/Nope"}
+                            }
+                        },
+                    }
+                ]
+            },
+        )
+        assert response.status_code == 400
+        detail = _json(response)["errors"][0]["detail"]
+        assert detail == "Test Case is missing, or the one specified is invalid."
+
+    def test_post_testrecords_missing_test_case_relationship_is_400(self) -> None:
+        fake = FakePolarion()
+        response = _mutate(
+            fake,
+            "POST",
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}/testrecords",
+            {"data": [{"type": "testrecords"}]},
+        )
+        assert response.status_code == 400
+
     def test_post_documents_echoes_module_id(self) -> None:
         fake = FakePolarion()
         response = _mutate(
@@ -481,6 +556,87 @@ class TestMutations:
         fake = FakePolarion()
         _get(fake, "/projects")
         assert fake.mutations == []
+
+
+class TestTestRecordMutations:
+    _RECORD_ID = f"{PROJECT}/{TEST_RUN_ID}/{PROJECT}/{TESTCASE_ID}/0"
+    _UNKNOWN_RECORD_ID = f"{PROJECT}/{TEST_RUN_ID}/{PROJECT}/MCPT-9999/0"
+
+    def test_patch_known_id_returns_204_and_records_mutation(self) -> None:
+        fake = FakePolarion()
+        response = _mutate(
+            fake,
+            "PATCH",
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}/testrecords",
+            {
+                "data": [
+                    {
+                        "type": "testrecords",
+                        "id": self._RECORD_ID,
+                        "attributes": {"result": "passed"},
+                    }
+                ]
+            },
+        )
+        assert response.status_code == 204
+        assert fake.mutations[-1]["path"].endswith("/testrecords")
+
+    def test_patch_unknown_id_is_400(self) -> None:
+        fake = FakePolarion()
+        response = _mutate(
+            fake,
+            "PATCH",
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}/testrecords",
+            {
+                "data": [
+                    {
+                        "type": "testrecords",
+                        "id": self._UNKNOWN_RECORD_ID,
+                        "attributes": {"result": "passed"},
+                    }
+                ]
+            },
+        )
+        assert response.status_code == 400
+        detail = _json(response)["errors"][0]["detail"]
+        assert self._UNKNOWN_RECORD_ID in detail
+        assert "was not found" in detail
+
+    def test_patch_mixed_batch_rejects_whole_batch(self) -> None:
+        # One bad id in a multi-item batch still 400s -- atomic, live-verified.
+        fake = FakePolarion()
+        response = _mutate(
+            fake,
+            "PATCH",
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}/testrecords",
+            {
+                "data": [
+                    {"id": self._RECORD_ID, "attributes": {"result": "passed"}},
+                    {"id": self._UNKNOWN_RECORD_ID, "attributes": {"result": "failed"}},
+                ]
+            },
+        )
+        assert response.status_code == 400
+
+    def test_patch_other_runs_record_is_400(self) -> None:
+        # Record id valid for TEST_RUN_ID -- PATCH via TEST_RUN_ID_2 path 400s.
+        fake = FakePolarion()
+        response = _mutate(
+            fake,
+            "PATCH",
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_ID_2}/testrecords",
+            {
+                "data": [
+                    {
+                        "type": "testrecords",
+                        "id": self._RECORD_ID,
+                        "attributes": {"result": "passed"},
+                    }
+                ]
+            },
+        )
+        assert response.status_code == 400
+        assert "was not found" in _json(response)["errors"][0]["detail"]
 
 
 class TestOrchestrationSeeding:

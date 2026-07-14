@@ -24,6 +24,7 @@ from .fixtures import (
     PROJECT,
     SEEDS,
     SPACE,
+    TEST_RUN_ID,
     TESTCASE_ID,
     TS,
     Comment,
@@ -602,6 +603,53 @@ class FakePolarion:
                         ]
                     },
                 )
+            if path.endswith("/testrecords"):
+                # Live-verified: server compose 5-segment id run/testCase/iter;
+                # unknown testCase 400, no client-set record id. Iteration 0
+                # enough — tool reject batch duplicate testCase client-side.
+                run_match = re.search(r"/testruns/([^/]+)/testrecords$", path)
+                run_id = run_match.group(1) if run_match else TEST_RUN_ID
+                record_ids: list[str] = []
+                entries = (
+                    body["data"]
+                    if isinstance(body, dict) and isinstance(body.get("data"), list)
+                    else []
+                )
+                for entry in entries:
+                    rels = (
+                        entry.get("relationships") if isinstance(entry, dict) else None
+                    )
+                    tc_rel = rels.get("testCase") if isinstance(rels, dict) else None
+                    tc_data = tc_rel.get("data") if isinstance(tc_rel, dict) else None
+                    tc_id = (
+                        str(tc_data.get("id") or "")
+                        if isinstance(tc_data, dict)
+                        else ""
+                    )
+                    tc_short = tc_id.rsplit("/", 1)[-1]
+                    if tc_short not in self.seeds.work_items:
+                        return httpx.Response(
+                            400,
+                            json={
+                                "errors": [
+                                    {
+                                        "status": "400",
+                                        "title": "Bad Request",
+                                        "detail": "Test Case is missing, or the "
+                                        "one specified is invalid.",
+                                    }
+                                ]
+                            },
+                        )
+                    record_ids.append(f"{PROJECT}/{run_id}/{tc_id}/0")
+                return httpx.Response(
+                    201,
+                    json={
+                        "data": [
+                            {"type": "testrecords", "id": rid} for rid in record_ids
+                        ]
+                    },
+                )
             if path.endswith("/testruns"):
                 # Polarion honor client-supplied id verbatim; echo it back.
                 ids: list[str] = []
@@ -653,6 +701,40 @@ class FakePolarion:
                                 "id": f"{PROJECT}/MCPT-{9001 + i}",
                             }
                             for i in range(submitted)
+                        ]
+                    },
+                )
+        if request.method == "PATCH":
+            testrecords = re.search(r"/testruns/([^/]+)/testrecords$", path)
+            if testrecords:
+                return self._patch_testrecords(testrecords.group(1), body)
+        return httpx.Response(204)
+
+    def _patch_testrecords(self, run_id: str, body: Any) -> httpx.Response:
+        """Bulk test-record PATCH: every submitted id must be the path run's
+        seeded, non-template record -- other run's record or unknown id 400s
+        the whole batch (live-verified atomic; mirror moveFromDocument
+        existence-validating shape).
+        """
+        valid_ids = {
+            f"{PROJECT}/{tr.short_id}/{PROJECT}/{TESTCASE_ID}/0"
+            for tr in self.seeds.test_runs.values()
+            if not tr.is_template and tr.short_id == run_id
+        }
+        entries = body.get("data") if isinstance(body, dict) else None
+        entries = entries if isinstance(entries, list) else []
+        for entry in entries:
+            record_id = entry.get("id") if isinstance(entry, dict) else None
+            if record_id not in valid_ids:
+                return httpx.Response(
+                    400,
+                    json={
+                        "errors": [
+                            {
+                                "status": "400",
+                                "title": "Bad Request",
+                                "detail": f"Test Record '{record_id}' was not found.",
+                            }
                         ]
                     },
                 )

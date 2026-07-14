@@ -114,6 +114,24 @@ def extract_created_short_ids(response: dict[str, object]) -> list[str]:
     return ids
 
 
+def extract_created_full_ids(response: dict[str, object]) -> list[str]:
+    """Verbatim resource ids from bulk 201 response -- testrecord ids are
+    5 segments (project/testRun/testCaseProject/testCaseId/iteration);
+    ``extract_created_short_ids`` would rsplit to the bare iteration index,
+    losing test case + run context. Collect ``data[].id`` as-is, never split.
+    """
+    data = response.get("data")
+    if not isinstance(data, list):
+        return []
+    ids: list[str] = []
+    for item in data:
+        if isinstance(item, dict):
+            full_id = safe_str(item.get("id", ""))
+            if full_id:
+                ids.append(full_id)
+    return ids
+
+
 def parse_included_work_item_map(
     response: dict[str, object],
 ) -> dict[str, dict[str, object]]:
@@ -569,6 +587,7 @@ def parse_enum_option(entry: dict[str, object]) -> EnumOption:
 
 __all__: list[str] = [
     "WorkItemSummaryKwargs",
+    "extract_created_full_ids",
     "extract_created_short_ids",
     "extract_relationship_id",
     "extract_relationship_ids",

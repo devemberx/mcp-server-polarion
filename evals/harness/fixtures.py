@@ -289,5 +289,6 @@ SEEDS = Seeds(
         "workitem-link-role": ["relates_to", "parent", "satisfies", "verifies"],
         "testing/testrun-type": ["manual", "automated"],
         "testing/testrun-status": ["open", "inProgress", "finished"],
+        "testing/test-result": ["passed", "failed", "blocked"],
     },
 )

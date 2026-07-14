@@ -8,6 +8,7 @@ from __future__ import annotations
 from mcp_server_polarion.models import Comment, WorkItemSummary
 from mcp_server_polarion.tools._shared.parse import (
     _parse_comment,
+    extract_created_full_ids,
     extract_created_short_ids,
     extract_relationship_id,
     extract_relationship_ids,
@@ -125,6 +126,46 @@ class TestExtractCreatedShortIds:
             ]
         }
         assert extract_created_short_ids(response) == ["MCPT-1"]
+
+
+class TestExtractCreatedFullIds:
+    """Tests for `extract_created_full_ids` (testrecord 5-segment ids)."""
+
+    def test_extracts_full_ids_verbatim_in_order(self) -> None:
+        # 5-segment testrecord id: project/testRun/testCaseProject/testCaseId/
+        # iteration -- extract_created_short_ids would rsplit to bare "0".
+        response: dict[str, object] = {
+            "data": [
+                {
+                    "type": "testrecords",
+                    "id": "MCP_Test_Project/run1/MCP_Test_Project/MCPT-568/0",
+                },
+                {
+                    "type": "testrecords",
+                    "id": "MCP_Test_Project/run1/MCP_Test_Project/MCPT-569/1",
+                },
+            ]
+        }
+        assert extract_created_full_ids(response) == [
+            "MCP_Test_Project/run1/MCP_Test_Project/MCPT-568/0",
+            "MCP_Test_Project/run1/MCP_Test_Project/MCPT-569/1",
+        ]
+
+    def test_returns_empty_when_data_missing(self) -> None:
+        assert extract_created_full_ids({}) == []
+
+    def test_returns_empty_when_data_not_a_list(self) -> None:
+        assert extract_created_full_ids({"data": {"id": "p/r/p/WI-1/0"}}) == []
+
+    def test_skips_entries_missing_id_or_not_dict(self) -> None:
+        response: dict[str, object] = {
+            "data": [
+                {"type": "testrecords", "id": "p/r/p/WI-1/0"},
+                {"type": "testrecords"},
+                "not a dict",
+            ]
+        }
+        assert extract_created_full_ids(response) == ["p/r/p/WI-1/0"]
 
 
 class TestParseIncludedWorkItemMap:
