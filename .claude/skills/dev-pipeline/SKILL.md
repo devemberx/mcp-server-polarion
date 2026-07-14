@@ -90,13 +90,14 @@ sequentially, in one Agent call each.
    credentials work, burn it down before asking approval.** Probe a
    project-scoped endpoint first (global ones can 403 on a scoped token),
    then settle the researcher's UNVERIFIED items with cheap reads and scratch
-   writes (create a disposable resource, probe, delete it). A failed probe on
+   writes (create a disposable resource, probe, delete it — where the API
+   allows delete; documents are not REST-deletable). A failed probe on
    one endpoint is not "access is dead" — probe the exact resource the tool
    will touch before concluding. A fact settled at spec time is a design
    decision made once; the same fact discovered after implementation is a
-   review-fix round. (Run 2026-07-13: a pre-approval probe found the real
-   enum path and two silent-ghost writes — flipped a guard from "deferred"
-   to "shipped" before any code existed.)
+   review-fix round. (update_test_records run, 2026-07-13: a pre-approval
+   probe found the real enum path and two silent-ghost writes — flipped a
+   guard from "deferred" to "shipped" before any code existed.)
 4. **Show the user the full spec, then ask approval.** The approval request
    quotes `.pipeline/spec.md` verbatim — the full file text, not a summary or
    translation (on a redo, the revised sections verbatim) — the user approves
@@ -181,8 +182,11 @@ mocks so tests mirror reality (e.g. an endpoint that omits `meta.totalCount`).
 
 ## Stage 7 — Ship (main thread)
 
-- Commit: `type(scope): summary` ≤50 chars + 2-bullet body (motivation,
-  change), bullets ≤120 chars — hook enforces. `.pipeline/` stays uncommitted.
+- Commit message format — defined here, used from Stage 5.1 onward:
+  `type(scope): summary` ≤50 chars + 2-bullet body (motivation, change),
+  bullets ≤120 chars — hook enforces. Work is already committed by review
+  time; commit here only what is still uncommitted. `.pipeline/` stays
+  uncommitted.
 - PR: flip template checkboxes `[ ]`→`[x]`, keep unchecked options, record
   live-test evidence and unfixed LOW/NIT findings in Notes. Squash merge only.
 - CI: after opening the PR, `gh pr checks <PR#> --watch --fail-fast` until
@@ -208,7 +212,7 @@ mocks so tests mirror reality (e.g. an endpoint that omits `meta.totalCount`).
 | "Opus everywhere to be safe" | Model choice is a cost/judgment trade-off; sonnet ships code volume fine, opus earns its cost only on judgment stages. |
 | "Main-thread glue is too small for TDD" | A fake-server handler shipped code-first once and diff-cover bounced the gate; the failing test first was the cheaper path. |
 | "The user approved my summary of it" | A summary is your interpretation. Approval binds only the file text they actually read — quote it verbatim. |
-| "Live checks belong in Stage 4" | When an UNVERIFIED item shapes the spec, a smoke probe before freeze beats re-planning after it — one run flipped three guard decisions that way. |
+| "Live checks belong in Stage 4" | When an UNVERIFIED item shapes the spec, a smoke probe before freeze beats re-planning after it — the create_test_records run flipped three guard decisions that way. |
 
 ## Red Flags
 
