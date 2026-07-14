@@ -31,7 +31,9 @@ def _link(target: str, *, project: str | None = None) -> WorkItemLinkSpec:
 
 
 class TestGuardWorkItemLinkTargets:
-    """Target-existence guard for ``create_work_item_links`` (uncached)."""
+    """Target-existence guard for ``create_work_item_links`` -- confirmed
+    targets cache across calls (shared ``_targets`` helper).
+    """
 
     async def test_all_targets_exist_one_get_per_project(
         self, mock_client: AsyncMock
@@ -111,6 +113,19 @@ class TestGuardWorkItemLinkTargets:
             for call in mock_client.get.await_args_list
         ]
         assert [q.count(" ") + 1 for q in queries] == [100, 50]
+
+    async def test_cache_hit_second_call_makes_zero_http_calls(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = workitems_response("P", ["A"])
+
+        await guard_work_item_link_targets(mock_client, "P", [_link("A")])
+        assert mock_client.get.await_count == 1
+
+        mock_client.get.reset_mock()
+        await guard_work_item_link_targets(mock_client, "P", [_link("A")])
+
+        mock_client.get.assert_not_awaited()
 
     async def test_unreachable_backend_blocks_write(
         self, mock_client: AsyncMock

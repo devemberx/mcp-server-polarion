@@ -8,13 +8,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from mcp_server_polarion.core.client import PolarionClient
-from mcp_server_polarion.core.exceptions import PolarionNotFoundError
-from mcp_server_polarion.tools._shared.cache import (
-    get_cached_confirmed_work_item,
-    store_cached_confirmed_work_item,
-)
+from mcp_server_polarion.tools._shared.guard._targets import missing_work_item_targets
 from mcp_server_polarion.tools._shared.guard.enums import check_project_enum_roles
-from mcp_server_polarion.tools._shared.guard.links import _existing_target_ids
 from mcp_server_polarion.tools._shared.helpers import format_option_list
 
 
@@ -46,9 +41,8 @@ async def guard_test_record_defect_targets(
     """Reject defect targets that don't exist -- Polarion silently 201s a
     dangling defect id (HTTP 201, target WI type unchecked too, live-verified).
     *defect_ids* = full ``"Proj/WI"`` ids (bare id falls back to *project_id*).
-    Confirmed-existing ids cache across calls (server-load requirement) --
-    never negatives, a missing WI may be created later. Only cache misses
-    reach Polarion, grouped one ``id:(...)`` query per project.
+    Existence + confirmed-positive caching shared via
+    :func:`missing_work_item_targets`.
     """
     by_project: dict[str, set[str]] = {}
     for defect_id in defect_ids:
@@ -57,22 +51,7 @@ async def guard_test_record_defect_targets(
             proj, wi = project_id, defect_id
         by_project.setdefault(proj, set()).add(wi)
 
-    missing: list[str] = []
-    for proj, requested in by_project.items():
-        to_query = {
-            wi for wi in requested if get_cached_confirmed_work_item(proj, wi) is None
-        }
-        if not to_query:
-            continue
-        try:
-            existing = await _existing_target_ids(client, proj, frozenset(to_query))
-        except PolarionNotFoundError:
-            missing.extend(f"{proj}/{wi}" for wi in sorted(to_query))
-            continue
-        for wi in existing:
-            store_cached_confirmed_work_item(proj, wi)
-        missing.extend(f"{proj}/{wi}" for wi in sorted(to_query - existing))
-
+    missing = await missing_work_item_targets(client, by_project)
     if missing:
         raise ValueError(
             f"Defect target work item(s) {format_option_list(missing)} do not "
