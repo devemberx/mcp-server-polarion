@@ -87,17 +87,17 @@ class FakePolarion:
             },
         }
 
-    def _test_record_resource(self, tr: TestRun) -> dict[str, Any]:
-        # One failed TESTCASE_ID execution per run -- enough for trigger +
-        # result-filter behavior.
+    def _test_record_resource(self, tr: TestRun, iteration: int = 0) -> dict[str, Any]:
+        # Failed TESTCASE_ID executions, one per iteration -- enough for
+        # trigger + result-filter + bulk-update behavior.
         return {
             "type": "testrecords",
-            "id": f"{PROJECT}/{tr.short_id}/{PROJECT}/{TESTCASE_ID}/0",
+            "id": f"{PROJECT}/{tr.short_id}/{PROJECT}/{TESTCASE_ID}/{iteration}",
             "attributes": {
                 "executed": TS,
                 "duration": 1.5,
                 "result": "failed",
-                "iteration": 0,
+                "iteration": iteration,
             },
             "relationships": {
                 "testCase": {
@@ -421,7 +421,11 @@ class FakePolarion:
             if tr is None:
                 return httpx.Response(404, json={"errors": [{"status": "404"}]})
             # Blueprints never executed -- empty page for templates.
-            data = [] if tr.is_template else [self._test_record_resource(tr)]
+            data = (
+                []
+                if tr.is_template
+                else [self._test_record_resource(tr, i) for i in range(tr.iterations)]
+            )
             wanted = params.get("testResultId", "")
             if wanted:
                 data = [r for r in data if r["attributes"]["result"] == wanted]
@@ -682,9 +686,10 @@ class FakePolarion:
         existence-validating shape).
         """
         valid_ids = {
-            f"{PROJECT}/{tr.short_id}/{PROJECT}/{TESTCASE_ID}/0"
+            f"{PROJECT}/{tr.short_id}/{PROJECT}/{TESTCASE_ID}/{i}"
             for tr in self.seeds.test_runs.values()
             if not tr.is_template and tr.short_id == run_id
+            for i in range(tr.iterations)
         }
         entries = body.get("data") if isinstance(body, dict) else None
         entries = entries if isinstance(entries, list) else []

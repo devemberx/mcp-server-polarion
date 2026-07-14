@@ -14,8 +14,10 @@ class TestRecordSummary(BaseModel):
     # pytest collect Test*-named classes on import; opt out.
     __test__ = False
 
-    # Full "project/WI-id" from relationships.testCase; record 5-segment id
-    # never parsed. test_case_id + iteration = record identity within run.
+    # record_id = resource 5-segment id verbatim (update_test_records input);
+    # never parsed. test_case_id = full "project/WI-id" from
+    # relationships.testCase; + iteration = record identity within run.
+    record_id: str = ""
     test_case_id: str
     iteration: int = 0
     result: str = ""
@@ -207,7 +209,10 @@ class TestRecordUpdateSpec(BaseModel):
     comment_format: Literal["text/plain", "text/html"] = "text/plain"
     defect_work_item_id: str | None = Field(
         default=None,
-        description="2-segment '{projectId}/{workItemId}' defect link.",
+        description=(
+            "Defect link: 'WorkItemId' or 'ProjectId/WorkItemId'; a bare id "
+            "resolves in the run's project."
+        ),
     )
 
     @model_validator(mode="after")

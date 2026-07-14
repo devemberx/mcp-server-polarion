@@ -78,6 +78,18 @@ CASES: list[Case] = [
         min_total_items=3,
     ),
     _case(
+        "EFF-BULK-UPDATE-RECORDS",
+        f"Mark every test record of test run '{TEST_RUN_ID_2}' as passed with "
+        f"the comment 'Fake bulk retest pass.'",
+        "single_bulk_write",
+        intent="Result changes to several records of one run use ONE committed "
+        "update_test_records call covering all of them; a per-record split or "
+        "zero commits fails.",
+        covers=["update_test_records"],
+        tool="update_test_records",
+        min_total_items=3,
+    ),
+    _case(
         "EFF-DIRECT-GET",
         f"What is the current status and severity of work item {FLOATING_TASK_ID}?",
         "direct_read",

@@ -440,6 +440,7 @@ class TestListTestRecords:
 
         first = result.items[0]
         # Full work-item ids preserved -- never derived from 5-segment record id.
+        assert first.record_id == "proj1/TR-001/proj1/TC-42/0"
         assert first.test_case_id == "proj1/TC-42"
         assert first.iteration == 0
         assert first.result == "failed"
@@ -1213,7 +1214,7 @@ class TestBuildUpdateTestRecordsPayload:
             defect_work_item_id="proj1/WI-9",
         )
 
-        payload = _build_update_test_records_payload(specs=[spec])
+        payload = _build_update_test_records_payload(project_id="proj1", specs=[spec])
 
         data = payload["data"]
         assert isinstance(data, list)
@@ -1234,7 +1235,7 @@ class TestBuildUpdateTestRecordsPayload:
             record_id="proj1/TR-1/proj1/WI-1/0", result="failed"
         )
 
-        payload = _build_update_test_records_payload(specs=[spec])
+        payload = _build_update_test_records_payload(project_id="proj1", specs=[spec])
 
         data = payload["data"]
         assert isinstance(data, list)
@@ -1249,7 +1250,7 @@ class TestBuildUpdateTestRecordsPayload:
             TestRecordUpdateSpec(record_id="proj1/TR-1/proj1/WI-2/0", result="failed"),
         ]
 
-        payload = _build_update_test_records_payload(specs=specs)
+        payload = _build_update_test_records_payload(project_id="proj1", specs=specs)
 
         data = payload["data"]
         assert isinstance(data, list)
@@ -1259,7 +1260,7 @@ class TestBuildUpdateTestRecordsPayload:
     def test_comment_only_spec_uses_own_format(self) -> None:
         spec = TestRecordUpdateSpec(record_id="proj1/TR-1/proj1/WI-1/0", comment="Note")
 
-        payload = _build_update_test_records_payload(specs=[spec])
+        payload = _build_update_test_records_payload(project_id="proj1", specs=[spec])
 
         data = payload["data"]
         assert isinstance(data, list)
@@ -1276,13 +1277,30 @@ class TestBuildUpdateTestRecordsPayload:
             record_id="proj1/TR-1/proj1/WI-1/0", defect_work_item_id="proj1/WI-9"
         )
 
-        payload = _build_update_test_records_payload(specs=[spec])
+        payload = _build_update_test_records_payload(project_id="proj1", specs=[spec])
 
         data = payload["data"]
         assert isinstance(data, list)
         resource = data[0]
         assert isinstance(resource, dict)
         assert "attributes" not in resource
+        assert resource["relationships"] == {
+            "defect": {"data": {"type": "workitems", "id": "proj1/WI-9"}}
+        }
+
+    def test_bare_defect_id_qualified_with_project(self) -> None:
+        # Bare id pass guard (project fallback) yet store dangling
+        # unqualified -- payload must carry qualified 2-segment id.
+        spec = TestRecordUpdateSpec(
+            record_id="proj1/TR-1/proj1/WI-1/0", defect_work_item_id="WI-9"
+        )
+
+        payload = _build_update_test_records_payload(project_id="proj1", specs=[spec])
+
+        data = payload["data"]
+        assert isinstance(data, list)
+        resource = data[0]
+        assert isinstance(resource, dict)
         assert resource["relationships"] == {
             "defect": {"data": {"type": "workitems", "id": "proj1/WI-9"}}
         }
@@ -1320,7 +1338,7 @@ class TestUpdateTestRecords:
                 mock_ctx,
                 project_id="proj1",
                 test_run_id="TR-1",
-                records=records,
+                items=records,
                 dry_run=False,
             )
 
@@ -1336,7 +1354,7 @@ class TestUpdateTestRecords:
             mock_ctx,
             project_id="proj1",
             test_run_id="TR-1",
-            records=[
+            items=[
                 TestRecordUpdateSpec(
                     record_id="proj1/TR-1/proj1/WI-1/0", comment="Looks fine"
                 )
@@ -1362,7 +1380,7 @@ class TestUpdateTestRecords:
             mock_ctx,
             project_id="proj1",
             test_run_id="TR-1",
-            records=[
+            items=[
                 TestRecordUpdateSpec(
                     record_id="proj1/TR-1/proj1/WI-1/0", comment="Preview me"
                 )
@@ -1388,7 +1406,7 @@ class TestUpdateTestRecords:
                 mock_ctx,
                 project_id="proj1",
                 test_run_id="TR-1",
-                records=[
+                items=[
                     TestRecordUpdateSpec(
                         record_id="proj1/TR-1/proj1/WI-1/0", result="ghost"
                     )
@@ -1408,7 +1426,7 @@ class TestUpdateTestRecords:
                 mock_ctx,
                 project_id="proj1",
                 test_run_id="TR-1",
-                records=[
+                items=[
                     TestRecordUpdateSpec(
                         record_id="proj1/TR-1/proj1/WI-1/0", result="ghost"
                     )
@@ -1428,7 +1446,7 @@ class TestUpdateTestRecords:
                 mock_ctx,
                 project_id="proj1",
                 test_run_id="TR-1",
-                records=[
+                items=[
                     TestRecordUpdateSpec(
                         record_id="proj1/TR-1/proj1/WI-1/0",
                         defect_work_item_id="proj1/WI-9",
@@ -1438,6 +1456,33 @@ class TestUpdateTestRecords:
             )
 
         mock_client.patch.assert_not_awaited()
+
+    async def test_bare_defect_id_guarded_and_sent_qualified(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Bare defect id: guard + payload both use project-qualified id.
+        mock_client.get.return_value = _workitems_response("proj1", ["WI-9"])
+        mock_client.patch.return_value = None
+
+        result = await update_test_records(
+            mock_ctx,
+            project_id="proj1",
+            test_run_id="TR-1",
+            items=[
+                TestRecordUpdateSpec(
+                    record_id="proj1/TR-1/proj1/WI-1/0",
+                    defect_work_item_id="WI-9",
+                )
+            ],
+            dry_run=False,
+        )
+
+        assert result.updated is True
+        _, get_kwargs = mock_client.get.await_args
+        assert "id:(WI-9)" in get_kwargs["params"]["query"]
+        _, patch_kwargs = mock_client.patch.await_args
+        defect = patch_kwargs["json"]["data"][0]["relationships"]["defect"]
+        assert defect["data"]["id"] == "proj1/WI-9"
 
     async def test_per_item_error_names_offending_item(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1449,7 +1494,7 @@ class TestUpdateTestRecords:
                 mock_ctx,
                 project_id="proj1",
                 test_run_id="TR-1",
-                records=[
+                items=[
                     TestRecordUpdateSpec(
                         record_id="proj1/TR-1/proj1/WI-1/0", comment="fine"
                     ),
@@ -1470,7 +1515,7 @@ class TestUpdateTestRecords:
                 mock_ctx,
                 project_id="proj1",
                 test_run_id="TR-1",
-                records=[
+                items=[
                     TestRecordUpdateSpec(
                         record_id="other/TR-1/proj1/WI-1/0", result="passed"
                     )
@@ -1489,7 +1534,7 @@ class TestUpdateTestRecords:
                 mock_ctx,
                 project_id="proj1",
                 test_run_id="TR-1",
-                records=[
+                items=[
                     TestRecordUpdateSpec(
                         record_id="proj1/TR-1/proj1/WI-1", result="passed"
                     )
@@ -1512,7 +1557,7 @@ class TestUpdateTestRecords:
                 mock_ctx,
                 project_id="proj1",
                 test_run_id="TR-1",
-                records=[
+                items=[
                     TestRecordUpdateSpec(
                         record_id="proj1/TR-1/proj1/WI-1/0", result="passed"
                     )
@@ -1535,7 +1580,7 @@ class TestUpdateTestRecords:
                 mock_ctx,
                 project_id="proj1",
                 test_run_id="TR-1",
-                records=[
+                items=[
                     TestRecordUpdateSpec(
                         record_id="proj1/TR-1/proj1/WI-1/0", result="passed"
                     )
@@ -1556,7 +1601,7 @@ class TestUpdateTestRecords:
                 mock_ctx,
                 project_id="proj1",
                 test_run_id="TR-1",
-                records=[
+                items=[
                     TestRecordUpdateSpec(
                         record_id="proj1/TR-1/proj1/WI-1/0", result="passed"
                     )
@@ -1579,7 +1624,7 @@ class TestUpdateTestRecordsFieldValidation:
 
     def test_empty_records_rejected(self) -> None:
         with pytest.raises(ValidationError):
-            self._adapter("records").validate_python([])
+            self._adapter("items").validate_python([])
 
     def test_records_above_max_rejected(self) -> None:
         specs = [
@@ -1587,14 +1632,14 @@ class TestUpdateTestRecordsFieldValidation:
             for i in range(51)
         ]
         with pytest.raises(ValidationError):
-            self._adapter("records").validate_python(specs)
+            self._adapter("items").validate_python(specs)
 
     def test_records_at_max_accepted(self) -> None:
         specs = [
             {"record_id": f"proj1/TR-1/proj1/WI-{i}/0", "result": "passed"}
             for i in range(50)
         ]
-        validated = self._adapter("records").validate_python(specs)
+        validated = self._adapter("items").validate_python(specs)
         assert isinstance(validated, list)
         assert len(validated) == 50
 
