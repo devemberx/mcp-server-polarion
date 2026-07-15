@@ -648,8 +648,8 @@ class TestParseTestRecordDetail:
         assert detail.executed == "2026-06-01T10:00:00Z"
         assert detail.duration == 12.5
         assert detail.defect_id == "proj/DEF-7"
-        # Full id kept -- not extract_short_id-shortened (name-lookup key).
-        assert detail.executed_by_id == "proj/jdoe"
+        # Short id output, parity TestRunDetail.author_id; name resolve off full id.
+        assert detail.executed_by_id == "jdoe"
         assert detail.executed_by_name == "J Doe"
         assert detail.test_case_revision == "42"
         assert detail.comment_html == "<p>note</p>"
@@ -741,7 +741,7 @@ class TestParseTestRecordDetail:
         detail = parse_test_record_detail(
             item, project_id="proj", test_run_id="TR-1", user_names={}
         )
-        assert detail.executed_by_id == "proj/jdoe"
+        assert detail.executed_by_id == "jdoe"
         assert detail.executed_by_name == ""
 
 

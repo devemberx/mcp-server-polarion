@@ -443,8 +443,10 @@ def parse_test_record_detail(
         **summary_kwargs,
         project_id=project_id,
         test_run_id=test_run_id,
-        # Full id, no extract_short_id -- must match included-users map key.
-        executed_by_id=extract_relationship_id(relationships, "executedBy"),
+        # Name lookup (summary kwargs) key full id; output short, parity author_id.
+        executed_by_id=extract_short_id(
+            extract_relationship_id(relationships, "executedBy")
+        ),
         test_case_revision=safe_str(attributes.get("testCaseRevision", "")),
         comment_html=comment_html,
     )

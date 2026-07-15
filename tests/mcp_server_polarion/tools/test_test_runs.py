@@ -1940,7 +1940,7 @@ class TestGetTestRecord:
         assert result.result == "failed"
         assert result.executed == "2026-06-01T10:00:00Z"
         assert result.duration == 12.5
-        assert result.executed_by_id == "proj1/devemberx"
+        assert result.executed_by_id == "devemberx"
         assert result.executed_by_name == "Devember X"
         assert result.defect_id == "proj1/DEF-7"
         assert result.test_case_revision == "42"

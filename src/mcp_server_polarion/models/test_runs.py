@@ -90,8 +90,7 @@ class TestRecordDetail(TestRecordSummary):
 
     project_id: str
     test_run_id: str
-    # Full relationships.executedBy.data.id, kept whole (name-lookup key);
-    # unlike TestRunDetail.author_id this is NOT extract_short_id-shortened.
+    # Short user id (extract_short_id), parity TestRunDetail.author_id.
     executed_by_id: str = ""
     test_case_revision: str = ""
     comment_html: str = ""
