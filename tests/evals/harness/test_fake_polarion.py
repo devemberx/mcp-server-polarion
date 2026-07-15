@@ -27,6 +27,7 @@ from evals.harness.fixtures import (
     SEEDS,
     SPACE,
     TEST_RUN_ID,
+    TEST_RUN_ID_2,
     TEST_RUN_TEMPLATE_ID,
     TESTCASE_ID,
 )
@@ -294,6 +295,20 @@ class TestTestRecordRouting:
         assert response.status_code == 200
         assert _json(response)["data"] == []
 
+    def test_multi_iteration_run_serves_one_record_per_iteration(self) -> None:
+        # TEST_RUN_ID_2 seed iterations=3 -- EFF-BULK-UPDATE-RECORDS need
+        # 3 distinct record ids on one run.
+        response = _get(
+            FakePolarion(), f"/projects/{PROJECT}/testruns/{TEST_RUN_ID_2}/testrecords"
+        )
+        data = _json(response)["data"]
+        ids = [record["id"] for record in data]
+        assert ids == [
+            f"{PROJECT}/{TEST_RUN_ID_2}/{PROJECT}/{TESTCASE_ID}/{i}" for i in range(3)
+        ]
+        iterations = [record["attributes"]["iteration"] for record in data]
+        assert iterations == [0, 1, 2]
+
 
 class TestWorkItemResource:
     def test_module_relationship_only_for_module_items(self) -> None:
@@ -501,6 +516,106 @@ class TestMutations:
         fake = FakePolarion()
         _get(fake, "/projects")
         assert fake.mutations == []
+
+
+class TestTestRecordMutations:
+    _RECORD_ID = f"{PROJECT}/{TEST_RUN_ID}/{PROJECT}/{TESTCASE_ID}/0"
+    _UNKNOWN_RECORD_ID = f"{PROJECT}/{TEST_RUN_ID}/{PROJECT}/MCPT-9999/0"
+
+    def test_patch_known_id_returns_204_and_records_mutation(self) -> None:
+        fake = FakePolarion()
+        response = _mutate(
+            fake,
+            "PATCH",
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}/testrecords",
+            {
+                "data": [
+                    {
+                        "type": "testrecords",
+                        "id": self._RECORD_ID,
+                        "attributes": {"result": "passed"},
+                    }
+                ]
+            },
+        )
+        assert response.status_code == 204
+        assert fake.mutations[-1]["path"].endswith("/testrecords")
+
+    def test_patch_unknown_id_is_400(self) -> None:
+        fake = FakePolarion()
+        response = _mutate(
+            fake,
+            "PATCH",
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}/testrecords",
+            {
+                "data": [
+                    {
+                        "type": "testrecords",
+                        "id": self._UNKNOWN_RECORD_ID,
+                        "attributes": {"result": "passed"},
+                    }
+                ]
+            },
+        )
+        assert response.status_code == 400
+        detail = _json(response)["errors"][0]["detail"]
+        assert self._UNKNOWN_RECORD_ID in detail
+        assert "was not found" in detail
+
+    def test_patch_mixed_batch_rejects_whole_batch(self) -> None:
+        # One bad id in a multi-item batch still 400s -- atomic, live-verified.
+        fake = FakePolarion()
+        response = _mutate(
+            fake,
+            "PATCH",
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}/testrecords",
+            {
+                "data": [
+                    {"id": self._RECORD_ID, "attributes": {"result": "passed"}},
+                    {"id": self._UNKNOWN_RECORD_ID, "attributes": {"result": "failed"}},
+                ]
+            },
+        )
+        assert response.status_code == 400
+
+    def test_patch_higher_iteration_record_is_204(self) -> None:
+        # iterations=3 seed -- every seeded iteration id patchable.
+        fake = FakePolarion()
+        response = _mutate(
+            fake,
+            "PATCH",
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_ID_2}/testrecords",
+            {
+                "data": [
+                    {
+                        "type": "testrecords",
+                        "id": f"{PROJECT}/{TEST_RUN_ID_2}/{PROJECT}/{TESTCASE_ID}/2",
+                        "attributes": {"result": "passed"},
+                    }
+                ]
+            },
+        )
+        assert response.status_code == 204
+
+    def test_patch_other_runs_record_is_400(self) -> None:
+        # Record id valid for TEST_RUN_ID -- PATCH via TEST_RUN_ID_2 path 400s.
+        fake = FakePolarion()
+        response = _mutate(
+            fake,
+            "PATCH",
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_ID_2}/testrecords",
+            {
+                "data": [
+                    {
+                        "type": "testrecords",
+                        "id": self._RECORD_ID,
+                        "attributes": {"result": "passed"},
+                    }
+                ]
+            },
+        )
+        assert response.status_code == 400
+        assert "was not found" in _json(response)["errors"][0]["detail"]
 
 
 class TestOrchestrationSeeding:

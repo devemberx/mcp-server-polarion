@@ -14,8 +14,10 @@ class TestRecordSummary(BaseModel):
     # pytest collect Test*-named classes on import; opt out.
     __test__ = False
 
-    # Full "project/WI-id" from relationships.testCase; record 5-segment id
-    # never parsed. test_case_id + iteration = record identity within run.
+    # record_id = resource 5-segment id verbatim (update_test_records input);
+    # never parsed. test_case_id = full "project/WI-id" from
+    # relationships.testCase; + iteration = record identity within run.
+    record_id: str = ""
     test_case_id: str
     iteration: int = 0
     result: str = ""
@@ -180,4 +182,58 @@ class TestRunsUpdateResult(BaseModel):
     updated: bool
     dry_run: bool
     test_run_ids: list[str] = Field(default_factory=list)
+    payload_preview: Mapping[str, object] | None = None
+
+
+class TestRecordUpdateSpec(BaseModel):
+    """One update_test_records batch entry; unset fields stay unchanged."""
+
+    __test__ = False
+
+    # LLM input model: reject typo keys, not silent-drop.
+    model_config = ConfigDict(extra="forbid")
+
+    record_id: str = Field(
+        description=(
+            "Full 5-segment id exactly as returned by list_test_records; "
+            "never decomposed."
+        )
+    )
+    result: str | None = Field(
+        default=None,
+        description="Result option id (e.g. 'passed', 'failed', 'blocked').",
+    )
+    comment: str | None = Field(
+        default=None, description="Comment text, sent verbatim."
+    )
+    comment_format: Literal["text/plain", "text/html"] = "text/plain"
+    defect_id: str | None = Field(
+        default=None,
+        description=(
+            "Defect link: 'WorkItemId' or 'ProjectId/WorkItemId'; a bare id "
+            "resolves in the run's project."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _require_effective_change(self) -> TestRecordUpdateSpec:
+        # comment_format alone carries no intent -- needs comment/result/defect too.
+        effective = self.result or self.comment or self.defect_id
+        if not effective:
+            msg = (
+                f"test record '{self.record_id}': no effective change -- set "
+                "at least one of result/comment/defect_id."
+            )
+            raise ValueError(msg)
+        return self
+
+
+class TestRecordsUpdateResult(BaseModel):
+    """``update_test_records`` result."""
+
+    __test__ = False
+
+    updated: bool
+    dry_run: bool
+    record_ids: list[str] = Field(default_factory=list)
     payload_preview: Mapping[str, object] | None = None

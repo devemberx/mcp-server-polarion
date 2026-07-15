@@ -19,6 +19,7 @@ from mcp_server_polarion.core.exceptions import (
 from mcp_server_polarion.models import (
     PaginatedResult,
     TestRecordCreateSpec,
+    TestRecordUpdateSpec,
     TestRunCreateSpec,
     TestRunDetail,
     TestRunUpdateSpec,
@@ -27,12 +28,14 @@ from mcp_server_polarion.tools.test_runs import (
     _build_create_test_records_payload,
     _build_create_test_runs_payload,
     _build_test_record_resource,
+    _build_update_test_records_payload,
     _build_update_test_runs_payload,
     create_test_records,
     create_test_runs,
     get_test_run,
     list_test_records,
     list_test_runs,
+    update_test_records,
     update_test_runs,
 )
 from tests.mcp_server_polarion.tools._shared.guard._builders import (
@@ -437,6 +440,7 @@ class TestListTestRecords:
 
         first = result.items[0]
         # Full work-item ids preserved -- never derived from 5-segment record id.
+        assert first.record_id == "proj1/TR-001/proj1/TC-42/0"
         assert first.test_case_id == "proj1/TC-42"
         assert first.iteration == 0
         assert first.result == "failed"
@@ -1196,6 +1200,448 @@ class TestUpdateTestRunsFieldValidation:
     def test_unknown_key_rejected(self) -> None:
         with pytest.raises(ValidationError):
             TestRunUpdateSpec(test_run_id="TR-1", bogus="x")  # type: ignore[call-arg]
+
+
+class TestBuildUpdateTestRecordsPayload:
+    """``_build_update_test_records_payload`` unit seam."""
+
+    def test_full_spec_builds_attributes(self) -> None:
+        spec = TestRecordUpdateSpec(
+            record_id="proj1/TR-1/proj1/WI-1/0",
+            result="passed",
+            comment="Looks good",
+            comment_format="text/html",
+            defect_id="proj1/WI-9",
+        )
+
+        payload = _build_update_test_records_payload(project_id="proj1", specs=[spec])
+
+        data = payload["data"]
+        assert isinstance(data, list)
+        resource = data[0]
+        assert isinstance(resource, dict)
+        assert resource["type"] == "testrecords"
+        assert resource["id"] == "proj1/TR-1/proj1/WI-1/0"
+        assert resource["attributes"] == {
+            "result": "passed",
+            "comment": {"type": "text/html", "value": "Looks good"},
+        }
+        assert resource["relationships"] == {
+            "defect": {"data": {"type": "workitems", "id": "proj1/WI-9"}}
+        }
+
+    def test_partial_spec_skips_unset(self) -> None:
+        spec = TestRecordUpdateSpec(
+            record_id="proj1/TR-1/proj1/WI-1/0", result="failed"
+        )
+
+        payload = _build_update_test_records_payload(project_id="proj1", specs=[spec])
+
+        data = payload["data"]
+        assert isinstance(data, list)
+        resource = data[0]
+        assert isinstance(resource, dict)
+        assert resource["attributes"] == {"result": "failed"}
+        assert "relationships" not in resource
+
+    def test_multiple_specs_keep_order(self) -> None:
+        specs = [
+            TestRecordUpdateSpec(record_id="proj1/TR-1/proj1/WI-1/0", result="passed"),
+            TestRecordUpdateSpec(record_id="proj1/TR-1/proj1/WI-2/0", result="failed"),
+        ]
+
+        payload = _build_update_test_records_payload(project_id="proj1", specs=specs)
+
+        data = payload["data"]
+        assert isinstance(data, list)
+        ids = [entry["id"] for entry in data if isinstance(entry, dict)]
+        assert ids == ["proj1/TR-1/proj1/WI-1/0", "proj1/TR-1/proj1/WI-2/0"]
+
+    def test_comment_only_spec_uses_own_format(self) -> None:
+        spec = TestRecordUpdateSpec(record_id="proj1/TR-1/proj1/WI-1/0", comment="Note")
+
+        payload = _build_update_test_records_payload(project_id="proj1", specs=[spec])
+
+        data = payload["data"]
+        assert isinstance(data, list)
+        resource = data[0]
+        assert isinstance(resource, dict)
+        assert resource["attributes"] == {
+            "comment": {"type": "text/plain", "value": "Note"}
+        }
+
+    def test_defect_only_spec_omits_empty_attributes(self) -> None:
+        # Live-verified: attributes key absent -- 204, defect store, prior
+        # result keep.
+        spec = TestRecordUpdateSpec(
+            record_id="proj1/TR-1/proj1/WI-1/0", defect_id="proj1/WI-9"
+        )
+
+        payload = _build_update_test_records_payload(project_id="proj1", specs=[spec])
+
+        data = payload["data"]
+        assert isinstance(data, list)
+        resource = data[0]
+        assert isinstance(resource, dict)
+        assert "attributes" not in resource
+        assert resource["relationships"] == {
+            "defect": {"data": {"type": "workitems", "id": "proj1/WI-9"}}
+        }
+
+    def test_bare_defect_id_qualified_with_project(self) -> None:
+        # Bare id pass guard (project fallback) yet store dangling
+        # unqualified -- payload must carry qualified 2-segment id.
+        spec = TestRecordUpdateSpec(
+            record_id="proj1/TR-1/proj1/WI-1/0", defect_id="WI-9"
+        )
+
+        payload = _build_update_test_records_payload(project_id="proj1", specs=[spec])
+
+        data = payload["data"]
+        assert isinstance(data, list)
+        resource = data[0]
+        assert isinstance(resource, dict)
+        assert resource["relationships"] == {
+            "defect": {"data": {"type": "workitems", "id": "proj1/WI-9"}}
+        }
+
+
+def _result_enum_response(options: list[str]) -> dict[str, object]:
+    """``testing/test-result`` enumeration GET body."""
+    return {
+        "data": {
+            "type": "enumerations",
+            "id": "test-result",
+            "attributes": {"options": [{"id": option} for option in options]},
+        }
+    }
+
+
+def _workitems_response(project_id: str, ids: list[str]) -> dict[str, object]:
+    """Existence-check GET body for ``/projects/{p}/workitems``."""
+    return {"data": [{"type": "workitems", "id": f"{project_id}/{wi}"} for wi in ids]}
+
+
+class TestUpdateTestRecords:
+    """``update_test_records`` tool."""
+
+    async def test_duplicate_ids_rejected_before_any_request(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        records = [
+            TestRecordUpdateSpec(record_id="proj1/TR-1/proj1/WI-1/0", result="passed"),
+            TestRecordUpdateSpec(record_id="proj1/TR-1/proj1/WI-1/0", result="failed"),
+        ]
+
+        with pytest.raises(ValueError, match=r"Duplicate record_id\(s\)"):
+            await update_test_records(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="TR-1",
+                items=records,
+                dry_run=False,
+            )
+
+        mock_client.get.assert_not_awaited()
+        mock_client.patch.assert_not_awaited()
+
+    async def test_minimal_update_patches_and_returns_ids(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.return_value = None
+
+        result = await update_test_records(
+            mock_ctx,
+            project_id="proj1",
+            test_run_id="TR-1",
+            items=[
+                TestRecordUpdateSpec(
+                    record_id="proj1/TR-1/proj1/WI-1/0", comment="Looks fine"
+                )
+            ],
+            dry_run=False,
+        )
+
+        assert result.updated is True
+        assert result.dry_run is False
+        assert result.record_ids == ["proj1/TR-1/proj1/WI-1/0"]
+        assert result.payload_preview is None
+        # Comment-only update needs zero guard traffic.
+        mock_client.get.assert_not_awaited()
+        args, kwargs = mock_client.patch.await_args
+        assert args[0] == "/projects/proj1/testruns/TR-1/testrecords"
+        data = kwargs["json"]["data"]
+        assert data[0]["id"] == "proj1/TR-1/proj1/WI-1/0"
+
+    async def test_dry_run_returns_payload_without_patching(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        result = await update_test_records(
+            mock_ctx,
+            project_id="proj1",
+            test_run_id="TR-1",
+            items=[
+                TestRecordUpdateSpec(
+                    record_id="proj1/TR-1/proj1/WI-1/0", comment="Preview me"
+                )
+            ],
+            dry_run=True,
+        )
+
+        assert result.updated is False
+        assert result.dry_run is True
+        assert result.record_ids == []
+        assert result.payload_preview is not None
+        data = result.payload_preview["data"]
+        assert isinstance(data, list)
+        mock_client.patch.assert_not_awaited()
+
+    async def test_dry_run_still_runs_guards(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _result_enum_response(["passed", "failed"])
+
+        with pytest.raises(ValueError, match="result"):
+            await update_test_records(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="TR-1",
+                items=[
+                    TestRecordUpdateSpec(
+                        record_id="proj1/TR-1/proj1/WI-1/0", result="ghost"
+                    )
+                ],
+                dry_run=True,
+            )
+
+        mock_client.patch.assert_not_awaited()
+
+    async def test_unknown_result_blocks_before_patch(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _result_enum_response(["passed", "failed"])
+
+        with pytest.raises(ValueError, match=r"items\[0\].*result"):
+            await update_test_records(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="TR-1",
+                items=[
+                    TestRecordUpdateSpec(
+                        record_id="proj1/TR-1/proj1/WI-1/0", result="ghost"
+                    )
+                ],
+                dry_run=False,
+            )
+
+        mock_client.patch.assert_not_awaited()
+
+    async def test_defect_guard_blocks_before_patch(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _workitems_response("proj1", [])
+
+        with pytest.raises(ValueError, match="proj1/WI-9"):
+            await update_test_records(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="TR-1",
+                items=[
+                    TestRecordUpdateSpec(
+                        record_id="proj1/TR-1/proj1/WI-1/0",
+                        defect_id="proj1/WI-9",
+                    )
+                ],
+                dry_run=False,
+            )
+
+        mock_client.patch.assert_not_awaited()
+
+    async def test_bare_defect_id_guarded_and_sent_qualified(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Bare defect id: guard + payload both use project-qualified id.
+        mock_client.get.return_value = _workitems_response("proj1", ["WI-9"])
+        mock_client.patch.return_value = None
+
+        result = await update_test_records(
+            mock_ctx,
+            project_id="proj1",
+            test_run_id="TR-1",
+            items=[
+                TestRecordUpdateSpec(
+                    record_id="proj1/TR-1/proj1/WI-1/0",
+                    defect_id="WI-9",
+                )
+            ],
+            dry_run=False,
+        )
+
+        assert result.updated is True
+        _, get_kwargs = mock_client.get.await_args
+        assert "id:(WI-9)" in get_kwargs["params"]["query"]
+        _, patch_kwargs = mock_client.patch.await_args
+        defect = patch_kwargs["json"]["data"][0]["relationships"]["defect"]
+        assert defect["data"]["id"] == "proj1/WI-9"
+
+    async def test_per_item_error_names_offending_item(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _result_enum_response(["passed", "failed"])
+
+        with pytest.raises(ValueError, match=r"items\[1\]"):
+            await update_test_records(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="TR-1",
+                items=[
+                    TestRecordUpdateSpec(
+                        record_id="proj1/TR-1/proj1/WI-1/0", comment="fine"
+                    ),
+                    TestRecordUpdateSpec(
+                        record_id="proj1/TR-1/proj1/WI-2/0", result="ghost"
+                    ),
+                ],
+                dry_run=False,
+            )
+
+        mock_client.patch.assert_not_awaited()
+
+    async def test_bad_prefix_record_id_rejected(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        with pytest.raises(ValueError, match=r"items\[0\]"):
+            await update_test_records(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="TR-1",
+                items=[
+                    TestRecordUpdateSpec(
+                        record_id="other/TR-1/proj1/WI-1/0", result="passed"
+                    )
+                ],
+                dry_run=False,
+            )
+
+        mock_client.get.assert_not_awaited()
+        mock_client.patch.assert_not_awaited()
+
+    async def test_bad_segment_count_record_id_rejected(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        with pytest.raises(ValueError, match=r"items\[0\]"):
+            await update_test_records(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="TR-1",
+                items=[
+                    TestRecordUpdateSpec(
+                        record_id="proj1/TR-1/proj1/WI-1", result="passed"
+                    )
+                ],
+                dry_run=False,
+            )
+
+        mock_client.get.assert_not_awaited()
+        mock_client.patch.assert_not_awaited()
+
+    async def test_run_not_found_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.side_effect = PolarionNotFoundError(
+            "Not found", status_code=404
+        )
+
+        with pytest.raises(ValueError, match="list_test_runs"):
+            await update_test_records(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="TR-1",
+                items=[
+                    TestRecordUpdateSpec(
+                        record_id="proj1/TR-1/proj1/WI-1/0", result="passed"
+                    )
+                ],
+                dry_run=False,
+            )
+
+    async def test_auth_error_raises_permission_error_with_detail(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Polarion 403 detail must surface: e-signature-configured run types
+        # reject record writes with portal-only remedy — generic token hint
+        # alone misleads.
+        mock_client.patch.side_effect = PolarionAuthError(
+            "cannot be executed without providing an e-signature", status_code=403
+        )
+
+        with pytest.raises(PermissionError, match="without providing an e-signature"):
+            await update_test_records(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="TR-1",
+                items=[
+                    TestRecordUpdateSpec(
+                        record_id="proj1/TR-1/proj1/WI-1/0", result="passed"
+                    )
+                ],
+                dry_run=False,
+            )
+
+    async def test_unknown_record_in_batch_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Live-verified: unknown record id -- whole-batch 400, not 404.
+        mock_client.patch.side_effect = PolarionError(
+            "Test Record 'proj1/TR-1/proj1/WI-1/0' was not found", status_code=400
+        )
+
+        with pytest.raises(RuntimeError, match="was not found"):
+            await update_test_records(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="TR-1",
+                items=[
+                    TestRecordUpdateSpec(
+                        record_id="proj1/TR-1/proj1/WI-1/0", result="passed"
+                    )
+                ],
+                dry_run=False,
+            )
+
+
+class TestUpdateTestRecordsFieldValidation:
+    """Bulk bounds via ``TypeAdapter`` rebuild; spec constraints live in
+    ``tests/mcp_server_polarion/models/test_test_runs.py``.
+    """
+
+    @staticmethod
+    def _adapter(param_name: str) -> TypeAdapter[object]:
+        hints = get_type_hints(update_test_records)
+        sig = inspect.signature(update_test_records)
+        field_info = sig.parameters[param_name].default
+        return TypeAdapter(Annotated[hints[param_name], field_info])
+
+    def test_empty_records_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter("items").validate_python([])
+
+    def test_records_above_max_rejected(self) -> None:
+        specs = [
+            {"record_id": f"proj1/TR-1/proj1/WI-{i}/0", "result": "passed"}
+            for i in range(51)
+        ]
+        with pytest.raises(ValidationError):
+            self._adapter("items").validate_python(specs)
+
+    def test_records_at_max_accepted(self) -> None:
+        specs = [
+            {"record_id": f"proj1/TR-1/proj1/WI-{i}/0", "result": "passed"}
+            for i in range(50)
+        ]
+        validated = self._adapter("items").validate_python(specs)
+        assert isinstance(validated, list)
+        assert len(validated) == 50
 
 
 class TestCreateTestRunsFieldValidation:
