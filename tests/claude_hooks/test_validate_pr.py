@@ -27,17 +27,8 @@ class TestBodyClassify:
     def test_pr(self, cmd: str) -> None:
         assert body.classify(cmd) == "pr"
 
-    @pytest.mark.parametrize(
-        "cmd",
-        [
-            "gh pr comment 5 --body y",
-            "gh issue create --body y",
-            "gh issue comment 5 --body y",
-            "gh api -X PATCH /repos/o/r/issues/5 -f body=z",
-        ],
-    )
-    def test_other(self, cmd: str) -> None:
-        assert body.classify(cmd) == "other"
+    def test_other(self) -> None:
+        assert body.classify("gh pr comment 5 --body y") == "other"
 
     @pytest.mark.parametrize(
         "cmd",
@@ -47,6 +38,10 @@ class TestBodyClassify:
             # PR review/comment API endpoints are not full-body PR edits.
             "gh api /repos/o/r/pulls/5/comments -f body=z",
             "gh api /repos/o/r/pulls/5/reviews -f body=z",
+            # Issue commands = validate_issue.py territory.
+            "gh issue create --body y",
+            "gh issue comment 5 --body y",
+            "gh api -X PATCH /repos/o/r/issues/5 -f body=z",
         ],
     )
     def test_skip(self, cmd: str) -> None:

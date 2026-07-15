@@ -41,9 +41,17 @@ as fact.
 - path:line — CRITICAL|MEDIUM|LOW|NIT — problem. Failure scenario: concrete
   input/state → wrong outcome. Fix: concrete suggestion.
 
+## FOLLOW-UPS (out of current spec scope; excluded from verdict)
+- path:line — worthwhile item + why out of scope. Fix: concrete suggestion.
+
 ## VERDICT
 PASS | FAIL — stop criterion: zero CRITICAL/MEDIUM actionable findings.
 ```
+
+The spec-fidelity rule still applies to the diff — but an improvement idea
+beyond the spec belongs in FOLLOW-UPS, not inflated into a finding and not
+silently dropped. The orchestrator exports these as `follow-up` issues at
+ship time.
 
 No praise padding, no restating the diff. LOW/NIT are for the PR notes — be
 honest about them but don't inflate severity to force a fix round.

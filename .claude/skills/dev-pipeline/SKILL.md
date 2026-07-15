@@ -36,6 +36,7 @@ Subagents share **no memory and no conversation history**. Three channels only:
    | `.pipeline/spec.md` | orchestrator (Stage 1, draft before approval; approval freezes it) | pattern-scout, pipeline-implementer, pipeline-reviewer |
    | `.pipeline/plan.md` | orchestrator (Stage 2, full text shown before approval — via ExitPlanMode or quoted draft; approval freezes it) | pipeline-implementer, pipeline-reviewer |
    | `.pipeline/review-round-N.md` | orchestrator (Stage 5, reviewer report pasted verbatim) | pipeline-implementer (Stage 6), user on escalation |
+   | `.pipeline/followups.md` | orchestrator (Stage 5, FOLLOW-UPS + unfixed LOW accumulated per round, deduped) | orchestrator (Stage 7 issue export) |
 
 Follow-up questions to an agent you already spawned: `SendMessage` to its id —
 a fresh Agent call starts cold and re-derives everything.
@@ -78,14 +79,19 @@ sequentially, in one Agent call each.
 
 ## Stage 1 — Spec
 
-1. **Invoke `spec-researcher`** with: the feature ask, the vendor doc URL(s),
+1. **Check the follow-up queue first**: `gh issue list --label follow-up
+   --state open` (plus a keyword search for the feature's domain). An open
+   issue touching the same domain can change spec decisions — fold it into
+   the spec's Related open issues section, absorbed or explicitly deferred
+   with a reason. If the pipeline resolves one, the PR body gets `Fixes #N`.
+2. **Invoke `spec-researcher`** with: the feature ask, the vendor doc URL(s),
    and which sibling tools to read for conventions. Expect its
    CONTRACT FACTS / QUIRKS / UNVERIFIED report back.
-2. Copy [spec-template.md](references/spec-template.md) to `.pipeline/spec.md`
+3. Copy [spec-template.md](references/spec-template.md) to `.pipeline/spec.md`
    and fill its slots from the report. The template fixes the required
    sections — don't invent a new shape; they are the standard
    pipeline-reviewer judges the diff against.
-3. **If an UNVERIFIED item decides spec content** — whether a field exists,
+4. **If an UNVERIFIED item decides spec content** — whether a field exists,
    whether a guard is needed, which enum backs a value — **and live
    credentials work, burn it down before asking approval.** Probe a
    project-scoped endpoint first (global ones can 403 on a scoped token),
@@ -98,7 +104,7 @@ sequentially, in one Agent call each.
    review-fix round. (update_test_records run, 2026-07-13: a pre-approval
    probe found the real enum path and two silent-ghost writes — flipped a
    guard from "deferred" to "shipped" before any code existed.)
-4. **Show the user the full spec, then ask approval.** The approval request
+5. **Show the user the full spec, then ask approval.** The approval request
    quotes `.pipeline/spec.md` verbatim — the full file text, not a summary or
    translation (on a redo, the revised sections verbatim) — the user approves
    text they have read, never a bare "spec ready, approve?" prompt. Fold
@@ -167,9 +173,13 @@ mocks so tests mirror reality (e.g. an endpoint that omits `meta.totalCount`).
 3. Save its report verbatim to `.pipeline/review-round-N.md` — full text, not
    a paraphrase (Stage 6's implementer and any escalation read it); relay
    findings to the user.
-4. **Stop criterion — the only exit:** verdict PASS (zero CRITICAL/MEDIUM
-   actionable findings). LOW/NIT go to PR notes, not necessarily fixed.
-   PASS → Stage 7. FAIL → Stage 6.
+4. Append the round's FOLLOW-UPS and any LOW items you won't fix to
+   `.pipeline/followups.md`, deduped across rounds (drop an item a later
+   round fixed). NIT stays PR-notes-only. This file is the only thing that
+   survives worktree cleanup — via the Stage 7 export.
+5. **Stop criterion — the only exit:** verdict PASS (zero CRITICAL/MEDIUM
+   actionable findings). LOW/NIT don't block, but unfixed LOW must be in
+   `.pipeline/followups.md` by now. PASS → Stage 7. FAIL → Stage 6.
 
 ## Stage 6 — Fix, then back to review
 
@@ -188,7 +198,15 @@ mocks so tests mirror reality (e.g. an endpoint that omits `meta.totalCount`).
   is still uncommitted. Commit format, PR checklist handling, squash-merge
   rule: CLAUDE.md Repo Conventions / `.github/CONTRIBUTING.md` — restating
   them here would be a third copy that drifts. `.pipeline/` stays uncommitted.
-- PR Notes: record live-test evidence and unfixed LOW/NIT findings.
+- **Export follow-ups before cleanup** — `.pipeline/` dies with the worktree,
+  so each `.pipeline/followups.md` item becomes an issue:
+  `gh issue create --label follow-up` with `### Origin` / `### Finding` /
+  `### Suggested fix` body sections (validate_issue.py hook checks the shape
+  against `.github/ISSUE_TEMPLATE/follow_up.yml`). One issue per item —
+  independently closeable. An item the user explicitly drops instead is noted
+  in PR notes, not filed.
+- PR Notes: record live-test evidence, NIT findings, and links to the filed
+  follow-up issues; add `Fixes #N` for any follow-up issue this PR resolved.
 - CI: after opening the PR, `gh pr checks <PR#> --watch --fail-fast` until
   every check is green — merge is blocked on red anyway, but an unwatched red
   PR rots until a human notices; catch it while the session context is hot.
@@ -234,6 +252,8 @@ mocks so tests mirror reality (e.g. an endpoint that omits `meta.totalCount`).
   reviewer's full report.
 - Spec frozen with an UNVERIFIED item that decides tool shape while the
   live server was reachable.
+- Worktree cleaned up while `.pipeline/followups.md` still holds unexported
+  items — they die with it.
 
 ## Verification (pipeline exit checklist)
 
@@ -246,6 +266,9 @@ mocks so tests mirror reality (e.g. an endpoint that omits `meta.totalCount`).
       mypy, diff-cover); diff-cover ≥90% on changed lines
 - [ ] Live test done for contract-boundary changes, findings folded into mocks
 - [ ] Final `pipeline-reviewer` verdict is PASS (zero CRITICAL/MEDIUM)
-- [ ] PR open with template filled, LOW/NIT + live evidence recorded
+- [ ] Every `.pipeline/followups.md` item filed as a `follow-up` issue (or
+      explicitly dropped with the user) before worktree cleanup
+- [ ] PR open with template filled, NIT + live evidence + follow-up issue
+      links recorded
 - [ ] PR CI checks all green (`gh pr checks <PR#> --watch --fail-fast`),
       branch up to date with main

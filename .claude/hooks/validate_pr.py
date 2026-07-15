@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""PreToolUse hook: block PR/issue Bash invocations that violate repo conventions.
+"""PreToolUse hook: block PR Bash invocations that violate repo conventions.
 
-Triggered on: gh pr (create|edit|comment), gh issue (create|edit|comment),
-gh api .../pulls/... or .../issues/...
+Triggered on: gh pr (create|edit|comment), gh api .../pulls/...
+Issue commands live in validate_issue.py.
 
 Rules:
   1. English-only — no non-ASCII letters. Common typographic punctuation
@@ -53,7 +53,6 @@ TITLE_LIMIT = 50
 
 PR_CREATE_EDIT_RE = re.compile(r"\bgh\s+pr\s+(create|edit)\b")
 PR_COMMENT_RE = re.compile(r"\bgh\s+pr\s+comment\b")
-ISSUE_CMD_RE = re.compile(r"\bgh\s+issue\s+(create|edit|comment)\b")
 GH_API_RE = re.compile(r"\bgh\s+api\b")
 
 
@@ -121,9 +120,7 @@ def classify(cmd: str) -> str | None:
         and "/reviews" not in cmd
     ):
         return "pr"
-    if PR_COMMENT_RE.search(cmd) or ISSUE_CMD_RE.search(cmd):
-        return "other"
-    if GH_API_RE.search(cmd) and "/issues/" in cmd:
+    if PR_COMMENT_RE.search(cmd):
         return "other"
     return None
 
