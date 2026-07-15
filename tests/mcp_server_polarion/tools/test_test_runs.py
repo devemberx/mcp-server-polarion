@@ -1929,7 +1929,6 @@ class TestGetTestRecord:
             test_run_id="TR-100",
             test_case_id="proj1/TC-42",
             iteration=0,
-            include_comment_html=True,
         )
 
         assert isinstance(result, TestRecordDetail)
@@ -1960,7 +1959,6 @@ class TestGetTestRecord:
             test_run_id="TR-100",
             test_case_id="proj1/TC-42",
             iteration=0,
-            include_comment_html=False,
         )
 
         args, kwargs = mock_client.get.call_args
@@ -1969,25 +1967,6 @@ class TestGetTestRecord:
         assert params["fields[testrecords]"] == TEST_RECORD_DETAIL_FIELDS
         assert params["include"] == "executedBy"
         assert params["fields[users]"] == "name"
-
-    async def test_include_comment_html_false_blanks_field(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        """Flag off blank comment -- other fields still populated."""
-        mock_client.get.return_value = _record_detail_response()
-
-        result = await get_test_record(
-            mock_ctx,
-            project_id="proj1",
-            test_run_id="TR-100",
-            test_case_id="proj1/TC-42",
-            iteration=0,
-            include_comment_html=False,
-        )
-
-        assert result.comment_html == ""
-        assert result.result == "failed"
-        assert result.test_case_revision == "42"
 
     async def test_test_case_id_without_slash_raises_before_http(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1999,7 +1978,6 @@ class TestGetTestRecord:
                 test_run_id="TR-100",
                 test_case_id="TC-42",
                 iteration=0,
-                include_comment_html=False,
             )
 
         mock_client.get.assert_not_called()
@@ -2018,7 +1996,6 @@ class TestGetTestRecord:
                 test_run_id="TR-100",
                 test_case_id="proj1/TC-42",
                 iteration=0,
-                include_comment_html=False,
             )
 
     async def test_auth_error_raises_permission_error(
@@ -2033,7 +2010,6 @@ class TestGetTestRecord:
                 test_run_id="TR-100",
                 test_case_id="proj1/TC-42",
                 iteration=0,
-                include_comment_html=False,
             )
 
     async def test_other_error_raises_runtime_error(
@@ -2048,7 +2024,6 @@ class TestGetTestRecord:
                 test_run_id="TR-100",
                 test_case_id="proj1/TC-42",
                 iteration=0,
-                include_comment_html=False,
             )
 
     async def test_non_dict_data_falls_back_to_empty_detail(
@@ -2062,7 +2037,6 @@ class TestGetTestRecord:
             test_run_id="TR-100",
             test_case_id="proj1/TC-42",
             iteration=0,
-            include_comment_html=False,
         )
 
         assert result.project_id == "proj1"

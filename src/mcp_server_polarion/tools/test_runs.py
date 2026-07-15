@@ -762,7 +762,7 @@ async def list_test_records(  # noqa: PLR0913
     timeout=60.0,
     annotations={"readOnlyHint": True},
 )
-async def get_test_record(  # noqa: PLR0913
+async def get_test_record(
     ctx: Context,
     project_id: str = Field(description="Polarion project ID."),
     test_run_id: str = Field(description="Test run ID (e.g. 'TR-2026-01')."),
@@ -775,18 +775,14 @@ async def get_test_record(  # noqa: PLR0913
     iteration: int = Field(
         default=0, ge=0, description="Record iteration number (0-based)."
     ),
-    include_comment_html: bool = Field(
-        default=False,
-        description="Fill comment_html with the record's raw HTML comment.",
-    ),
 ) -> TestRecordDetail:
     """Get full detail of one test-case iteration inside a test run:
     execution comment and test-case revision.
 
     Use list_test_records for run-wide summaries, get_test_run for run
-    metadata. include_comment_html=True fills comment_html with the record's
-    raw HTML comment; plain-text comments return as-is. Verify coordinates
-    via list_test_records if not found.
+    metadata. comment_html carries the record's raw HTML comment;
+    plain-text comments return as-is. Verify coordinates via
+    list_test_records if not found.
     """
     if "/" not in test_case_id:
         raise ValueError(
@@ -828,16 +824,12 @@ async def get_test_record(  # noqa: PLR0913
     if not isinstance(data, dict):
         data = {}
 
-    detail = parse_test_record_detail(
+    return parse_test_record_detail(
         data,
         project_id=project_id,
         test_run_id=test_run_id,
         user_names=parse_included_user_name_map(response),
     )
-    if not include_comment_html:
-        # Comment always travel over wire; blank per flag=False contract.
-        detail = detail.model_copy(update={"comment_html": ""})
-    return detail
 
 
 @mcp.tool(

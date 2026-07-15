@@ -365,7 +365,6 @@ class TestEndToEndInvocation:
                     "project_id": "P1",
                     "test_run_id": "TR-1",
                     "test_case_id": "P1/TC-9",
-                    "include_comment_html": True,
                 },
             )
 
