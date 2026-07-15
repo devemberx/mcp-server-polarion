@@ -503,12 +503,12 @@ def _build_update_test_record_resource(
     # store, prior values keep.
     if attributes:
         resource["attributes"] = attributes
-    if spec.defect_work_item_id:
+    if spec.defect_id:
         resource["relationships"] = {
             "defect": {
                 "data": {
                     "type": "workitems",
-                    "id": qualify_work_item_id(spec.defect_work_item_id, project_id),
+                    "id": qualify_work_item_id(spec.defect_id, project_id),
                 }
             }
         }
@@ -567,7 +567,7 @@ async def update_test_records(
 
     Returns the echoed record_ids only — re-read via list_test_records.
     result must already be a value the run uses (discover via
-    list_test_records) or the write is rejected; defect_work_item_id must
+    list_test_records) or the write is rejected; defect_id must
     reference an existing work item or the write is rejected.
     """
     client = get_client(ctx)
@@ -593,9 +593,9 @@ async def update_test_records(
         client,
         project_id,
         (
-            qualify_work_item_id(spec.defect_work_item_id, project_id)
+            qualify_work_item_id(spec.defect_id, project_id)
             for spec in items
-            if spec.defect_work_item_id
+            if spec.defect_id
         ),
     )
 

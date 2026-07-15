@@ -1211,7 +1211,7 @@ class TestBuildUpdateTestRecordsPayload:
             result="passed",
             comment="Looks good",
             comment_format="text/html",
-            defect_work_item_id="proj1/WI-9",
+            defect_id="proj1/WI-9",
         )
 
         payload = _build_update_test_records_payload(project_id="proj1", specs=[spec])
@@ -1274,7 +1274,7 @@ class TestBuildUpdateTestRecordsPayload:
         # Live-verified: attributes key absent -- 204, defect store, prior
         # result keep.
         spec = TestRecordUpdateSpec(
-            record_id="proj1/TR-1/proj1/WI-1/0", defect_work_item_id="proj1/WI-9"
+            record_id="proj1/TR-1/proj1/WI-1/0", defect_id="proj1/WI-9"
         )
 
         payload = _build_update_test_records_payload(project_id="proj1", specs=[spec])
@@ -1292,7 +1292,7 @@ class TestBuildUpdateTestRecordsPayload:
         # Bare id pass guard (project fallback) yet store dangling
         # unqualified -- payload must carry qualified 2-segment id.
         spec = TestRecordUpdateSpec(
-            record_id="proj1/TR-1/proj1/WI-1/0", defect_work_item_id="WI-9"
+            record_id="proj1/TR-1/proj1/WI-1/0", defect_id="WI-9"
         )
 
         payload = _build_update_test_records_payload(project_id="proj1", specs=[spec])
@@ -1449,7 +1449,7 @@ class TestUpdateTestRecords:
                 items=[
                     TestRecordUpdateSpec(
                         record_id="proj1/TR-1/proj1/WI-1/0",
-                        defect_work_item_id="proj1/WI-9",
+                        defect_id="proj1/WI-9",
                     )
                 ],
                 dry_run=False,
@@ -1471,7 +1471,7 @@ class TestUpdateTestRecords:
             items=[
                 TestRecordUpdateSpec(
                     record_id="proj1/TR-1/proj1/WI-1/0",
-                    defect_work_item_id="WI-9",
+                    defect_id="WI-9",
                 )
             ],
             dry_run=False,

@@ -207,7 +207,7 @@ class TestRecordUpdateSpec(BaseModel):
         default=None, description="Comment text, sent verbatim."
     )
     comment_format: Literal["text/plain", "text/html"] = "text/plain"
-    defect_work_item_id: str | None = Field(
+    defect_id: str | None = Field(
         default=None,
         description=(
             "Defect link: 'WorkItemId' or 'ProjectId/WorkItemId'; a bare id "
@@ -218,11 +218,11 @@ class TestRecordUpdateSpec(BaseModel):
     @model_validator(mode="after")
     def _require_effective_change(self) -> TestRecordUpdateSpec:
         # comment_format alone carries no intent -- needs comment/result/defect too.
-        effective = self.result or self.comment or self.defect_work_item_id
+        effective = self.result or self.comment or self.defect_id
         if not effective:
             msg = (
                 f"test record '{self.record_id}': no effective change -- set "
-                "at least one of result/comment/defect_work_item_id."
+                "at least one of result/comment/defect_id."
             )
             raise ValueError(msg)
         return self
