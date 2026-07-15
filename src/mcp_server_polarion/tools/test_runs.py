@@ -721,8 +721,8 @@ async def list_test_records(  # noqa: PLR0913
 
     Filter by result (e.g. 'failed') or omit for all; not-yet-executed
     records have empty result. Lucene query is NOT supported here. Returns
-    summaries — record_id is the exact id update_test_records takes;
-    defect_id links the failure work item.
+    summaries — id is the exact value update_test_records takes as
+    record_id; defect_id links the failure work item.
     """
     client = get_client(ctx)
     params: dict[str, str | int] = {
@@ -841,7 +841,7 @@ async def get_test_run(
     ctx: Context,
     project_id: str = Field(description="Polarion project ID."),
     test_run_id: str = Field(description="Test run ID (e.g. 'TR-2026-01')."),
-    include_homepage_content_html: bool = Field(
+    include_home_page_content_html: bool = Field(
         default=False,
         description="Fill content_html with the run's raw HTML report body.",
     ),
@@ -850,7 +850,7 @@ async def get_test_run(
 
     Returns writable fields (title, status, group_id, custom_fields) plus
     read-only context: test-case selection, template provenance, author, and
-    timestamps. include_homepage_content_html=True fills content_html with
+    timestamps. include_home_page_content_html=True fills content_html with
     the raw HTML report body; it stays empty when use_report_from_template
     is true. Never feed back a blanked (flag=False) body.
     """
@@ -892,7 +892,7 @@ async def get_test_run(
         fallback_id=test_run_id,
         user_names=parse_included_user_name_map(response),
     )
-    if not include_homepage_content_html:
+    if not include_home_page_content_html:
         # Body always travel over wire; blank per flag=False contract.
         detail = detail.model_copy(update={"content_html": ""})
     return detail

@@ -102,7 +102,7 @@ async def _call_create_doc(mock_ctx: MagicMock, **overrides: object) -> object:
     defaults: dict[str, object] = {
         "project_id": "MyProj",
         "space_id": "_default",
-        "module_name": "Doc",
+        "document_name": "Doc",
         "title": "x",
         "type": "systemRequirementSpecification",
         "status": None,
@@ -671,7 +671,7 @@ class TestGetDocument:
             project_id="proj1",
             space_id="_default",
             document_name="SRS",
-            include_homepage_content_html=True,
+            include_home_page_content_html=True,
         )
 
         assert isinstance(result, DocumentDetail)
@@ -755,10 +755,10 @@ class TestGetDocument:
         assert result.auto_suspect is False
         assert result.uses_outline_numbering is False
 
-    async def test_include_homepage_content_html_false_omits_content(
+    async def test_include_home_page_content_html_false_omits_content(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """include_homepage_content_html=False → body hidden even though ``@all``
+        """include_home_page_content_html=False → body hidden even though ``@all``
         always carry it on wire.
         """
         mock_client.get.return_value = {
@@ -781,7 +781,7 @@ class TestGetDocument:
             project_id="proj1",
             space_id="_default",
             document_name="SRS",
-            include_homepage_content_html=False,
+            include_home_page_content_html=False,
         )
 
         assert result.title == "SRS"
@@ -789,10 +789,10 @@ class TestGetDocument:
         assert result.status == "draft"
         assert result.content_html == ""
 
-    async def test_include_homepage_content_html_returns_raw_html(
+    async def test_include_home_page_content_html_returns_raw_html(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """include_homepage_content_html=True → raw HTML, no markdownify."""
+        """include_home_page_content_html=True → raw HTML, no markdownify."""
         mock_client.get.return_value = {
             "data": {
                 "attributes": {
@@ -812,7 +812,7 @@ class TestGetDocument:
             project_id="proj1",
             space_id="_default",
             document_name="Doc",
-            include_homepage_content_html=True,
+            include_home_page_content_html=True,
         )
 
         # Verbatim HTML; no Markdown conversion.
@@ -842,7 +842,7 @@ class TestGetDocument:
             project_id="proj1",
             space_id="_default",
             document_name="Doc",
-            include_homepage_content_html=True,
+            include_home_page_content_html=True,
         )
 
         assert result.content_html == raw
@@ -887,7 +887,7 @@ class TestGetDocument:
             project_id="proj1",
             space_id="_default",
             document_name="EmptyDoc",
-            include_homepage_content_html=True,
+            include_home_page_content_html=True,
         )
 
         assert result.content_html == ""
@@ -926,7 +926,7 @@ class TestGetDocument:
             project_id="proj1",
             space_id="_default",
             document_name="NoContent",
-            include_homepage_content_html=True,
+            include_home_page_content_html=True,
         )
 
         assert result.content_html == ""
@@ -958,7 +958,7 @@ class TestGetDocument:
             project_id="proj1",
             space_id="_default",
             document_name="SRS",
-            include_homepage_content_html=False,
+            include_home_page_content_html=False,
         )
 
         # Raw passthrough: rich-text and structured values stay verbatim.
@@ -988,7 +988,7 @@ class TestGetDocument:
             project_id="proj1",
             space_id="_default",
             document_name="Plain",
-            include_homepage_content_html=False,
+            include_home_page_content_html=False,
         )
 
         assert result.custom_fields == {}
@@ -1008,7 +1008,7 @@ class TestGetDocument:
             project_id="proj1",
             space_id="_default",
             document_name="A",
-            include_homepage_content_html=False,
+            include_home_page_content_html=False,
         )
         _, kwargs_a = mock_client.get.call_args
         assert kwargs_a["params"]["fields[documents]"] == "@all"
@@ -1021,7 +1021,7 @@ class TestGetDocument:
             project_id="proj1",
             space_id="_default",
             document_name="B",
-            include_homepage_content_html=True,
+            include_home_page_content_html=True,
         )
         _, kwargs_b = mock_client.get.call_args
         assert kwargs_b["params"]["fields[documents]"] == "@all"
@@ -2159,7 +2159,7 @@ class TestBuildUpdateDocumentPayload:
         assert "attributes" not in data
         assert data["id"] == "MyProj/S/D"
 
-    def test_homepagecontent_omitted_when_not_passed(self) -> None:
+    def test_home_page_content_omitted_when_not_passed(self) -> None:
         # Omit home_page_content_html leave body untouched.
         payload = _build_update_document_payload(
             project_id="MyProj",
@@ -2471,7 +2471,7 @@ class TestUpdateDocumentValidation:
             )
         mock_client.patch.assert_not_called()
 
-    async def test_custom_fields_homepagecontent_collision_raises(
+    async def test_custom_fields_home_page_content_collision_raises(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         """`homePageContent` collision raise — allow via custom_fields would
@@ -2962,7 +2962,7 @@ class TestBuildCreateDocumentPayload:
 
     def test_minimal_payload_has_only_required_attrs(self) -> None:
         payload = _build_create_document_payload(
-            module_name="MySpec",
+            document_name="MySpec",
             title="My Spec",
             type="req_specification",
             home_page_content_html="",
@@ -2988,7 +2988,7 @@ class TestBuildCreateDocumentPayload:
 
     def test_status_attached_when_set(self) -> None:
         payload = _build_create_document_payload(
-            module_name="MySpec",
+            document_name="MySpec",
             title="t",
             type="generic",
             home_page_content_html="",
@@ -3001,7 +3001,7 @@ class TestBuildCreateDocumentPayload:
 
     def test_home_page_content_wrapped_as_html_block(self) -> None:
         payload = _build_create_document_payload(
-            module_name="MySpec",
+            document_name="MySpec",
             title="t",
             type="generic",
             home_page_content_html="<p>Hi</p>",
@@ -3017,7 +3017,7 @@ class TestBuildCreateDocumentPayload:
 
     def test_skips_none_status_and_empty_body(self) -> None:
         payload = _build_create_document_payload(
-            module_name="MySpec",
+            document_name="MySpec",
             title="t",
             type="generic",
             home_page_content_html="",
@@ -3030,7 +3030,7 @@ class TestBuildCreateDocumentPayload:
 
     def test_custom_fields_inlined_alongside_standard_attrs(self) -> None:
         payload = _build_create_document_payload(
-            module_name="MySpec",
+            document_name="MySpec",
             title="t",
             type="generic",
             home_page_content_html="",
@@ -3046,7 +3046,7 @@ class TestBuildCreateDocumentPayload:
     def test_custom_fields_collision_with_standard_attr_raises(self) -> None:
         with pytest.raises(ValueError, match="title"):
             _build_create_document_payload(
-                module_name="MySpec",
+                document_name="MySpec",
                 title="t",
                 type="generic",
                 home_page_content_html="",
@@ -3056,7 +3056,7 @@ class TestBuildCreateDocumentPayload:
 
     def test_outline_and_autosuspect_attached_when_set(self) -> None:
         payload = _build_create_document_payload(
-            module_name="MySpec",
+            document_name="MySpec",
             title="t",
             type="generic",
             home_page_content_html="",
@@ -3072,7 +3072,7 @@ class TestBuildCreateDocumentPayload:
 
     def test_outline_and_autosuspect_omitted_when_none(self) -> None:
         payload = _build_create_document_payload(
-            module_name="MySpec",
+            document_name="MySpec",
             title="t",
             type="generic",
             home_page_content_html="",
@@ -3085,7 +3085,7 @@ class TestBuildCreateDocumentPayload:
 
     def test_false_autosuspect_and_outline_serialised(self) -> None:
         payload = _build_create_document_payload(
-            module_name="MySpec",
+            document_name="MySpec",
             title="t",
             type="generic",
             home_page_content_html="",
@@ -3110,7 +3110,7 @@ class TestCreateDocumentDryRun:
             mock_ctx,
             project_id="MyProj",
             space_id="_default",
-            module_name="MySpec",
+            document_name="MySpec",
             title="Dry test",
             type="req_specification",
             status=None,
@@ -3157,7 +3157,7 @@ class TestCreateDocumentHappyPath:
             mock_ctx,
             project_id="MyProj",
             space_id="_default",
-            module_name="MySpec",
+            document_name="MySpec",
             title="Real",
             type="req_specification",
             status=None,
@@ -3183,7 +3183,7 @@ class TestCreateDocumentHappyPath:
             mock_ctx,
             project_id="MyProj",
             space_id="_default",
-            module_name="MySpec",
+            document_name="MySpec",
             title="t",
             type="req_specification",
             status="draft",
@@ -3213,7 +3213,7 @@ class TestCreateDocumentHappyPath:
             mock_ctx,
             project_id="Proj With Space",
             space_id="My Space",
-            module_name="MySpec",
+            document_name="MySpec",
             title="t",
             type="generic",
             status=None,
@@ -3236,7 +3236,7 @@ class TestCreateDocumentHappyPath:
             mock_ctx,
             project_id="MyProj",
             space_id="_default",
-            module_name="MySpec",
+            document_name="MySpec",
             title="t",
             type="generic",
             status=None,
@@ -3262,7 +3262,7 @@ class TestCreateDocumentHappyPath:
             mock_ctx,
             project_id="MyProj",
             space_id="_default",
-            module_name="MySpec",
+            document_name="MySpec",
             title="t",
             type="generic",
             status=None,
@@ -3299,7 +3299,7 @@ class TestCreateDocumentHappyPath:
             mock_ctx,
             project_id="MyProj",
             space_id="_default",
-            module_name="MySpec",
+            document_name="MySpec",
             title="t",
             type="generic",
             status=None,
@@ -3331,7 +3331,7 @@ class TestCreateDocumentHappyPath:
                 mock_ctx,
                 project_id="MyProj",
                 space_id="_default",
-                module_name="MySpec",
+                document_name="MySpec",
                 title="t",
                 type="generic",
                 status=None,
@@ -3352,7 +3352,7 @@ class TestCreateDocumentHappyPath:
             mock_ctx,
             project_id="MyProj",
             space_id="_default",
-            module_name="MySpec",
+            document_name="MySpec",
             title="t",
             type="generic",
             status=None,
@@ -3378,7 +3378,7 @@ class TestCreateDocumentHappyPath:
             mock_ctx,
             project_id="MyProj",
             space_id="_default",
-            module_name="Folder/Sub/Doc",
+            document_name="Folder/Sub/Doc",
             title="t",
             type="generic",
             status=None,
@@ -3402,7 +3402,7 @@ class TestCreateDocumentHappyPath:
             mock_ctx,
             project_id="MyProj",
             space_id="_default",
-            module_name="MySpec",
+            document_name="MySpec",
             title="t",
             type="generic",
             status=None,
@@ -3425,7 +3425,7 @@ class TestCreateDocumentHappyPath:
                 mock_ctx,
                 project_id="MyProj",
                 space_id="_default",
-                module_name="MySpec",
+                document_name="MySpec",
                 title="t",
                 type="generic",
                 status=None,
@@ -3452,7 +3452,7 @@ class TestCreateDocumentErrorMapping:
                 mock_ctx,
                 project_id="MyProj",
                 space_id="_default",
-                module_name="MySpec",
+                document_name="MySpec",
                 title="t",
                 type="generic",
                 status=None,
@@ -3473,7 +3473,7 @@ class TestCreateDocumentErrorMapping:
                 mock_ctx,
                 project_id="ghost",
                 space_id="ghost_space",
-                module_name="MySpec",
+                document_name="MySpec",
                 title="t",
                 type="generic",
                 status=None,
@@ -3494,7 +3494,7 @@ class TestCreateDocumentErrorMapping:
                 mock_ctx,
                 project_id="MyProj",
                 space_id="_default",
-                module_name="MySpec",
+                document_name="MySpec",
                 title="t",
                 type="generic",
                 status=None,
@@ -3517,7 +3517,7 @@ class TestCreateDocumentResponseParsing:
                 mock_ctx,
                 project_id="MyProj",
                 space_id="_default",
-                module_name="MySpec",
+                document_name="MySpec",
                 title="t",
                 type="generic",
                 status=None,
@@ -3536,7 +3536,7 @@ class TestCreateDocumentResponseParsing:
                 mock_ctx,
                 project_id="MyProj",
                 space_id="_default",
-                module_name="MySpec",
+                document_name="MySpec",
                 title="t",
                 type="generic",
                 status=None,
@@ -3558,7 +3558,7 @@ class TestCreateDocumentResponseParsing:
                 mock_ctx,
                 project_id="MyProj",
                 space_id="_default",
-                module_name="MySpec",
+                document_name="MySpec",
                 title="t",
                 type="generic",
                 status=None,
@@ -3586,12 +3586,12 @@ class TestCreateDocumentFieldValidation:
         with pytest.raises(ValidationError):
             self._adapter_for("space_id").validate_python("")
 
-    def test_module_name_rejects_empty_string(self) -> None:
+    def test_document_name_rejects_empty_string(self) -> None:
         with pytest.raises(ValidationError):
-            self._adapter_for("module_name").validate_python("")
+            self._adapter_for("document_name").validate_python("")
 
-    def test_module_name_accepts_non_empty(self) -> None:
-        assert self._adapter_for("module_name").validate_python("MySpec") == "MySpec"
+    def test_document_name_accepts_non_empty(self) -> None:
+        assert self._adapter_for("document_name").validate_python("MySpec") == "MySpec"
 
     def test_title_rejects_empty_string(self) -> None:
         with pytest.raises(ValidationError):
@@ -3623,7 +3623,7 @@ class TestCreateDocumentDocstringGuidance:
     enum-resolution steer needed; uniqueness is not.
     """
 
-    def test_docstring_mentions_module_name_uniqueness(self) -> None:
+    def test_docstring_mentions_document_name_uniqueness(self) -> None:
         document = create_document.__doc__ or ""
         assert "unique" in document.lower()
         assert "409" in document or "conflict" in document.lower()
@@ -4002,7 +4002,7 @@ class TestEnumGuardCreateDocument:
         with pytest.raises(ValueError, match="type='productRequirementSpecification'"):
             await _call_create_doc(
                 mock_ctx,
-                module_name="NewSpec",
+                document_name="NewSpec",
                 type="productRequirementSpecification",
             )
         mock_client.post.assert_not_called()
@@ -4031,7 +4031,10 @@ class TestEnumGuardCreateDocument:
         }
 
         result = await _call_create_doc(
-            mock_ctx, module_name="NewSpec", type=dtype, custom_fields={"version": "2"}
+            mock_ctx,
+            document_name="NewSpec",
+            type=dtype,
+            custom_fields={"version": "2"},
         )
 
         assert result.created is True  # type: ignore[attr-defined]
@@ -4063,7 +4066,7 @@ class TestEnumGuardCreateDocument:
         with pytest.raises(ValueError, match=r"'docRisk'.*'severe'"):
             await _call_create_doc(
                 mock_ctx,
-                module_name="NewSpec",
+                document_name="NewSpec",
                 type=dtype,
                 custom_fields={"docRisk": "severe"},
             )
@@ -4087,7 +4090,7 @@ class TestEnumGuardCreateDocument:
         with pytest.raises(ValueError, match="ghostField"):
             await _call_create_doc(
                 mock_ctx,
-                module_name="NewSpec",
+                document_name="NewSpec",
                 type=dtype,
                 custom_fields={"ghostField": "x"},
             )
@@ -4109,7 +4112,7 @@ class TestEnumGuardCreateDocument:
         with pytest.raises(RuntimeError, match="Refusing the write"):
             await _call_create_doc(
                 mock_ctx,
-                module_name="NewSpec",
+                document_name="NewSpec",
                 type=dtype,
                 custom_fields={"version": "2"},
             )

@@ -2,7 +2,7 @@
 
 Templates for hand-writing Polarion-native HTML when editing a body fetched
 with `get_work_item(include_description_html=True)` /
-`get_document(include_homepage_content_html=True)`. Splice new blocks in;
+`get_document(include_home_page_content_html=True)`. Splice new blocks in;
 never rewrite existing markup (round-trip bodies are sent verbatim).
 
 Markdown given to `create_work_items` / `create_document` gets tables and

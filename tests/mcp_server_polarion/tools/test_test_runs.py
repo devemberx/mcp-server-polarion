@@ -443,7 +443,7 @@ class TestListTestRecords:
 
         first = result.items[0]
         # Full work-item ids preserved -- never derived from 5-segment record id.
-        assert first.record_id == "proj1/TR-001/proj1/TC-42/0"
+        assert first.id == "proj1/TR-001/proj1/TC-42/0"
         assert first.test_case_id == "proj1/TC-42"
         assert first.iteration == 0
         assert first.result == "failed"
@@ -1761,7 +1761,7 @@ class TestGetTestRun:
             mock_ctx,
             project_id="proj1",
             test_run_id="TR-100",
-            include_homepage_content_html=True,
+            include_home_page_content_html=True,
         )
 
         assert isinstance(result, TestRunDetail)
@@ -1798,7 +1798,7 @@ class TestGetTestRun:
             mock_ctx,
             project_id="proj1",
             test_run_id="TR-100",
-            include_homepage_content_html=False,
+            include_home_page_content_html=False,
         )
 
         args, kwargs = mock_client.get.call_args
@@ -1807,7 +1807,7 @@ class TestGetTestRun:
         assert kwargs["params"]["include"] == "author"
         assert kwargs["params"]["fields[users]"] == "name"
 
-    async def test_include_homepage_content_html_false_blanks_field(
+    async def test_include_home_page_content_html_false_blanks_field(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         """Flag off blank body — body still travel (``@all`` for customs)."""
@@ -1817,7 +1817,7 @@ class TestGetTestRun:
             mock_ctx,
             project_id="proj1",
             test_run_id="TR-100",
-            include_homepage_content_html=False,
+            include_home_page_content_html=False,
         )
 
         assert result.content_html == ""
@@ -1836,7 +1836,7 @@ class TestGetTestRun:
                 mock_ctx,
                 project_id="proj1",
                 test_run_id="TR-404",
-                include_homepage_content_html=False,
+                include_home_page_content_html=False,
             )
 
     async def test_auth_error_raises_permission_error(
@@ -1849,7 +1849,7 @@ class TestGetTestRun:
                 mock_ctx,
                 project_id="proj1",
                 test_run_id="TR-100",
-                include_homepage_content_html=False,
+                include_home_page_content_html=False,
             )
 
     async def test_other_error_raises_runtime_error(
@@ -1862,7 +1862,7 @@ class TestGetTestRun:
                 mock_ctx,
                 project_id="proj1",
                 test_run_id="TR-100",
-                include_homepage_content_html=False,
+                include_home_page_content_html=False,
             )
 
     async def test_non_dict_data_falls_back_to_arg_id(
@@ -1874,7 +1874,7 @@ class TestGetTestRun:
             mock_ctx,
             project_id="proj1",
             test_run_id="TR-100",
-            include_homepage_content_html=False,
+            include_home_page_content_html=False,
         )
 
         assert result.id == "TR-100"

@@ -350,7 +350,7 @@ class TestCheckRoundTripSource:
         trajectory = [
             _call(
                 "get_document",
-                {**_DOC_ARGS, "include_homepage_content_html": True},
+                {**_DOC_ARGS, "include_home_page_content_html": True},
             ),
             _call(
                 "update_document",
@@ -370,7 +370,7 @@ class TestCheckRoundTripSource:
         ]
         passed, reason = checks.check_round_trip_source(trajectory, {})
         assert passed is False
-        assert "include_homepage_content_html" in reason
+        assert "include_home_page_content_html" in reason
 
     def test_read_document_does_not_satisfy(self) -> None:
         trajectory = [
