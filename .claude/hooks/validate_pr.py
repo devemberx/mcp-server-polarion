@@ -4,6 +4,9 @@
 Triggered on: gh pr (create|edit|comment), gh api .../pulls/...
 Issue commands live in validate_issue.py.
 
+Regex + body/title parser block duplicated in validate_issue.py — hooks run
+standalone on system python3, no shared import; keep both copies in sync.
+
 Rules:
   1. English-only — no non-ASCII letters. Common typographic punctuation
      (dashes, arrows, curly quotes, ellipsis, math signs) + emoji allowed.
@@ -26,6 +29,7 @@ import shlex
 import sys
 from pathlib import Path
 
+# Block below duplicated in validate_issue.py — keep in sync.
 NON_ASCII_RE = re.compile(r"[^\x00-\x7F]")
 # Typographic punctuation allowed: formatting not language.
 TYPOGRAPHIC_RE = re.compile(
@@ -131,12 +135,14 @@ def extract_body(cmd: str) -> str | None:
     except ValueError:
         return None
 
+    # gh api: -F/-f = field flags; gh subcommands: -F = --body-file shorthand.
+    api = GH_API_RE.search(cmd) is not None
     i = 0
     while i < len(argv):
         a = argv[i]
         nxt = argv[i + 1] if i + 1 < len(argv) else None
 
-        if a == "--body" and nxt is not None:
+        if a in {"--body", "-b"} and nxt is not None:
             return nxt
         if a.startswith("--body="):
             return a[len("--body=") :]
@@ -144,15 +150,18 @@ def extract_body(cmd: str) -> str | None:
             return _read_file(nxt)
         if a.startswith("--body-file="):
             return _read_file(a[len("--body-file=") :])
-        if (
-            a in {"-F", "-f", "--field", "--raw-field"}
-            and nxt is not None
-            and nxt.startswith("body=")
-        ):
-            val = nxt[len("body=") :]
-            if val.startswith("@"):
-                return _read_file(val[1:])
-            return val
+        if api:
+            if (
+                a in {"-F", "-f", "--field", "--raw-field"}
+                and nxt is not None
+                and nxt.startswith("body=")
+            ):
+                val = nxt[len("body=") :]
+                if val.startswith("@"):
+                    return _read_file(val[1:])
+                return val
+        elif a == "-F" and nxt is not None:
+            return _read_file(nxt)
         i += 1
     return None
 

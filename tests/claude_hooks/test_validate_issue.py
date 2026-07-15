@@ -99,6 +99,8 @@ class TestClassify:
             "gh issue edit 5 --body y",
             "gh issue comment 5 --body y",
             "gh api -X PATCH /repos/o/r/issues/5 -f body=z",
+            # Creation POST end path at /issues — no trailing slash.
+            "gh api repos/o/r/issues -f title=x -f body=y",
         ],
     )
     def test_other(self, cmd: str) -> None:
@@ -138,6 +140,54 @@ class TestExtractLabels:
 
     def test_none(self) -> None:
         assert hook.extract_labels("gh issue create --title x --body y") == []
+
+
+class TestExtractBody:
+    def test_long_flag(self) -> None:
+        assert hook.extract_body("gh issue create --body 'hello'") == "hello"
+
+    def test_short_flag(self) -> None:
+        assert hook.extract_body("gh issue create -b 'hello'") == "hello"
+
+    def test_body_file_flag(self, tmp_path: Path) -> None:
+        f = tmp_path / "b.md"
+        f.write_text("from file")
+        assert hook.extract_body(f"gh issue create --body-file {f}") == "from file"
+
+    def test_short_body_file_flag(self, tmp_path: Path) -> None:
+        f = tmp_path / "b.md"
+        f.write_text("from file")
+        assert hook.extract_body(f"gh issue create -F {f}") == "from file"
+
+    def test_api_field_body(self) -> None:
+        cmd = "gh api /repos/o/r/issues/5 -F body=hello"
+        assert hook.extract_body(cmd) == "hello"
+
+    def test_api_field_body_file(self, tmp_path: Path) -> None:
+        f = tmp_path / "b.md"
+        f.write_text("filed")
+        assert hook.extract_body(f"gh api /repos/o/r/issues/5 -f body=@{f}") == "filed"
+
+    def test_api_non_body_field_is_not_a_file(self) -> None:
+        # Under gh api, -F stay field flag — never body-file shorthand.
+        assert hook.extract_body("gh api /repos/o/r/issues/5 -F state=closed") is None
+
+    def test_no_body(self) -> None:
+        assert hook.extract_body("gh issue create --title only") is None
+
+
+class TestExtractTitle:
+    def test_long_flag(self) -> None:
+        assert hook.extract_title("gh issue create --title 'follow up'") == "follow up"
+
+    def test_long_flag_equals(self) -> None:
+        assert hook.extract_title("gh issue create --title=x") == "x"
+
+    def test_short_flag(self) -> None:
+        assert hook.extract_title("gh issue create -t 'follow up' -b y") == "follow up"
+
+    def test_absent(self) -> None:
+        assert hook.extract_title("gh issue edit 5 --body y") is None
 
 
 class TestLoadTemplateMap:

@@ -73,6 +73,18 @@ class TestBodyExtractBody:
         f.write_text("from file")
         assert body.extract_body(f"gh pr create --body-file={f}") == "from file"
 
+    def test_short_flag(self) -> None:
+        assert body.extract_body("gh pr create -b 'hello'") == "hello"
+
+    def test_short_body_file_flag(self, tmp_path: Path) -> None:
+        f = tmp_path / "b.txt"
+        f.write_text("from file")
+        assert body.extract_body(f"gh pr create -F {f}") == "from file"
+
+    def test_api_non_body_field_is_not_a_file(self) -> None:
+        # Under gh api, -F stay field flag — never body-file shorthand.
+        assert body.extract_body("gh api /x -F per_page=5") is None
+
     def test_body_file_unreadable(self, tmp_path: Path) -> None:
         missing = tmp_path / "nope.txt"
         assert body.extract_body(f"gh pr create --body-file {missing}") is None

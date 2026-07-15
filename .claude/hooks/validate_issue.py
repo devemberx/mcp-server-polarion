@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 """PreToolUse hook: block issue Bash invocations that violate repo conventions.
 
-Triggered on: gh issue (create|edit|comment), gh api .../issues/...
+Triggered on: gh issue (create|edit|comment), gh api paths hitting /issues
+(item paths and the creation POST).
 
 Rules:
-  1. English-only — no non-ASCII letters. Common typographic punctuation
-     (dashes, arrows, curly quotes, ellipsis, math signs) + emoji allowed.
-  2. Template match (gh issue create with --body only) — exactly one label
+  1. English-only (title + body) — no non-ASCII letters. Common typographic
+     punctuation (dashes, arrows, curly quotes, ellipsis, math signs) + emoji
+     allowed.
+  2. Template match (gh issue create with a body flag) — exactly one label
      mapping to a .github/ISSUE_TEMPLATE form, and body must carry a
      '### <field label>' heading for every required field of that form
      (GitHub renders form submissions in that shape). Interactive/--web
      creation has no body to inspect — the web chooser enforces the form.
+
+Regex + body/title parser block duplicated in validate_pr.py — hooks run
+standalone on system python3, no shared import; keep both copies in sync.
 
 Exit 0 = allow, exit 2 = block.
 """
@@ -23,6 +28,7 @@ import shlex
 import sys
 from pathlib import Path
 
+# Block below duplicated in validate_pr.py — keep in sync.
 NON_ASCII_RE = re.compile(r"[^\x00-\x7F]")
 # Typographic punctuation allowed: formatting not language.
 TYPOGRAPHIC_RE = re.compile(
@@ -41,6 +47,8 @@ EMOJI_RE = re.compile(
 ISSUE_CREATE_RE = re.compile(r"\bgh\s+issue\s+create\b")
 ISSUE_OTHER_RE = re.compile(r"\bgh\s+issue\s+(edit|comment)\b")
 GH_API_RE = re.compile(r"\bgh\s+api\b")
+# \b cover item paths (/issues/5) and creation POST (/issues, no trailing slash).
+ISSUES_PATH_RE = re.compile(r"/issues\b")
 
 TEMPLATE_DIR = Path(".github/ISSUE_TEMPLATE")
 # Form yml simple enough for line parsing — hook run on system python3, no PyYAML.
@@ -66,8 +74,15 @@ def main() -> int:
         return 0
 
     body = extract_body(cmd)
+    title = extract_title(cmd)
 
     errors: list[str] = []
+    if title is not None and has_disallowed_non_ascii(title):
+        errors.append(
+            "Title contains non-ASCII characters (other than emoji and "
+            "typographic punctuation). Per repo convention PR/issue/commit "
+            "artifacts must be in English."
+        )
     if body is not None and has_disallowed_non_ascii(body):
         errors.append(
             "Body contains non-ASCII characters (other than emoji and "
@@ -97,7 +112,7 @@ def classify(cmd: str) -> str | None:
         return "create"
     if ISSUE_OTHER_RE.search(cmd):
         return "other"
-    if GH_API_RE.search(cmd) and "/issues/" in cmd:
+    if GH_API_RE.search(cmd) and ISSUES_PATH_RE.search(cmd):
         return "other"
     return None
 
@@ -108,12 +123,14 @@ def extract_body(cmd: str) -> str | None:
     except ValueError:
         return None
 
+    # gh api: -F/-f = field flags; gh subcommands: -F = --body-file shorthand.
+    api = GH_API_RE.search(cmd) is not None
     i = 0
     while i < len(argv):
         a = argv[i]
         nxt = argv[i + 1] if i + 1 < len(argv) else None
 
-        if a == "--body" and nxt is not None:
+        if a in {"--body", "-b"} and nxt is not None:
             return nxt
         if a.startswith("--body="):
             return a[len("--body=") :]
@@ -121,15 +138,18 @@ def extract_body(cmd: str) -> str | None:
             return _read_file(nxt)
         if a.startswith("--body-file="):
             return _read_file(a[len("--body-file=") :])
-        if (
-            a in {"-F", "-f", "--field", "--raw-field"}
-            and nxt is not None
-            and nxt.startswith("body=")
-        ):
-            val = nxt[len("body=") :]
-            if val.startswith("@"):
-                return _read_file(val[1:])
-            return val
+        if api:
+            if (
+                a in {"-F", "-f", "--field", "--raw-field"}
+                and nxt is not None
+                and nxt.startswith("body=")
+            ):
+                val = nxt[len("body=") :]
+                if val.startswith("@"):
+                    return _read_file(val[1:])
+                return val
+        elif a == "-F" and nxt is not None:
+            return _read_file(nxt)
         i += 1
     return None
 
@@ -139,6 +159,24 @@ def _read_file(path: str) -> str | None:
         return Path(path).read_text()
     except OSError:
         return None
+
+
+def extract_title(cmd: str) -> str | None:
+    try:
+        argv = shlex.split(cmd)
+    except ValueError:
+        return None
+
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        nxt = argv[i + 1] if i + 1 < len(argv) else None
+        if a in {"--title", "-t"} and nxt is not None:
+            return nxt
+        if a.startswith("--title="):
+            return a[len("--title=") :]
+        i += 1
+    return None
 
 
 def extract_labels(cmd: str) -> list[str]:
