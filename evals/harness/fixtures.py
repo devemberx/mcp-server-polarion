@@ -117,6 +117,8 @@ class TestRun:
     status: str = "open"
     finished_on: str = ""
     is_template: bool = False
+    # TESTCASE_ID re-executions -- one record per iteration 0..n-1.
+    iterations: int = 1
 
 
 @dataclass
@@ -223,7 +225,8 @@ SEEDS = Seeds(
             status="open",
             finished_on=TS,
         ),
-        TEST_RUN_ID_2: TestRun(TEST_RUN_ID_2, "Fake Smoke Run"),
+        # 3 iterations feed EFF-BULK-UPDATE-RECORDS (one bulk PATCH, 3 items).
+        TEST_RUN_ID_2: TestRun(TEST_RUN_ID_2, "Fake Smoke Run", iterations=3),
         TEST_RUN_ID_3: TestRun(TEST_RUN_ID_3, "Fake Sanity Run"),
         TEST_RUN_TEMPLATE_ID: TestRun(
             TEST_RUN_TEMPLATE_ID,

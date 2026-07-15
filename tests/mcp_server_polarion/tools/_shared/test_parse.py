@@ -457,6 +457,8 @@ class TestParseTestRecordSummaries:
             user_names={"proj/jdoe": "J Doe"},
         )
         # Full ids kept -- no extract_short_id on work-item targets.
+        # record_id verbatim -- update_test_records copy it whole.
+        assert kwargs["record_id"] == "proj/TR-1/proj/TC-42/0"
         assert kwargs["test_case_id"] == "proj/TC-42"
         assert kwargs["defect_id"] == "proj/DEF-7"
         assert kwargs["executed_by_name"] == "J Doe"
@@ -512,6 +514,7 @@ class TestParseTestRecordSummaries:
         }
         parsed = parse_test_record_summaries(response)
         assert [r.test_case_id for r in parsed] == ["proj/TC-2"]
+        assert [r.record_id for r in parsed] == ["proj/TR-1/proj/TC-2/0"]
 
 
 class TestParseTestRunDetail:

@@ -24,7 +24,7 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for **P
 
 ## Features
 
-- **34 tools** covering read and write across documents, work items, test runs, traceability links, and comments.
+- **36 tools** covering read and write across documents, work items, test runs, traceability links, and comments.
 - **Read** — render documents as Markdown, search with Lucene or SQL, walk incoming/outgoing links, resolve enum options.
 - **Write** — create and update work items, documents, and test runs, manage links, reorganize document structure, post comments.
 - **Safe writes** — every write tool supports `dry_run`, and pre-write guards validate fields, enum values, and link targets before hitting Polarion.
@@ -86,6 +86,7 @@ All list tools support pagination via `page_size` (1–100) and `page_number` pa
 | `create_test_runs` | Create one or more test runs, optionally from a template |
 | `create_test_records` | Record test-case execution results on a test run |
 | `update_test_runs` | Update title, status, group, or custom fields on one or more test runs |
+| `update_test_records` | Update result, comment, or defect link on one or more test records of a test run |
 | `create_work_item_links` | Create one or more outgoing links from a source work item |
 | `update_work_item_link` | Update `suspect` / `revision` on one outgoing link |
 | `delete_work_item_links` | Delete one or more outgoing links from a source work item |

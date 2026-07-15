@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from mcp_server_polarion.models import (
     TestRecordCreateSpec,
     TestRecordsCreateResult,
+    TestRecordUpdateSpec,
     TestRunCreateSpec,
 )
 
@@ -20,9 +21,47 @@ class TestTestRunCreateSpec:
         assert spec.custom_fields is None
 
     def test_typo_key_rejected(self):
-        # extra='forbid': a typo key must error, not silently drop the field.
+        # extra='forbid': typo key must error, not silently drop field.
         with pytest.raises(ValidationError, match="titel"):
             TestRunCreateSpec.model_validate({"id": "RUN-1", "titel": "oops"})
+
+
+class TestTestRecordUpdateSpec:
+    def test_extra_key_rejected(self):
+        # extra='forbid': typo key must error, not silently drop field.
+        with pytest.raises(ValidationError, match="bogus"):
+            TestRecordUpdateSpec.model_validate(
+                {"record_id": "P/TR-1/P/WI-1/0", "result": "passed", "bogus": "x"}
+            )
+
+    def test_no_effective_change_rejected(self):
+        with pytest.raises(ValidationError, match="no effective change"):
+            TestRecordUpdateSpec(record_id="P/TR-1/P/WI-1/0")
+
+    def test_comment_format_alone_not_effective(self):
+        # comment_format alone (no comment/result/defect) is not a change.
+        with pytest.raises(ValidationError, match="no effective change"):
+            TestRecordUpdateSpec(
+                record_id="P/TR-1/P/WI-1/0", comment_format="text/html"
+            )
+
+    def test_happy_construction(self):
+        spec = TestRecordUpdateSpec(
+            record_id="P/TR-1/P/WI-1/0",
+            result="passed",
+            comment="looks good",
+            comment_format="text/html",
+            defect_id="P/WI-2",
+        )
+        assert spec.record_id == "P/TR-1/P/WI-1/0"
+        assert spec.result == "passed"
+        assert spec.comment == "looks good"
+        assert spec.comment_format == "text/html"
+        assert spec.defect_id == "P/WI-2"
+
+    def test_default_comment_format_is_text_plain(self):
+        spec = TestRecordUpdateSpec(record_id="P/TR-1/P/WI-1/0", result="passed")
+        assert spec.comment_format == "text/plain"
 
 
 class TestTestRecordCreateSpec:
