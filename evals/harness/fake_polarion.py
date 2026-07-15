@@ -107,9 +107,11 @@ class FakePolarion:
             },
         }
 
-    def _test_record_detail_resource(self, tr: TestRun) -> dict[str, Any]:
+    def _test_record_detail_resource(
+        self, tr: TestRun, iteration: int
+    ) -> dict[str, Any]:
         # Single-GET add comment + testCaseRevision beyond list shape.
-        resource = self._test_record_resource(tr)
+        resource = self._test_record_resource(tr, iteration)
         resource["attributes"]["comment"] = {
             "type": "text/html",
             "value": "<p>Fake execution comment.</p>",
@@ -437,13 +439,14 @@ class FakePolarion:
                 or tr.is_template
                 or case_project != PROJECT
                 or case_id != TESTCASE_ID
-                or iteration != "0"
+                # Same range as list route -- seeds serve tr.iterations records.
+                or int(iteration) >= tr.iterations
             ):
                 return httpx.Response(404, json={"errors": [{"status": "404"}]})
             return httpx.Response(
                 200,
                 json={
-                    "data": self._test_record_detail_resource(tr),
+                    "data": self._test_record_detail_resource(tr, int(iteration)),
                     "included": self._author_included(),
                 },
             )
