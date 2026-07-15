@@ -83,6 +83,19 @@ class TestRunSummary(BaseModel):
     template_id: str = ""
 
 
+class TestRecordDetail(TestRecordSummary):
+    """Full single test-record detail from ``get_test_record``."""
+
+    __test__ = False
+
+    project_id: str
+    test_run_id: str
+    # Short user id (extract_short_id), parity TestRunDetail.author_id.
+    executed_by_id: str = ""
+    test_case_revision: str = ""
+    comment_html: str = ""
+
+
 class TestRunDetail(TestRunSummary):
     """Full test-run detail from ``get_test_run``."""
 

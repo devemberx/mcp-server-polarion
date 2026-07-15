@@ -310,6 +310,82 @@ class TestTestRecordRouting:
         assert iterations == [0, 1, 2]
 
 
+class TestSingleTestRecordRouting:
+    def test_found_record_carries_comment_and_revision(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}"
+            f"/testrecords/{PROJECT}/{TESTCASE_ID}/0",
+        )
+        assert response.status_code == 200
+        payload = _json(response)
+        record = payload["data"]
+        assert isinstance(record, dict)
+        assert record["type"] == "testrecords"
+        assert record["id"] == f"{PROJECT}/{TEST_RUN_ID}/{PROJECT}/{TESTCASE_ID}/0"
+        attributes = record["attributes"]
+        assert attributes["comment"]["type"] == "text/html"
+        assert attributes["comment"]["value"]
+        assert attributes["testCaseRevision"]
+        rel = record["relationships"]
+        assert rel["testCase"]["data"]["id"] == f"{PROJECT}/{TESTCASE_ID}"
+        assert rel["executedBy"]["data"]["type"] == "users"
+        assert payload["included"][0]["attributes"]["name"] == "Fake Author"
+
+    def test_missing_run_is_404(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/testruns/Nope/testrecords/{PROJECT}/{TESTCASE_ID}/0",
+        )
+        assert response.status_code == 404
+
+    def test_wrong_test_case_is_404(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}/testrecords/{PROJECT}/MCPT-9999/0",
+        )
+        assert response.status_code == 404
+
+    def test_wrong_iteration_is_404(self) -> None:
+        # TEST_RUN_ID seed iterations=1 -- only iteration 0 exist.
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}"
+            f"/testrecords/{PROJECT}/{TESTCASE_ID}/1",
+        )
+        assert response.status_code == 404
+
+    def test_multi_iteration_run_serves_requested_iteration(self) -> None:
+        # Single GET must honor same iteration range as list route.
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_ID_2}"
+            f"/testrecords/{PROJECT}/{TESTCASE_ID}/2",
+        )
+        assert response.status_code == 200
+        record = _json(response)["data"]
+        assert record["id"] == f"{PROJECT}/{TEST_RUN_ID_2}/{PROJECT}/{TESTCASE_ID}/2"
+        assert record["attributes"]["iteration"] == 2
+        assert record["attributes"]["comment"]["value"]
+
+    def test_iteration_beyond_seeded_count_is_404(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_ID_2}"
+            f"/testrecords/{PROJECT}/{TESTCASE_ID}/3",
+        )
+        assert response.status_code == 404
+
+    def test_template_run_record_is_404(self) -> None:
+        # Blueprints never executed -- no record coordinates resolve.
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_TEMPLATE_ID}"
+            f"/testrecords/{PROJECT}/{TESTCASE_ID}/0",
+        )
+        assert response.status_code == 404
+
+
 class TestWorkItemResource:
     def test_module_relationship_only_for_module_items(self) -> None:
         fake = FakePolarion()

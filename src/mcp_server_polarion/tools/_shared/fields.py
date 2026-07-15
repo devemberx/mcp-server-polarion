@@ -22,6 +22,12 @@ TEST_RUN_DETAIL_FIELDS: Final[str] = "@all"
 TEST_RECORD_LIST_FIELDS: Final[str] = (
     "executed,duration,result,iteration,testCase,executedBy,defect"
 )
+# Single-record GET: comment/testCaseRevision added to list fields; relationship
+# names still listed explicit (not @all) to survive sparse fieldset.
+TEST_RECORD_DETAIL_FIELDS: Final[str] = (
+    "executed,duration,result,iteration,comment,testCaseRevision,testCase,"
+    "executedBy,defect"
+)
 DOCUMENT_DETAIL_FIELDS: Final[str] = "@all"
 # Sparse fieldset filters relationships too — name them explicitly.
 DOCUMENT_COMMENT_LIST_FIELDS: Final[str] = (
@@ -36,6 +42,7 @@ __all__: list[str] = [
     "DOCUMENT_COMMENT_LIST_FIELDS",
     "DOCUMENT_DETAIL_FIELDS",
     "MAX_BULK_ITEMS",
+    "TEST_RECORD_DETAIL_FIELDS",
     "TEST_RECORD_LIST_FIELDS",
     "TEST_RUN_DETAIL_FIELDS",
     "TEST_RUN_LIST_FIELDS",

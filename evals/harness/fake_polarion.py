@@ -107,6 +107,18 @@ class FakePolarion:
             },
         }
 
+    def _test_record_detail_resource(
+        self, tr: TestRun, iteration: int
+    ) -> dict[str, Any]:
+        # Single-GET add comment + testCaseRevision beyond list shape.
+        resource = self._test_record_resource(tr, iteration)
+        resource["attributes"]["comment"] = {
+            "type": "text/html",
+            "value": "<p>Fake execution comment.</p>",
+        }
+        resource["attributes"]["testCaseRevision"] = "3"
+        return resource
+
     def _document_resource(self, name: str) -> dict[str, Any]:
         # Direct index, not .get: only reached once dispatch confirm name seeded.
         doc = self.seeds.documents[name]
@@ -411,6 +423,32 @@ class FakePolarion:
             data = [self._work_item_resource(w) for w in items]
             return httpx.Response(
                 200, json={"data": data, "meta": {"totalCount": len(data)}}
+            )
+
+        # Single test record (get_test_record); anchor BEFORE list route --
+        # 3 extra path segments (case project/id/iteration), so list regex
+        # ``$`` never claim this path; keep both explicit for clarity.
+        single_record = re.search(
+            r"/testruns/([^/]+)/testrecords/([^/]+)/([^/]+)/(\d+)$", path
+        )
+        if single_record:
+            run_id, case_project, case_id, iteration = single_record.groups()
+            tr = self.seeds.test_runs.get(run_id)
+            if (
+                tr is None
+                or tr.is_template
+                or case_project != PROJECT
+                or case_id != TESTCASE_ID
+                # Same range as list route -- seeds serve tr.iterations records.
+                or int(iteration) >= tr.iterations
+            ):
+                return httpx.Response(404, json={"errors": [{"status": "404"}]})
+            return httpx.Response(
+                200,
+                json={
+                    "data": self._test_record_detail_resource(tr, int(iteration)),
+                    "included": self._author_included(),
+                },
             )
 
         # Test records of one run; testResultId filter server-side. No meta
