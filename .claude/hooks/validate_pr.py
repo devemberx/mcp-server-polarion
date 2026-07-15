@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""PreToolUse hook: block PR/issue Bash invocations that violate repo conventions.
+"""PreToolUse hook: block PR Bash invocations that violate repo conventions.
 
-Triggered on: gh pr (create|edit|comment), gh issue (create|edit|comment),
-gh api .../pulls/... or .../issues/...
+Triggered on: gh pr (create|edit|comment), gh api .../pulls/...
+Issue commands live in validate_issue.py.
+
+Regex + body/title parsers duplicated in validate_issue.py — standalone
+scripts, no shared import; keep in sync.
 
 Rules:
   1. English-only — no non-ASCII letters. Common typographic punctuation
@@ -53,7 +56,6 @@ TITLE_LIMIT = 50
 
 PR_CREATE_EDIT_RE = re.compile(r"\bgh\s+pr\s+(create|edit)\b")
 PR_COMMENT_RE = re.compile(r"\bgh\s+pr\s+comment\b")
-ISSUE_CMD_RE = re.compile(r"\bgh\s+issue\s+(create|edit|comment)\b")
 GH_API_RE = re.compile(r"\bgh\s+api\b")
 
 
@@ -121,9 +123,7 @@ def classify(cmd: str) -> str | None:
         and "/reviews" not in cmd
     ):
         return "pr"
-    if PR_COMMENT_RE.search(cmd) or ISSUE_CMD_RE.search(cmd):
-        return "other"
-    if GH_API_RE.search(cmd) and "/issues/" in cmd:
+    if PR_COMMENT_RE.search(cmd):
         return "other"
     return None
 
@@ -134,12 +134,14 @@ def extract_body(cmd: str) -> str | None:
     except ValueError:
         return None
 
+    # gh api: -F/-f = field flags; gh subcommands: -F = --body-file shorthand.
+    api = GH_API_RE.search(cmd) is not None
     i = 0
     while i < len(argv):
         a = argv[i]
         nxt = argv[i + 1] if i + 1 < len(argv) else None
 
-        if a == "--body" and nxt is not None:
+        if a in {"--body", "-b"} and nxt is not None:
             return nxt
         if a.startswith("--body="):
             return a[len("--body=") :]
@@ -147,15 +149,18 @@ def extract_body(cmd: str) -> str | None:
             return _read_file(nxt)
         if a.startswith("--body-file="):
             return _read_file(a[len("--body-file=") :])
-        if (
-            a in {"-F", "-f", "--field", "--raw-field"}
-            and nxt is not None
-            and nxt.startswith("body=")
-        ):
-            val = nxt[len("body=") :]
-            if val.startswith("@"):
-                return _read_file(val[1:])
-            return val
+        if api:
+            if (
+                a in {"-F", "-f", "--field", "--raw-field"}
+                and nxt is not None
+                and nxt.startswith("body=")
+            ):
+                val = nxt[len("body=") :]
+                if val.startswith("@"):
+                    return _read_file(val[1:])
+                return val
+        elif a == "-F" and nxt is not None:
+            return _read_file(nxt)
         i += 1
     return None
 

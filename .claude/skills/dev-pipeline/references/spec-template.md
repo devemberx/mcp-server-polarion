@@ -51,6 +51,12 @@ vs flat action body, post-write delay implications.
 - `tests/...` — what changes
 - Registration: `tools/__init__.py`, `EXPECTED_TOOL_NAMES`, eval coverage entry
 
+## Related open issues — optional
+
+Open `follow-up` (or other) issues touching this domain, from the Stage 1
+queue check. One bullet per issue: `#N — absorbed into this spec` or
+`#N — deferred: <reason>`.
+
 ## UNVERIFIED — required, may be empty
 
 Open questions the researcher could not confirm from docs. Each item becomes

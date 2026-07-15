@@ -1,0 +1,31 @@
+name: Follow-up
+description: Deferred item from a PR review or pipeline run — work for a later PR
+labels: ["follow-up"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For items deferred out of a PR's scope (review findings, live-test
+        discoveries). One issue per item — keep them independently closeable.
+  - type: input
+    id: origin
+    attributes:
+      label: Origin
+      description: Where this came from — source PR and review round, or other trigger.
+      placeholder: "PR #178, review round 2"
+    validations:
+      required: true
+  - type: textarea
+    id: finding
+    attributes:
+      label: Finding
+      description: What was found — path:line, severity, and the problem or opportunity.
+    validations:
+      required: true
+  - type: textarea
+    id: suggested-fix
+    attributes:
+      label: Suggested fix
+      description: Concrete suggestion from the reviewer, if any.
+    validations:
+      required: false
