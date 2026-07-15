@@ -14,8 +14,8 @@ Rules:
      (GitHub renders form submissions in that shape). Interactive/--web
      creation has no body to inspect — the web chooser enforces the form.
 
-Regex + body/title parser block duplicated in validate_pr.py — hooks run
-standalone on system python3, no shared import; keep both copies in sync.
+Regex + body/title parsers duplicated in validate_pr.py — standalone
+scripts, no shared import; keep in sync.
 
 Exit 0 = allow, exit 2 = block.
 """
@@ -28,7 +28,6 @@ import shlex
 import sys
 from pathlib import Path
 
-# Block below duplicated in validate_pr.py — keep in sync.
 NON_ASCII_RE = re.compile(r"[^\x00-\x7F]")
 # Typographic punctuation allowed: formatting not language.
 TYPOGRAPHIC_RE = re.compile(
@@ -219,7 +218,7 @@ def load_template_map() -> dict[str, list[str]]:
             if item.strip().strip("\"'")
         ]
         required: list[str] = []
-        # Chunk 0 = preamble before first field; fields follow.
+        # Chunk 0 = preamble before first field.
         for chunk in FIELD_SPLIT_RE.split(text)[1:]:
             field_label = FIELD_LABEL_RE.search(chunk)
             if field_label is None:  # markdown items carry no label

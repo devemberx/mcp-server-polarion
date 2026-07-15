@@ -4,8 +4,8 @@
 Triggered on: gh pr (create|edit|comment), gh api .../pulls/...
 Issue commands live in validate_issue.py.
 
-Regex + body/title parser block duplicated in validate_issue.py — hooks run
-standalone on system python3, no shared import; keep both copies in sync.
+Regex + body/title parsers duplicated in validate_issue.py — standalone
+scripts, no shared import; keep in sync.
 
 Rules:
   1. English-only — no non-ASCII letters. Common typographic punctuation
@@ -29,7 +29,6 @@ import shlex
 import sys
 from pathlib import Path
 
-# Block below duplicated in validate_issue.py — keep in sync.
 NON_ASCII_RE = re.compile(r"[^\x00-\x7F]")
 # Typographic punctuation allowed: formatting not language.
 TYPOGRAPHIC_RE = re.compile(
