@@ -14,8 +14,10 @@ class TestRecordSummary(BaseModel):
     # pytest collect Test*-named classes on import; opt out.
     __test__ = False
 
-    # Full "project/WI-id" from relationships.testCase; record 5-segment id
-    # never parsed. test_case_id + iteration = record identity within run.
+    # record_id = resource 5-segment id verbatim (update_test_records input);
+    # never parsed. test_case_id = full "project/WI-id" from
+    # relationships.testCase; + iteration = record identity within run.
+    record_id: str = ""
     test_case_id: str
     iteration: int = 0
     result: str = ""
@@ -219,19 +221,22 @@ class TestRecordUpdateSpec(BaseModel):
         default=None, description="Comment text, sent verbatim."
     )
     comment_format: Literal["text/plain", "text/html"] = "text/plain"
-    defect_work_item_id: str | None = Field(
+    defect_id: str | None = Field(
         default=None,
-        description="2-segment '{projectId}/{workItemId}' defect link.",
+        description=(
+            "Defect link: 'WorkItemId' or 'ProjectId/WorkItemId'; a bare id "
+            "resolves in the run's project."
+        ),
     )
 
     @model_validator(mode="after")
     def _require_effective_change(self) -> TestRecordUpdateSpec:
         # comment_format alone carries no intent -- needs comment/result/defect too.
-        effective = self.result or self.comment or self.defect_work_item_id
+        effective = self.result or self.comment or self.defect_id
         if not effective:
             msg = (
                 f"test record '{self.record_id}': no effective change -- set "
-                "at least one of result/comment/defect_work_item_id."
+                "at least one of result/comment/defect_id."
             )
             raise ValueError(msg)
         return self

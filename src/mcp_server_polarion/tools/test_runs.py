@@ -482,12 +482,15 @@ _RECORD_ID_SEGMENTS = 5
 
 def _build_update_test_record_resource(
     *,
+    project_id: str,
     spec: TestRecordUpdateSpec,
 ) -> dict[str, JsonValue]:
     """One ``testrecords`` resource for bulk PATCH; skip unset so update
     never blank existing attribute. ``id`` = ``spec.record_id`` verbatim --
-    record ids never parsed. Spec validator guarantee at least one effective
-    field survive.
+    record ids never parsed. Defect id qualified: bare id pass guard via
+    *project_id* fallback but store dangling unqualified -- qualify keep
+    guard and payload on same id. Spec validator guarantee at least one
+    effective field survive.
     """
     attributes: dict[str, JsonValue] = {}
     if spec.result:
@@ -503,20 +506,27 @@ def _build_update_test_record_resource(
     # store, prior values keep.
     if attributes:
         resource["attributes"] = attributes
-    if spec.defect_work_item_id:
+    if spec.defect_id:
         resource["relationships"] = {
-            "defect": {"data": {"type": "workitems", "id": spec.defect_work_item_id}}
+            "defect": {
+                "data": {
+                    "type": "workitems",
+                    "id": qualify_work_item_id(spec.defect_id, project_id),
+                }
+            }
         }
     return resource
 
 
 def _build_update_test_records_payload(
     *,
+    project_id: str,
     specs: list[TestRecordUpdateSpec],
 ) -> dict[str, JsonValue]:
     """JSON:API body for bulk ``PATCH /projects/{p}/testruns/{r}/testrecords``."""
     data: list[JsonValue] = [
-        _build_update_test_record_resource(spec=spec) for spec in specs
+        _build_update_test_record_resource(project_id=project_id, spec=spec)
+        for spec in specs
     ]
     return {"data": data}
 
@@ -537,7 +547,7 @@ async def update_test_records(
     test_run_id: str = Field(
         min_length=1, description="Test run ID (e.g. 'TR-2026-01')."
     ),
-    records: list[TestRecordUpdateSpec] = Field(  # noqa: B008
+    items: list[TestRecordUpdateSpec] = Field(  # noqa: B008
         min_length=1,
         max_length=MAX_BULK_ITEMS,
         description="Per-record changes (1-50); unset fields stay unchanged.",
@@ -560,16 +570,16 @@ async def update_test_records(
 
     Returns the echoed record_ids only — re-read via list_test_records.
     result must already be a value the run uses (discover via
-    list_test_records) or the write is rejected; defect_work_item_id must
+    list_test_records) or the write is rejected; defect_id must
     reference an existing work item or the write is rejected.
     """
     client = get_client(ctx)
-    ensure_unique_ids((spec.record_id for spec in records), label="record_id")
+    ensure_unique_ids((spec.record_id for spec in items), label="record_id")
 
-    payload = _build_update_test_records_payload(specs=records)
+    payload = _build_update_test_records_payload(project_id=project_id, specs=items)
 
     prefix = f"{project_id}/{test_run_id}/"
-    for index, spec in enumerate(records):
+    for index, spec in enumerate(items):
         with reraise_with_item_context(index, spec.record_id):
             segments = spec.record_id.split("/")
             if len(segments) != _RECORD_ID_SEGMENTS or not spec.record_id.startswith(
@@ -585,7 +595,11 @@ async def update_test_records(
     await guard_test_record_defect_targets(
         client,
         project_id,
-        [spec.defect_work_item_id for spec in records if spec.defect_work_item_id],
+        (
+            qualify_work_item_id(spec.defect_id, project_id)
+            for spec in items
+            if spec.defect_id
+        ),
     )
 
     if dry_run:
@@ -617,7 +631,7 @@ async def update_test_records(
     return TestRecordsUpdateResult(
         updated=True,
         dry_run=False,
-        record_ids=[spec.record_id for spec in records],
+        record_ids=[spec.record_id for spec in items],
         payload_preview=None,
     )
 
@@ -707,8 +721,8 @@ async def list_test_records(  # noqa: PLR0913
 
     Filter by result (e.g. 'failed') or omit for all; not-yet-executed
     records have empty result. Lucene query is NOT supported here. Returns
-    summaries — test_case_id + iteration identify a record; defect_id links
-    the failure work item.
+    summaries — record_id is the exact id update_test_records takes;
+    defect_id links the failure work item.
     """
     client = get_client(ctx)
     params: dict[str, str | int] = {

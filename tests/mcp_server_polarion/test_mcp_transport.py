@@ -501,3 +501,16 @@ class TestReadmeToolTable:
             f"README {section} tool table out of sync — "
             f"add rows for {missing}; drop stale rows {stale}"
         )
+
+    def test_prose_count_matches_registration(self) -> None:
+        # Tables marker-synced above; prose "**N tools**" claim drift silent
+        # without this (went stale at #178).
+        readme = _README_PATH.read_text(encoding="utf-8")
+        claims = re.findall(r"\*\*(\d+) tools?\*\*", readme)
+        assert len(claims) == 1, (
+            f"README must claim tool count once as '**N tools**', found {claims}"
+        )
+        assert int(claims[0]) == len(EXPECTED_TOOL_NAMES), (
+            f"README claims {claims[0]} tools; registered {len(EXPECTED_TOOL_NAMES)} — "
+            f"update the '**N tools**' line"
+        )

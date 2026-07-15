@@ -88,13 +88,13 @@ class TestTestRecordUpdateSpec:
             result="passed",
             comment="looks good",
             comment_format="text/html",
-            defect_work_item_id="P/WI-2",
+            defect_id="P/WI-2",
         )
         assert spec.record_id == "P/TR-1/P/WI-1/0"
         assert spec.result == "passed"
         assert spec.comment == "looks good"
         assert spec.comment_format == "text/html"
-        assert spec.defect_work_item_id == "P/WI-2"
+        assert spec.defect_id == "P/WI-2"
 
     def test_default_comment_format_is_text_plain(self):
         spec = TestRecordUpdateSpec(record_id="P/TR-1/P/WI-1/0", result="passed")
