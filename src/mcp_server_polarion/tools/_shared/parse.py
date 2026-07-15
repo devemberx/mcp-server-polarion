@@ -303,7 +303,7 @@ def parse_work_item_summaries(
 class TestRecordSummaryKwargs(TypedDict):
     """Kwargs shape from ``parse_test_record_summary_kwargs``."""
 
-    record_id: str
+    id: str
     test_case_id: str
     iteration: int
     result: str
@@ -331,7 +331,7 @@ def parse_test_record_summary_kwargs(
     iteration = attributes.get("iteration", 0)
     executed_by_id = extract_relationship_id(relationships, "executedBy")
     return {
-        "record_id": safe_str(item.get("id", "")),
+        "id": safe_str(item.get("id", "")),
         "test_case_id": extract_relationship_id(relationships, "testCase"),
         # bool is int subclass -- reject as iteration.
         "iteration": iteration

@@ -229,7 +229,7 @@ _BODY_WRITE_TO_SOURCE: dict[str, tuple[str, str, str, tuple[str, ...], bool]] = 
     "update_document": (
         "home_page_content_html",
         "get_document",
-        "include_homepage_content_html",
+        "include_home_page_content_html",
         ("project_id", "space_id", "document_name"),
         False,
     ),

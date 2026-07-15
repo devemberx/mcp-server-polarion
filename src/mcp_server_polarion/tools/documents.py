@@ -306,7 +306,7 @@ class _DocumentMeta:
     status: str = ""
     updated: str = ""
     author_id: str = ""
-    updated_by_id: str = ""
+    last_updated_by_id: str = ""
 
 
 def _extract_document_from_module(
@@ -334,7 +334,7 @@ def _extract_document_from_module(
         status=safe_str(attrs.get("status", "")),
         updated=safe_str(attrs.get("updated", "")),
         author_id=extract_relationship_id(relationships, "author"),
-        updated_by_id=extract_relationship_id(relationships, "updatedBy"),
+        last_updated_by_id=extract_relationship_id(relationships, "updatedBy"),
     )
 
 
@@ -395,7 +395,7 @@ async def _discover_documents(
             status=meta.status,
             updated=meta.updated,
             author_name=user_names.get(meta.author_id, ""),
-            updated_by_name=user_names.get(meta.updated_by_id, ""),
+            last_updated_by_name=user_names.get(meta.last_updated_by_id, ""),
         )
         for (space, name), meta in documents.items()
     )
@@ -415,7 +415,7 @@ def _extract_first_resource_id(response: dict[str, object]) -> str | None:
     return full_id or None
 
 
-def _extract_created_module_name(response: dict[str, object]) -> str | None:
+def _extract_created_document_name(response: dict[str, object]) -> str | None:
     """Document name from 201 create response (name may contain ``/``);
     ``None`` on unexpected shape.
     """
@@ -482,7 +482,7 @@ def _build_update_document_payload(  # noqa: PLR0913
 
 def _build_create_document_payload(  # noqa: PLR0913
     *,
-    module_name: str,
+    document_name: str,
     title: str,
     type: str,
     home_page_content_html: str,
@@ -493,7 +493,7 @@ def _build_create_document_payload(  # noqa: PLR0913
 ) -> dict[str, JsonValue]:
     """JSON:API POST body for ``.../spaces/{s}/documents``; skip unset."""
     attributes: dict[str, JsonValue] = {
-        "moduleName": module_name,
+        "moduleName": document_name,
         "title": title,
         "type": type,
     }
@@ -589,7 +589,7 @@ async def list_documents(
             status=doc.status,
             updated=doc.updated,
             author_name=doc.author_name,
-            last_updated_by_name=doc.updated_by_name,
+            last_updated_by_name=doc.last_updated_by_name,
         )
         for doc in page_slice
     ]
@@ -617,14 +617,14 @@ async def get_document(
     document_name: str = Field(
         description="Document name within space_id.",
     ),
-    include_homepage_content_html: bool = Field(
+    include_home_page_content_html: bool = Field(
         default=False,
         description="Fill content_html with raw HTML for round-trip editing.",
     ),
 ) -> DocumentDetail:
     """Get a document's metadata: title/type/status/timestamps/editors/custom fields.
 
-    include_homepage_content_html=True fills content_html with raw
+    include_home_page_content_html=True fills content_html with raw
     homePageContent HTML — the required source for
     update_document(home_page_content_html=...). That body is inline prose
     only — headings and embedded work items render via read_document.
@@ -674,10 +674,10 @@ async def get_document(
     # ids = join keys into included users; surfaced short-form for requery too.
     user_names = parse_included_user_name_map(response)
     author_full = extract_relationship_id(relationships, "author")
-    updated_by_full = extract_relationship_id(relationships, "updatedBy")
+    last_updated_by_full = extract_relationship_id(relationships, "updatedBy")
 
     content_html = ""
-    if include_homepage_content_html:
+    if include_home_page_content_html:
         # Verbatim {type,value} so it round-trip through update_document.
         content_obj = attributes.get("homePageContent", {})
         if isinstance(content_obj, dict):
@@ -691,8 +691,8 @@ async def get_document(
         updated=safe_str(attributes.get("updated", "")),
         author_id=extract_short_id(author_full),
         author_name=user_names.get(author_full, ""),
-        last_updated_by_id=extract_short_id(updated_by_full),
-        last_updated_by_name=user_names.get(updated_by_full, ""),
+        last_updated_by_id=extract_short_id(last_updated_by_full),
+        last_updated_by_name=user_names.get(last_updated_by_full, ""),
         content_html=content_html,
         auto_suspect=bool(attributes.get("autoSuspect", False)),
         uses_outline_numbering=bool(attributes.get("usesOutlineNumbering", False)),
@@ -784,7 +784,7 @@ async def read_document(  # noqa: PLR0913
 
     Interleaves headings, work-item descriptions, and prose. Synthesis
     output: NEVER feed it to update_document — round-trip via
-    get_document(include_homepage_content_html=True). For metadata-only
+    get_document(include_home_page_content_html=True). For metadata-only
     extraction use list_work_items with SQL.
     """
     # read_document_parts handle fetch + error mapping (@mcp.tool return
@@ -881,7 +881,7 @@ async def update_document(  # noqa: PLR0913
         max_length=MAX_BODY_HTML_LEN,
         description=(
             "New body as raw HTML from "
-            "get_document(include_homepage_content_html=True); '' rejected; "
+            "get_document(include_home_page_content_html=True); '' rejected; "
             "anchorless blocks get id= auto-stamped. New tables, captions, or "
             "other Polarion constructs: call get_html_recipes first and adapt "
             "a template."
@@ -913,7 +913,7 @@ async def update_document(  # noqa: PLR0913
     PATCHes only supplied attributes — omitted fields stay unchanged. Fetch
     via get_document BEFORE updating. home_page_content_html is raw Polarion
     HTML, sent verbatim — source from
-    get_document(include_homepage_content_html=True). An empty string is
+    get_document(include_home_page_content_html=True). An empty string is
     rejected — pass '<p></p>' for near-empty.
 
     Body rules:
@@ -1045,7 +1045,7 @@ async def update_document(  # noqa: PLR0913
     tags={"write"},
     timeout=60.0,
     annotations={
-        # Additive: non-destructive, non-idempotent (duplicate module_name 409s).
+        # Additive: non-destructive, non-idempotent (duplicate document_name 409s).
         "readOnlyHint": False,
         "destructiveHint": False,
         "idempotentHint": False,
@@ -1059,10 +1059,10 @@ async def create_document(  # noqa: PLR0913
         min_length=1,
         description="Space ID ('_default' = default space).",
     ),
-    module_name: str = Field(
+    document_name: str = Field(
         min_length=1,
         description=(
-            "Document identifier (e.g. 'MySpecV1'); unique within space_id, "
+            "Document name (e.g. 'MySpecV1'); unique within space_id, "
             "appears in the document URL."
         ),
     ),
@@ -1105,7 +1105,7 @@ async def create_document(  # noqa: PLR0913
 ) -> DocumentCreateResult:
     """Create a document in a space.
 
-    module_name must be unique in the space — a duplicate name conflicts;
+    document_name must be unique in the space — a duplicate name conflicts;
     check list_documents first. type/status and custom_fields keys are
     validated on write — resolve ids via list_document_enum_options first.
 
@@ -1113,7 +1113,7 @@ async def create_document(  # noqa: PLR0913
     HTML. Markdown tables get native Polarion styling; a paragraph starting
     'Table:' directly after a table becomes a numbered caption widget.
     Post-create edits round-trip raw HTML via
-    get_document(include_homepage_content_html=True) and update_document;
+    get_document(include_home_page_content_html=True) and update_document;
     add work items via move_work_item_to_document.
     """
     client = get_client(ctx)
@@ -1140,7 +1140,7 @@ async def create_document(  # noqa: PLR0913
         )
 
     payload = _build_create_document_payload(
-        module_name=module_name,
+        document_name=document_name,
         title=title,
         type=type,
         home_page_content_html=home_page_content_html,
@@ -1176,7 +1176,7 @@ async def create_document(  # noqa: PLR0913
     except PolarionError as exc:
         raise RuntimeError(f"Failed to create document: {exc.message}") from exc
 
-    new_name = _extract_created_module_name(response)
+    new_name = _extract_created_document_name(response)
     if new_name is None:
         raise RuntimeError(
             "Polarion accepted the create request but returned no document name. "

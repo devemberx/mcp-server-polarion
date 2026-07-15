@@ -49,6 +49,16 @@ CI: `ruff check` → `ruff format --check` → `mypy` → `pytest` (`--cov-fail-
 - No `WARNING:`/`NOTE:` prefixes, no dev-narrative, no banner dividers. CLAUDE.md dev-only — MCP-user info live in `@mcp.tool` docstring. Module docstrings = why module exists; constraints inline next to what they constrain.
 - Comments + dev docstrings caveman-style: drop articles/filler, compress verbs — `# Custom key match standard attr = silent shadow.` One line per point, why not what; never restate self-evident code; multi-line only when each line carry distinct fact. Technical terms/ids/API names/numbers exact; no invented abbreviations. Exempt (LLM-facing, eval-gated): `@mcp.tool` docstrings + `Field(description=...)` — normal prose per Docstrings rule above. `TODO` = `# TODO(#issue): concrete action`, never stray. No dead code; keep comments sync when code change.
 
+## Naming Rules (LLM surface: params + model fields)
+
+- Cross-resource ref = full-noun `<resource>_id` (`project_id`, `work_item_id`, `test_run_id`, `test_case_id`, `comment_id`, `field_id`, `defect_id`, `template_id`). Documents own no id — address = `space_id` + `document_name` pair; `module_*` never on LLM surface (API `moduleName` map inside payload builder only).
+- Other location = `target_*` prefix (`target_project_id`, `target_space_id`, `target_document_name`, `target_work_item_id`).
+- Own id in own Summary/Detail model = bare `id`. Composite resource (work_item_**link**, test_**record**) drop parent prefix in own echo/selector fields (`link_id(s)`, `record_id(s)`); tool names + cross-domain refs stay full.
+- Create spec mirror resource attributes (client-supplied id = bare `id`, e.g. `TestRunCreateSpec.id`); update spec = target selector (`work_item_id`/`test_run_id`/`record_id`) + changed attributes.
+- Polarion camelCase → snake_case split at case boundary exact (`homePageContent` → `home_page_content`, `finishedOn` → `finished_on`); ad-hoc compounds banned (never "homepage").
+- Person fields = `<role>_id`/`<role>_name` parallel scalar pairs (author, assignee(s), last_updated_by, executed_by); list/summary = name only, detail add id.
+- Bools: state field = API-derived (`is_template`, `resolved`, `suspect`); read-expansion flag = `include_*_html`; list filter param describe result set (`templates`) — 1:1 field-name match not required.
+
 ## Polarion API Gotchas
 
 - Baseline: Polarion REST API v2506 — assume that version behavior.

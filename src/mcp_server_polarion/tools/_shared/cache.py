@@ -61,7 +61,7 @@ class DiscoveredDocument(NamedTuple):
     status: str = ""
     updated: str = ""
     author_name: str = ""
-    updated_by_name: str = ""
+    last_updated_by_name: str = ""
 
 
 # 60s cap window where stale entry accept admin-removed option.

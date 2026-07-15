@@ -14,10 +14,10 @@ class TestRecordSummary(BaseModel):
     # pytest collect Test*-named classes on import; opt out.
     __test__ = False
 
-    # record_id = resource 5-segment id verbatim (update_test_records input);
-    # never parsed. test_case_id = full "project/WI-id" from
+    # id = resource 5-segment id verbatim; never parsed. Pass as record_id
+    # in update_test_records items. test_case_id = full "project/WI-id" from
     # relationships.testCase; + iteration = record identity within run.
-    record_id: str = ""
+    id: str = ""
     test_case_id: str
     iteration: int = 0
     result: str = ""
