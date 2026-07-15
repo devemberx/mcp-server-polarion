@@ -13,6 +13,7 @@ from mcp_server_polarion.models import (
     EnumOption,
     Hyperlink,
     PaginatedResult,
+    TestRecordDetail,
     TestRecordSummary,
     TestRunDetail,
     TestRunSummary,
@@ -412,6 +413,45 @@ def parse_test_run_summary_kwargs(
     }
 
 
+def parse_test_record_detail(
+    item: dict[str, object],
+    *,
+    project_id: str,
+    test_run_id: str,
+    user_names: Mapping[str, str] | None = None,
+) -> TestRecordDetail:
+    """JSON:API testrecord resource → ``TestRecordDetail``. Expect
+    ``TEST_RECORD_DETAIL_FIELDS`` + ``include=executedBy``; comment pass
+    through as raw HTML, round-trip unchanged. ``user_names`` map full
+    user id → display name (from included ``users``).
+    """
+    attributes = item.get("attributes", {})
+    if not isinstance(attributes, dict):
+        attributes = {}
+    relationships = item.get("relationships", {})
+    if not isinstance(relationships, dict):
+        relationships = {}
+
+    comment_obj = attributes.get("comment", {})
+    comment_html = ""
+    if isinstance(comment_obj, dict):
+        comment_html = safe_str(comment_obj.get("value", ""))
+
+    summary_kwargs = parse_test_record_summary_kwargs(item, dict(user_names or {}))
+
+    return TestRecordDetail(
+        **summary_kwargs,
+        project_id=project_id,
+        test_run_id=test_run_id,
+        # Name lookup (summary kwargs) key full id; output short, parity author_id.
+        executed_by_id=extract_short_id(
+            extract_relationship_id(relationships, "executedBy")
+        ),
+        test_case_revision=safe_str(attributes.get("testCaseRevision", "")),
+        comment_html=comment_html,
+    )
+
+
 def parse_test_run_summaries(response: dict[str, object]) -> list[TestRunSummary]:
     """Test-runs list response → ``TestRunSummary`` models. Take whole
     response (not just ``data``) to resolve author names from included
@@ -561,6 +601,7 @@ __all__: list[str] = [
     "parse_hyperlinks",
     "parse_included_user_name_map",
     "parse_included_work_item_map",
+    "parse_test_record_detail",
     "parse_work_item_detail",
     "parse_work_item_summaries",
     "parse_work_item_summary_kwargs",

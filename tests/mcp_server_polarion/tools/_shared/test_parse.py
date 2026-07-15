@@ -18,6 +18,7 @@ from mcp_server_polarion.tools._shared.parse import (
     parse_hyperlinks,
     parse_included_user_name_map,
     parse_included_work_item_map,
+    parse_test_record_detail,
     parse_test_record_summaries,
     parse_test_record_summary_kwargs,
     parse_test_run_detail,
@@ -611,6 +612,137 @@ class TestParseTestRunDetail:
         assert detail.content_html == ""
         assert detail.author_id == ""
         assert detail.custom_fields == {}
+
+
+class TestParseTestRecordDetail:
+    """Tests for `parse_test_record_detail`."""
+
+    def test_full_record_resolves_all_fields(self) -> None:
+        item: dict[str, object] = {
+            "id": "proj/TR-1/proj/TC-42/0",
+            "attributes": {
+                "executed": "2026-06-01T10:00:00Z",
+                "duration": 12.5,
+                "result": "failed",
+                "iteration": 3,
+                "testCaseRevision": "42",
+                "comment": {"type": "text/html", "value": "<p>note</p>"},
+            },
+            "relationships": {
+                "testCase": {"data": {"id": "proj/TC-42"}},
+                "executedBy": {"data": {"id": "proj/jdoe"}},
+                "defect": {"data": {"id": "proj/DEF-7"}},
+            },
+        }
+        detail = parse_test_record_detail(
+            item,
+            project_id="proj",
+            test_run_id="TR-1",
+            user_names={"proj/jdoe": "J Doe"},
+        )
+        assert detail.project_id == "proj"
+        assert detail.test_run_id == "TR-1"
+        assert detail.test_case_id == "proj/TC-42"
+        assert detail.iteration == 3
+        assert detail.result == "failed"
+        assert detail.executed == "2026-06-01T10:00:00Z"
+        assert detail.duration == 12.5
+        assert detail.defect_id == "proj/DEF-7"
+        # Short id output, parity TestRunDetail.author_id; name resolve off full id.
+        assert detail.executed_by_id == "jdoe"
+        assert detail.executed_by_name == "J Doe"
+        assert detail.test_case_revision == "42"
+        assert detail.comment_html == "<p>note</p>"
+
+    def test_plain_text_comment_value_passed_verbatim(self) -> None:
+        item: dict[str, object] = {
+            "id": "proj/TR-1/proj/TC-1/0",
+            "attributes": {"comment": {"type": "text/plain", "value": "plain note"}},
+        }
+        detail = parse_test_record_detail(
+            item, project_id="proj", test_run_id="TR-1", user_names={}
+        )
+        assert detail.comment_html == "plain note"
+
+    def test_comment_absent_defaults_empty(self) -> None:
+        item: dict[str, object] = {
+            "id": "proj/TR-1/proj/TC-1/0",
+            "attributes": {},
+        }
+        detail = parse_test_record_detail(
+            item, project_id="proj", test_run_id="TR-1", user_names={}
+        )
+        assert detail.comment_html == ""
+
+    def test_comment_non_dict_defaults_empty(self) -> None:
+        item: dict[str, object] = {
+            "id": "proj/TR-1/proj/TC-1/0",
+            "attributes": {"comment": "nope"},
+        }
+        detail = parse_test_record_detail(
+            item, project_id="proj", test_run_id="TR-1", user_names={}
+        )
+        assert detail.comment_html == ""
+
+    def test_relationships_block_omitted_defaults_empty_ids(self) -> None:
+        item: dict[str, object] = {
+            "id": "proj/TR-1/proj/TC-1/0",
+            "attributes": {},
+        }
+        detail = parse_test_record_detail(
+            item, project_id="proj", test_run_id="TR-1", user_names={}
+        )
+        assert detail.test_case_id == ""
+        assert detail.executed_by_id == ""
+        assert detail.defect_id == ""
+
+    def test_executed_by_data_null_defaults_empty(self) -> None:
+        item: dict[str, object] = {
+            "id": "proj/TR-1/proj/TC-1/0",
+            "attributes": {},
+            "relationships": {"executedBy": {"data": None}},
+        }
+        detail = parse_test_record_detail(
+            item, project_id="proj", test_run_id="TR-1", user_names={}
+        )
+        assert detail.executed_by_id == ""
+        assert detail.executed_by_name == ""
+
+    def test_non_dict_attributes_default_empty(self) -> None:
+        item: dict[str, object] = {
+            "id": "proj/TR-1/proj/TC-1/0",
+            "attributes": [],
+            "relationships": "nope",
+        }
+        detail = parse_test_record_detail(
+            item, project_id="proj", test_run_id="TR-1", user_names={}
+        )
+        assert detail.test_case_revision == ""
+        assert detail.comment_html == ""
+        assert detail.result == ""
+        assert detail.duration == 0.0
+
+    def test_bool_iteration_rejected_to_zero(self) -> None:
+        item: dict[str, object] = {
+            "id": "proj/TR-1/proj/TC-1/0",
+            "attributes": {"iteration": True},
+        }
+        detail = parse_test_record_detail(
+            item, project_id="proj", test_run_id="TR-1", user_names={}
+        )
+        assert detail.iteration == 0
+
+    def test_user_names_miss_keeps_id_blanks_name(self) -> None:
+        item: dict[str, object] = {
+            "id": "proj/TR-1/proj/TC-1/0",
+            "attributes": {},
+            "relationships": {"executedBy": {"data": {"id": "proj/jdoe"}}},
+        }
+        detail = parse_test_record_detail(
+            item, project_id="proj", test_run_id="TR-1", user_names={}
+        )
+        assert detail.executed_by_id == "jdoe"
+        assert detail.executed_by_name == ""
 
 
 class TestParseComment:

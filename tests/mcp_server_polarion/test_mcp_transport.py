@@ -35,6 +35,7 @@ _READ_TOOL_NAMES: frozenset[str] = frozenset(
         "list_work_items",
         "list_test_runs",
         "list_test_records",
+        "get_test_record",
         "get_test_run",
         "get_sql_query_recipes",
         "get_html_recipes",
@@ -319,6 +320,61 @@ class TestEndToEndInvocation:
         assert body["items"][0]["test_case_id"] == "P1/TC-9"
         assert body["items"][0]["result"] == "passed"
         assert body["items"][0]["executed_by_name"] == "Devember X"
+
+    async def test_get_test_record_round_trip(self, mcp_client: _MCPClient) -> None:
+        with respx.mock(base_url=_BASE, assert_all_called=False) as mock:
+            mock.get("/projects/P1/testruns/TR-1/testrecords/P1/TC-9/0").mock(
+                return_value=httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "type": "testrecords",
+                            "id": "P1/TR-1/P1/TC-9/0",
+                            "attributes": {
+                                "result": "failed",
+                                "duration": 3.5,
+                                "iteration": 0,
+                                "comment": {
+                                    "type": "text/html",
+                                    "value": "<p>Investigate.</p>",
+                                },
+                                "testCaseRevision": "5",
+                            },
+                            "relationships": {
+                                "testCase": {
+                                    "data": {"type": "workitems", "id": "P1/TC-9"}
+                                },
+                                "executedBy": {
+                                    "data": {"type": "users", "id": "P1/devemberx"}
+                                },
+                            },
+                        },
+                        "included": [
+                            {
+                                "type": "users",
+                                "id": "P1/devemberx",
+                                "attributes": {"name": "Devember X"},
+                            }
+                        ],
+                    },
+                )
+            )
+            result = await mcp_client.call_tool(
+                "get_test_record",
+                {
+                    "project_id": "P1",
+                    "test_run_id": "TR-1",
+                    "test_case_id": "P1/TC-9",
+                },
+            )
+
+        body = result.structured_content
+        assert body is not None
+        assert body["test_case_id"] == "P1/TC-9"
+        assert body["result"] == "failed"
+        assert body["executed_by_name"] == "Devember X"
+        assert body["test_case_revision"] == "5"
+        assert body["comment_html"] == "<p>Investigate.</p>"
 
     async def test_polarion_not_found_surfaces_as_tool_error(
         self, mcp_client: _MCPClient

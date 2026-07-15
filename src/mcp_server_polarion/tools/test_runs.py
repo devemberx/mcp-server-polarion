@@ -16,6 +16,7 @@ from mcp_server_polarion.models import (
     JsonValue,
     PaginatedResult,
     TestRecordCreateSpec,
+    TestRecordDetail,
     TestRecordsCreateResult,
     TestRecordSummary,
     TestRecordsUpdateResult,
@@ -34,6 +35,7 @@ from mcp_server_polarion.tools._shared.custom_fields import (
 )
 from mcp_server_polarion.tools._shared.fields import (
     MAX_BULK_ITEMS,
+    TEST_RECORD_DETAIL_FIELDS,
     TEST_RECORD_LIST_FIELDS,
     TEST_RUN_DETAIL_FIELDS,
     TEST_RUN_LIST_FIELDS,
@@ -60,6 +62,7 @@ from mcp_server_polarion.tools._shared.parse import (
     extract_created_full_ids,
     extract_created_short_ids,
     parse_included_user_name_map,
+    parse_test_record_detail,
     parse_test_record_summaries,
     parse_test_run_detail,
     parse_test_run_summaries,
@@ -752,6 +755,81 @@ async def list_test_records(  # noqa: PLR0913
     items = parse_test_record_summaries(response)
 
     return make_page(items, response, page_number, page_size)
+
+
+@mcp.tool(
+    tags={"read"},
+    timeout=60.0,
+    annotations={"readOnlyHint": True},
+)
+async def get_test_record(
+    ctx: Context,
+    project_id: str = Field(description="Polarion project ID."),
+    test_run_id: str = Field(description="Test run ID (e.g. 'TR-2026-01')."),
+    test_case_id: str = Field(
+        description=(
+            "Full test case work item ID 'project/WI-id' as returned by "
+            "list_test_records."
+        )
+    ),
+    iteration: int = Field(
+        default=0, ge=0, description="Record iteration number (0-based)."
+    ),
+) -> TestRecordDetail:
+    """Get full detail of one test-case iteration inside a test run:
+    execution comment and test-case revision.
+
+    Use list_test_records for run-wide summaries, get_test_run for run
+    metadata. comment_html carries the record's raw HTML comment;
+    plain-text comments return as-is. Verify coordinates via
+    list_test_records if not found.
+    """
+    if "/" not in test_case_id:
+        raise ValueError(
+            f"test_case_id '{test_case_id}' must be the full 'project/WI-id' "
+            "form returned by list_test_records, not the short work item ID."
+        )
+    tc_project, tc_id = test_case_id.split("/", 1)
+
+    client = get_client(ctx)
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/testruns/{encode_path_segment(test_run_id)}"
+        f"/testrecords/{encode_path_segment(tc_project)}/{encode_path_segment(tc_id)}"
+        f"/{encode_path_segment(str(iteration))}"
+    )
+    try:
+        response = await client.get(
+            path,
+            params={
+                "fields[testrecords]": TEST_RECORD_DETAIL_FIELDS,
+                "include": "executedBy",
+                "fields[users]": "name",
+            },
+        )
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Test record for case '{test_case_id}' iteration {iteration} not "
+            f"found in test run '{test_run_id}' (project '{project_id}'). "
+            "Use `list_test_records` to discover valid coordinates."
+        ) from exc
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot access test record -- check your POLARION_TOKEN permissions."
+        ) from exc
+    except PolarionError as exc:
+        raise RuntimeError(f"Failed to get test record: {exc.message}") from exc
+
+    data = response.get("data", {})
+    if not isinstance(data, dict):
+        data = {}
+
+    return parse_test_record_detail(
+        data,
+        project_id=project_id,
+        test_run_id=test_run_id,
+        user_names=parse_included_user_name_map(response),
+    )
 
 
 @mcp.tool(
