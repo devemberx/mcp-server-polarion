@@ -628,10 +628,13 @@ async def update_work_item_link(  # noqa: PLR0913
             "Cannot update work item link -- check your POLARION_TOKEN permissions."
         ) from exc
     except PolarionNotFoundError as exc:
-        raise ValueError(f"Link not found (HTTP 404): {exc.message}") from exc
+        raise ValueError(
+            f"Link '{link_id}' not found -- check role/target via "
+            f"`list_work_item_links`."
+        ) from exc
     except PolarionError as exc:
         raise RuntimeError(
-            f"Patch failed (HTTP {exc.status_code}): {exc.message}"
+            f"Failed to update work item link '{link_id}': {exc.message}"
         ) from exc
 
     return WorkItemLinkUpdateResult(

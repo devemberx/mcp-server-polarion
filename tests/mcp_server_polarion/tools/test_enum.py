@@ -209,7 +209,7 @@ class TestListWorkItemEnumOptions:
             status_code=404,
         )
 
-        with pytest.raises(ValueError, match="No enum options"):
+        with pytest.raises(ValueError, match=r"No enum options.*not enum-typed"):
             await list_work_item_enum_options(
                 mock_ctx,
                 project_id="MCP_Test_Project",
@@ -445,7 +445,7 @@ class TestListDocumentEnumOptions:
             status_code=404,
         )
 
-        with pytest.raises(ValueError, match="No enum options"):
+        with pytest.raises(ValueError, match=r"No enum options.*not enum-typed"):
             await list_document_enum_options(
                 mock_ctx,
                 project_id="MCP_Test_Project",
