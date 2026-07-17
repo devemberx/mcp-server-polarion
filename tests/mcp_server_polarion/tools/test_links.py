@@ -1539,7 +1539,7 @@ class TestUpdateWorkItemLinkErrors:
             "no such link", status_code=404
         )
 
-        with pytest.raises(ValueError, match="404"):
+        with pytest.raises(ValueError, match="list_work_item_links"):
             await update_work_item_link(
                 mock_ctx,
                 project_id="MyProj",
@@ -1557,7 +1557,9 @@ class TestUpdateWorkItemLinkErrors:
     ) -> None:
         mock_client.patch.side_effect = PolarionError("bad revision", status_code=400)
 
-        with pytest.raises(RuntimeError, match="400"):
+        with pytest.raises(
+            RuntimeError, match=r"Failed to update work item link.*bad revision"
+        ):
             await update_work_item_link(
                 mock_ctx,
                 project_id="MyProj",

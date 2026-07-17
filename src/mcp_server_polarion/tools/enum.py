@@ -56,7 +56,8 @@ async def _list_enum_options(  # noqa: PLR0913
     except PolarionNotFoundError as exc:
         raise ValueError(
             f"No enum options for field '{field_id}' on {type_label} type "
-            f"'{type_id}' in project '{project_id}'."
+            f"'{type_id}' in project '{project_id}' -- field unknown or not "
+            f"enum-typed."
         ) from exc
     except PolarionAuthError as exc:
         raise PermissionError(
