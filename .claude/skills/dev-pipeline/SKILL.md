@@ -1,21 +1,25 @@
 ---
 name: dev-pipeline
-description: Full feature-development pipeline for this repo — isolated worktree, spec, implementation plan, TDD build, quality gates, then a review→fix loop that only stops when review passes. Each stage delegates to a named project subagent (spec-researcher, pattern-scout, pipeline-implementer, pipeline-reviewer) with a stage-appropriate model. Use when starting any new MCP tool, feature, or multi-file change from scratch; when the user says "new tool/feature" (any language), "run the pipeline", or asks to develop something "the same way as list_test_records". Triggers on `/dev-pipeline`. NOT for one-file tweaks, doc edits, or work already mid-flight — jump to the matching stage instead.
+description: Full feature-development pipeline for this repo — isolated worktree, spec, implementation plan, TDD build, quality gates, then a review→fix loop that only stops when review passes. Each stage delegates to a named project subagent (spec-researcher, pattern-scout, pipeline-implementer, pipeline-simplifier, pipeline-reviewer) with a stage-appropriate model. Use when starting any new MCP tool, feature, or multi-file change from scratch; when the user says "new tool/feature" (any language), "run the pipeline", or asks to develop something "the same way as list_test_records". Triggers on `/dev-pipeline`. NOT for one-file tweaks, doc edits, or work already mid-flight — jump to the matching stage instead.
 ---
 
 # Dev Pipeline
 
 Encode the sequence that shipped `list_test_records` (PR #170): worktree → spec →
-plan → TDD implement → gates → review loop → ship. Main session is the
+plan → TDD implement → gates → simplify → review loop → ship. Main session is the
 **orchestrator**: it sequences stages, holds user approvals, spawns the stage
 agents, and merges their reports. Subagents never spawn other subagents
 (hard rule here — every paraphrase hop loses information).
 
 ```
- 0.Worktree → 1.Spec →(approve)→ 2.Plan →(approve)→ 3.Implement(TDD) → 4.Gates
-                                                          ▲                │
-                                                          │                ▼
-                                              6.Fix ◄─(findings)─ 5.Review ─(clean)→ 7.Ship
+ 0.Worktree → 1.Spec →(approve)→ 2.Plan →(approve)→ 3.Implement(TDD) → 4.Gates ◄─┐
+                                                                       │         │ (re-run)
+                                              (5.Simplify, first pass) ▼         │
+                                              7.Fix ◄─(findings)─ 6.Review       │
+                                                │                    │(clean)    │
+                                                └────────────────────┼───────────┘
+                                                                     ▼
+                                                                  8.Ship
 ```
 
 ## Data handoff — how stages talk
@@ -33,10 +37,10 @@ Subagents share **no memory and no conversation history**. Three channels only:
 
    | File | Written by | Read by |
    |---|---|---|
-   | `.pipeline/spec.md` | orchestrator (Stage 1, draft before approval; approval freezes it) | pattern-scout, pipeline-implementer, pipeline-reviewer |
-   | `.pipeline/plan.md` | orchestrator (Stage 2, full text shown before approval — via ExitPlanMode or quoted draft; approval freezes it) | pipeline-implementer, pipeline-reviewer |
-   | `.pipeline/review-round-N.md` | orchestrator (Stage 5, reviewer report pasted verbatim) | pipeline-implementer (Stage 6), user on escalation |
-   | `.pipeline/followups.md` | orchestrator (Stage 5, FOLLOW-UPS + unfixed LOW accumulated per round, deduped) | orchestrator (Stage 7 issue export) |
+   | `.pipeline/spec.md` | orchestrator (Stage 1, draft before approval; approved via file link — single copy; approval freezes it) | pattern-scout, pipeline-implementer, pipeline-reviewer |
+   | `.pipeline/plan.md` | orchestrator (Stage 2, approved via file link — single copy; approval freezes it) | pipeline-implementer, pipeline-reviewer |
+   | `.pipeline/review-round-N.md` | orchestrator (Stage 6, reviewer report pasted verbatim) | pipeline-implementer (Stage 7), user on escalation |
+   | `.pipeline/followups.md` | orchestrator (Stage 6, FOLLOW-UPS + unfixed LOW accumulated per round, deduped) | orchestrator (Stage 8 issue export) |
 
 Follow-up questions to an agent you already spawned: `SendMessage` to its id —
 a fresh Agent call starts cold and re-derives everything.
@@ -52,8 +56,9 @@ a fresh Agent call starts cold and re-derives everything.
 | 2 Plan design | main thread (Plan agent for big scope) | opus for Plan agent | architecture trade-offs |
 | 3 Implement | `pipeline-implementer` × 1 per plan task | sonnet | code volume; escalate model per rule below |
 | 4 Gates | main thread | — | deterministic bash; a subagent relays an exit code for tokens |
-| 5 Review | `pipeline-reviewer` | opus | judgment-heavy; fresh context avoids implementer blindness |
-| 6 Fix | `pipeline-implementer` (fix mode) | sonnet | bounded edits from findings list |
+| 5 Simplify | `pipeline-simplifier` | sonnet | code-volume edits over the whole diff; report-only return keeps orchestrator context lean |
+| 6 Review | `pipeline-reviewer` | opus | judgment-heavy; fresh context avoids implementer blindness |
+| 7 Fix | `pipeline-implementer` (fix mode) | sonnet | bounded edits from findings list |
 
 Escalation rule: move one model tier up (`model` param on the Agent call
 overrides the definition) when a stage keeps failing or the domain is
@@ -104,11 +109,16 @@ sequentially, in one Agent call each.
    review-fix round. (update_test_records run, 2026-07-13: a pre-approval
    probe found the real enum path and two silent-ghost writes — flipped a
    guard from "deferred" to "shipped" before any code existed.)
-5. **Show the user the full spec, then ask approval.** The approval request
-   quotes `.pipeline/spec.md` verbatim — the full file text, not a summary or
-   translation (on a redo, the revised sections verbatim) — the user approves
-   text they have read, never a bare "spec ready, approve?" prompt. Fold
-   feedback back into `.pipeline/spec.md`; approval freezes it.
+5. **Ask approval over the file, not a re-print.** Post a clickable link to
+   `.pipeline/spec.md` — as an absolute path: the worktree sits outside the
+   editor's workspace root, so a workspace-relative link may not open — ask
+   the user to read it in the editor, and collect the decision via
+   AskUserQuestion. Never a summary or translation — approval
+   binds only the frozen file's own text — and never a bare "spec ready,
+   approve?" prompt without the link. The file was already written once;
+   quoting it in chat pays output tokens for a second copy. On a redo, quote
+   just the revised sections so the delta is visible in place. Fold feedback
+   back into `.pipeline/spec.md`; approval freezes it.
    Spec changes are cheap here, expensive later.
 
 ## Stage 2 — Plan
@@ -119,12 +129,14 @@ sequentially, in one Agent call each.
 2. Draft the plan in the main thread (or a Plan agent for large scope) in the
    shape of [plan-template.md](references/plan-template.md) — one implementer task per
    Changes entry, live-test items from the spec's UNVERIFIED list under
-   Verification. Use plan mode when available — ExitPlanMode already puts the
-   full plan in front of the user for approval; write it to
-   `.pipeline/plan.md` right after. Without plan mode, copy the template to
-   `.pipeline/plan.md`, fill it, and quote it verbatim in the approval
-   request — same rule as the spec: full file text, not a condensed
-   rendition; the user approves text they have read.
+   Verification. Copy the template to `.pipeline/plan.md`, fill it, and ask
+   approval the Stage 1 step 5 way: file link (absolute path) +
+   AskUserQuestion, no re-print, redo rounds quote only the revised sections.
+   Don't enter plan mode here — ExitPlanMode ships the full plan text as a
+   tool parameter, a second paid copy of a file that already exists. If the
+   session is already in plan mode (user-toggled), ExitPlanMode is the only
+   way out: keep its plan text to a short pointer at `.pipeline/plan.md`;
+   approval still binds the file.
 
 ## Stage 3 — Implement (TDD)
 
@@ -146,7 +158,7 @@ any other executable glue get their failing test before the code —
 diff-cover gates `evals/harness` like `src/`, and a bounced gate is the
 expensive way to rediscover that.
 
-## Stage 4 — Gates (main thread; all must pass before review)
+## Stage 4 — Gates (main thread; all must pass before advancing)
 
 ```bash
 uv run pytest --cov=src/mcp_server_polarion --cov=evals --cov-report=xml
@@ -159,43 +171,71 @@ additionally need a **live test** against the real server — mocks encode your
 assumptions, they cannot falsify them. Feed live findings back into fakes and
 mocks so tests mirror reality (e.g. an endpoint that omits `meta.totalCount`).
 
-## Stage 5 — Review (loop entry)
+## Stage 5 — Simplify (first pass only)
+
+Once, after gates first go green and before the first review round — never
+repeated after Stage 7 fix rounds (those are bounded edits, not new
+complexity):
 
 1. **Commit the work first**, in the repo commit format (CLAUDE.md Repo
    Conventions; full rules `.github/CONTRIBUTING.md`, commit-msg hook
-   enforces) — the reviewer diffs `origin/main...HEAD`, and uncommitted
-   changes are invisible to that range. Fix rounds add commits; squash merge
-   collapses them at the end.
+   enforces) — the simplifier diffs `origin/main...HEAD`, and uncommitted
+   work is invisible to that range; a new tool is mostly untracked files, so
+   skipping this turns the pass into a silent no-op.
+2. **Invoke `pipeline-simplifier`** with the worktree path and the diff scope
+   (`git diff origin/main...HEAD`). It sweeps reuse/simplification/efficiency/
+   altitude and applies the fixes itself — quality only, no bug hunting;
+   behavior stays pinned by the Stage 3 tests. Expect its CHANGED / SKIPPED /
+   TESTS report back.
+3. Re-run Stage 4 gates in the main thread, then commit the simplify edits.
+   Gates red on a simplify edit (diff-cover counts its changed lines too):
+   `SendMessage` the simplifier to fix or revert that edit — it holds the
+   context; don't spawn an implementer for it.
+
+Why before review, not after: reviewer rounds stop burning on quality
+findings (those demote to LOW → followups and rarely get fixed), and the
+simplify edits themselves still pass through Stage 6 — new code gets
+reviewed. Placing it after PASS would ship unreviewed edits.
+
+## Stage 6 — Review (loop entry)
+
+1. **Commit anything still uncommitted** — the reviewer diffs
+   `origin/main...HEAD`, and uncommitted changes are invisible to that range.
+   The first pass is already committed by Stage 5; fix rounds add their
+   commits here. Squash merge collapses them at the end.
 2. **Invoke `pipeline-reviewer`** with: `.pipeline/spec.md` and
    `.pipeline/plan.md` paths and the diff scope (`git diff origin/main...HEAD`).
    Give it the spec and plan — **never** the implementer reports or your
    implementation narrative (context bleed defeats the fresh eyes).
 3. Save its report verbatim to `.pipeline/review-round-N.md` — full text, not
-   a paraphrase (Stage 6's implementer and any escalation read it); relay
+   a paraphrase (Stage 7's implementer and any escalation read it); relay
    findings to the user.
 4. Append the round's FOLLOW-UPS and any LOW items you won't fix to
    `.pipeline/followups.md`, deduped across rounds (drop an item a later
    round fixed). NIT stays PR-notes-only. This file is the only thing that
-   survives worktree cleanup — via the Stage 7 export.
-5. **Stop criterion — the only exit:** verdict PASS (zero CRITICAL/MEDIUM
+   survives worktree cleanup — via the Stage 8 export.
+5. BREAKING items ride in the round file to Stage 8 for the PR notes. They
+   never block the verdict; a shipped-surface change the spec did not
+   sanction is a spec-fidelity finding instead, and does block.
+6. **Stop criterion — the only exit:** verdict PASS (zero CRITICAL/MEDIUM
    actionable findings). LOW/NIT don't block, but unfixed LOW must be in
-   `.pipeline/followups.md` by now. PASS → Stage 7. FAIL → Stage 6.
+   `.pipeline/followups.md` by now. PASS → Stage 8. FAIL → Stage 7.
 
-## Stage 6 — Fix, then back to review
+## Stage 7 — Fix, then back to review
 
 - **Invoke `pipeline-implementer` in fix mode** with the
   `.pipeline/review-round-N.md` path and the CRITICAL/MEDIUM items to address;
   behavior changes go through RED→GREEN again, never patch-and-hope.
-- Re-run Stage 4 gates, then **return to Stage 5** — a fresh
+- Re-run Stage 4 gates, then **return to Stage 6** — a fresh
   `pipeline-reviewer` spawn over the new diff, not a reply to the old one.
 - Loop cap: after 3 review rounds with open findings, stop and escalate to the
   user with `.pipeline/review-round-*.md` — grinding further usually means the
   spec or plan is wrong, not the code.
 
-## Stage 7 — Ship (main thread)
+## Stage 8 — Ship (main thread)
 
-- Work is already committed by review time (Stage 5.1); commit here only what
-  is still uncommitted. Commit format, PR checklist handling, squash-merge
+- Work is already committed by review time (Stage 5.1, fix rounds 6.1);
+  commit here only what is still uncommitted. Commit format, PR checklist handling, squash-merge
   rule: CLAUDE.md Repo Conventions / `.github/CONTRIBUTING.md` — restating
   them here would be a third copy that drifts. `.pipeline/` stays uncommitted.
 - **Export follow-ups before cleanup** — `.pipeline/` dies with the worktree,
@@ -207,13 +247,18 @@ mocks so tests mirror reality (e.g. an endpoint that omits `meta.totalCount`).
   in PR notes, not filed.
 - PR Notes: record live-test evidence, NIT findings, and links to the filed
   follow-up issues; add `Fixes #N` for any follow-up issue this PR resolved.
+  List every reviewer BREAKING item verbatim, plus the consequence once: a
+  release containing these must bump major and rerun the full eval suite —
+  the deploy skill reads version policy from here. (Deferring via a
+  deprecation alias is a spec decision; an aliased rename never breaks the
+  surface, so it produces no BREAKING item at all.)
 - CI: after opening the PR, `gh pr checks <PR#> --watch --fail-fast` until
   every check is green — merge is blocked on red anyway, but an unwatched red
   PR rots until a human notices; catch it while the session context is hot.
   Right after `gh pr create` it can exit "no checks reported" before check
   runs register — wait a few seconds and rerun, don't skip the watch.
   A red check is a Stage 4 gate failure, not a review finding: fix, re-run
-  gates, and if code changed re-enter Stage 5. Protection is strict-mode, so
+  gates, and if code changed re-enter Stage 6. Protection is strict-mode, so
   if main moved, update the branch and let checks re-run.
 
 ## Common Rationalizations
@@ -229,15 +274,20 @@ mocks so tests mirror reality (e.g. an endpoint that omits `meta.totalCount`).
 | "Subagent for the gate commands too" | Gates are deterministic bash. A subagent burns tokens to relay an exit code. |
 | "Opus everywhere to be safe" | Model choice is a cost/judgment trade-off; sonnet ships code volume fine, opus earns its cost only on judgment stages. |
 | "Main-thread glue is too small for TDD" | A fake-server handler shipped code-first once and diff-cover bounced the gate; the failing test first was the cheaper path. |
-| "The user approved my summary of it" | A summary is your interpretation. Approval binds only the file text they actually read — quote it verbatim. |
+| "The user approved my summary of it" | A summary is your interpretation. Approval binds only the frozen file's text — link the file and have them read it, never summarize. |
 | "Live checks belong in Stage 4" | When an UNVERIFIED item shapes the spec, a smoke probe before freeze beats re-planning after it — the create_test_records run flipped three guard decisions that way. |
+| "The reviewer will catch the complexity" | Quality findings demote to LOW → followups and rarely get fixed. The Stage 5 simplify pass before review is the cheap path. |
 
 ## Red Flags
 
 - Production code written before its failing test exists.
 - Implementer report accepted without RED evidence.
-- Approval requested without the full spec/plan text in front of the user —
-  or over a summary/translation instead of the frozen file's verbatim text.
+- Approval requested over a summary/translation instead of the frozen file —
+  link the file itself; redo rounds quote only the revised sections.
+- Spec or plan re-printed in full in chat — the file is the single paid copy;
+  approval goes through its link.
+- Simplifier invoked over uncommitted work — `origin/main...HEAD` is empty,
+  the pass silently no-ops; commit first (Stage 5.1).
 - Reviewer given implementer reports or conversation summaries (context bleed).
 - Review round 4+ still producing MEDIUM findings — escalate, don't grind.
 - `.pipeline/` files committed, or a subagent prompted without the file paths
@@ -258,16 +308,20 @@ mocks so tests mirror reality (e.g. an endpoint that omits `meta.totalCount`).
 ## Verification (pipeline exit checklist)
 
 - [ ] Worktree isolated, branch `<type>/<kebab>`, baseline was green at start
-- [ ] Spec and plan each shown to the user verbatim (full file text), approved,
-      frozen in `.pipeline/`; reviewer reports stored verbatim in
-      `.pipeline/review-round-*.md`
+- [ ] Spec and plan each approved via frozen-file link (never a summary or
+      full re-print), frozen in `.pipeline/`; reviewer reports stored verbatim
+      in `.pipeline/review-round-*.md`
 - [ ] Every implementer report carried RED-then-GREEN evidence
 - [ ] All five gate commands pass (pytest, ruff check, ruff format --check,
       mypy, diff-cover); diff-cover ≥90% on changed lines
+- [ ] Stage 5 simplify pass ran once (`pipeline-simplifier`), gates re-run
+      green after
 - [ ] Live test done for contract-boundary changes, findings folded into mocks
 - [ ] Final `pipeline-reviewer` verdict is PASS (zero CRITICAL/MEDIUM)
 - [ ] Every `.pipeline/followups.md` item filed as a `follow-up` issue (or
       explicitly dropped with the user) before worktree cleanup
+- [ ] Reviewer BREAKING items (if any) listed in PR notes with the deploy
+      consequence stated there
 - [ ] PR open with template filled, NIT + live evidence + follow-up issue
       links recorded
 - [ ] PR CI checks all green (`gh pr checks <PR#> --watch --fail-fast`),
