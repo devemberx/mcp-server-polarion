@@ -44,6 +44,7 @@ _READ_TOOL_NAMES: frozenset[str] = frozenset(
         "list_work_item_links",
         "list_document_comments",
         "list_work_item_comments",
+        "list_document_attachments",
     }
 )
 _WRITE_TOOL_NAMES: frozenset[str] = frozenset(

@@ -5,6 +5,7 @@ Import of each module register its ``@mcp.tool``s as side effect.
 
 from __future__ import annotations
 
+import mcp_server_polarion.tools.attachments
 import mcp_server_polarion.tools.comments
 import mcp_server_polarion.tools.documents
 import mcp_server_polarion.tools.enum

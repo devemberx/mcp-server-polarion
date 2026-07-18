@@ -127,6 +127,16 @@ CASES: list[Case] = [
         expect="list_work_item_comments",
     ),
     _case(
+        "TRIG-DOC-ATTACHMENTS",
+        f"What files are attached to the document '{DOC}' in the '{SPACE}' space?",
+        "triggers_tool",
+        intent="Listing a document's attached files must call "
+        "list_document_attachments; rendering the body does not enumerate them.",
+        covers=["list_document_attachments"],
+        expect="list_document_attachments",
+        reject=["read_document"],
+    ),
+    _case(
         "TRIG-DOC-ENUM",
         f"What are the allowed values for the 'status' field on the document "
         f"'{DOC}' in the '{SPACE}' space?",
