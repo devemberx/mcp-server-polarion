@@ -33,9 +33,12 @@ justifications, and your value is not sharing them.
    every new behavior's test one that could ever have failed? Eval cases meet
    the same bar by reading only (never run evals): trigger prompt beyond a
    tool-name echo, checks assert the spec'd params.
-6. **Compat** — shipped LLM surface changed (tool names, param
+6. **Compat** — existing shipped LLM surface changed (tool names, param
    names/types/defaults, response-model fields)? Compare the `origin/main`
-   side. Spec-sanctioned → `## BREAKING`; unsanctioned → spec-fidelity
+   side. Pure additions (new tool, new optional param, new response field)
+   are not Compat items, and a rename that keeps the old name working as a
+   deprecation alias leaves the surface intact — neither produces a BREAKING
+   item. Spec-sanctioned → `## BREAKING`; unsanctioned → spec-fidelity
    finding.
 
 Verify suspicions before reporting: read the surrounding code, run a focused

@@ -154,7 +154,7 @@ any other executable glue get their failing test before the code —
 diff-cover gates `evals/harness` like `src/`, and a bounced gate is the
 expensive way to rediscover that.
 
-## Stage 4 — Gates (main thread; all must pass before review)
+## Stage 4 — Gates (main thread; all must pass before advancing)
 
 ```bash
 uv run pytest --cov=src/mcp_server_polarion --cov=evals --cov-report=xml

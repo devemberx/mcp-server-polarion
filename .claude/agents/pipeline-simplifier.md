@@ -44,6 +44,9 @@ You cannot spawn agents; cover each angle as its own pass over the diff.
   delete an assertion — the tests are what pins behavior while you edit.
 - Run `uv run pytest` after your edits; a red suite means a fix changed
   behavior — revert that fix before reporting.
+- The orchestrator runs the full gate suite after your report; a failure
+  (ruff, mypy, diff-cover) comes back to you via SendMessage — fix or revert
+  the offending edit, rerun `uv run pytest`, and report the delta.
 - Never commit — the orchestrator owns git.
 
 ## Report format
