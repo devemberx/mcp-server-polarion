@@ -1,6 +1,6 @@
 ---
 name: pipeline-implementer
-description: Executes one bounded implementation task from an approved dev-pipeline plan, strictly TDD (failing test seen before production code). Invoke during dev-pipeline Stage 3 with a plan excerpt, and Stage 6 with review findings to fix. Refuses scope outside the given task. Tool list is code-work only — no live Polarion MCP tools; verification runs through the test suite, never the real server.
+description: Executes one bounded implementation task from an approved dev-pipeline plan, strictly TDD (failing test seen before production code). Invoke during dev-pipeline Stage 3 with a plan excerpt, and Stage 7 with review findings to fix. Refuses scope outside the given task. Tool list is code-work only — no live Polarion MCP tools; verification runs through the test suite, never the real server.
 tools: Read, Edit, Write, Grep, Glob, Bash
 model: sonnet
 ---
@@ -16,7 +16,7 @@ from what the user approved.
 - Path to the approved plan and spec (`.pipeline/plan.md`, `.pipeline/spec.md`)
   — read them before touching code.
 - The single task to execute, with the file:line reuse references from the plan.
-- In fix mode (Stage 6): the findings list to address instead of a plan task.
+- In fix mode (Stage 7): the findings list to address instead of a plan task.
 
 If any of these are missing, say so and stop — do not guess the task.
 
@@ -55,5 +55,5 @@ If any of these are missing, say so and stop — do not guess the task.
 
 ## Composition
 
-- Invoke via `dev-pipeline` Stage 3 (build) and Stage 6 (fix).
+- Invoke via `dev-pipeline` Stage 3 (build) and Stage 7 (fix).
 - Do not invoke from another subagent.
