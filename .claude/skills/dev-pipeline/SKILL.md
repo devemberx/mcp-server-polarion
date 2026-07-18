@@ -106,8 +106,10 @@ sequentially, in one Agent call each.
    probe found the real enum path and two silent-ghost writes — flipped a
    guard from "deferred" to "shipped" before any code existed.)
 5. **Ask approval over the file, not a re-print.** Post a clickable link to
-   `.pipeline/spec.md`, ask the user to read it in the editor, and collect the
-   decision via AskUserQuestion. Never a summary or translation — approval
+   `.pipeline/spec.md` — as an absolute path: the worktree sits outside the
+   editor's workspace root, so a workspace-relative link may not open — ask
+   the user to read it in the editor, and collect the decision via
+   AskUserQuestion. Never a summary or translation — approval
    binds only the frozen file's own text — and never a bare "spec ready,
    approve?" prompt without the link. The file was already written once;
    quoting it in chat pays output tokens for a second copy. On a redo, quote
@@ -124,10 +126,13 @@ sequentially, in one Agent call each.
    shape of [plan-template.md](references/plan-template.md) — one implementer task per
    Changes entry, live-test items from the spec's UNVERIFIED list under
    Verification. Copy the template to `.pipeline/plan.md`, fill it, and ask
-   approval the Stage 1.5 way: file link + AskUserQuestion, no re-print, redo
-   rounds quote only the revised sections. Skip plan mode here even when
-   available — ExitPlanMode ships the full plan text as a tool parameter, a
-   second paid copy of a file that already exists.
+   approval the Stage 1 step 5 way: file link (absolute path) +
+   AskUserQuestion, no re-print, redo rounds quote only the revised sections.
+   Don't enter plan mode here — ExitPlanMode ships the full plan text as a
+   tool parameter, a second paid copy of a file that already exists. If the
+   session is already in plan mode (user-toggled), ExitPlanMode is the only
+   way out: keep its plan text to a short pointer at `.pipeline/plan.md`;
+   approval still binds the file.
 
 ## Stage 3 — Implement (TDD)
 
