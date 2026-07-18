@@ -189,6 +189,20 @@ class TestExtractTitle:
     def test_absent(self) -> None:
         assert hook.extract_title("gh issue edit 5 --body y") is None
 
+    def test_api_template_flag_is_not_a_title(self) -> None:
+        # Under gh api, -t = --template (output format), never a title.
+        assert hook.extract_title("gh api /repos/o/r/issues/5 -t '{{.title}}'") is None
+
+    def test_api_field_title(self) -> None:
+        cmd = "gh api /repos/o/r/issues -f title='tools: fix upload'"
+        assert hook.extract_title(cmd) == "tools: fix upload"
+
+    def test_api_field_title_file(self, tmp_path: Path) -> None:
+        f = tmp_path / "t.txt"
+        f.write_text("tools: filed title")
+        cmd = f"gh api /repos/o/r/issues -F title=@{f}"
+        assert hook.extract_title(cmd) == "tools: filed title"
+
 
 class TestLoadTemplateMap:
     def test_builds_label_to_required_fields(self, template_dir: Path) -> None:
