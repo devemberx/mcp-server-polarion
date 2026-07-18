@@ -193,6 +193,16 @@ class TestReadRouting:
         )
         assert "meta" not in _json(response)
 
+    def test_comments_empty_for_other_document(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/spaces/{SPACE}/documents/{PARENT_DOC}/comments",
+        )
+        assert response.status_code == 200
+        assert _json(response)["data"] == []
+        assert _json(response)["included"] == []
+        assert "meta" not in _json(response)
+
     def test_comments_unseeded_document_404(self) -> None:
         response = _get(
             FakePolarion(),
