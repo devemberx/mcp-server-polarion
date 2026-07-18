@@ -12,10 +12,14 @@ agents, and merges their reports. Subagents never spawn other subagents
 (hard rule here — every paraphrase hop loses information).
 
 ```
- 0.Worktree → 1.Spec →(approve)→ 2.Plan →(approve)→ 3.Implement(TDD) → 4.Gates
-                                                          ▲                │
-                                                          │                ▼ (5.Simplify, first pass only)
-                                              7.Fix ◄─(findings)─ 6.Review ─(clean)→ 8.Ship
+ 0.Worktree → 1.Spec →(approve)→ 2.Plan →(approve)→ 3.Implement(TDD) → 4.Gates ◄─┐
+                                                                       │         │ (re-run)
+                                              (5.Simplify, first pass) ▼         │
+                                              7.Fix ◄─(findings)─ 6.Review       │
+                                                │                    │(clean)    │
+                                                └────────────────────┼───────────┘
+                                                                     ▼
+                                                                  8.Ship
 ```
 
 ## Data handoff — how stages talk
