@@ -291,6 +291,15 @@ class TestTitleErrors:
         errs = hook.title_errors("tools: ")
         assert any("scope" in e for e in errs)
 
+    def test_hyphen_scope_allowed(self) -> None:
+        assert hook.title_errors("dev-pipeline: fix stage export") == []
+
+    def test_empty_summary_gets_pointed_message(self) -> None:
+        # Scope was right — wrong-scope message would mislead.
+        errs = hook.title_errors("tools: ")
+        assert any("no summary" in e for e in errs)
+        assert not any("must start" in e for e in errs)
+
     def test_over_length_rejected(self) -> None:
         errs = hook.title_errors("evals(harness): " + "x" * 60)
         assert any("72" in e for e in errs)

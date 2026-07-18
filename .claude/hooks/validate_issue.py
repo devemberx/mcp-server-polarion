@@ -48,7 +48,9 @@ EMOJI_RE = re.compile(
 
 # Title = "scope: summary" / "scope(subscope): summary"; lowercase scope keep
 # it parallel to commit scopes.
-TITLE_SHAPE_RE = re.compile(r"^[a-z0-9_]+(\([a-z0-9_./-]+\))?: \S")
+TITLE_SHAPE_RE = re.compile(r"^[a-z0-9_-]+(\([a-z0-9_./-]+\))?: \S")
+# Scope shape right, nothing after colon — wrong-scope message would mislead.
+TITLE_NO_SUMMARY_RE = re.compile(r"^[a-z0-9_-]+(\([a-z0-9_./-]+\))?:\s*$")
 MAX_TITLE_LEN = 72
 
 ISSUE_CREATE_RE = re.compile(r"\bgh\s+issue\s+create\b")
@@ -115,12 +117,18 @@ def title_errors(title: str) -> list[str]:
     """Title must read 'scope: imperative summary' and stay scannable."""
     errors: list[str] = []
     if not TITLE_SHAPE_RE.match(title):
-        errors.append(
-            "Title must start with a lowercase scope then ': ' — "
-            "'scope: imperative summary' or 'scope(subscope): summary', "
-            "mirroring the commit convention minus the type (the issue type "
-            f"is its label). Got: {title!r}"
-        )
+        if TITLE_NO_SUMMARY_RE.match(title):
+            errors.append(
+                "Title has a scope but no summary — put an imperative "
+                f"summary after ': '. Got: {title!r}"
+            )
+        else:
+            errors.append(
+                "Title must start with a lowercase scope then ': ' — "
+                "'scope: imperative summary' or 'scope(subscope): summary', "
+                "mirroring the commit convention minus the type (the issue "
+                f"type is its label). Got: {title!r}"
+            )
     if len(title) > MAX_TITLE_LEN:
         errors.append(
             f"Title is {len(title)} chars (limit: {MAX_TITLE_LEN}). Put the "
