@@ -295,9 +295,10 @@ class FakePolarion:
                     "updated": TS,
                     "length": attachment.length,
                 },
+                # No project relationship: production sparse fieldset drop it
+                # (verified 2026-07-18) -- author only.
                 "relationships": {
                     "author": {"data": {"id": f"{PROJECT}/{AUTHOR}"}},
-                    "project": {"data": {"id": PROJECT}},
                 },
             }
             for attachment in attachments
@@ -546,12 +547,18 @@ class FakePolarion:
                 200, json=self._document_parts_response(parts.group(1))
             )
 
-        doc_comments = re.search(r"/documents/([^/]+)/comments$", path)
+        # Both document sub-resource collections space-scoped + 404 on
+        # unseeded doc, matching live. No meta block on normal page -- live
+        # emit totalCount only on overshoot past non-empty collection
+        # (verified 2026-07-18); fake never overshoot, so omit always.
+        doc_comments = re.search(rf"/spaces/{SPACE}/documents/([^/]+)/comments$", path)
         if doc_comments:
             name = doc_comments.group(1)
             doc = self.seeds.documents.get(name)
+            if doc is None:
+                return httpx.Response(404, json={"errors": [{"status": "404"}]})
             data = self._comment_resources(
-                doc.comments if doc else [],
+                doc.comments,
                 f"{PROJECT}/{SPACE}/{name}",
                 "document_comments",
             )
@@ -560,23 +567,25 @@ class FakePolarion:
                 json={
                     "data": data,
                     "included": self._author_included() if data else [],
-                    "meta": {"totalCount": len(data)},
                 },
             )
 
-        doc_attachments = re.search(r"/documents/([^/]+)/attachments$", path)
+        doc_attachments = re.search(
+            rf"/spaces/{SPACE}/documents/([^/]+)/attachments$", path
+        )
         if doc_attachments:
             name = doc_attachments.group(1)
             doc = self.seeds.documents.get(name)
+            if doc is None:
+                return httpx.Response(404, json={"errors": [{"status": "404"}]})
             data = self._attachment_resources(
-                doc.attachments if doc else [], f"{PROJECT}/{SPACE}/{name}"
+                doc.attachments, f"{PROJECT}/{SPACE}/{name}"
             )
             return httpx.Response(
                 200,
                 json={
                     "data": data,
                     "included": self._author_included() if data else [],
-                    "meta": {"totalCount": len(data)},
                 },
             )
 
