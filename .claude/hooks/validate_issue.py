@@ -13,6 +13,8 @@ Rules:
      '### <field label>' heading for every required field of that form
      (GitHub renders form submissions in that shape). Interactive/--web
      creation has no body to inspect — the web chooser enforces the form.
+  3. Title shape — 'scope: imperative summary', commit convention minus
+     type (issue type = label). Scope prefix make queue scannable by area.
 
 Regex + body/title parsers duplicated in validate_pr.py — standalone
 scripts, no shared import; keep in sync.
@@ -42,6 +44,12 @@ EMOJI_RE = re.compile(
     "\U0000fe00-\U0000fe0f"  # variation selectors
     "\U0000200d]"  # zero-width joiner (emoji sequences)
 )
+
+# Lowercase scope keep it parallel to commit scopes.
+TITLE_SHAPE_RE = re.compile(r"^[a-z0-9_-]+(\([a-z0-9_./-]+\))?: \S")
+# Scope shape right, nothing after colon — wrong-scope message would mislead.
+TITLE_NO_SUMMARY_RE = re.compile(r"^[a-z0-9_-]+(\([a-z0-9_./-]+\))?:\s*$")
+MAX_TITLE_LEN = 72
 
 ISSUE_CREATE_RE = re.compile(r"\bgh\s+issue\s+create\b")
 ISSUE_OTHER_RE = re.compile(r"\bgh\s+issue\s+(edit|comment)\b")
@@ -82,6 +90,8 @@ def main() -> int:
             "typographic punctuation). Per repo convention PR/issue/commit "
             "artifacts must be in English."
         )
+    if title is not None:
+        errors.extend(title_errors(title))
     if body is not None and has_disallowed_non_ascii(body):
         errors.append(
             "Body contains non-ASCII characters (other than emoji and "
@@ -99,6 +109,33 @@ def main() -> int:
         return 2
 
     return 0
+
+
+def title_errors(title: str) -> list[str]:
+    """Title must read 'scope: imperative summary' and stay scannable."""
+    errors: list[str] = []
+    if not TITLE_SHAPE_RE.match(title):
+        if TITLE_NO_SUMMARY_RE.match(title):
+            errors.append(
+                "Title has a scope but no summary — put an imperative "
+                f"summary after ': '. Got: {title!r}"
+            )
+        else:
+            errors.append(
+                "Title must start with a lowercase scope then ': ' — "
+                "'scope: imperative summary' or 'scope(subscope): summary', "
+                "mirroring the commit convention minus the type (the issue "
+                f"type is its label). Got: {title!r}"
+            )
+    if len(title) > MAX_TITLE_LEN:
+        errors.append(
+            f"Title is {len(title)} chars (limit: {MAX_TITLE_LEN}). Put the "
+            "detail in the body — the title only has to say which area and "
+            "what work."
+        )
+    if title.endswith("."):
+        errors.append("Title must not end with a period.")
+    return errors
 
 
 def has_disallowed_non_ascii(body: str) -> bool:
@@ -166,14 +203,27 @@ def extract_title(cmd: str) -> str | None:
     except ValueError:
         return None
 
+    # gh api: -t = --template (output format) — title travel as title= field.
+    api = GH_API_RE.search(cmd) is not None
     i = 0
     while i < len(argv):
         a = argv[i]
         nxt = argv[i + 1] if i + 1 < len(argv) else None
-        if a in {"--title", "-t"} and nxt is not None:
-            return nxt
-        if a.startswith("--title="):
-            return a[len("--title=") :]
+        if api:
+            if (
+                a in {"-F", "-f", "--field", "--raw-field"}
+                and nxt is not None
+                and nxt.startswith("title=")
+            ):
+                val = nxt[len("title=") :]
+                if val.startswith("@"):
+                    return _read_file(val[1:])
+                return val
+        else:
+            if a in {"--title", "-t"} and nxt is not None:
+                return nxt
+            if a.startswith("--title="):
+                return a[len("--title=") :]
         i += 1
     return None
 
