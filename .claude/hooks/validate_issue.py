@@ -13,9 +13,8 @@ Rules:
      '### <field label>' heading for every required field of that form
      (GitHub renders form submissions in that shape). Interactive/--web
      creation has no body to inspect — the web chooser enforces the form.
-  3. Title shape — 'scope: imperative summary', mirroring the commit
-     convention minus the type (issue type = label). Scope prefix make the
-     queue scannable by area; cap keep titles readable in list views.
+  3. Title shape — 'scope: imperative summary', commit convention minus
+     type (issue type = label). Scope prefix make queue scannable by area.
 
 Regex + body/title parsers duplicated in validate_pr.py — standalone
 scripts, no shared import; keep in sync.
@@ -46,8 +45,7 @@ EMOJI_RE = re.compile(
     "\U0000200d]"  # zero-width joiner (emoji sequences)
 )
 
-# Title = "scope: summary" / "scope(subscope): summary"; lowercase scope keep
-# it parallel to commit scopes.
+# Lowercase scope keep it parallel to commit scopes.
 TITLE_SHAPE_RE = re.compile(r"^[a-z0-9_-]+(\([a-z0-9_./-]+\))?: \S")
 # Scope shape right, nothing after colon — wrong-scope message would mislead.
 TITLE_NO_SUMMARY_RE = re.compile(r"^[a-z0-9_-]+(\([a-z0-9_./-]+\))?:\s*$")
