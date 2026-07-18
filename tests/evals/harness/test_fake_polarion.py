@@ -151,8 +151,71 @@ class TestReadRouting:
             FakePolarion(),
             f"/projects/{PROJECT}/spaces/{SPACE}/documents/{PARENT_DOC}/attachments",
         )
-        assert _json(response)["meta"]["totalCount"] == 0
+        assert response.status_code == 200
+        assert _json(response)["data"] == []
         assert _json(response)["included"] == []
+
+    def test_attachments_relationships_author_only(self) -> None:
+        # Sparse fieldset drop project rel -- mock must not ship it.
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/spaces/{SPACE}/documents/{DOC}/attachments",
+        )
+        entry = _json(response)["data"][0]
+        assert sorted(entry["relationships"]) == ["author"]
+
+    def test_attachments_omit_meta(self) -> None:
+        # Live omit meta on normal page; totalCount only on overshoot.
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/spaces/{SPACE}/documents/{DOC}/attachments",
+        )
+        assert "meta" not in _json(response)
+
+    def test_attachments_unseeded_document_404(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/spaces/{SPACE}/documents/NoSuchDoc/attachments",
+        )
+        assert response.status_code == 404
+
+    def test_attachments_wrong_space_404(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/spaces/NoSuchSpace/documents/{DOC}/attachments",
+        )
+        assert response.status_code == 404
+
+    def test_comments_omit_meta(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/spaces/{SPACE}/documents/{DOC}/comments",
+        )
+        assert "meta" not in _json(response)
+
+    def test_comments_empty_for_other_document(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/spaces/{SPACE}/documents/{PARENT_DOC}/comments",
+        )
+        assert response.status_code == 200
+        assert _json(response)["data"] == []
+        assert _json(response)["included"] == []
+        assert "meta" not in _json(response)
+
+    def test_comments_unseeded_document_404(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/spaces/{SPACE}/documents/NoSuchDoc/comments",
+        )
+        assert response.status_code == 404
+
+    def test_comments_wrong_space_404(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/spaces/NoSuchSpace/documents/{DOC}/comments",
+        )
+        assert response.status_code == 404
 
     def test_single_document_exact_match(self) -> None:
         response = _get(
