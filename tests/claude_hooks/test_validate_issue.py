@@ -254,6 +254,46 @@ class TestTemplateErrors:
         assert hook.template_errors([], "anything", {}) == []
 
 
+class TestTitleErrors:
+    def test_scope_and_summary(self) -> None:
+        assert hook.title_errors("evals: model meta omission") == []
+
+    def test_subscope(self) -> None:
+        assert hook.title_errors("tools(attachments): re-measure upload") == []
+
+    def test_missing_scope(self) -> None:
+        errs = hook.title_errors("Re-measure upload on another instance")
+        assert any("scope" in e for e in errs)
+
+    def test_uppercase_scope_rejected(self) -> None:
+        errs = hook.title_errors("Tools: re-measure upload")
+        assert any("scope" in e for e in errs)
+
+    def test_colon_without_space_rejected(self) -> None:
+        errs = hook.title_errors("tools:re-measure upload")
+        assert any("scope" in e for e in errs)
+
+    def test_empty_summary_rejected(self) -> None:
+        errs = hook.title_errors("tools: ")
+        assert any("scope" in e for e in errs)
+
+    def test_over_length_rejected(self) -> None:
+        errs = hook.title_errors("evals(harness): " + "x" * 60)
+        assert any("72" in e for e in errs)
+
+    def test_at_length_limit_allowed(self) -> None:
+        title = "evals(harness): " + "x" * (72 - len("evals(harness): "))
+        assert len(title) == 72
+        assert hook.title_errors(title) == []
+
+    def test_trailing_period_rejected(self) -> None:
+        errs = hook.title_errors("tools: re-measure upload.")
+        assert any("period" in e for e in errs)
+
+    def test_identifier_in_summary_allowed(self) -> None:
+        assert hook.title_errors("evals(cases): loosen TRIG-DOC reject list") == []
+
+
 class TestNonAsciiDetection:
     def test_blocks_korean(self) -> None:
         assert hook.has_disallowed_non_ascii("후속 작업")
