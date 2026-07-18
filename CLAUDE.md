@@ -7,20 +7,19 @@ MCP server: AI read/write Polarion ALM. FastMCP 3.0, strict async, fully typed.
 ```bash
 uv sync --dev                                            # install deps
 uv run pytest                                            # all tests
-uv run pytest --cov --cov-report=term-missing            # tests + uncovered lines
 uv run ruff check . && uv run ruff format . && uv run mypy src/  # lint + format + types
 uv run pytest --cov=src/mcp_server_polarion --cov=evals --cov-report=xml \
-  && uv run diff-cover coverage.xml --compare-branch=origin/main --fail-under=90  # changed-line gate
+  && uv run diff-cover coverage.xml --compare-branch=origin/main --fail-under=90  # changed-line gate — run before push
 uv run mcp-server-polarion                               # run server (stdio)
 ```
 
-CI: `ruff check` → `ruff format --check` → `mypy` → `pytest` (`--cov-fail-under=90`) → `diff-cover` (changed lines ≥90% — incl parser defensive branches + `evals/harness` request handlers, not only `src/`). Run `diff-cover` command above before push.
+CI: same order + `ruff format --check` + `pytest --cov-fail-under=90`; diff-cover changed lines ≥90% cover `src/` + `evals/` both — incl parser defensive branches + `evals/harness` request handlers.
 
 ## Architecture
 
-- `core/` — `client.py` (async httpx, retries 429/5xx), `exceptions.py` (`PolarionError`/`PolarionAuthError`/`PolarionNotFoundError`), `config.py` (`POLARION_URL`/`POLARION_TOKEN`), `logging.py` (stderr-only; loggers `mcp_server_polarion.<module>`).
-- `tools/` — domain modules; `_build_*_payload` = unit-test seam; `tools/__init__.py` import registers `@mcp.tool`s. `_shared/`: `helpers.py`, `parse.py` (JSON:API→models), `pagination.py` (`make_page`), `fields.py`/`custom_fields.py` (sparse-fieldset + custom-field policy), `cache.py` (`TTLCache`), `guard/` (write guards, submodule per domain axis; new guards compose `_http.py` `guarded_get`/`guarded_pages`, custom-field key checks via `_custom_keys.py` `check_custom_keys`), `sql.py` (recipes). `tools/guides/` = on-demand data served by `recipes.py`.
-- `middleware.py` — FastMCP `on_call_tool` middleware; compact tool-arg `ValidationError` to one-line summary (raw Pydantic dump = token waste).
+- `core/` — `client.py` (async httpx; serialize + pace + retry per Gotchas), `exceptions.py`, `config.py` (`POLARION_URL`/`POLARION_TOKEN`), `logging.py` (stderr-only).
+- `tools/` — domain module per resource; `_build_*_payload` = unit-test seam; `tools/__init__.py` import registers `@mcp.tool`s. `_shared/`: `parse.py` (JSON:API→models), `pagination.py`, `fields.py`/`custom_fields.py` (sparse-fieldset + custom-field policy), `cache.py` (`TTLCache`), `sql.py`, `guard/` (pre-write validation, submodule per domain axis; new guards compose `_http.py` `guarded_get`/`guarded_pages` + `_custom_keys.py` `check_custom_keys`). `tools/guides/` = on-demand data served by `recipes.py`.
+- `middleware.py` — compact tool-arg `ValidationError` to one-line summary (raw Pydantic dump = token waste).
 - `utils/html.py` — Markdown↔HTML, `stamp_block_ids`, `first_anchorless_block`.
 - `models/` — Pydantic v2, re-exported from `models/__init__.py`; `PaginatedResult[T]` wrap list responses.
 - `server.py` — FastMCP instance; lifespan owns `PolarionClient`.
@@ -46,8 +45,8 @@ CI: `ruff check` → `ruff format --check` → `mypy` → `pytest` (`--cov-fail-
   - [4] round-trip format rules; [5] returns + follow-up; [6] errors as prevention-form ("resolve via list_*_enum_options first").
   - Shipped text = docstring prose + `Field(description=...)` + input spec-model class docstrings (`$defs` ship them) — NEVER exception class names / raw HTTP codes / RST double-backticks; caps only NEVER/REPLACE/Atomic; `dry_run` = approved byte-exact variants.
   - Budget: read ≤~50, write ≤~150 words. Gate `test_tool_description_style.py`; eval-FAIL-restored phrase = lock via docstring contract test.
-- No `WARNING:`/`NOTE:` prefixes, no dev-narrative, no banner dividers. CLAUDE.md dev-only — MCP-user info live in `@mcp.tool` docstring. Module docstrings = why module exists; constraints inline next to what they constrain.
-- Comments + dev docstrings caveman-style: drop articles/filler, compress verbs — `# Custom key match standard attr = silent shadow.` One line per point, why not what; never restate self-evident code; multi-line only when each line carry distinct fact. Technical terms/ids/API names/numbers exact; no invented abbreviations. Exempt (LLM-facing, eval-gated): `@mcp.tool` docstrings + `Field(description=...)` — normal prose per Docstrings rule above. `TODO` = `# TODO(#issue): concrete action`, never stray. No dead code; keep comments sync when code change.
+- No `WARNING:`/`NOTE:` prefixes, dev-narrative, banner dividers. CLAUDE.md dev-only — MCP-user info live in `@mcp.tool` docstrings. Module docstring = why module exist; constraints inline next to what they constrain.
+- Comments + dev docstrings caveman-style: drop articles/filler — `# Custom key match standard attr = silent shadow.` Why not what; never restate self-evident code; one distinct fact per line. Technical terms/ids/API names/numbers exact; no invented abbreviations. Exempt (LLM-facing, eval-gated): `@mcp.tool` docstrings + `Field(description=...)` — normal prose per Docstrings rule. `TODO` = `# TODO(#issue): concrete action`. No dead code; comments sync when code change.
 
 ## Naming Rules (LLM surface: params + model fields)
 
@@ -66,17 +65,28 @@ CI: `ruff check` → `ruff format --check` → `mypy` → `pytest` (`--cov-fail-
 - Linked-work-item ids = 5 segments — derive targets via `relationships.workItem.data.id`, never parse. Module ids = 3 segments, doc names may contain `/` — use `split_module_id`.
 - Lucene: trailing wildcards OK, leading 400. `module`/`description` not indexed — use `query="SQL:(...)"`; recipes via `get_sql_query_recipes`.
 - Server limits: ≤3 req/s, no concurrency. Client serialize via lock + pace every request to ≤3 req/s (start-based min-interval, so slow request add no extra wait); writes add 1.5s post-delay; retries 429/5xx.
-- Sparse fieldset drop `relationships` block — list relationship names explicit. To-many need `include=`; nested dot-path drop intermediate resource (`module,module.author`, not `module.author` alone).
+- Sparse fieldset drop `relationships` block — list relationship names explicit. To-many need `include=`; nested dot-path drop intermediate resource (`module,module.author`, not `module.author` alone). Resource with every requested attr unset ship no `attributes` block at all — parsers default it.
 - `/backlinkedworkitems` unsupported — back direction via `query=linkedWorkItems:{wi}`, so back results have `role=None`.
 - Polarion validate neither custom-field ids (unknown keys persist; wrong-type 400), nor enum values, nor link targets/roles — `guard/` validate pre-write. `getAvailableOptions` = only key→enum-options API (non-enum/unknown → 404). Link/hyperlink roles not there — use `GET /projects/{p}/enumerations/~/{enumName}/~` (`data` = dict, not list).
 - Custom fields inline under `attributes` (no `customFields` container; `@all` tokens dropped). `GET /projects/{p}/documents` absent on some builds.
-- Testruns: POST require explicit `id` (400 without; UI-only autofill); enums resolve only under `testing` context (`~` 404); no `getAvailableOptions` → custom-field enum values unguardable (keys only); `isTemplate` served only on templates; `homePageContent` served only on runs owning report — absent under `useReportFromTemplate` (even when requested explicit).
-- Testrecords: PATCH batch atomic (one bad id 400 whole batch, "was not found" = 400 not 404); server validate neither `result` nor `defect` target (204 ghost) — guard pre-write via `testing/test-result` enum + workitem existence; partial PATCH safe (omitted attrs preserved); REST auto-fill nothing (`executed`/`duration`/`testCaseRevision` UI-only); `text/plain` comment stored as `text/html`; `defect` relationship absent from default GET (`testCase` served) — serialize only when named in `fields[testrecords]` or via `include=defect` `included`; run type may require e-signature → record write 403 portal-only remedy, REST cannot supply — surface Polarion detail in error, token hint alone mislead.
+- Testruns:
+  - POST require explicit `id` (400 without; UI-only autofill).
+  - Enums resolve only under `testing` context (`~` 404); no `getAvailableOptions` → custom-field enum values unguardable (keys only).
+  - `isTemplate` settable at POST (`attributes.isTemplate`), served only on templates.
+  - `homePageContent` settable at POST/PATCH, served on explicit request — under `useReportFromTemplate` GET serve linked template content.
+  - Default GET (no `fields`) ship only `id`/`title`/`status`.
+- Testrecords:
+  - PATCH batch atomic — one bad id 400 whole batch ("was not found" = 400, not 404). Partial PATCH safe (omitted attrs preserved).
+  - Server validate neither `result` nor `defect` target (204 ghost) — guard pre-write via `testing/test-result` enum + workitem existence.
+  - REST auto-fill nothing — server never populate `executed`/`duration`/`testCaseRevision`; all three settable explicit via PATCH (204, preserved).
+  - `text/plain` comment stored as `text/html`.
+  - `defect` relationship absent from default GET (default = attrs `result`/`iteration` + `testCase` relationship) — serialize only when named in `fields[testrecords]` or via `include=defect` `included`.
+  - Run type may require e-signature → record write 403 portal-only remedy, REST cannot supply — surface Polarion detail in error, token hint alone mislead.
 - `documents/.../actions/copy`: flat body, 201 `data` = single dict (not list); `linkOriginalItemsWithRole` unvalidated → ghost link per copied item, guard vs **target** project `workitem-link-role`; documents not REST-deletable (405).
 
 ## Testing
 
-- `tests/` mirror source one-to-one; shared fixtures in `tests/` `conftest.py`; `mock_client`/`mock_ctx` + autouse guard-cache reset in `tools/conftest.py`.
+- `tests/mcp_server_polarion/` mirror `src` package one-to-one (`tests/` also hold `claude_hooks/`, `github_scripts/`, `evals/`); shared fixtures `tests/conftest.py`; `mock_client`/`mock_ctx` + autouse guard-cache reset in `tools/conftest.py`.
 - `pytest-asyncio` `mode=auto`. Tool tests call functions directly (`@mcp.tool` return original); client tests use `respx`. Pydantic `Field` constraints bypass JSON Schema on direct call — verify via `TypeAdapter` reconstruction.
 - New `@mcp.tool` needs update `EXPECTED_TOOL_NAMES` in `test_mcp_transport.py` + README tool-table row (marker-anchored sync test, same file).
 - `tests/evals/` open with `pytest.importorskip` (`evals` group; CI sync `--group evals`).
