@@ -14,7 +14,7 @@ agents, and merges their reports. Subagents never spawn other subagents
 ```
  0.Worktree → 1.Spec →(approve)→ 2.Plan →(approve)→ 3.Implement(TDD) → 4.Gates
                                                           ▲                │
-                                                          │                ▼
+                                                          │                ▼ (4½.Simplify, first pass only)
                                               6.Fix ◄─(findings)─ 5.Review ─(clean)→ 7.Ship
 ```
 
@@ -33,8 +33,8 @@ Subagents share **no memory and no conversation history**. Three channels only:
 
    | File | Written by | Read by |
    |---|---|---|
-   | `.pipeline/spec.md` | orchestrator (Stage 1, draft before approval; approval freezes it) | pattern-scout, pipeline-implementer, pipeline-reviewer |
-   | `.pipeline/plan.md` | orchestrator (Stage 2, full text shown before approval — via ExitPlanMode or quoted draft; approval freezes it) | pipeline-implementer, pipeline-reviewer |
+   | `.pipeline/spec.md` | orchestrator (Stage 1, draft before approval; approved via file link — single copy; approval freezes it) | pattern-scout, pipeline-implementer, pipeline-reviewer |
+   | `.pipeline/plan.md` | orchestrator (Stage 2, approved via file link — single copy; approval freezes it) | pipeline-implementer, pipeline-reviewer |
    | `.pipeline/review-round-N.md` | orchestrator (Stage 5, reviewer report pasted verbatim) | pipeline-implementer (Stage 6), user on escalation |
    | `.pipeline/followups.md` | orchestrator (Stage 5, FOLLOW-UPS + unfixed LOW accumulated per round, deduped) | orchestrator (Stage 7 issue export) |
 
@@ -52,6 +52,7 @@ a fresh Agent call starts cold and re-derives everything.
 | 2 Plan design | main thread (Plan agent for big scope) | opus for Plan agent | architecture trade-offs |
 | 3 Implement | `pipeline-implementer` × 1 per plan task | sonnet | code volume; escalate model per rule below |
 | 4 Gates | main thread | — | deterministic bash; a subagent relays an exit code for tokens |
+| 4½ Simplify | `general-purpose` invoking the built-in `/simplify` skill | sonnet | code-volume edits over the whole diff; report-only return keeps orchestrator context lean |
 | 5 Review | `pipeline-reviewer` | opus | judgment-heavy; fresh context avoids implementer blindness |
 | 6 Fix | `pipeline-implementer` (fix mode) | sonnet | bounded edits from findings list |
 
@@ -104,11 +105,14 @@ sequentially, in one Agent call each.
    review-fix round. (update_test_records run, 2026-07-13: a pre-approval
    probe found the real enum path and two silent-ghost writes — flipped a
    guard from "deferred" to "shipped" before any code existed.)
-5. **Show the user the full spec, then ask approval.** The approval request
-   quotes `.pipeline/spec.md` verbatim — the full file text, not a summary or
-   translation (on a redo, the revised sections verbatim) — the user approves
-   text they have read, never a bare "spec ready, approve?" prompt. Fold
-   feedback back into `.pipeline/spec.md`; approval freezes it.
+5. **Ask approval over the file, not a re-print.** Post a clickable link to
+   `.pipeline/spec.md`, ask the user to read it in the editor, and collect the
+   decision via AskUserQuestion. Never a summary or translation — approval
+   binds only the frozen file's own text — and never a bare "spec ready,
+   approve?" prompt without the link. The file was already written once;
+   quoting it in chat pays output tokens for a second copy. On a redo, quote
+   just the revised sections so the delta is visible in place. Fold feedback
+   back into `.pipeline/spec.md`; approval freezes it.
    Spec changes are cheap here, expensive later.
 
 ## Stage 2 — Plan
@@ -119,12 +123,11 @@ sequentially, in one Agent call each.
 2. Draft the plan in the main thread (or a Plan agent for large scope) in the
    shape of [plan-template.md](references/plan-template.md) — one implementer task per
    Changes entry, live-test items from the spec's UNVERIFIED list under
-   Verification. Use plan mode when available — ExitPlanMode already puts the
-   full plan in front of the user for approval; write it to
-   `.pipeline/plan.md` right after. Without plan mode, copy the template to
-   `.pipeline/plan.md`, fill it, and quote it verbatim in the approval
-   request — same rule as the spec: full file text, not a condensed
-   rendition; the user approves text they have read.
+   Verification. Copy the template to `.pipeline/plan.md`, fill it, and ask
+   approval the Stage 1.5 way: file link + AskUserQuestion, no re-print, redo
+   rounds quote only the revised sections. Skip plan mode here even when
+   available — ExitPlanMode ships the full plan text as a tool parameter, a
+   second paid copy of a file that already exists.
 
 ## Stage 3 — Implement (TDD)
 
@@ -158,6 +161,25 @@ Contract-boundary changes (include/fields/parse/auth or any new HTTP shape)
 additionally need a **live test** against the real server — mocks encode your
 assumptions, they cannot falsify them. Feed live findings back into fakes and
 mocks so tests mirror reality (e.g. an endpoint that omits `meta.totalCount`).
+
+## Stage 4½ — Simplify (first pass only)
+
+Once, after gates first go green and before the first review round — never
+repeated after Stage 6 fix rounds (those are bounded edits, not new
+complexity):
+
+1. **Spawn a `general-purpose` subagent (sonnet)** whose prompt says: invoke
+   the built-in `/simplify` skill over the `git diff origin/main...HEAD` scope
+   in this worktree, apply its fixes, and report changed files with a one-line
+   rationale each. `/simplify` hunts reuse/simplification/efficiency and
+   applies the fixes itself — quality only, no bug hunting; behavior stays
+   pinned by the Stage 3 tests.
+2. Re-run Stage 4 gates in the main thread, then commit.
+
+Why before review, not after: reviewer rounds stop burning on quality
+findings (those demote to LOW → followups and rarely get fixed), and the
+simplify edits themselves still pass through Stage 5 — new code gets
+reviewed. Placing it after PASS would ship unreviewed edits.
 
 ## Stage 5 — Review (loop entry)
 
@@ -229,15 +251,18 @@ mocks so tests mirror reality (e.g. an endpoint that omits `meta.totalCount`).
 | "Subagent for the gate commands too" | Gates are deterministic bash. A subagent burns tokens to relay an exit code. |
 | "Opus everywhere to be safe" | Model choice is a cost/judgment trade-off; sonnet ships code volume fine, opus earns its cost only on judgment stages. |
 | "Main-thread glue is too small for TDD" | A fake-server handler shipped code-first once and diff-cover bounced the gate; the failing test first was the cheaper path. |
-| "The user approved my summary of it" | A summary is your interpretation. Approval binds only the file text they actually read — quote it verbatim. |
+| "The user approved my summary of it" | A summary is your interpretation. Approval binds only the frozen file's text — link the file and have them read it, never summarize. |
 | "Live checks belong in Stage 4" | When an UNVERIFIED item shapes the spec, a smoke probe before freeze beats re-planning after it — the create_test_records run flipped three guard decisions that way. |
+| "The reviewer will catch the complexity" | Quality findings demote to LOW → followups and rarely get fixed. The Stage 4½ simplify pass before review is the cheap path. |
 
 ## Red Flags
 
 - Production code written before its failing test exists.
 - Implementer report accepted without RED evidence.
-- Approval requested without the full spec/plan text in front of the user —
-  or over a summary/translation instead of the frozen file's verbatim text.
+- Approval requested over a summary/translation instead of the frozen file —
+  link the file itself; redo rounds quote only the revised sections.
+- Spec or plan re-printed in full in chat — the file is the single paid copy;
+  approval goes through its link.
 - Reviewer given implementer reports or conversation summaries (context bleed).
 - Review round 4+ still producing MEDIUM findings — escalate, don't grind.
 - `.pipeline/` files committed, or a subagent prompted without the file paths
@@ -258,12 +283,13 @@ mocks so tests mirror reality (e.g. an endpoint that omits `meta.totalCount`).
 ## Verification (pipeline exit checklist)
 
 - [ ] Worktree isolated, branch `<type>/<kebab>`, baseline was green at start
-- [ ] Spec and plan each shown to the user verbatim (full file text), approved,
-      frozen in `.pipeline/`; reviewer reports stored verbatim in
-      `.pipeline/review-round-*.md`
+- [ ] Spec and plan each approved via frozen-file link (never a summary or
+      full re-print), frozen in `.pipeline/`; reviewer reports stored verbatim
+      in `.pipeline/review-round-*.md`
 - [ ] Every implementer report carried RED-then-GREEN evidence
 - [ ] All five gate commands pass (pytest, ruff check, ruff format --check,
       mypy, diff-cover); diff-cover ≥90% on changed lines
+- [ ] Stage 4½ `/simplify` pass ran once (subagent), gates re-run green after
 - [ ] Live test done for contract-boundary changes, findings folded into mocks
 - [ ] Final `pipeline-reviewer` verdict is PASS (zero CRITICAL/MEDIUM)
 - [ ] Every `.pipeline/followups.md` item filed as a `follow-up` issue (or
