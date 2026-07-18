@@ -156,8 +156,7 @@ class TestReadRouting:
         assert _json(response)["included"] == []
 
     def test_attachments_relationships_author_only(self) -> None:
-        # Production sparse fieldset drop project relationship (verified
-        # 2026-07-18); mock must not ship field tool never receive.
+        # Sparse fieldset drop project rel -- mock must not ship it.
         response = _get(
             FakePolarion(),
             f"/projects/{PROJECT}/spaces/{SPACE}/documents/{DOC}/attachments",
@@ -166,8 +165,7 @@ class TestReadRouting:
         assert sorted(entry["relationships"]) == ["author"]
 
     def test_attachments_omit_meta(self) -> None:
-        # Live normal page omit meta.totalCount (verified 2026-07-18);
-        # totalCount appear only on overshoot past non-empty collection.
+        # Live omit meta on normal page; totalCount only on overshoot.
         response = _get(
             FakePolarion(),
             f"/projects/{PROJECT}/spaces/{SPACE}/documents/{DOC}/attachments",
@@ -189,7 +187,6 @@ class TestReadRouting:
         assert response.status_code == 404
 
     def test_comments_omit_meta(self) -> None:
-        # Same verified rule as attachments: no meta on normal page.
         response = _get(
             FakePolarion(),
             f"/projects/{PROJECT}/spaces/{SPACE}/documents/{DOC}/comments",

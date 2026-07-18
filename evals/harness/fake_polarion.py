@@ -295,8 +295,7 @@ class FakePolarion:
                     "updated": TS,
                     "length": attachment.length,
                 },
-                # No project relationship: production sparse fieldset drop it
-                # (verified 2026-07-18) -- author only.
+                # Author only: sparse fieldset drop project rel (verified 2026-07-18).
                 "relationships": {
                     "author": {"data": {"id": f"{PROJECT}/{AUTHOR}"}},
                 },
@@ -547,10 +546,8 @@ class FakePolarion:
                 200, json=self._document_parts_response(parts.group(1))
             )
 
-        # Both document sub-resource collections space-scoped + 404 on
-        # unseeded doc, matching live. No meta block on normal page -- live
-        # emit totalCount only on overshoot past non-empty collection
-        # (verified 2026-07-18); fake never overshoot, so omit always.
+        # Doc sub-resource routes: space-scoped, unseeded 404, no meta -- live
+        # emit totalCount only on overshoot; fake never overshoot (verified 2026-07-18).
         doc_comments = re.search(rf"/spaces/{SPACE}/documents/([^/]+)/comments$", path)
         if doc_comments:
             name = doc_comments.group(1)
