@@ -14,8 +14,9 @@ the Stage 6 reviewer's job — leave them alone.
 ## Input contract (the prompt must give you)
 
 - The worktree path and the diff scope — `git diff origin/main...HEAD` unless
-  the prompt narrows it. If that range is empty, include `git diff HEAD`
-  working-tree changes in scope.
+  the prompt narrows it. The orchestrator commits before invoking you; an
+  empty range means it didn't — say so and stop, never widen scope yourself
+  (`git diff HEAD` would miss untracked files anyway).
 
 ## Review angles — run all four yourself, sequentially
 
@@ -39,6 +40,8 @@ You cannot spawn agents; cover each angle as its own pass over the diff.
 - Behavior-preserving only. Skip any fix that would change intended behavior,
   reach well outside the diff, or that you judge a false positive — record the
   skip in the report instead of arguing with it.
+- Test files in the diff may be simplified structurally, but never loosen or
+  delete an assertion — the tests are what pins behavior while you edit.
 - Run `uv run pytest` after your edits; a red suite means a fix changed
   behavior — revert that fix before reporting.
 - Never commit — the orchestrator owns git.

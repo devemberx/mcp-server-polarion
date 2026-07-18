@@ -173,12 +173,20 @@ Once, after gates first go green and before the first review round — never
 repeated after Stage 7 fix rounds (those are bounded edits, not new
 complexity):
 
-1. **Invoke `pipeline-simplifier`** with the worktree path and the diff scope
+1. **Commit the work first**, in the repo commit format (CLAUDE.md Repo
+   Conventions; full rules `.github/CONTRIBUTING.md`, commit-msg hook
+   enforces) — the simplifier diffs `origin/main...HEAD`, and uncommitted
+   work is invisible to that range; a new tool is mostly untracked files, so
+   skipping this turns the pass into a silent no-op.
+2. **Invoke `pipeline-simplifier`** with the worktree path and the diff scope
    (`git diff origin/main...HEAD`). It sweeps reuse/simplification/efficiency/
    altitude and applies the fixes itself — quality only, no bug hunting;
    behavior stays pinned by the Stage 3 tests. Expect its CHANGED / SKIPPED /
    TESTS report back.
-2. Re-run Stage 4 gates in the main thread, then commit.
+3. Re-run Stage 4 gates in the main thread, then commit the simplify edits.
+   Gates red on a simplify edit (diff-cover counts its changed lines too):
+   `SendMessage` the simplifier to fix or revert that edit — it holds the
+   context; don't spawn an implementer for it.
 
 Why before review, not after: reviewer rounds stop burning on quality
 findings (those demote to LOW → followups and rarely get fixed), and the
@@ -187,11 +195,10 @@ reviewed. Placing it after PASS would ship unreviewed edits.
 
 ## Stage 6 — Review (loop entry)
 
-1. **Commit the work first**, in the repo commit format (CLAUDE.md Repo
-   Conventions; full rules `.github/CONTRIBUTING.md`, commit-msg hook
-   enforces) — the reviewer diffs `origin/main...HEAD`, and uncommitted
-   changes are invisible to that range. Fix rounds add commits; squash merge
-   collapses them at the end.
+1. **Commit anything still uncommitted** — the reviewer diffs
+   `origin/main...HEAD`, and uncommitted changes are invisible to that range.
+   The first pass is already committed by Stage 5; fix rounds add their
+   commits here. Squash merge collapses them at the end.
 2. **Invoke `pipeline-reviewer`** with: `.pipeline/spec.md` and
    `.pipeline/plan.md` paths and the diff scope (`git diff origin/main...HEAD`).
    Give it the spec and plan — **never** the implementer reports or your
@@ -220,8 +227,8 @@ reviewed. Placing it after PASS would ship unreviewed edits.
 
 ## Stage 8 — Ship (main thread)
 
-- Work is already committed by review time (Stage 6.1); commit here only what
-  is still uncommitted. Commit format, PR checklist handling, squash-merge
+- Work is already committed by review time (Stage 5.1, fix rounds 6.1);
+  commit here only what is still uncommitted. Commit format, PR checklist handling, squash-merge
   rule: CLAUDE.md Repo Conventions / `.github/CONTRIBUTING.md` — restating
   them here would be a third copy that drifts. `.pipeline/` stays uncommitted.
 - **Export follow-ups before cleanup** — `.pipeline/` dies with the worktree,
@@ -267,6 +274,8 @@ reviewed. Placing it after PASS would ship unreviewed edits.
   link the file itself; redo rounds quote only the revised sections.
 - Spec or plan re-printed in full in chat — the file is the single paid copy;
   approval goes through its link.
+- Simplifier invoked over uncommitted work — `origin/main...HEAD` is empty,
+  the pass silently no-ops; commit first (Stage 5.1).
 - Reviewer given implementer reports or conversation summaries (context bleed).
 - Review round 4+ still producing MEDIUM findings — escalate, don't grind.
 - `.pipeline/` files committed, or a subagent prompted without the file paths
