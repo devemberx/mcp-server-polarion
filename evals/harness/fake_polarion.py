@@ -27,6 +27,7 @@ from .fixtures import (
     TEST_RUN_ID,
     TESTCASE_ID,
     TS,
+    Attachment,
     Comment,
     Seeds,
     TestRun,
@@ -276,6 +277,32 @@ class FakePolarion:
             )
         return resources
 
+    def _attachment_resources(
+        self, attachments: list[Attachment], base: str
+    ) -> list[dict[str, Any]]:
+        """Document attachment resources. ``attributes.id`` = bare token body
+        HTML reference; resource id prefix it with 4-segment document base.
+        Polarion serve no ``created`` and no mime type here.
+        """
+        return [
+            {
+                "type": "document_attachments",
+                "id": f"{base}/{attachment.attachment_id}",
+                "attributes": {
+                    "id": attachment.attachment_id,
+                    "fileName": attachment.attachment_id,
+                    "title": attachment.title,
+                    "updated": TS,
+                    "length": attachment.length,
+                },
+                # Author only: sparse fieldset drop project rel (verified 2026-07-18).
+                "relationships": {
+                    "author": {"data": {"id": f"{PROJECT}/{AUTHOR}"}},
+                },
+            }
+            for attachment in attachments
+        ]
+
     def _author_included(self) -> list[dict[str, Any]]:
         """``included`` users entry resolve shared author id to name;
         production request ``include=author&fields[users]=name`` on these read.
@@ -519,12 +546,16 @@ class FakePolarion:
                 200, json=self._document_parts_response(parts.group(1))
             )
 
-        doc_comments = re.search(r"/documents/([^/]+)/comments$", path)
+        # Doc sub-resource routes: space-scoped, unseeded 404, no meta -- live
+        # emit totalCount only on overshoot; fake never overshoot (verified 2026-07-18).
+        doc_comments = re.search(rf"/spaces/{SPACE}/documents/([^/]+)/comments$", path)
         if doc_comments:
             name = doc_comments.group(1)
             doc = self.seeds.documents.get(name)
+            if doc is None:
+                return httpx.Response(404, json={"errors": [{"status": "404"}]})
             data = self._comment_resources(
-                doc.comments if doc else [],
+                doc.comments,
                 f"{PROJECT}/{SPACE}/{name}",
                 "document_comments",
             )
@@ -533,7 +564,25 @@ class FakePolarion:
                 json={
                     "data": data,
                     "included": self._author_included() if data else [],
-                    "meta": {"totalCount": len(data)},
+                },
+            )
+
+        doc_attachments = re.search(
+            rf"/spaces/{SPACE}/documents/([^/]+)/attachments$", path
+        )
+        if doc_attachments:
+            name = doc_attachments.group(1)
+            doc = self.seeds.documents.get(name)
+            if doc is None:
+                return httpx.Response(404, json={"errors": [{"status": "404"}]})
+            data = self._attachment_resources(
+                doc.attachments, f"{PROJECT}/{SPACE}/{name}"
+            )
+            return httpx.Response(
+                200,
+                json={
+                    "data": data,
+                    "included": self._author_included() if data else [],
                 },
             )
 

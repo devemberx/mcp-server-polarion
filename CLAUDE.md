@@ -83,6 +83,7 @@ CI: same order + `ruff format --check` + `pytest --cov-fail-under=90`; diff-cove
   - `defect` relationship absent from default GET (default = attrs `result`/`iteration` + `testCase` relationship) — serialize only when named in `fields[testrecords]` or via `include=defect` `included`.
   - Run type may require e-signature → record write 403 portal-only remedy, REST cannot supply — surface Polarion detail in error, token hint alone mislead.
 - `documents/.../actions/copy`: flat body, 201 `data` = single dict (not list); `linkOriginalItemsWithRole` unvalidated → ghost link per copied item, guard vs **target** project `workitem-link-role`; documents not REST-deletable (405).
+- Document attachments (`documents/{d}/attachments`): body `<img src="attachment:{id}">` refs unvalidated — nonexistent id persist verbatim (204) and render same as real in `read_document`; work item attachments = separate resource, `workitemimg:` scheme. Attributes `id`/`fileName`/`title`/`updated`/`length` only — no `created`, no mime (`content` serve `application/octet-stream`); `@basic` = `id,fileName,title` no relationships. `sort` rejected (400) — order server-defined. POST 500 on testdrive (any payload, even bogus `type`), DELETE 405. Attachments + document comments: `meta.totalCount` absent on normal page (empty collection too) — appear only when page overshoot non-empty collection; unseeded doc/wrong space 404 (verified 2026-07-18).
 
 ## Testing
 
