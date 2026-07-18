@@ -178,14 +178,27 @@ def extract_title(cmd: str) -> str | None:
     except ValueError:
         return None
 
+    # gh api: -t = --template (output format) — title travel as title= field.
+    api = GH_API_RE.search(cmd) is not None
     i = 0
     while i < len(argv):
         a = argv[i]
         nxt = argv[i + 1] if i + 1 < len(argv) else None
-        if a in {"--title", "-t"} and nxt is not None:
-            return nxt
-        if a.startswith("--title="):
-            return a[len("--title=") :]
+        if api:
+            if (
+                a in {"-F", "-f", "--field", "--raw-field"}
+                and nxt is not None
+                and nxt.startswith("title=")
+            ):
+                val = nxt[len("title=") :]
+                if val.startswith("@"):
+                    return _read_file(val[1:])
+                return val
+        else:
+            if a in {"--title", "-t"} and nxt is not None:
+                return nxt
+            if a.startswith("--title="):
+                return a[len("--title=") :]
         i += 1
     return None
 

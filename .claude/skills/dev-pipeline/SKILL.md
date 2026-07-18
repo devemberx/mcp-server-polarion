@@ -240,9 +240,11 @@ reviewed. Placing it after PASS would ship unreviewed edits.
   them here would be a third copy that drifts. `.pipeline/` stays uncommitted.
 - **Export follow-ups before cleanup** — `.pipeline/` dies with the worktree,
   so each `.pipeline/followups.md` item becomes an issue:
-  `gh issue create --label follow-up` with `### Origin` / `### Finding` /
-  `### Suggested fix` body sections (validate_issue.py hook checks the shape
-  against `.github/ISSUE_TEMPLATE/follow_up.yml`). One issue per item —
+  `gh issue create --label follow-up`, title in `scope: imperative summary`
+  form (`scope(subscope): …` allowed, ≤72 chars), body with `### Origin` /
+  `### Finding` / `### Suggested fix` sections (validate_issue.py hook
+  enforces the title shape and checks the body against
+  `.github/ISSUE_TEMPLATE/follow_up.yml`). One issue per item —
   independently closeable. An item the user explicitly drops instead is noted
   in PR notes, not filed.
 - PR Notes: record live-test evidence, NIT findings, and links to the filed
