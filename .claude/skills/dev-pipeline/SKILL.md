@@ -210,7 +210,10 @@ reviewed. Placing it after PASS would ship unreviewed edits.
    `.pipeline/followups.md`, deduped across rounds (drop an item a later
    round fixed). NIT stays PR-notes-only. This file is the only thing that
    survives worktree cleanup — via the Stage 8 export.
-5. **Stop criterion — the only exit:** verdict PASS (zero CRITICAL/MEDIUM
+5. BREAKING items ride in the round file to Stage 8 for the PR notes. They
+   never block the verdict; a shipped-surface change the spec did not
+   sanction is a spec-fidelity finding instead, and does block.
+6. **Stop criterion — the only exit:** verdict PASS (zero CRITICAL/MEDIUM
    actionable findings). LOW/NIT don't block, but unfixed LOW must be in
    `.pipeline/followups.md` by now. PASS → Stage 8. FAIL → Stage 7.
 
@@ -240,6 +243,11 @@ reviewed. Placing it after PASS would ship unreviewed edits.
   in PR notes, not filed.
 - PR Notes: record live-test evidence, NIT findings, and links to the filed
   follow-up issues; add `Fixes #N` for any follow-up issue this PR resolved.
+  List every reviewer BREAKING item verbatim, plus the consequence once: a
+  release containing these must bump major and rerun the full eval suite —
+  the deploy skill reads version policy from here. (Deferring via a
+  deprecation alias is a spec decision; an aliased rename never breaks the
+  surface, so it produces no BREAKING item at all.)
 - CI: after opening the PR, `gh pr checks <PR#> --watch --fail-fast` until
   every check is green — merge is blocked on red anyway, but an unwatched red
   PR rots until a human notices; catch it while the session context is hot.
@@ -308,6 +316,8 @@ reviewed. Placing it after PASS would ship unreviewed edits.
 - [ ] Final `pipeline-reviewer` verdict is PASS (zero CRITICAL/MEDIUM)
 - [ ] Every `.pipeline/followups.md` item filed as a `follow-up` issue (or
       explicitly dropped with the user) before worktree cleanup
+- [ ] Reviewer BREAKING items (if any) listed in PR notes with the deploy
+      consequence stated there
 - [ ] PR open with template filled, NIT + live evidence + follow-up issue
       links recorded
 - [ ] PR CI checks all green (`gh pr checks <PR#> --watch --fail-fast`),
