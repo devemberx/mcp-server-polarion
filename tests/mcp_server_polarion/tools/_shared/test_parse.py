@@ -5,14 +5,16 @@ text-format branches, phantom-editor skip.
 
 from __future__ import annotations
 
-from mcp_server_polarion.models import Comment, WorkItemSummary
+from mcp_server_polarion.models import Attachment, Comment, WorkItemSummary
 from mcp_server_polarion.tools._shared.parse import (
+    _parse_attachment,
     _parse_comment,
     extract_created_full_ids,
     extract_created_short_ids,
     extract_relationship_id,
     extract_relationship_ids,
     extract_short_id,
+    parse_attachments_page,
     parse_comments_page,
     parse_enum_option,
     parse_hyperlinks,
@@ -823,6 +825,101 @@ class TestParseCommentsPage:
 
     def test_non_list_data_yields_empty_page(self) -> None:
         page = parse_comments_page({"data": None}, page_number=1, page_size=10)
+        assert page.items == []
+        assert page.total_count == 0
+
+
+class TestParseAttachment:
+    """Tests for `_parse_attachment` attribute/relationship extraction."""
+
+    def test_full_attributes_happy_path(self) -> None:
+        item: dict[str, object] = {
+            "id": "proj/space/doc/1-file.png",
+            "attributes": {
+                "id": "1-file.png",
+                "fileName": "1-file.png",
+                "title": "file",
+                "updated": "2026-05-12T12:27:38.294Z",
+                "length": 17834,
+            },
+            "relationships": {"author": {"data": {"id": "proj/jdoe"}}},
+        }
+        attachment = _parse_attachment(item, {"proj/jdoe": "J Doe"})
+        assert attachment.id == "1-file.png"
+        assert attachment.file_name == "1-file.png"
+        assert attachment.title == "file"
+        assert attachment.updated == "2026-05-12T12:27:38.294Z"
+        assert attachment.length == 17834
+        assert attachment.author_name == "J Doe"
+
+    def test_missing_attributes_defaults(self) -> None:
+        item: dict[str, object] = {"id": "proj/space/doc/1-file.png"}
+        attachment = _parse_attachment(item, {})
+        assert attachment.id == ""
+        assert attachment.file_name == ""
+        assert attachment.title == ""
+        assert attachment.length == 0
+        assert attachment.updated == ""
+        assert attachment.author_name == ""
+
+    def test_missing_relationships_author_name_empty(self) -> None:
+        item: dict[str, object] = {
+            "id": "proj/space/doc/1-file.png",
+            "attributes": {"id": "1-file.png"},
+        }
+        assert _parse_attachment(item, {"proj/jdoe": "J Doe"}).author_name == ""
+
+    def test_unknown_author_id_not_in_included_map(self) -> None:
+        item: dict[str, object] = {
+            "id": "proj/space/doc/1-file.png",
+            "attributes": {"id": "1-file.png"},
+            "relationships": {"author": {"data": {"id": "proj/other"}}},
+        }
+        assert _parse_attachment(item, {"proj/jdoe": "J Doe"}).author_name == ""
+
+    def test_non_int_length_falls_back_to_zero(self) -> None:
+        item: dict[str, object] = {
+            "id": "proj/space/doc/1-file.png",
+            "attributes": {"id": "1-file.png", "length": "not-a-number"},
+        }
+        assert _parse_attachment(item, {}).length == 0
+
+
+class TestParseAttachmentsPage:
+    """Tests for `parse_attachments_page`."""
+
+    def test_wraps_parsed_attachments(self) -> None:
+        response: dict[str, object] = {
+            "data": [
+                {
+                    "id": "proj/space/doc/1-file.png",
+                    "attributes": {"id": "1-file.png", "length": 17834},
+                    "relationships": {"author": {"data": {"id": "proj/jdoe"}}},
+                }
+            ],
+            "included": [
+                {
+                    "type": "users",
+                    "id": "proj/jdoe",
+                    "attributes": {"name": "J Doe"},
+                }
+            ],
+            "meta": {"totalCount": 1},
+        }
+        page = parse_attachments_page(response, page_number=1, page_size=10)
+        assert page.total_count == 1
+        assert page.has_more is False
+        assert isinstance(page.items[0], Attachment)
+        assert page.items[0].id == "1-file.png"
+        assert page.items[0].author_name == "J Doe"
+
+    def test_empty_data_yields_empty_page(self) -> None:
+        page = parse_attachments_page({"data": []}, page_number=1, page_size=10)
+        assert page.items == []
+        assert page.total_count == 0
+
+    def test_non_list_data_yields_empty_page(self) -> None:
+        page = parse_attachments_page({"data": None}, page_number=1, page_size=10)
         assert page.items == []
         assert page.total_count == 0
 

@@ -27,6 +27,7 @@ from .fixtures import (
     TEST_RUN_ID,
     TESTCASE_ID,
     TS,
+    Attachment,
     Comment,
     Seeds,
     TestRun,
@@ -275,6 +276,32 @@ class FakePolarion:
                 }
             )
         return resources
+
+    def _attachment_resources(
+        self, attachments: list[Attachment], base: str
+    ) -> list[dict[str, Any]]:
+        """Document attachment resources. ``attributes.id`` = bare token body
+        HTML reference; resource id prefix it with 4-segment document base.
+        Polarion serve no ``created`` and no mime type here.
+        """
+        return [
+            {
+                "type": "document_attachments",
+                "id": f"{base}/{attachment.attachment_id}",
+                "attributes": {
+                    "id": attachment.attachment_id,
+                    "fileName": attachment.attachment_id,
+                    "title": attachment.title,
+                    "updated": TS,
+                    "length": attachment.length,
+                },
+                "relationships": {
+                    "author": {"data": {"id": f"{PROJECT}/{AUTHOR}"}},
+                    "project": {"data": {"id": PROJECT}},
+                },
+            }
+            for attachment in attachments
+        ]
 
     def _author_included(self) -> list[dict[str, Any]]:
         """``included`` users entry resolve shared author id to name;
@@ -527,6 +554,22 @@ class FakePolarion:
                 doc.comments if doc else [],
                 f"{PROJECT}/{SPACE}/{name}",
                 "document_comments",
+            )
+            return httpx.Response(
+                200,
+                json={
+                    "data": data,
+                    "included": self._author_included() if data else [],
+                    "meta": {"totalCount": len(data)},
+                },
+            )
+
+        doc_attachments = re.search(r"/documents/([^/]+)/attachments$", path)
+        if doc_attachments:
+            name = doc_attachments.group(1)
+            doc = self.seeds.documents.get(name)
+            data = self._attachment_resources(
+                doc.attachments if doc else [], f"{PROJECT}/{SPACE}/{name}"
             )
             return httpx.Response(
                 200,

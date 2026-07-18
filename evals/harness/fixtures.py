@@ -37,6 +37,9 @@ FLOATING_TASK_HYPERLINK_URI = "https://specs.example.com/fake-spec"
 # Anchored intro paragraph in doc body; SAFE-ROUNDTRIP-SOURCE edit it.
 DOC_INTRO_PARAGRAPH_ID = "p-1"
 
+# Attachment on DOC; numeric prefix mirror server-assigned real ids.
+DOC_ATTACHMENT_ID = "1-fake-diagram.png"
+
 # Second document + requirement traceability seeds (orchestration cases).
 PARENT_DOC = "FakeParentDoc"
 PARENT_MODULE_ID = f"{PROJECT}/{SPACE}/{PARENT_DOC}"
@@ -122,6 +125,18 @@ class TestRun:
 
 
 @dataclass
+class Attachment:
+    """Document attachment. ``attachment_id`` carry server-assigned numeric
+    prefix and is the token body HTML reference as ``attachment:{id}``.
+    Polarion serve no mime type and no created timestamp here.
+    """
+
+    attachment_id: str
+    title: str
+    length: int
+
+
+@dataclass
 class Document:
     name: str
     title: str
@@ -130,6 +145,7 @@ class Document:
     status: str = "draft"
     parts: list[DocumentPart] = field(default_factory=list)
     comments: list[Comment] = field(default_factory=list)
+    attachments: list[Attachment] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -209,6 +225,7 @@ SEEDS = Seeds(
                     REPLY_COMMENT_ID, "fake reply comment", parent_id=ROOT_COMMENT_ID
                 ),
             ],
+            attachments=[Attachment(DOC_ATTACHMENT_ID, "fake-diagram", 17834)],
         ),
         PARENT_DOC: Document(
             name=PARENT_DOC,

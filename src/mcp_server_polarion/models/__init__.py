@@ -5,6 +5,7 @@ JSON Schema — omit description when name + type say everything.
 
 from __future__ import annotations
 
+from mcp_server_polarion.models.attachments import Attachment
 from mcp_server_polarion.models.comments import (
     Comment,
     CommentsCreateResult,
@@ -69,6 +70,7 @@ from mcp_server_polarion.models.work_items import (
 
 __all__: list[str] = [
     "MAX_BODY_HTML_LEN",
+    "Attachment",
     "Comment",
     "CommentSpec",
     "CommentUpdateResult",

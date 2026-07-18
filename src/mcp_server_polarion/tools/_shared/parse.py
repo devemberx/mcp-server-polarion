@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from typing import Literal, TypedDict
 
 from mcp_server_polarion.models import (
+    Attachment,
     Comment,
     EnumOption,
     Hyperlink,
@@ -572,6 +573,54 @@ def parse_comments_page(
     return make_page(comment_items, response, page_number, page_size)
 
 
+def _parse_attachment(
+    item: dict[str, object], user_names: Mapping[str, str]
+) -> Attachment:
+    """``Attachment`` from JSON:API resource; ``id`` is ``attributes.id``
+    (bare filename token), not the 4-segment resource id. ``user_names`` map
+    full author id → display name (from included ``users``).
+    """
+    attributes_raw = item.get("attributes")
+    attributes: dict[str, object] = (
+        attributes_raw if isinstance(attributes_raw, dict) else {}
+    )
+    relationships_raw = item.get("relationships")
+    relationships: dict[str, object] = (
+        relationships_raw if isinstance(relationships_raw, dict) else {}
+    )
+
+    length = attributes.get("length", 0)
+    if not isinstance(length, int):
+        # length typed object -- non-int payload fall back to 0, not raise.
+        length = 0
+
+    author_full = extract_relationship_id(relationships, "author")
+
+    return Attachment(
+        id=safe_str(attributes.get("id", "")),
+        file_name=safe_str(attributes.get("fileName", "")),
+        title=safe_str(attributes.get("title", "")),
+        length=length,
+        updated=safe_str(attributes.get("updated", "")),
+        author_name=user_names.get(author_full, ""),
+    )
+
+
+def parse_attachments_page(
+    response: dict[str, object], page_number: int, page_size: int
+) -> PaginatedResult[Attachment]:
+    """JSON:API document-attachments response → ``PaginatedResult`` page."""
+    user_names = parse_included_user_name_map(response)
+    raw_data = response.get("data", [])
+    attachment_items: list[Attachment] = []
+    if isinstance(raw_data, list):
+        for entry in raw_data:
+            if isinstance(entry, dict):
+                attachment_items.append(_parse_attachment(entry, user_names))
+
+    return make_page(attachment_items, response, page_number, page_size)
+
+
 def parse_enum_option(entry: dict[str, object]) -> EnumOption:
     """JSON:API enumeration entry → ``EnumOption``; non-bool flags coerce to False."""
 
@@ -596,6 +645,7 @@ __all__: list[str] = [
     "extract_relationship_id",
     "extract_relationship_ids",
     "extract_short_id",
+    "parse_attachments_page",
     "parse_comments_page",
     "parse_enum_option",
     "parse_hyperlinks",
