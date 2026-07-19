@@ -320,7 +320,7 @@ class TestGetDocumentAttachmentContent:
 
         assert isinstance(result, Image)
         assert result.data == raw
-        assert result._mime_type == "image/png"
+        assert result.to_image_content().mimeType == "image/png"
         mock_client.get_bytes.assert_awaited_once_with(
             "/projects/proj1/spaces/Design/documents/SRS/attachments/1-shot.png/content",
             max_bytes=5 * 1024 * 1024,
@@ -341,7 +341,7 @@ class TestGetDocumentAttachmentContent:
         )
 
         assert isinstance(result, Image)
-        assert result._mime_type == "image/png"
+        assert result.to_image_content().mimeType == "image/png"
 
     async def test_svg_returns_decoded_string(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -396,6 +396,23 @@ class TestGetDocumentAttachmentContent:
             )
 
         mock_client.get_bytes.assert_not_awaited()
+
+    async def test_unsupported_extension_message_lists_extensions(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Rejection lists extensions, not mime types — LLM match file_name."""
+        mock_client.get_bytes = AsyncMock()
+
+        with pytest.raises(
+            ValueError, match=r"supported formats: gif, jpeg, png, webp, svg"
+        ):
+            await get_document_attachment_content(
+                mock_ctx,
+                project_id="proj1",
+                space_id="Design",
+                document_name="SRS",
+                attachment_id="1-report.docx",
+            )
 
     async def test_response_too_large_raises_value_error_mentioning_cap(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
