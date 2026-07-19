@@ -125,7 +125,8 @@ async def get_document_attachment_content(
     elif mime == _SVG_MIME:
         max_bytes = _MAX_SVG_BYTES
     else:
-        supported = ", ".join([*sorted(_BITMAP_MIME_TO_FORMAT), _SVG_MIME])
+        # Extensions, not mime types -- LLM match against file_name.
+        supported = ", ".join([*sorted(_BITMAP_MIME_TO_FORMAT.values()), "svg"])
         raise ValueError(
             f"Attachment '{attachment_id}' has an unsupported or "
             f"unrecognized extension; supported formats: {supported}. "
