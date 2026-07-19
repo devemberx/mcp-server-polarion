@@ -34,9 +34,10 @@ _BITMAP_MIME_TO_FORMAT: Final[dict[str, str]] = {
 _SVG_MIME: Final[str] = "image/svg+xml"
 
 # Image tokens scale with pixels (API downscale past 1568px); SVG ride as
-# text (~bytes/4 tokens) so its cap differs.
+# text (~bytes/4 tokens) so its cap differs. 64 KiB ~ 16k tokens — larger
+# SVG near-always embed base64 raster, token waste as text.
 _MAX_BITMAP_BYTES: Final[int] = 5 * 1024 * 1024
-_MAX_SVG_BYTES: Final[int] = 128 * 1024
+_MAX_SVG_BYTES: Final[int] = 64 * 1024
 
 
 @mcp.tool(

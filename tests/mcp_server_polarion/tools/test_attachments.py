@@ -362,7 +362,7 @@ class TestGetDocumentAttachmentContent:
         mock_client.get_bytes.assert_awaited_once_with(
             "/projects/proj1/spaces/Design/documents/SRS/attachments"
             "/1-diagram.svg/content",
-            max_bytes=128 * 1024,
+            max_bytes=64 * 1024,
         )
 
     async def test_unsupported_extension_raises_value_error_no_client_call(
