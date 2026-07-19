@@ -329,7 +329,7 @@ class TestGetDocumentAttachmentContent:
     async def test_uppercase_extension_still_bitmap(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        raw = b"fakepngbytes"
+        raw = b"\x89PNG\r\n\x1a\nfakepngbytes"
         mock_client.get_bytes = AsyncMock(return_value=raw)
 
         result = await get_document_attachment_content(
@@ -364,6 +364,87 @@ class TestGetDocumentAttachmentContent:
             "/1-diagram.svg/content",
             max_bytes=64 * 1024,
         )
+
+    async def test_bitmap_magic_overrides_extension(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Renamed file: .png name, JPEG bytes — magic decides served mime."""
+        mock_client.get_bytes = AsyncMock(return_value=b"\xff\xd8\xffjpegbytes")
+
+        result = await get_document_attachment_content(
+            mock_ctx,
+            project_id="proj1",
+            space_id="Design",
+            document_name="SRS",
+            attachment_id="1-shot.png",
+        )
+
+        assert isinstance(result, Image)
+        assert result.to_image_content().mimeType == "image/jpeg"
+
+    async def test_webp_riff_magic_detected(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get_bytes = AsyncMock(
+            return_value=b"RIFF\x24\x00\x00\x00WEBPVP8 webpbytes"
+        )
+
+        result = await get_document_attachment_content(
+            mock_ctx,
+            project_id="proj1",
+            space_id="Design",
+            document_name="SRS",
+            attachment_id="1-shot.webp",
+        )
+
+        assert isinstance(result, Image)
+        assert result.to_image_content().mimeType == "image/webp"
+
+    async def test_bitmap_magic_mismatch_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Garbage bytes as image = whole-request vision API 400 — reject."""
+        mock_client.get_bytes = AsyncMock(return_value=b"MZ not an image")
+
+        with pytest.raises(ValueError, match="list_document_attachments"):
+            await get_document_attachment_content(
+                mock_ctx,
+                project_id="proj1",
+                space_id="Design",
+                document_name="SRS",
+                attachment_id="1-shot.png",
+            )
+
+    async def test_svg_bom_and_whitespace_prefix_ok(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        raw = b"\xef\xbb\xbf\n <?xml version='1.0'?><svg></svg>"
+        mock_client.get_bytes = AsyncMock(return_value=raw)
+
+        result = await get_document_attachment_content(
+            mock_ctx,
+            project_id="proj1",
+            space_id="Design",
+            document_name="SRS",
+            attachment_id="1-diagram.svg",
+        )
+
+        assert isinstance(result, str)
+
+    async def test_svg_binary_content_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Binary mislabeled .svg = up to 16k tokens of mojibake — reject."""
+        mock_client.get_bytes = AsyncMock(return_value=b"\x89PNG\r\n\x1a\npng")
+
+        with pytest.raises(ValueError, match="list_document_attachments"):
+            await get_document_attachment_content(
+                mock_ctx,
+                project_id="proj1",
+                space_id="Design",
+                document_name="SRS",
+                attachment_id="1-diagram.svg",
+            )
 
     async def test_unsupported_extension_raises_value_error_no_client_call(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -484,7 +565,7 @@ class TestGetDocumentAttachmentContent:
     async def test_url_encodes_path_segments(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get_bytes = AsyncMock(return_value=b"fakepngbytes")
+        mock_client.get_bytes = AsyncMock(return_value=b"\x89PNG\r\n\x1a\nfakepngbytes")
 
         await get_document_attachment_content(
             mock_ctx,

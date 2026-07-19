@@ -39,6 +39,34 @@ _SVG_MIME: Final[str] = "image/svg+xml"
 _MAX_BITMAP_BYTES: Final[int] = 5 * 1024 * 1024
 _MAX_SVG_BYTES: Final[int] = 64 * 1024
 
+# Magic bytes decide served format, extension only route pre-fetch —
+# extension lie shipped as image = vision API 400 whole request,
+# unrecoverable for LLM. WebP separate: RIFF container, tag at offset 8.
+_BITMAP_MAGIC_TO_FORMAT: Final[tuple[tuple[bytes, str], ...]] = (
+    (b"\x89PNG\r\n\x1a\n", "png"),
+    (b"\xff\xd8\xff", "jpeg"),
+    (b"GIF87a", "gif"),
+    (b"GIF89a", "gif"),
+)
+# Loose on purpose — goal = block binary mislabeled .svg, not validate spec.
+_SVG_PREFIXES: Final[tuple[str, ...]] = ("<?xml", "<svg", "<!--", "<!doctype")
+
+
+def _sniff_bitmap_format(raw: bytes) -> str | None:
+    """Image format from magic bytes; ``None`` = no supported signature."""
+    for magic, image_format in _BITMAP_MAGIC_TO_FORMAT:
+        if raw.startswith(magic):
+            return image_format
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "webp"
+    return None
+
+
+def _looks_like_svg(text: str) -> bool:
+    """Markup prefix after BOM/whitespace strip — reject binary payloads."""
+    head = text.lstrip("\ufeff \t\r\n")[:10].lower()
+    return head.startswith(_SVG_PREFIXES)
+
 
 @mcp.tool(
     tags={"read"},
@@ -165,5 +193,20 @@ async def get_document_attachment_content(
         ) from exc
 
     if mime == _SVG_MIME:
-        return raw.decode("utf-8", errors="replace")
-    return Image(data=raw, format=_BITMAP_MIME_TO_FORMAT[mime])
+        text = raw.decode("utf-8", errors="replace")
+        if not _looks_like_svg(text):
+            raise ValueError(
+                f"Attachment '{attachment_id}' content is not SVG markup — "
+                "its file_name extension may be wrong. Verify via "
+                "list_document_attachments."
+            )
+        return text
+    sniffed_format = _sniff_bitmap_format(raw)
+    if sniffed_format is None:
+        supported = ", ".join(sorted(_BITMAP_MIME_TO_FORMAT.values()))
+        raise ValueError(
+            f"Attachment '{attachment_id}' content matches no supported "
+            f"image format ({supported}) — its file_name extension may be "
+            "wrong. Verify via list_document_attachments."
+        )
+    return Image(data=raw, format=sniffed_format)
