@@ -196,6 +196,16 @@ class TestReadRouting:
         )
         assert response.status_code == 404
 
+    def test_attachment_content_wrong_space_is_404(self) -> None:
+        # Live-verified: wrong space 404 even when doc name exist elsewhere.
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/spaces/OtherSpace/documents/{DOC}/attachments/"
+            f"{DOC_ATTACHMENT_ID}/content",
+            headers=_BYTES_ACCEPT,
+        )
+        assert response.status_code == 404
+
     def test_attachment_content_unseeded_document_is_404(self) -> None:
         response = _get(
             FakePolarion(),
