@@ -382,6 +382,44 @@ class TestGetDocumentAttachmentContent:
         assert isinstance(result, Image)
         assert result.to_image_content().mimeType == "image/jpeg"
 
+    @pytest.mark.parametrize(
+        "attachment_id",
+        ["1-a.png", "1-a.jpg", "1-a.jpeg", "1-a.jpe", "1-a.gif", "1-a.webp"],
+    )
+    async def test_every_bitmap_extension_routes_pre_request(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, attachment_id: str
+    ) -> None:
+        """Extension map project-owned — dropped key = silent false reject."""
+        mock_client.get_bytes = AsyncMock(return_value=b"\x89PNG\r\n\x1a\npng")
+
+        result = await get_document_attachment_content(
+            mock_ctx,
+            project_id="proj1",
+            space_id="Design",
+            document_name="SRS",
+            attachment_id=attachment_id,
+        )
+
+        assert isinstance(result, Image)
+        assert mock_client.get_bytes.await_args.kwargs["max_bytes"] == 5 * 1024 * 1024
+
+    @pytest.mark.parametrize("magic", [b"GIF87a", b"GIF89a"])
+    async def test_gif_magic_detected(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, magic: bytes
+    ) -> None:
+        mock_client.get_bytes = AsyncMock(return_value=magic + b"gifbytes")
+
+        result = await get_document_attachment_content(
+            mock_ctx,
+            project_id="proj1",
+            space_id="Design",
+            document_name="SRS",
+            attachment_id="1-anim.gif",
+        )
+
+        assert isinstance(result, Image)
+        assert result.to_image_content().mimeType == "image/gif"
+
     async def test_webp_riff_magic_detected(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
@@ -406,7 +444,10 @@ class TestGetDocumentAttachmentContent:
         """Garbage bytes as image = whole-request vision API 400 — reject."""
         mock_client.get_bytes = AsyncMock(return_value=b"MZ not an image")
 
-        with pytest.raises(ValueError, match="list_document_attachments"):
+        with pytest.raises(
+            ValueError,
+            match=r"\(gif, jpeg, png, webp\).*list_document_attachments",
+        ):
             await get_document_attachment_content(
                 mock_ctx,
                 project_id="proj1",
@@ -474,6 +515,40 @@ class TestGetDocumentAttachmentContent:
                 space_id="Design",
                 document_name="SRS",
                 attachment_id="README",
+            )
+
+        mock_client.get_bytes.assert_not_awaited()
+
+    async def test_svgz_rejected_pre_request(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """.svgz = gzipped SVG — bytes never decode as markup, reject early."""
+        mock_client.get_bytes = AsyncMock()
+
+        with pytest.raises(ValueError, match="list_document_attachments"):
+            await get_document_attachment_content(
+                mock_ctx,
+                project_id="proj1",
+                space_id="Design",
+                document_name="SRS",
+                attachment_id="1-diagram.svgz",
+            )
+
+        mock_client.get_bytes.assert_not_awaited()
+
+    async def test_gz_double_extension_rejected_pre_request(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """.png.gz = gzip bytes, not PNG — reject on final suffix."""
+        mock_client.get_bytes = AsyncMock()
+
+        with pytest.raises(ValueError, match="list_document_attachments"):
+            await get_document_attachment_content(
+                mock_ctx,
+                project_id="proj1",
+                space_id="Design",
+                document_name="SRS",
+                attachment_id="1-shot.png.gz",
             )
 
         mock_client.get_bytes.assert_not_awaited()

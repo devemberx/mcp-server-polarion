@@ -4,7 +4,7 @@ attachment's content.
 
 from __future__ import annotations
 
-import mimetypes
+from pathlib import PurePosixPath
 from typing import Final
 
 from fastmcp import Context
@@ -24,14 +24,20 @@ from mcp_server_polarion.tools._shared.helpers import encode_path_segment, get_c
 from mcp_server_polarion.tools._shared.pagination import DEFAULT_PAGE_SIZE
 from mcp_server_polarion.tools._shared.parse import parse_attachments_page
 
-# Mime -> Image format arg. Bitmap formats major LLM hosts render.
-_BITMAP_MIME_TO_FORMAT: Final[dict[str, str]] = {
-    "image/png": "png",
-    "image/jpeg": "jpeg",
-    "image/gif": "gif",
-    "image/webp": "webp",
+# Extension -> Image format arg. Bitmap formats major LLM hosts render.
+# Not mimetypes.guess_type: it merge system mime files + Windows registry
+# over builtin — polluted env remap .png = false pre-request reject; it
+# also strip encoding suffix (.svgz -> image/svg+xml) = gzip bytes routed
+# as SVG. Static map same answer every platform.
+_BITMAP_EXTENSION_TO_FORMAT: Final[dict[str, str]] = {
+    ".png": "png",
+    ".jpg": "jpeg",
+    ".jpeg": "jpeg",
+    ".jpe": "jpeg",
+    ".gif": "gif",
+    ".webp": "webp",
 }
-_SVG_MIME: Final[str] = "image/svg+xml"
+_SVG_EXTENSION: Final[str] = ".svg"
 
 # Image tokens scale with pixels (API downscale past 1568px); SVG ride as
 # text (~bytes/4 tokens) so its cap differs. 64 KiB ~ 16k tokens — larger
@@ -148,14 +154,17 @@ async def get_document_attachment_content(
     request. Use list_document_attachments to discover attachment ids,
     file names, and sizes.
     """
-    mime, _ = mimetypes.guess_type(attachment_id)
-    if mime in _BITMAP_MIME_TO_FORMAT:
+    extension = PurePosixPath(attachment_id).suffix.lower()
+    is_svg = extension == _SVG_EXTENSION
+    if extension in _BITMAP_EXTENSION_TO_FORMAT:
         max_bytes = _MAX_BITMAP_BYTES
-    elif mime == _SVG_MIME:
+    elif is_svg:
         max_bytes = _MAX_SVG_BYTES
     else:
-        # Extensions, not mime types -- LLM match against file_name.
-        supported = ", ".join([*sorted(_BITMAP_MIME_TO_FORMAT.values()), "svg"])
+        # Format names double as extensions -- LLM match against file_name.
+        supported = ", ".join(
+            [*sorted(set(_BITMAP_EXTENSION_TO_FORMAT.values())), "svg"]
+        )
         raise ValueError(
             f"Attachment '{attachment_id}' has an unsupported or "
             f"unrecognized extension; supported formats: {supported}. "
@@ -192,7 +201,7 @@ async def get_document_attachment_content(
             f"Failed to fetch attachment '{attachment_id}': {exc.message}"
         ) from exc
 
-    if mime == _SVG_MIME:
+    if is_svg:
         text = raw.decode("utf-8", errors="replace")
         if not _looks_like_svg(text):
             raise ValueError(
@@ -203,7 +212,7 @@ async def get_document_attachment_content(
         return text
     sniffed_format = _sniff_bitmap_format(raw)
     if sniffed_format is None:
-        supported = ", ".join(sorted(_BITMAP_MIME_TO_FORMAT.values()))
+        supported = ", ".join(sorted(set(_BITMAP_EXTENSION_TO_FORMAT.values())))
         raise ValueError(
             f"Attachment '{attachment_id}' content matches no supported "
             f"image format ({supported}) — its file_name extension may be "
