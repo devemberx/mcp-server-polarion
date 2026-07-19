@@ -34,16 +34,11 @@ You cannot spawn agents; cover each angle as its own pass over the diff.
    Use the cheaper alternative.
 4. **Altitude** — special cases layered on shared infrastructure instead of a
    fix to the underlying mechanism. Generalize rather than patch on top.
-5. **Comment density** — verbose developer comments and dev docstrings in the
-   diff. Apply the CLAUDE.md comment rules: why not what, one distinct fact
-   per line, caveman-compressed (drop articles/filler); delete comments that
-   restate the code. Diff scope only — never tidy unchanged files (repo-wide
-   sweeps belong to `/compress-code-comments`).
-   Never touch: `@mcp.tool` function docstrings and `Field(description=...)`
-   strings — LLM-facing and eval-gated, editing them can fail the deploy-gate
-   evals; and functional pseudo-comments (`# noqa`, `# type: ignore[...]`,
-   `# pragma: no cover`, `# fmt:`/`# ruff:`/`# isort:` directives, shebangs,
-   license headers) — preserve verbatim, including position on the line.
+5. **Comment density** — verbose comments or dev docstrings. Compress to the
+   CLAUDE.md comment rules (why not what, one line per fact); delete what
+   restates the code. Never touch `@mcp.tool` docstrings or
+   `Field(description=...)` (eval-gated LLM surface), nor functional
+   directives (`# noqa`, `# type: ignore`, `# pragma`, `# fmt:`).
 
 ## Boundaries
 
