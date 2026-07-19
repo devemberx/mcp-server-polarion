@@ -19,6 +19,7 @@ from .fixtures import (
     API_PREFIX,
     AUTHOR,
     DOC,
+    DOC_ATTACHMENT_CONTENT,
     MODULE_ID,
     POLARION_HOST,
     PROJECT,
@@ -578,6 +579,27 @@ class FakePolarion:
                     "included": self._author_included() if data else [],
                     "meta": {"totalCount": len(data)},
                 },
+            )
+
+        # Attachment content: 404 unseeded doc/attachment (#194 principle) --
+        # NOT list route's empty-200 shape. First binary route in harness;
+        # real bytes so client-side decode/size-cap tests work. Vendor 406
+        # missing octet-stream in Accept -- falsify header contract too.
+        attachment_content = re.search(
+            r"/documents/([^/]+)/attachments/([^/]+)/content$", path
+        )
+        if attachment_content:
+            name, attachment_id = attachment_content.groups()
+            if "application/octet-stream" not in request.headers.get("accept", ""):
+                return httpx.Response(406, json={"errors": [{"status": "406"}]})
+            doc = self.seeds.documents.get(name)
+            known_ids = {a.attachment_id for a in doc.attachments} if doc else set()
+            if doc is None or attachment_id not in known_ids:
+                return httpx.Response(404, json={"errors": [{"status": "404"}]})
+            return httpx.Response(
+                200,
+                content=DOC_ATTACHMENT_CONTENT,
+                headers={"Content-Type": "application/octet-stream"},
             )
 
         # Exact match on seeded doc: broad "/documents/" would claim every

@@ -19,6 +19,7 @@ from mcp_server_polarion.core.exceptions import (
     PolarionAuthError,
     PolarionError,
     PolarionNotFoundError,
+    PolarionResponseTooLargeError,
 )
 
 BASE = "https://polarion.example.com/polarion/rest/v1"
@@ -690,6 +691,119 @@ class TestSerialization:
             f"follow-up GET started {starts[2] - starts[1]:.3f}s after the retry "
             f"attempt; expected ≥ {min_interval * 0.9:.3f}s (re-stamped pacing)."
         )
+
+
+class TestGetBytes:
+    """``get_bytes`` — streamed binary GET with client-side size cap."""
+
+    async def test_returns_exact_bytes(self) -> None:
+        payload = b"\x89PNG\r\n\x1a\n" + b"x" * 50
+        with respx.mock(base_url=BASE) as mock:
+            mock.get("/projects/P1/attachments/a1/content").mock(
+                return_value=httpx.Response(200, content=payload),
+            )
+
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
+                result = await client.get_bytes(
+                    "/projects/P1/attachments/a1/content", max_bytes=1024
+                )
+
+            assert result == payload
+
+    async def test_sends_octet_stream_accept_header(self) -> None:
+        """Vendor content endpoint 406 on client-wide JSON-only Accept."""
+        with respx.mock(base_url=BASE) as mock:
+            route = mock.get("/projects/P1/attachments/a1/content").mock(
+                return_value=httpx.Response(200, content=b"data"),
+            )
+
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
+                await client.get_bytes(
+                    "/projects/P1/attachments/a1/content", max_bytes=1024
+                )
+
+            request = route.calls.last.request
+            assert (
+                request.headers["accept"]
+                == "application/octet-stream, application/json"
+            )
+
+    async def test_404_raises_not_found_error(self) -> None:
+        with respx.mock(base_url=BASE) as mock:
+            mock.get("/projects/P1/attachments/missing/content").mock(
+                return_value=httpx.Response(
+                    404,
+                    json={"errors": [{"detail": "Attachment not found"}]},
+                ),
+            )
+
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
+                with pytest.raises(PolarionNotFoundError) as exc_info:
+                    await client.get_bytes(
+                        "/projects/P1/attachments/missing/content",
+                        max_bytes=1024,
+                    )
+
+            assert exc_info.value.status_code == 404
+
+    async def test_oversize_body_raises_too_large_error(self) -> None:
+        with respx.mock(base_url=BASE) as mock:
+            mock.get("/projects/P1/attachments/a1/content").mock(
+                return_value=httpx.Response(200, content=b"x" * 100),
+            )
+
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
+                with pytest.raises(PolarionResponseTooLargeError) as exc_info:
+                    await client.get_bytes(
+                        "/projects/P1/attachments/a1/content", max_bytes=10
+                    )
+
+            assert exc_info.value.limit == 10
+
+    async def test_retries_on_429_then_succeeds(self) -> None:
+        """First request → 429, second → 200; route hit twice."""
+        with respx.mock(base_url=BASE) as mock:
+            route = mock.get("/projects/P1/attachments/a1/content").mock(
+                side_effect=[
+                    httpx.Response(429, json={"error": "Too Many Requests"}),
+                    httpx.Response(200, content=b"data"),
+                ],
+            )
+
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
+                result = await client.get_bytes(
+                    "/projects/P1/attachments/a1/content", max_bytes=1024
+                )
+
+            assert result == b"data"
+            assert route.call_count == 2
+
+    async def test_oversize_body_not_retried(self) -> None:
+        """Client-side cap abort must not trigger the 429/5xx retry loop."""
+        with respx.mock(base_url=BASE) as mock:
+            route = mock.get("/projects/P1/attachments/a1/content").mock(
+                return_value=httpx.Response(200, content=b"x" * 100),
+            )
+
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
+                with pytest.raises(PolarionResponseTooLargeError):
+                    await client.get_bytes(
+                        "/projects/P1/attachments/a1/content", max_bytes=10
+                    )
+
+            assert route.call_count == 1
 
 
 class TestContextManager:

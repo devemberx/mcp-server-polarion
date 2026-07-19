@@ -40,6 +40,15 @@ DOC_INTRO_PARAGRAPH_ID = "p-1"
 # Attachment on DOC; numeric prefix mirror server-assigned real ids.
 DOC_ATTACHMENT_ID = "1-fake-diagram.png"
 
+# Minimal 1x1 transparent PNG; content route serve verbatim for
+# DOC_ATTACHMENT_ID -- byte validity matters (real PNG signature), pixel
+# content does not.
+DOC_ATTACHMENT_CONTENT = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x04\x00\x00\x00\xb5\x1c\x0c\x02\x00\x00\x00\x0bIDATx\xdacd`\x00"
+    b"\x00\x00\x06\x00\x020\x81\xd0/\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
 # Second document + requirement traceability seeds (orchestration cases).
 PARENT_DOC = "FakeParentDoc"
 PARENT_MODULE_ID = f"{PROJECT}/{SPACE}/{PARENT_DOC}"
