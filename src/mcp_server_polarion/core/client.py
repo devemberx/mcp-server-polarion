@@ -21,6 +21,7 @@ from mcp_server_polarion.core.exceptions import (
     PolarionAuthError,
     PolarionError,
     PolarionNotFoundError,
+    PolarionResponseTooLargeError,
 )
 
 logger: Final = logging.getLogger("mcp_server_polarion.core.client")
@@ -42,6 +43,9 @@ _HTTP_FORBIDDEN: Final[int] = 403
 _HTTP_NOT_FOUND: Final[int] = 404
 
 _MAX_ERROR_DETAIL_LEN: Final[int] = 200
+
+# Vendor content endpoint 406 on client-wide JSON-only Accept default.
+_BYTES_ACCEPT_HEADER: Final[str] = "application/octet-stream, application/json"
 
 
 def _extract_json_api_detail(body: object) -> str:
@@ -142,6 +146,14 @@ class PolarionClient:
         async with self._get_request_lock():
             return await self._request("GET", path, params=params)
 
+    async def get_bytes(self, path: str, *, max_bytes: int) -> bytes:
+        """Streamed ``GET``; abort + raise ``PolarionResponseTooLargeError``
+        once body cross ``max_bytes`` (client-side cap, never retried). Same
+        error mapping/retry as :meth:`get` otherwise.
+        """
+        async with self._get_request_lock():
+            return await self._request_bytes(path, max_bytes=max_bytes)
+
     async def post(
         self,
         path: str,
@@ -233,6 +245,74 @@ class PolarionClient:
                     "Retryable error %d on %s %s (attempt %d/%d). Backing off %.1f s.",
                     response.status_code,
                     method,
+                    path,
+                    attempt + 1,
+                    _MAX_RETRIES + 1,
+                    backoff,
+                )
+                last_exception = error
+                await asyncio.sleep(backoff)
+                backoff *= _BACKOFF_MULTIPLIER
+                continue
+
+            raise error
+
+        if last_exception is not None:
+            raise last_exception
+
+        raise PolarionError(  # pragma: no cover
+            "Unexpected retry loop exit",
+            status_code=0,
+        )
+
+    async def _request_bytes(self, path: str, *, max_bytes: int) -> bytes:
+        """Stream GET behind :meth:`get_bytes`; retry 429/5xx like
+        :meth:`_request`.
+        """
+        # _request duplicate: body arrive streamed, cap check mid-accumulation.
+        await self._pace()
+        last_exception: PolarionError | None = None
+        backoff = _INITIAL_BACKOFF_SECONDS
+        loop = asyncio.get_running_loop()
+
+        for attempt in range(_MAX_RETRIES + 1):
+            self._last_request_monotonic = loop.time()
+            try:
+                async with self._client.stream(
+                    "GET",
+                    path,
+                    headers={"Accept": _BYTES_ACCEPT_HEADER},
+                ) as response:
+                    if not response.is_success:
+                        # Error body needed for _map_status_to_error below.
+                        await response.aread()
+                    else:
+                        chunks: list[bytes] = []
+                        total = 0
+                        async for chunk in response.aiter_bytes():
+                            total += len(chunk)
+                            if total > max_bytes:
+                                raise PolarionResponseTooLargeError(
+                                    f"Response from {path} exceeded "
+                                    f"{max_bytes} byte cap before "
+                                    "completing.",
+                                    limit=max_bytes,
+                                )
+                            chunks.append(chunk)
+                        return b"".join(chunks)
+            except httpx.HTTPError as exc:
+                raise PolarionError(
+                    f"HTTP transport error: {exc}",
+                    status_code=0,
+                ) from exc
+
+            error = self._map_status_to_error(response)
+
+            is_retryable = response.status_code in _RETRYABLE_STATUS_CODES
+            if is_retryable and attempt < _MAX_RETRIES:
+                logger.warning(
+                    "Retryable error %d on GET %s (attempt %d/%d). Backing off %.1f s.",
+                    response.status_code,
                     path,
                     attempt + 1,
                     _MAX_RETRIES + 1,

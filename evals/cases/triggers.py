@@ -13,6 +13,7 @@ from evals.cases._shared import make_case
 from evals.harness.fixtures import (
     CHILD_REQ_ID,
     DOC,
+    DOC_ATTACHMENT_ID,
     FLOATING_TASK_ID,
     PARENT_REQ_ID,
     PROJECT,
@@ -135,6 +136,18 @@ CASES: list[Case] = [
         covers=["list_document_attachments"],
         expect="list_document_attachments",
         reject=["read_document"],
+    ),
+    _case(
+        "TRIG-DOC-ATTACHMENT-CONTENT",
+        f"Show me the image attachment '{DOC_ATTACHMENT_ID}' from the document "
+        f"'{DOC}' in the '{SPACE}' space.",
+        "triggers_tool",
+        intent="Viewing an attachment's image content must call "
+        "get_document_attachment_content; listing its metadata via "
+        "list_document_attachments does not render the image.",
+        covers=["get_document_attachment_content"],
+        expect="get_document_attachment_content",
+        reject=["list_document_attachments"],
     ),
     _case(
         "TRIG-DOC-ENUM",

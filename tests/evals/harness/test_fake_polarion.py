@@ -14,6 +14,7 @@ from evals.harness.fixtures import (
     API_PREFIX,
     CHILD_REQ_ID,
     DOC,
+    DOC_ATTACHMENT_CONTENT,
     DOC_ATTACHMENT_ID,
     DOC_HEADING_ID,
     DOC_INTRO_PARAGRAPH_ID,
@@ -34,10 +35,20 @@ from evals.harness.fixtures import (
 )
 
 _BASE = f"{POLARION_HOST}{API_PREFIX}"
+# Real client Accept header for binary content routes (client.py mirror).
+_BYTES_ACCEPT = {"Accept": "application/octet-stream, application/json"}
 
 
-def _get(fake: FakePolarion, path: str, **params: str) -> httpx.Response:
-    request = httpx.Request("GET", f"{_BASE}{path}", params=params or None)
+def _get(
+    fake: FakePolarion,
+    path: str,
+    *,
+    headers: dict[str, str] | None = None,
+    **params: str,
+) -> httpx.Response:
+    request = httpx.Request(
+        "GET", f"{_BASE}{path}", params=params or None, headers=headers
+    )
     return fake._dispatch(request)
 
 
@@ -154,6 +165,55 @@ class TestReadRouting:
         assert response.status_code == 200
         assert _json(response)["data"] == []
         assert _json(response)["included"] == []
+
+    def test_attachment_content_serves_seeded_bytes(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/spaces/{SPACE}/documents/{DOC}/attachments/"
+            f"{DOC_ATTACHMENT_ID}/content",
+            headers=_BYTES_ACCEPT,
+        )
+        assert response.status_code == 200
+        assert response.content == DOC_ATTACHMENT_CONTENT
+
+    def test_attachment_content_json_only_accept_is_406(self) -> None:
+        # Real Polarion 406 on JSON-only Accept; harness falsify same contract.
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/spaces/{SPACE}/documents/{DOC}/attachments/"
+            f"{DOC_ATTACHMENT_ID}/content",
+            headers={"Accept": "application/json"},
+        )
+        assert response.status_code == 406
+        assert _json(response)["errors"]
+
+    def test_attachment_content_unseeded_attachment_is_404(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/spaces/{SPACE}/documents/{DOC}/attachments/"
+            "999-not-real.png/content",
+            headers=_BYTES_ACCEPT,
+        )
+        assert response.status_code == 404
+
+    def test_attachment_content_wrong_space_is_404(self) -> None:
+        # Live-verified: wrong space 404 even when doc name exist elsewhere.
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/spaces/OtherSpace/documents/{DOC}/attachments/"
+            f"{DOC_ATTACHMENT_ID}/content",
+            headers=_BYTES_ACCEPT,
+        )
+        assert response.status_code == 404
+
+    def test_attachment_content_unseeded_document_is_404(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/spaces/{SPACE}/documents/OtherDoc/attachments/"
+            f"{DOC_ATTACHMENT_ID}/content",
+            headers=_BYTES_ACCEPT,
+        )
+        assert response.status_code == 404
 
     def test_attachments_relationships_author_only(self) -> None:
         # Sparse fieldset drop project rel -- mock must not ship it.

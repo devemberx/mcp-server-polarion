@@ -184,9 +184,9 @@ complexity):
    skipping this turns the pass into a silent no-op.
 2. **Invoke `pipeline-simplifier`** with the worktree path and the diff scope
    (`git diff origin/main...HEAD`). It sweeps reuse/simplification/efficiency/
-   altitude and applies the fixes itself — quality only, no bug hunting;
-   behavior stays pinned by the Stage 3 tests. Expect its CHANGED / SKIPPED /
-   TESTS report back.
+   altitude/comment-density and applies the fixes itself — quality only, no
+   bug hunting; behavior stays pinned by the Stage 3 tests. Expect its
+   CHANGED / SKIPPED / TESTS report back.
 3. Re-run Stage 4 gates in the main thread, then commit the simplify edits.
    Gates red on a simplify edit (diff-cover counts its changed lines too):
    `SendMessage` the simplifier to fix or revert that edit — it holds the
