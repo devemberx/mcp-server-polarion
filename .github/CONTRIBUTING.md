@@ -121,6 +121,11 @@ Want it checked locally as you commit? Enable the optional hook:
   Summary, Type of Change, Changes, Testing.
 - **Link issues** with `Closes #<n>` or `Refs #<n>` in the Summary.
 - **Make sure CI is green** — `ruff check` → `ruff format --check` → `mypy` → `pytest`.
+- **No private deployment names.** PR/issue/commit/release text must not name real Polarion
+  projects, spaces, or documents you test against — describe them generically ("live testdrive
+  project"). If you work against a private instance, copy `.claude/sensitive-patterns.example` to
+  `.claude/sensitive-patterns.local` (untracked) and the `block_sensitive_text.py` Claude hook
+  blocks outward commands containing those names.
 
 ### Review and merge
 

@@ -1,0 +1,10 @@
+# Copy to .claude/sensitive-patterns.local (untracked) and list names of
+# your private Polarion deployment (project/space/document ids) that must
+# never appear in PR/issue/commit/release text.
+#
+# One Python regex per line, case-sensitive; `#` = comment; invalid regex
+# guarded as literal. Enforced by .claude/hooks/block_sensitive_text.py
+# on outward commands (gh pr/issue/api/release/gist, git commit/tag).
+#
+# ExamplePrivateProject\b
+# ExampleSpace/ExamplePrivateDoc\b
