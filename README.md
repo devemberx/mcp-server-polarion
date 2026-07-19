@@ -24,7 +24,7 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for **P
 
 ## Features
 
-- **38 tools** covering read and write across documents, work items, test runs, traceability links, comments, and attachments.
+- **39 tools** covering read and write across documents, work items, test runs, traceability links, comments, and attachments.
 - **Read** — render documents as Markdown, search with Lucene or SQL, walk incoming/outgoing links, resolve enum options.
 - **Write** — create and update work items, documents, and test runs, manage links, reorganize document structure, post comments.
 - **Safe writes** — every write tool supports `dry_run`, and pre-write guards validate fields, enum values, and link targets before hitting Polarion.
@@ -67,6 +67,7 @@ Other clients (VS Code, Claude Desktop, Cursor) — see [Client Configuration](#
 | `read_work_item` | Get work item details with the body as Markdown |
 | `list_work_item_links` | List a work item's outgoing or incoming links |
 | `list_document_attachments` | List a document's attachments with file name, size, and author |
+| `get_document_attachment_content` | Fetch an image attachment for viewing (bitmap as image, SVG as text) |
 | `list_document_comments` | List a document's comments with thread relationships |
 | `list_work_item_comments` | List a work item's comments with thread relationships |
 | `list_document_enum_options` | Resolve valid enum ids for a document field |

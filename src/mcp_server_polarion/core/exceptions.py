@@ -18,3 +18,13 @@ class PolarionAuthError(PolarionError):
 
 class PolarionNotFoundError(PolarionError):
     """HTTP 404 — invalid project ID, work-item ID, or document path."""
+
+
+class PolarionResponseTooLargeError(PolarionError):
+    """Streamed GET aborted client-side — body crossed ``limit`` bytes
+    before completing. Not a Polarion status code — server never asked.
+    """
+
+    def __init__(self, message: str, *, limit: int) -> None:
+        super().__init__(message, status_code=0)
+        self.limit = limit

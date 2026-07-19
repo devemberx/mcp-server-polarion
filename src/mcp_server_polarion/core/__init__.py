@@ -8,6 +8,7 @@ from mcp_server_polarion.core.exceptions import (
     PolarionAuthError,
     PolarionError,
     PolarionNotFoundError,
+    PolarionResponseTooLargeError,
 )
 
 __all__: list[str] = [
@@ -16,4 +17,5 @@ __all__: list[str] = [
     "PolarionConfig",
     "PolarionError",
     "PolarionNotFoundError",
+    "PolarionResponseTooLargeError",
 ]
