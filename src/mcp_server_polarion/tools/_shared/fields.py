@@ -38,6 +38,7 @@ DOCUMENT_COMMENT_LIST_FIELDS: Final[str] = (
 WORK_ITEM_COMMENT_LIST_FIELDS: Final[str] = (
     "created,resolved,title,text,author,parentComment,childComments"
 )
+WORKITEM_ATTACHMENT_LIST_FIELDS: Final[str] = "id,fileName,title,updated,length,author"
 
 __all__: list[str] = [
     "DOCUMENT_ATTACHMENT_LIST_FIELDS",
@@ -48,6 +49,7 @@ __all__: list[str] = [
     "TEST_RECORD_LIST_FIELDS",
     "TEST_RUN_DETAIL_FIELDS",
     "TEST_RUN_LIST_FIELDS",
+    "WORKITEM_ATTACHMENT_LIST_FIELDS",
     "WORK_ITEM_COMMENT_LIST_FIELDS",
     "WORK_ITEM_DETAIL_FIELDS",
     "WORK_ITEM_LIST_FIELDS",

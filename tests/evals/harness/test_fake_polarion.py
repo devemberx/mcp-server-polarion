@@ -32,6 +32,7 @@ from evals.harness.fixtures import (
     TEST_RUN_ID_2,
     TEST_RUN_TEMPLATE_ID,
     TESTCASE_ID,
+    WORKITEM_ATTACHMENT_ID,
 )
 
 _BASE = f"{POLARION_HOST}{API_PREFIX}"
@@ -243,6 +244,53 @@ class TestReadRouting:
         response = _get(
             FakePolarion(),
             f"/projects/{PROJECT}/spaces/NoSuchSpace/documents/{DOC}/attachments",
+        )
+        assert response.status_code == 404
+
+    def test_workitem_attachments_expose_body_reference_id(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}/attachments",
+        )
+        data = _json(response)["data"]
+        assert len(data) == 1
+        entry = data[0]
+        assert entry["type"] == "workitem_attachments"
+        assert entry["id"] == f"{PROJECT}/{FLOATING_TASK_ID}/{WORKITEM_ATTACHMENT_ID}"
+        assert entry["attributes"]["id"] == WORKITEM_ATTACHMENT_ID
+        assert entry["attributes"]["length"] > 0
+        assert entry["relationships"]["author"]["data"]["id"]
+        assert _json(response)["included"]
+
+    def test_workitem_attachments_empty_for_other_work_item(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/workitems/{DOC_HEADING_ID}/attachments",
+        )
+        assert response.status_code == 200
+        assert _json(response)["data"] == []
+        assert _json(response)["included"] == []
+
+    def test_workitem_attachments_relationships_author_only(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}/attachments",
+        )
+        entry = _json(response)["data"][0]
+        assert sorted(entry["relationships"]) == ["author"]
+
+    def test_workitem_attachments_meta_total_count_always_present(self) -> None:
+        # Live rule: totalCount serve every multi-page page; fake always emit
+        # it here -- diverges from doc route's overshoot-only omit.
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}/attachments",
+        )
+        assert _json(response)["meta"]["totalCount"] == 1
+
+    def test_workitem_attachments_unseeded_work_item_404(self) -> None:
+        response = _get(
+            FakePolarion(), f"/projects/{PROJECT}/workitems/MCPT-9999/attachments"
         )
         assert response.status_code == 404
 
