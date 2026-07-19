@@ -581,12 +581,10 @@ class FakePolarion:
                 },
             )
 
-        # Attachment content: 404 unseeded doc/attachment (#194 principle) --
-        # NOT list route's empty-200 shape. First binary route in harness;
-        # real bytes so client-side decode/size-cap tests work. Vendor 406
-        # missing octet-stream in Accept -- falsify header contract too.
-        # Space anchored like list route: wrong space 404 live-verified,
-        # unanchored regex would mask space arg-threading bugs.
+        # Attachment content: 404 unseeded (#194 principle), NOT list route's
+        # empty-200. Real bytes so decode/size-cap tests work; 406 without
+        # octet-stream Accept mirror vendor. Space anchor: wrong space 404
+        # live-verified, unanchored regex mask space arg-threading bugs.
         attachment_content = re.search(
             rf"/spaces/{SPACE}/documents/([^/]+)/attachments/([^/]+)/content$", path
         )

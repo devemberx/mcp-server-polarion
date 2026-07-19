@@ -24,11 +24,9 @@ from mcp_server_polarion.tools._shared.helpers import encode_path_segment, get_c
 from mcp_server_polarion.tools._shared.pagination import DEFAULT_PAGE_SIZE
 from mcp_server_polarion.tools._shared.parse import parse_attachments_page
 
-# Extension -> Image format arg. Bitmap formats major LLM hosts render.
-# Not mimetypes.guess_type: it merge system mime files + Windows registry
-# over builtin — polluted env remap .png = false pre-request reject; it
-# also strip encoding suffix (.svgz -> image/svg+xml) = gzip bytes routed
-# as SVG. Static map same answer every platform.
+# Extension -> Image format arg; bitmap formats major LLM hosts render.
+# Static, not mimetypes.guess_type: guess_type read system mime files +
+# registry (polluted env remap .png) and strip .svgz to image/svg+xml.
 _BITMAP_EXTENSION_TO_FORMAT: Final[dict[str, str]] = {
     ".png": "png",
     ".jpg": "jpeg",
@@ -39,15 +37,13 @@ _BITMAP_EXTENSION_TO_FORMAT: Final[dict[str, str]] = {
 }
 _SVG_EXTENSION: Final[str] = ".svg"
 
-# Image tokens scale with pixels (API downscale past 1568px); SVG ride as
-# text (~bytes/4 tokens) so its cap differs. 64 KiB ~ 16k tokens — larger
-# SVG near-always embed base64 raster, token waste as text.
+# Bitmap tokens scale with pixels (API downscale past 1568px). SVG ride
+# as text: 64 KiB ~ 16k tokens; larger SVG near-always base64 raster.
 _MAX_BITMAP_BYTES: Final[int] = 5 * 1024 * 1024
 _MAX_SVG_BYTES: Final[int] = 64 * 1024
 
-# Magic bytes decide served format, extension only route pre-fetch —
-# extension lie shipped as image = vision API 400 whole request,
-# unrecoverable for LLM. WebP separate: RIFF container, tag at offset 8.
+# Magic decide served format (extension only route pre-fetch) — extension
+# lie shipped as image = unrecoverable vision API 400.
 _BITMAP_MAGIC_TO_FORMAT: Final[tuple[tuple[bytes, str], ...]] = (
     (b"\x89PNG\r\n\x1a\n", "png"),
     (b"\xff\xd8\xff", "jpeg"),

@@ -176,8 +176,7 @@ class TestReadRouting:
         assert response.content == DOC_ATTACHMENT_CONTENT
 
     def test_attachment_content_json_only_accept_is_406(self) -> None:
-        # Real Polarion 406 client-wide JSON-only Accept default; harness
-        # falsify same header contract.
+        # Real Polarion 406 on JSON-only Accept; harness falsify same contract.
         response = _get(
             FakePolarion(),
             f"/projects/{PROJECT}/spaces/{SPACE}/documents/{DOC}/attachments/"

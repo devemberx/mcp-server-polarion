@@ -769,7 +769,7 @@ class TestGetBytes:
             assert exc_info.value.limit == 10
 
     async def test_retries_on_429_then_succeeds(self) -> None:
-        """First request → 429, second → 200; route hit twice."""
+        """429 consumed by retry loop; caller see only final 200."""
         with respx.mock(base_url=BASE) as mock:
             route = mock.get("/projects/P1/attachments/a1/content").mock(
                 side_effect=[

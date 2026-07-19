@@ -266,12 +266,10 @@ class PolarionClient:
         )
 
     async def _request_bytes(self, path: str, *, max_bytes: int) -> bytes:
-        """Stream GET body; retry 429/5xx like :meth:`_request`. Abort +
-        raise ``PolarionResponseTooLargeError`` once accumulated bytes cross
-        ``max_bytes`` — client-side cap, never retried.
+        """Stream GET behind :meth:`get_bytes`; retry 429/5xx like
+        :meth:`_request`.
         """
-        # Mirror _request's retry loop; response body arrive as a stream
-        # instead of one .json() call, so cap check land mid-accumulation.
+        # _request duplicate: body arrive streamed, cap check mid-accumulation.
         await self._pace()
         last_exception: PolarionError | None = None
         backoff = _INITIAL_BACKOFF_SECONDS
