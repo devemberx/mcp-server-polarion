@@ -106,6 +106,20 @@ class TestExtractTitle:
     def test_absent(self) -> None:
         assert body.extract_title("gh pr edit 5 --body y") is None
 
+    def test_api_template_flag_is_not_a_title(self) -> None:
+        # Under gh api, -t = --template (output format), never a title.
+        assert body.extract_title("gh api /repos/o/r/pulls/5 -t '{{.title}}'") is None
+
+    def test_api_field_title(self) -> None:
+        cmd = "gh api /repos/o/r/pulls/5 -f title='fix: x'"
+        assert body.extract_title(cmd) == "fix: x"
+
+    def test_api_field_title_file(self, tmp_path: Path) -> None:
+        f = tmp_path / "t.txt"
+        f.write_text("fix: filed title")
+        cmd = f"gh api /repos/o/r/pulls/5 -F title=@{f}"
+        assert body.extract_title(cmd) == "fix: filed title"
+
 
 class TestTitleErrors:
     @pytest.mark.parametrize(
