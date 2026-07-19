@@ -30,7 +30,8 @@ TEST_RECORD_DETAIL_FIELDS: Final[str] = (
 )
 DOCUMENT_DETAIL_FIELDS: Final[str] = "@all"
 # Sparse fieldset filters relationships too — name them explicitly.
-DOCUMENT_ATTACHMENT_LIST_FIELDS: Final[str] = "id,fileName,title,updated,length,author"
+# Document and work item attachments expose same attribute set.
+ATTACHMENT_LIST_FIELDS: Final[str] = "id,fileName,title,updated,length,author"
 DOCUMENT_COMMENT_LIST_FIELDS: Final[str] = (
     "created,resolved,text,author,parentComment,childComments"
 )
@@ -38,10 +39,9 @@ DOCUMENT_COMMENT_LIST_FIELDS: Final[str] = (
 WORK_ITEM_COMMENT_LIST_FIELDS: Final[str] = (
     "created,resolved,title,text,author,parentComment,childComments"
 )
-WORKITEM_ATTACHMENT_LIST_FIELDS: Final[str] = "id,fileName,title,updated,length,author"
 
 __all__: list[str] = [
-    "DOCUMENT_ATTACHMENT_LIST_FIELDS",
+    "ATTACHMENT_LIST_FIELDS",
     "DOCUMENT_COMMENT_LIST_FIELDS",
     "DOCUMENT_DETAIL_FIELDS",
     "MAX_BULK_ITEMS",
@@ -49,7 +49,6 @@ __all__: list[str] = [
     "TEST_RECORD_LIST_FIELDS",
     "TEST_RUN_DETAIL_FIELDS",
     "TEST_RUN_LIST_FIELDS",
-    "WORKITEM_ATTACHMENT_LIST_FIELDS",
     "WORK_ITEM_COMMENT_LIST_FIELDS",
     "WORK_ITEM_DETAIL_FIELDS",
     "WORK_ITEM_LIST_FIELDS",

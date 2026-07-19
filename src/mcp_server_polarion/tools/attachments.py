@@ -19,10 +19,7 @@ from mcp_server_polarion.core.exceptions import (
 )
 from mcp_server_polarion.models import Attachment, PaginatedResult
 from mcp_server_polarion.server import mcp
-from mcp_server_polarion.tools._shared.fields import (
-    DOCUMENT_ATTACHMENT_LIST_FIELDS,
-    WORKITEM_ATTACHMENT_LIST_FIELDS,
-)
+from mcp_server_polarion.tools._shared.fields import ATTACHMENT_LIST_FIELDS
 from mcp_server_polarion.tools._shared.helpers import encode_path_segment, get_client
 from mcp_server_polarion.tools._shared.pagination import DEFAULT_PAGE_SIZE
 from mcp_server_polarion.tools._shared.parse import parse_attachments_page
@@ -105,7 +102,7 @@ async def list_document_attachments(  # noqa: PLR0913
         response = await client.get(
             path,
             params={
-                "fields[document_attachments]": DOCUMENT_ATTACHMENT_LIST_FIELDS,
+                "fields[document_attachments]": ATTACHMENT_LIST_FIELDS,
                 "include": "author",
                 "fields[users]": "name",
                 "page[size]": page_size,
@@ -250,7 +247,7 @@ async def list_work_item_attachments(
         response = await client.get(
             path,
             params={
-                "fields[workitem_attachments]": WORKITEM_ATTACHMENT_LIST_FIELDS,
+                "fields[workitem_attachments]": ATTACHMENT_LIST_FIELDS,
                 "include": "author",
                 "fields[users]": "name",
                 "page[size]": page_size,
