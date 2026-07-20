@@ -40,6 +40,9 @@ from mcp_server_polarion.tools.documents import (
     read_document_parts,
     update_document,
 )
+from tests.mcp_server_polarion.tools._shared.guard._builders import (
+    attachments_response,
+)
 
 
 def _make_part(
@@ -4349,15 +4352,6 @@ class TestCreateDocumentAttachmentRefGuard:
         mock_client.post.assert_not_called()
 
 
-def _attachments_get_response(short_ids: list[str]) -> dict[str, object]:
-    """Attachments-list GET reply (``@basic`` fieldset) for guard tests."""
-    return {
-        "data": [
-            {"type": "attachments", "id": i, "attributes": {"id": i}} for i in short_ids
-        ]
-    }
-
-
 class TestUpdateDocumentAttachmentRefGuard:
     """``update_document`` verify ``home_page_content_html`` attachment refs
     against live attachment list before PATCH.
@@ -4366,7 +4360,7 @@ class TestUpdateDocumentAttachmentRefGuard:
     async def test_dangling_ref_raises_before_patch(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = _attachments_get_response(["1-real.png"])
+        mock_client.get.return_value = attachments_response(["1-real.png"], meta=False)
 
         with pytest.raises(ValueError, match="list_document_attachments"):
             await _call_update_doc(
@@ -4380,7 +4374,7 @@ class TestUpdateDocumentAttachmentRefGuard:
     async def test_matching_ref_allows_patch(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = _attachments_get_response(["1-real.png"])
+        mock_client.get.return_value = attachments_response(["1-real.png"], meta=False)
         mock_client.patch.return_value = {}
 
         result = await _call_update_doc(
@@ -4396,7 +4390,7 @@ class TestUpdateDocumentAttachmentRefGuard:
     async def test_dry_run_still_queries_attachments(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        mock_client.get.return_value = _attachments_get_response(["1-real.png"])
+        mock_client.get.return_value = attachments_response(["1-real.png"], meta=False)
 
         result = await _call_update_doc(
             mock_ctx,

@@ -39,6 +39,9 @@ from mcp_server_polarion.tools.work_items import (
     read_work_item,
     update_work_items,
 )
+from tests.mcp_server_polarion.tools._shared.guard._builders import (
+    attachments_response,
+)
 
 
 def _project_enum_get_response(enum_name: str, ids: list[str]) -> dict[str, object]:
@@ -1716,15 +1719,6 @@ class TestCreateWorkItemsAttachmentRefGuard:
         mock_client.post.assert_not_called()
 
 
-def _attachments_get_response(short_ids: list[str]) -> dict[str, object]:
-    """Attachments-list GET reply (``@basic`` fieldset) for guard tests."""
-    return {
-        "data": [
-            {"type": "attachments", "id": i, "attributes": {"id": i}} for i in short_ids
-        ]
-    }
-
-
 class TestUpdateWorkItemsAttachmentRefGuard:
     """``update_work_items`` verify each item's ``description_html``
     attachment refs against its live attachment list before PATCH.
@@ -1735,8 +1729,8 @@ class TestUpdateWorkItemsAttachmentRefGuard:
     ) -> None:
         mock_client.get.side_effect = [
             _existence_response(("MCPT-1", "task"), ("MCPT-2", "task")),
-            _attachments_get_response(["1-real.png"]),
-            _attachments_get_response(["1-real.png"]),
+            attachments_response(["1-real.png"], meta=False),
+            attachments_response(["1-real.png"], meta=False),
         ]
 
         with pytest.raises(ValueError) as exc:
@@ -1764,7 +1758,7 @@ class TestUpdateWorkItemsAttachmentRefGuard:
     ) -> None:
         mock_client.get.side_effect = [
             _existence_response(("MCPT-1", "task")),
-            _attachments_get_response(["1-real.png"]),
+            attachments_response(["1-real.png"], meta=False),
         ]
         mock_client.patch.return_value = {}
 

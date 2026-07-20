@@ -15,6 +15,8 @@ from typing import Any
 import httpx
 import respx
 
+from mcp_server_polarion.tools._shared.pagination import DEFAULT_PAGE_SIZE
+
 from .fixtures import (
     API_PREFIX,
     AUTHOR,
@@ -34,10 +36,6 @@ from .fixtures import (
     TestRun,
     WorkItem,
 )
-
-# Real client always send page[size] explicit; direct route tests may omit
-# it -- default mirror tools/_shared/pagination.py DEFAULT_PAGE_SIZE.
-_DEFAULT_PAGE_SIZE = 100
 
 
 @dataclass
@@ -440,7 +438,7 @@ class FakePolarion:
             # Live: totalCount serve every page once collection span >1 page
             # for requested page[size]; single-page/empty omit meta entirely
             # -- diverges from doc route's overshoot-only rule (below).
-            page_size = int(params.get("page[size]", str(_DEFAULT_PAGE_SIZE)))
+            page_size = int(params.get("page[size]", str(DEFAULT_PAGE_SIZE)))
             if len(data) > page_size:
                 body["meta"] = {"totalCount": len(data)}
             return httpx.Response(200, json=body)

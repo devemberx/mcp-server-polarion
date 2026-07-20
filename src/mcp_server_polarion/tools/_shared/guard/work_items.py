@@ -18,9 +18,7 @@ from mcp_server_polarion.tools._shared.custom_fields import (
 )
 from mcp_server_polarion.tools._shared.fields import WORK_ITEM_DETAIL_FIELDS
 from mcp_server_polarion.tools._shared.guard._attachment_refs import (
-    check_refs_against_ids,
-    extract_scheme_refs,
-    fetch_attachment_ids,
+    guard_attachment_refs,
 )
 from mcp_server_polarion.tools._shared.guard._custom_keys import (
     check_custom_keys,
@@ -222,35 +220,18 @@ async def guard_work_item_attachment_refs(
     don't exist yet, or use the ``attachment:`` scheme (never resolves in a
     work item description).
     """
-    refs = extract_scheme_refs(html)
-    if not refs:
-        return
-    what = f"Work item '{work_item_id}'"
-    if any(scheme != _WORK_ITEM_ATTACHMENT_SCHEME for scheme, _token in refs):
-        # Wrong scheme never resolves regardless of real attachment.
-        # Reject before GET -- dummy id set safe, refs loop always raise
-        # here (mismatch guaranteed present) before reaching unmatched
-        # token check.
-        check_refs_against_ids(
-            refs,
-            frozenset(),
-            expected_scheme=_WORK_ITEM_ATTACHMENT_SCHEME,
-            list_tool="list_work_item_attachments",
-            what=what,
-        )
-
     path = (
         f"/projects/{encode_path_segment(project_id)}"
         f"/workitems/{encode_path_segment(work_item_id)}"
         "/attachments"
     )
-    valid_ids = await fetch_attachment_ids(
-        client, path, "workitem_attachments", what=what, project_id=project_id
-    )
-    check_refs_against_ids(
-        refs,
-        valid_ids,
+    await guard_attachment_refs(
+        client,
+        html,
+        path=path,
+        resource_type="workitem_attachments",
         expected_scheme=_WORK_ITEM_ATTACHMENT_SCHEME,
         list_tool="list_work_item_attachments",
-        what=what,
+        what=f"Work item '{work_item_id}'",
+        project_id=project_id,
     )

@@ -131,3 +131,46 @@ async def fetch_attachment_ids(
             if isinstance(attachment_id, str) and attachment_id:
                 ids.add(attachment_id)
     return frozenset(ids)
+
+
+async def guard_attachment_refs(  # noqa: PLR0913
+    client: PolarionClient,
+    html: str,
+    *,
+    path: str,
+    resource_type: str,
+    expected_scheme: str,
+    list_tool: str,
+    what: str,
+    project_id: str,
+) -> None:
+    """Update path: block *html* refs to attachments that don't exist yet,
+    or that use the other resource's scheme. Document/work-item axis share
+    this -- only path/resource_type/expected_scheme/list_tool differ.
+    """
+    refs = extract_scheme_refs(html)
+    if not refs:
+        return
+    if any(scheme != expected_scheme for scheme, _token in refs):
+        # Wrong scheme never resolves regardless of real attachment.
+        # Reject before GET -- dummy id set safe, refs loop always raise
+        # here (mismatch guaranteed present) before reaching unmatched
+        # token check.
+        check_refs_against_ids(
+            refs,
+            frozenset(),
+            expected_scheme=expected_scheme,
+            list_tool=list_tool,
+            what=what,
+        )
+
+    valid_ids = await fetch_attachment_ids(
+        client, path, resource_type, what=what, project_id=project_id
+    )
+    check_refs_against_ids(
+        refs,
+        valid_ids,
+        expected_scheme=expected_scheme,
+        list_tool=list_tool,
+        what=what,
+    )

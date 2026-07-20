@@ -10,6 +10,7 @@ import pytest
 
 from mcp_server_polarion.core.exceptions import PolarionAuthError, PolarionError
 from mcp_server_polarion.tools._shared.guard._attachment_refs import (
+    _append_ref,
     check_refs_against_ids,
     extract_scheme_refs,
     fetch_attachment_ids,
@@ -69,6 +70,13 @@ class TestExtractSchemeRefs:
         html = '<p><img src="attachment:1-x.png"><div>unclosed'
 
         assert extract_scheme_refs(html) == [("attachment", "1-x.png")]
+
+    def test_append_ref_ignores_non_str_value(self) -> None:
+        # BeautifulSoup can hand back a non-str attr value (e.g. a
+        # multi-valued attribute parsed as a list) -- must no-op, not crash.
+        refs: list[tuple[str, str]] = []
+        _append_ref(["attachment:1-x.png"], refs)
+        assert refs == []
 
 
 class TestRejectAnySchemeRefs:
@@ -224,6 +232,20 @@ class TestFetchAttachmentIds:
         mock_client.get.return_value = {
             "data": [
                 {"type": "attachments", "id": "no-attrs"},
+                {"type": "attachments", "id": "y", "attributes": {"id": "y-real.png"}},
+            ]
+        }
+
+        ids = await fetch_attachment_ids(
+            mock_client, "/p", "document_attachments", what="w", project_id="P"
+        )
+
+        assert ids == frozenset({"y-real.png"})
+
+    async def test_non_dict_entries_skipped(self, mock_client: AsyncMock) -> None:
+        mock_client.get.return_value = {
+            "data": [
+                "not-a-dict",
                 {"type": "attachments", "id": "y", "attributes": {"id": "y-real.png"}},
             ]
         }

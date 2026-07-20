@@ -13,9 +13,7 @@ from mcp_server_polarion.tools._shared.custom_fields import (
 )
 from mcp_server_polarion.tools._shared.fields import DOCUMENT_DETAIL_FIELDS
 from mcp_server_polarion.tools._shared.guard._attachment_refs import (
-    check_refs_against_ids,
-    extract_scheme_refs,
-    fetch_attachment_ids,
+    guard_attachment_refs,
 )
 from mcp_server_polarion.tools._shared.guard._custom_keys import check_custom_keys
 from mcp_server_polarion.tools._shared.guard._http import guarded_pages
@@ -152,36 +150,19 @@ async def guard_document_attachment_refs(
     that don't exist yet, or use the ``workitemimg:`` scheme (never resolves
     in a document body).
     """
-    refs = extract_scheme_refs(html)
-    if not refs:
-        return
-    what = f"Document '{space_id}/{document_name}'"
-    if any(scheme != _DOCUMENT_ATTACHMENT_SCHEME for scheme, _token in refs):
-        # Wrong scheme never resolves regardless of real attachment.
-        # Reject before GET -- dummy id set safe, refs loop always raise
-        # here (mismatch guaranteed present) before reaching unmatched
-        # token check.
-        check_refs_against_ids(
-            refs,
-            frozenset(),
-            expected_scheme=_DOCUMENT_ATTACHMENT_SCHEME,
-            list_tool="list_document_attachments",
-            what=what,
-        )
-
     path = (
         f"/projects/{encode_path_segment(project_id)}"
         f"/spaces/{encode_path_segment(space_id)}"
         f"/documents/{encode_path_segment(document_name)}"
         "/attachments"
     )
-    valid_ids = await fetch_attachment_ids(
-        client, path, "document_attachments", what=what, project_id=project_id
-    )
-    check_refs_against_ids(
-        refs,
-        valid_ids,
+    await guard_attachment_refs(
+        client,
+        html,
+        path=path,
+        resource_type="document_attachments",
         expected_scheme=_DOCUMENT_ATTACHMENT_SCHEME,
         list_tool="list_document_attachments",
-        what=what,
+        what=f"Document '{space_id}/{document_name}'",
+        project_id=project_id,
     )
