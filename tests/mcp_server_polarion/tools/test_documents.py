@@ -40,6 +40,9 @@ from mcp_server_polarion.tools.documents import (
     read_document_parts,
     update_document,
 )
+from tests.mcp_server_polarion.tools._shared.guard._builders import (
+    attachments_response,
+)
 
 
 def _make_part(
@@ -3266,7 +3269,7 @@ class TestCreateDocumentHappyPath:
             title="t",
             type="generic",
             status=None,
-            home_page_content="| a |\n| --- |\n| 1 |\n\nTable: 표 캡션\n",
+            home_page_content="| a |\n| --- |\n| 1 |\n\nTable: légende\n",
             custom_fields=None,
             dry_run=False,
         )
@@ -4271,3 +4274,121 @@ class TestUpdateDocumentAnchorlessGuard:
                 mock_ctx, home_page_content_html="<p>Note</p>", dry_run=True
             )
         mock_client.patch.assert_not_called()
+
+
+class TestCreateDocumentAttachmentRefGuard:
+    """Create -- any scheme ref block write; no attachments pre-create."""
+
+    async def test_clean_markdown_body_is_unaffected(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {
+            "data": [{"type": "documents", "id": "MyProj/_default/Doc"}]
+        }
+
+        result = await _call_create_doc(
+            mock_ctx, home_page_content="Plain paragraph, no refs."
+        )
+
+        assert result.created is True  # type: ignore[attr-defined]
+        mock_client.post.assert_awaited_once()
+
+    async def test_markdown_image_ref_rejected_before_create(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Guard run pre-sanitize -- Markdown image = real <img> there;
+        sanitize_html would strip it and hide ref.
+        """
+        with pytest.raises(ValueError, match="attachments cannot exist"):
+            await _call_create_doc(
+                mock_ctx, home_page_content="![x](attachment:ghost.png)"
+            )
+        mock_client.post.assert_not_called()
+
+    async def test_raw_inline_img_tag_is_html_escaped_before_guard_sees_it(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """markdown_to_html disable html_inline -- raw <img> markup =
+        escaped literal text, never real tag.
+        """
+        mock_client.post.return_value = {
+            "data": [{"type": "documents", "id": "MyProj/_default/Doc"}]
+        }
+
+        result = await _call_create_doc(
+            mock_ctx,
+            home_page_content='before <img src="workitemimg:ghost.png"/> after',
+        )
+
+        assert result.created is True  # type: ignore[attr-defined]
+        mock_client.post.assert_awaited_once()
+
+
+class TestUpdateDocumentAttachmentRefGuard:
+    """``update_document`` verify body refs vs live attachment list pre-PATCH."""
+
+    async def test_dangling_ref_raises_before_patch(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = attachments_response(["1-real.png"], meta=False)
+
+        with pytest.raises(ValueError, match="list_document_attachments"):
+            await _call_update_doc(
+                mock_ctx,
+                home_page_content_html=(
+                    '<p id="b1"><img src="attachment:ghost.png"/></p>'
+                ),
+            )
+        mock_client.patch.assert_not_called()
+
+    async def test_matching_ref_allows_patch(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = attachments_response(["1-real.png"], meta=False)
+        mock_client.patch.return_value = {}
+
+        result = await _call_update_doc(
+            mock_ctx,
+            home_page_content_html=(
+                '<p id="b1"><img src="attachment:1-real.png"/></p>'
+            ),
+        )
+
+        assert result.updated is True  # type: ignore[attr-defined]
+        mock_client.patch.assert_awaited_once()
+
+    async def test_dry_run_still_queries_attachments(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = attachments_response(["1-real.png"], meta=False)
+
+        result = await _call_update_doc(
+            mock_ctx,
+            home_page_content_html=(
+                '<p id="b1"><img src="attachment:1-real.png"/></p>'
+            ),
+            dry_run=True,
+        )
+
+        assert result.dry_run is True  # type: ignore[attr-defined]
+        mock_client.get.assert_awaited()
+        mock_client.patch.assert_not_called()
+
+    async def test_no_ref_html_adds_no_attachments_get(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.return_value = {}
+
+        await _call_update_doc(
+            mock_ctx, home_page_content_html='<p id="b1">No refs here</p>'
+        )
+
+        mock_client.get.assert_not_awaited()
+
+
+class TestUpdateDocumentAttachmentRefDocstringClause:
+    """Lock attachment-ref validation clause into public docstring."""
+
+    def test_docstring_names_list_document_attachments(self) -> None:
+        document = update_document.__doc__ or ""
+        assert "list_document_attachments" in document

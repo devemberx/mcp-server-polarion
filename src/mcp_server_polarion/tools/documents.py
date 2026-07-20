@@ -46,9 +46,11 @@ from mcp_server_polarion.tools._shared.fields import (
     WORK_ITEM_PART_FIELDS,
 )
 from mcp_server_polarion.tools._shared.guard import (
+    guard_document_attachment_refs,
     guard_document_custom_fields,
     guard_document_enums,
     guard_work_item_link_roles,
+    reject_any_scheme_refs,
 )
 from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
@@ -882,9 +884,9 @@ async def update_document(  # noqa: PLR0913
         description=(
             "New body as raw HTML from "
             "get_document(include_home_page_content_html=True); '' rejected; "
-            "anchorless blocks get id= auto-stamped. New tables, captions, or "
-            "other Polarion constructs: call get_html_recipes first and adapt "
-            "a template."
+            "anchorless blocks get id= auto-stamped. New tables, captions, "
+            "images, or other Polarion constructs: call get_html_recipes "
+            "first and adapt a template."
         ),
     ),
     auto_suspect: bool | None = Field(
@@ -923,9 +925,10 @@ async def update_document(  # noqa: PLR0913
       move_work_item_to_document, NOT this tool.
     - A polarion_wiki macro name=module-workitem <div> leaves the work item's
       module unset — attach via move_work_item_to_document.
-    - Polarion-specific constructs (tables, captions, links, TOC/TOF widgets,
-      page breaks) must be adapted from get_html_recipes templates, never
-      hand-written.
+    - Polarion-specific constructs (tables, captions, image embeds, links,
+      TOC/TOF widgets, page breaks) must be adapted from get_html_recipes
+      templates, never hand-written. attachment:{id} image refs must name
+      an existing attachment — confirm via list_document_attachments first.
 
     workflow_action must pair with at least one attribute. Unknown
     status/type ids and custom_fields keys outside the type schema are
@@ -1000,6 +1003,11 @@ async def update_document(  # noqa: PLR0913
         )
         await guard_document_custom_fields(
             client, project_id, effective_type, custom_fields
+        )
+
+    if home_page_content_html:
+        await guard_document_attachment_refs(
+            client, project_id, space_id, document_name, home_page_content_html
         )
 
     if dry_run:
@@ -1127,13 +1135,15 @@ async def create_document(  # noqa: PLR0913
     if custom_fields:
         await guard_document_custom_fields(client, project_id, type, custom_fields)
 
-    home_page_content_html = (
-        stamp_block_ids(
-            polarionify_html(sanitize_html(markdown_to_html(home_page_content)))
+    if home_page_content:
+        raw_home_page_content_html = markdown_to_html(home_page_content)
+        # Guard pre-sanitize -- sanitize_html strip <img>, refs vanish after.
+        reject_any_scheme_refs([raw_home_page_content_html], "document")
+        home_page_content_html = stamp_block_ids(
+            polarionify_html(sanitize_html(raw_home_page_content_html))
         )
-        if home_page_content
-        else ""
-    )
+    else:
+        home_page_content_html = ""
     if home_page_content_html and first_anchorless_block(home_page_content_html):
         raise RuntimeError(
             "stamp_block_ids left an anchorless block in new document body."

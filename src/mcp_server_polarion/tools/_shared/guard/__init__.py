@@ -11,7 +11,11 @@ caller also need as data.
 
 from __future__ import annotations
 
+from mcp_server_polarion.tools._shared.guard._attachment_refs import (
+    reject_any_scheme_refs,
+)
 from mcp_server_polarion.tools._shared.guard.documents import (
+    guard_document_attachment_refs,
     guard_document_custom_fields,
     guard_document_enums,
 )
@@ -31,12 +35,14 @@ from mcp_server_polarion.tools._shared.guard.test_runs import (
     guard_test_run_templates,
 )
 from mcp_server_polarion.tools._shared.guard.work_items import (
+    guard_work_item_attachment_refs,
     guard_work_item_custom_fields,
     guard_work_item_enums,
     resolve_work_item_types,
 )
 
 __all__ = [
+    "guard_document_attachment_refs",
     "guard_document_custom_fields",
     "guard_document_enums",
     "guard_hyperlink_roles",
@@ -45,10 +51,12 @@ __all__ = [
     "guard_test_run_custom_fields",
     "guard_test_run_enums",
     "guard_test_run_templates",
+    "guard_work_item_attachment_refs",
     "guard_work_item_custom_fields",
     "guard_work_item_enums",
     "guard_work_item_link_roles",
     "guard_work_item_link_targets",
     "partition_delete_links",
+    "reject_any_scheme_refs",
     "resolve_work_item_types",
 ]

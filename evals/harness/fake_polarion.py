@@ -15,6 +15,8 @@ from typing import Any
 import httpx
 import respx
 
+from mcp_server_polarion.tools._shared.pagination import DEFAULT_PAGE_SIZE
+
 from .fixtures import (
     API_PREFIX,
     AUTHOR,
@@ -437,16 +439,16 @@ class FakePolarion:
                 f"{PROJECT}/{wi_attachments.group(1)}",
                 "workitem_attachments",
             )
-            return httpx.Response(
-                200,
-                json={
-                    "data": data,
-                    "included": self._author_included() if data else [],
-                    # Live: totalCount serve every multi-page page; fake
-                    # always emit it -- diverges from doc route's omit.
-                    "meta": {"totalCount": len(data)},
-                },
-            )
+            body: dict[str, Any] = {
+                "data": data,
+                "included": self._author_included() if data else [],
+            }
+            # Live: totalCount on every page once collection span >1 page;
+            # single-page/empty omit meta -- diverge doc overshoot-only rule.
+            page_size = int(params.get("page[size]", str(DEFAULT_PAGE_SIZE)))
+            if len(data) > page_size:
+                body["meta"] = {"totalCount": len(data)}
+            return httpx.Response(200, json=body)
 
         # query=linkedWorkItems:{wi} = back-link fallback (sources -> target).
         if path.endswith("/workitems"):
