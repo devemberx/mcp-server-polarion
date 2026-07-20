@@ -150,6 +150,17 @@ CASES: list[Case] = [
         reject=["list_document_attachments"],
     ),
     _case(
+        "TRIG-WI-ATTACHMENTS",
+        f"What files are attached to work item '{FLOATING_TASK_ID}' in the "
+        f"'{PROJECT}' project?",
+        "triggers_tool",
+        intent="Listing a work item's attached files must call "
+        "list_work_item_attachments; rendering the body does not enumerate them.",
+        covers=["list_work_item_attachments"],
+        expect="list_work_item_attachments",
+        reject=["read_work_item"],
+    ),
+    _case(
         "TRIG-DOC-ENUM",
         f"What are the allowed values for the 'status' field on the document "
         f"'{DOC}' in the '{SPACE}' space?",

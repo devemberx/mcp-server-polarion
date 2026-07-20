@@ -46,6 +46,7 @@ _READ_TOOL_NAMES: frozenset[str] = frozenset(
         "list_work_item_comments",
         "list_document_attachments",
         "get_document_attachment_content",
+        "list_work_item_attachments",
     }
 )
 _WRITE_TOOL_NAMES: frozenset[str] = frozenset(
@@ -127,7 +128,7 @@ class TestHtmlRecipeGallery:
 
 @pytest.mark.parametrize("tool_name", sorted(EXPECTED_TOOL_NAMES))
 class TestToolMetadata:
-    """Per-tool metadata checks parametrized over every expected tool."""
+    """Per-tool metadata checks."""
 
     async def test_description_non_empty(
         self, mcp_client: _MCPClient, tool_name: str

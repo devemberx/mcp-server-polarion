@@ -1,4 +1,4 @@
-"""Attachment model — shared view for document (and future work item) attachments."""
+"""Attachment model — shared view for document and work item attachments."""
 
 from __future__ import annotations
 
