@@ -11,13 +11,15 @@ dangling symlink = fail closed.
 
 Scanned: whole command string + contents of files the command ship as text
 — body/notes/message flags (--body-file/--notes-file/--file/-F/--field/
---input, gh api field=@file), `gh gist create` + `gh release create|upload`
-positional files, `gh gist edit -a/--add`, `< file` redirect feeding a
-stdin body (`-`, `field=@-`, bare `gh gist create`). Command split at shell
-separators (&&/;/|) — flags resolve per sub-command. Outward commands only
-— local grep/cat of sensitive names stay allowed. Not expanded: command
-substitution (`--body "$(cat f)"`) and pipe sources (`cat f | gh ...`) —
-hook see literal tokens only.
+--input, gh api + gh workflow run field=@file), `gh gist create` +
+`gh release create|upload` positional files, `gh gist edit -a/--add`,
+`< file` redirect feeding a stdin body (`-`, `field=@-`, bare `gh gist
+create`, `workflow run --json`). Shell operators own tokens even glued
+(`x;gh`, `<file`, newline) — flags resolve per sub-command, quotes
+protect. Referenced-file reads capped at MAX_SCAN_BYTES. Outward commands
+only — local grep/cat of sensitive names stay allowed. Not expanded:
+command substitution (`--body "$(cat f)"`) and pipe sources
+(`cat f | gh ...`) — hook see literal tokens only.
 
 Exit 0 = allow, exit 2 = block.
 """
@@ -33,6 +35,8 @@ import sys
 from pathlib import Path
 
 PATTERN_FILENAME = ".claude/sensitive-patterns.local"
+# Referenced-file read cap — huge release asset must not stall hook.
+MAX_SCAN_BYTES = 5_000_000
 
 # gh gist/release/repo/label/workflow included: all publish text (repo via
 # --description, workflow via dispatch inputs). git push = branch/tag ref
@@ -78,7 +82,10 @@ RELEASE_VALUE_FLAGS = frozenset(
     }
 )
 SHARED_VALUE_FLAGS = frozenset({"-R", "--repo"})
-SHELL_SEPARATORS = frozenset({"&&", "||", ";", "|", "&"})
+# Shell operators tokenized standalone — glued `x;gh`/`<file` split; newline
+# out of whitespace = separator token (multi-line compound).
+PUNCTUATION_CHARS = "();<>|&\n"
+SEPARATOR_CHARS = frozenset(";&|()\n")
 REDIRECT_OPS = frozenset({">", ">>", "<", "<<"})
 # Sub-command pair → (leading positionals to skip, value-flags). Release
 # first positional = tag name, not a file.
@@ -132,10 +139,18 @@ def main() -> int:
     return 0
 
 
+def tokenize(cmd: str) -> list[str]:
+    """Shell-operator-aware shlex split; ValueError on unbalanced quote."""
+    lex = shlex.shlex(cmd, posix=True, punctuation_chars=PUNCTUATION_CHARS)
+    lex.whitespace_split = True
+    lex.whitespace = " \t\r"
+    return list(lex)
+
+
 def outward(cmd: str) -> bool:
     """Whether command publish text beyond the local checkout."""
     try:
-        argv = shlex.split(cmd)
+        argv = tokenize(cmd)
     except ValueError:
         # Unbalanced quote — conservative regex approximation.
         return OUTWARD_FALLBACK_RE.search(cmd) is not None
@@ -219,11 +234,11 @@ def referenced_file_texts(cmd: str, cwd: str | None = None) -> list[str]:
     """Contents of files the command ship as text; unreadable skipped.
 
     Relative paths anchor to ``cwd`` (Bash session dir from hook payload —
-    hook process cwd differ). Binary decoded lossy — crash on read = exit 1
-    = fail open.
+    hook process cwd differ). Binary decoded lossy, read capped at
+    MAX_SCAN_BYTES — crash on read = exit 1 = fail open.
     """
     try:
-        argv = shlex.split(cmd)
+        argv = tokenize(cmd)
     except ValueError:
         return []
     paths: list[str] = []
@@ -235,7 +250,9 @@ def referenced_file_texts(cmd: str, cwd: str | None = None) -> list[str]:
         if not resolved.is_absolute() and cwd:
             resolved = Path(cwd) / resolved
         with contextlib.suppress(OSError):
-            texts.append(resolved.read_text(errors="replace"))
+            with resolved.open("rb") as handle:
+                raw = handle.read(MAX_SCAN_BYTES)
+            texts.append(raw.decode(errors="replace"))
     return texts
 
 
@@ -244,7 +261,8 @@ def split_segments(argv: list[str]) -> list[list[str]]:
     segments: list[list[str]] = []
     seg: list[str] = []
     for arg in argv:
-        if arg in SHELL_SEPARATORS:
+        # Separator runs clump (`&&`, `;\n`) — any all-separator token split.
+        if all(c in SEPARATOR_CHARS for c in arg):
             if seg:
                 segments.append(seg)
                 seg = []
@@ -262,17 +280,20 @@ def has_pair(seg: list[str], first: str, second: str) -> bool:
 
 def segment_paths(seg: list[str]) -> list[str]:
     """File paths one command segment ship as outward text."""
-    gh_api = has_pair(seg, "gh", "api")
     gist_edit = has_pair(seg, "gist", "edit")
+    # gh workflow run share gh api @file/@- field syntax (dispatch inputs
+    # publish on run page); --json read inputs from stdin.
+    workflow_run = has_pair(seg, "workflow", "run")
+    at_field_syntax = has_pair(seg, "gh", "api") or workflow_run
     paths: list[str] = []
-    stdin_body = False
+    stdin_body = workflow_run and "--json" in seg
 
     def add_flag_value(flag: str, value: str) -> None:
         nonlocal stdin_body
-        if flag in API_FIELD_FLAGS and gh_api:
+        if flag in API_FIELD_FLAGS and at_field_syntax:
             field_at = FIELD_AT_RE.match(value)
             if field_at and field_at.group(1) == "-":
-                # gh api field=@- read stdin.
+                # field=@- read stdin.
                 stdin_body = True
             elif field_at:
                 paths.append(field_at.group(1))

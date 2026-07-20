@@ -87,6 +87,15 @@ class TestOutward:
         assert guard.outward("gh pr create --body 'unterminated")
         assert not guard.outward("grep 'unterminated")
 
+    def test_separator_attached_outward(self) -> None:
+        """Separator glued to neighbor token (`hi;gh`) must not hide command."""
+        assert guard.outward("echo hi;gh pr create --body x")
+        assert guard.outward("true &&gh pr create --body x")
+
+    def test_quoted_separator_text_not_outward(self) -> None:
+        """Quoted mention = data, not command."""
+        assert not guard.outward("echo 'hi;gh pr create'")
+
 
 class TestLoadPatterns:
     def test_missing_file_empty(
@@ -421,3 +430,55 @@ class TestReferencedFileTexts:
 
     def test_plain_field_value_not_treated_as_path(self) -> None:
         assert guard.referenced_file_texts("gh api /x -F body=inline") == []
+
+    def test_newline_compound_commit_file_next_to_gh_api(self, tmp_path: Path) -> None:
+        """Newline = separator too — gh api on next line must not swallow
+        git commit -F file above as api field."""
+        f = tmp_path / "msg.txt"
+        f.write_text("commit msg")
+        cmd = f"git commit -F {f}\ngh api /x -f body=z"
+        assert guard.referenced_file_texts(cmd) == ["commit msg"]
+
+    def test_gist_create_attached_stdin_redirect_read(self, tmp_path: Path) -> None:
+        """`<file` glued redirect publish same as `< file`."""
+        f = tmp_path / "pub.md"
+        f.write_text("gist body")
+        assert guard.referenced_file_texts(f"gh gist create <{f}") == ["gist body"]
+
+    def test_gist_create_attached_separator_stops_segment(self, tmp_path: Path) -> None:
+        """`&&cat` glued separator must still end gist segment."""
+        a = tmp_path / "pub.md"
+        a.write_text("gist a")
+        b = tmp_path / "local.md"
+        b.write_text("local notes")
+        cmd = f"gh gist create {a} &&cat {b}"
+        assert guard.referenced_file_texts(cmd) == ["gist a"]
+
+    def test_workflow_run_field_at_file(self, tmp_path: Path) -> None:
+        """gh workflow run -F share gh api @file syntax — dispatch inputs
+        publish on the run page."""
+        f = tmp_path / "inputs.md"
+        f.write_text("dispatch input")
+        cmd = f"gh workflow run deploy -F notes=@{f}"
+        assert guard.referenced_file_texts(cmd) == ["dispatch input"]
+
+    def test_workflow_run_plain_field_not_path(self) -> None:
+        assert guard.referenced_file_texts("gh workflow run deploy -F env=prod") == []
+
+    def test_workflow_run_json_stdin_redirect_read(self, tmp_path: Path) -> None:
+        """--json read dispatch inputs from stdin — redirect source scanned."""
+        f = tmp_path / "inputs.json"
+        f.write_text("dispatch input")
+        cmd = f"gh workflow run deploy --json < {f}"
+        assert guard.referenced_file_texts(cmd) == ["dispatch input"]
+
+    def test_oversized_file_truncated(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Unbounded read of huge release asset = hook stall — cap read."""
+        monkeypatch.setattr(guard, "MAX_SCAN_BYTES", 8, raising=False)
+        f = tmp_path / "big.bin"
+        f.write_bytes(b"AAAAAAAA tail beyond cap")
+        assert guard.referenced_file_texts(f"gh release upload v1.0.0 {f}") == [
+            "AAAAAAAA"
+        ]
