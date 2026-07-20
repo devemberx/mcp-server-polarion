@@ -2,9 +2,14 @@
 # your private Polarion deployment (project/space/document ids) that must
 # never appear in PR/issue/commit/release text.
 #
-# One Python regex per line, case-sensitive; `#` = comment; invalid regex
+# One Python regex per line, case-sensitive — prefix `(?i)` to also catch
+# lowercased variants (URL slugs etc.); `#` = comment; invalid regex
 # guarded as literal. Enforced by .claude/hooks/block_sensitive_text.py
-# on outward commands (gh pr/issue/api/release/gist, git commit/tag).
+# on outward commands (gh pr/issue/api/release/gist/repo/label/workflow,
+# git commit/tag/push — push catch private names in branch names).
+#
+# Untracked = absent in fresh worktree checkouts — copy or symlink the
+# .local file into each worktree you publish from.
 #
 # ExamplePrivateProject\b
-# ExampleSpace/ExamplePrivateDoc\b
+# (?i)examplespace/exampleprivatedoc\b
