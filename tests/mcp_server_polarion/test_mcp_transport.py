@@ -128,7 +128,7 @@ class TestHtmlRecipeGallery:
 
 @pytest.mark.parametrize("tool_name", sorted(EXPECTED_TOOL_NAMES))
 class TestToolMetadata:
-    """Per-tool metadata checks parametrized over every expected tool."""
+    """Per-tool metadata checks."""
 
     async def test_description_non_empty(
         self, mcp_client: _MCPClient, tool_name: str

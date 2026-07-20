@@ -178,7 +178,6 @@ class Seeds:
 
 
 SEEDS = Seeds(
-    # Structure mirror MCP_Test_Project; every string synthetic.
     work_items={
         DOC_HEADING_ID: WorkItem(
             DOC_HEADING_ID,
@@ -268,8 +267,7 @@ SEEDS = Seeds(
         ),
     },
     # Forward (outgoing) work-item links: source short id -> [(role, target
-    # short id)]. CHILD_REQ has parent + test case; UNCOVERED_REQ deliberately
-    # none.
+    # short id)].
     links={
         CHILD_REQ_ID: [("satisfies", PARENT_REQ_ID), ("verifies", TESTCASE_ID)],
     },
