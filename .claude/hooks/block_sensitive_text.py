@@ -18,8 +18,11 @@ create`, `workflow run --json`). Shell operators own tokens even glued
 (`x;gh`, `<file`, newline) — flags resolve per sub-command, quotes
 protect. Referenced-file reads capped at MAX_SCAN_BYTES. Outward commands
 only — local grep/cat of sensitive names stay allowed. Not expanded:
-command substitution (`--body "$(cat f)"`) and pipe sources
-(`cat f | gh ...`) — hook see literal tokens only.
+command substitution (`--body "$(cat f)"`), pipe sources
+(`cat f | gh ...`), wrapper-quoted scripts (`bash -c 'gh ...'`, quoted
+`eval` args) — hook see literal tokens only; unquoted wrappers
+(`xargs gh ...`) stay detected. Bare `git push` ship no branch name in
+command text — private branch name caught only when ref typed explicit.
 
 Exit 0 = allow, exit 2 = block.
 """
@@ -116,8 +119,7 @@ def main() -> int:
     if patterns is None:
         sys.stderr.write(
             "BLOCKED by .claude/hooks/block_sensitive_text.py:\n\n"
-            f"* Pattern file {pattern_path()} exists but is unreadable — "
-            "fail closed. Fix permissions or remove the file.\n"
+            + fail_closed_reason()
         )
         return 2
 
@@ -196,11 +198,29 @@ def mask(pattern: str) -> str:
     return f"{prefix}…({len(pattern)} chars)"
 
 
+def dangling_symlink(path: Path) -> bool:
+    """Guard installed then link target moved — not "never set up"."""
+    return path.is_symlink() and not path.exists()
+
+
+def fail_closed_reason() -> str:
+    """Block reason for ``load_patterns() is None`` — remedy differ by cause."""
+    path = pattern_path()
+    if dangling_symlink(path):
+        return (
+            f"* Pattern file {path} is a dangling symlink — fail closed. "
+            "Re-link it to the main checkout's file or remove it.\n"
+        )
+    return (
+        f"* Pattern file {path} exists but is unreadable or not UTF-8 — "
+        "fail closed. Fix permissions/encoding or remove the file.\n"
+    )
+
+
 def load_patterns() -> list[re.Pattern[str]] | None:
     """Compiled patterns; ``None`` = file unreadable (caller fail closed)."""
     path = pattern_path()
-    if path.is_symlink() and not path.exists():
-        # Dangling symlink = guard installed then broke — not "never set up".
+    if dangling_symlink(path):
         return None
     if not path.exists():
         return []
@@ -226,6 +246,9 @@ def scan(
     cmd: str, patterns: list[re.Pattern[str]], cwd: str | None = None
 ) -> list[str]:
     """Matched pattern strings across command + referenced text files."""
+    if not patterns:
+        # Absent/empty pattern file = allow all — skip referenced-file I/O.
+        return []
     texts = [cmd, *referenced_file_texts(cmd, cwd)]
     return [p.pattern for p in patterns if any(p.search(t) for t in texts)]
 

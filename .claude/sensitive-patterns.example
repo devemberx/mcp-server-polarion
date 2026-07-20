@@ -6,7 +6,8 @@
 # lowercased variants (URL slugs etc.); `#` = comment; invalid regex
 # guarded as literal. Enforced by .claude/hooks/block_sensitive_text.py
 # on outward commands (gh pr/issue/api/release/gist/repo/label/workflow,
-# git commit/tag/push — push catch private names in branch names).
+# git commit/tag/push — push catch private names in branch refs typed
+# in the command; bare `git push` carry none).
 #
 # Untracked = absent in fresh worktree checkouts. Claude sessions started
 # inside a worktree auto-link it from the main checkout

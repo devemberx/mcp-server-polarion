@@ -96,6 +96,15 @@ class TestOutward:
         """Quoted mention = data, not command."""
         assert not guard.outward("echo 'hi;gh pr create'")
 
+    def test_wrapper_quoted_script_not_detected(self) -> None:
+        """Known limitation (module docstring) — wrapper-quoted script =
+        single data token, inner gh invisible."""
+        assert not guard.outward("bash -c 'gh pr create --body x'")
+
+    def test_xargs_unquoted_wrapper_detected(self) -> None:
+        """xargs pass args as bare tokens — gh stay visible, unlike bash -c."""
+        assert guard.outward("cat files.txt | xargs gh pr create --body x")
+
 
 class TestLoadPatterns:
     def test_missing_file_empty(
@@ -148,6 +157,23 @@ class TestLoadPatterns:
         assert guard.load_patterns() is None
 
 
+class TestFailClosedReason:
+    def test_dangling_symlink_remedy(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Dangling link ≠ permission problem — remedy must say re-link."""
+        link = tmp_path / "patterns"
+        link.symlink_to(tmp_path / "gone")
+        monkeypatch.setattr(guard, "pattern_path", lambda: link)
+        assert "dangling symlink" in guard.fail_closed_reason()
+
+    def test_unreadable_remedy(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(guard, "pattern_path", lambda: tmp_path)
+        assert "unreadable" in guard.fail_closed_reason()
+
+
 class TestScan:
     def _patterns(self) -> list[re.Pattern[str]]:
         return [re.compile(r"SecretDoc\b")]
@@ -181,6 +207,17 @@ class TestScan:
             self._patterns(),
         )
         assert hits == []
+
+    def test_empty_patterns_skip_file_reads(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No patterns = allow-all — referenced-file I/O must be skipped."""
+
+        def boom(cmd: str, cwd: str | None = None) -> list[str]:
+            raise AssertionError("referenced_file_texts called")
+
+        monkeypatch.setattr(guard, "referenced_file_texts", boom)
+        assert guard.scan("gh pr create --body-file big.md", []) == []
 
 
 class TestMask:
