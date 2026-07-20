@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import inspect
+import json
+from pathlib import Path
 from typing import Annotated, get_type_hints
 from unittest.mock import AsyncMock, MagicMock
 
@@ -16,8 +18,16 @@ from mcp_server_polarion.core.exceptions import (
     PolarionNotFoundError,
     PolarionResponseTooLargeError,
 )
-from mcp_server_polarion.models import Attachment, PaginatedResult
+from mcp_server_polarion.models import (
+    Attachment,
+    DocumentAttachmentSpec,
+    PaginatedResult,
+)
 from mcp_server_polarion.tools.attachments import (
+    _MAX_TOTAL_UPLOAD_BYTES,
+    _build_document_attachments_payload,
+    _read_attachment_files,
+    create_document_attachments,
     get_document_attachment_content,
     list_document_attachments,
     list_work_item_attachments,
@@ -919,3 +929,540 @@ class TestListWorkItemAttachmentsFieldValidation:
 
     def test_page_number_accepts_minimum(self) -> None:
         assert self._adapter_for("page_number").validate_python(1) == 1
+
+
+class TestBuildDocumentAttachmentsPayload:
+    """``_build_document_attachments_payload`` -- pure JSON:API body builder."""
+
+    def test_file_name_defaults_to_basename(self) -> None:
+        payload = _build_document_attachments_payload(
+            [DocumentAttachmentSpec(file_path="/data/foo/bar.png")]
+        )
+        attrs = payload["data"][0]["attributes"]  # type: ignore[index]
+        assert attrs["fileName"] == "bar.png"  # type: ignore[index]
+
+    def test_file_name_override_wins(self) -> None:
+        payload = _build_document_attachments_payload(
+            [
+                DocumentAttachmentSpec(
+                    file_path="/data/foo/bar.png", file_name="renamed.png"
+                )
+            ]
+        )
+        attrs = payload["data"][0]["attributes"]  # type: ignore[index]
+        assert attrs["fileName"] == "renamed.png"  # type: ignore[index]
+
+    def test_title_omitted_when_none(self) -> None:
+        payload = _build_document_attachments_payload(
+            [DocumentAttachmentSpec(file_path="/data/bar.png")]
+        )
+        attrs = payload["data"][0]["attributes"]  # type: ignore[index]
+        assert "title" not in attrs  # type: ignore[operator]
+
+    def test_title_included_when_set(self) -> None:
+        payload = _build_document_attachments_payload(
+            [DocumentAttachmentSpec(file_path="/data/bar.png", title="A Chart")]
+        )
+        attrs = payload["data"][0]["attributes"]  # type: ignore[index]
+        assert attrs["title"] == "A Chart"  # type: ignore[index]
+
+    def test_type_is_document_attachments(self) -> None:
+        payload = _build_document_attachments_payload(
+            [DocumentAttachmentSpec(file_path="/data/bar.png")]
+        )
+        assert payload["data"][0]["type"] == "document_attachments"  # type: ignore[index]
+
+    def test_multiple_specs_preserve_order(self) -> None:
+        payload = _build_document_attachments_payload(
+            [
+                DocumentAttachmentSpec(file_path="/data/a.png"),
+                DocumentAttachmentSpec(file_path="/data/b.png"),
+            ]
+        )
+        names = [
+            item["attributes"]["fileName"]  # type: ignore[index]
+            for item in payload["data"]  # type: ignore[union-attr]
+        ]
+        assert names == ["a.png", "b.png"]
+
+
+class TestReadAttachmentFiles:
+    """``_read_attachment_files`` -- local read + validation seam."""
+
+    def test_returns_ordered_name_bytes_pairs(self, tmp_path: Path) -> None:
+        first = tmp_path / "a.png"
+        second = tmp_path / "b.png"
+        first.write_bytes(b"aaa")
+        second.write_bytes(b"bbbb")
+
+        result = _read_attachment_files(
+            [
+                DocumentAttachmentSpec(file_path=str(first)),
+                DocumentAttachmentSpec(file_path=str(second)),
+            ]
+        )
+
+        assert result == [("a.png", b"aaa"), ("b.png", b"bbbb")]
+
+    def test_file_name_override_used_as_key(self, tmp_path: Path) -> None:
+        path = tmp_path / "a.png"
+        path.write_bytes(b"data")
+
+        result = _read_attachment_files(
+            [DocumentAttachmentSpec(file_path=str(path), file_name="renamed.png")]
+        )
+
+        assert result == [("renamed.png", b"data")]
+
+    def test_missing_file_raises_value_error(self, tmp_path: Path) -> None:
+        missing = tmp_path / "missing.png"
+
+        with pytest.raises(ValueError, match=str(missing)):
+            _read_attachment_files([DocumentAttachmentSpec(file_path=str(missing))])
+
+    def test_directory_path_raises_value_error(self, tmp_path: Path) -> None:
+        directory = tmp_path / "adir"
+        directory.mkdir()
+
+        with pytest.raises(ValueError, match="directory"):
+            _read_attachment_files([DocumentAttachmentSpec(file_path=str(directory))])
+
+    def test_duplicate_effective_file_name_raises_value_error(
+        self, tmp_path: Path
+    ) -> None:
+        first = tmp_path / "a.png"
+        second = tmp_path / "b.png"
+        first.write_bytes(b"1")
+        second.write_bytes(b"2")
+
+        with pytest.raises(ValueError, match=r"dup\.png"):
+            _read_attachment_files(
+                [
+                    DocumentAttachmentSpec(file_path=str(first), file_name="dup.png"),
+                    DocumentAttachmentSpec(file_path=str(second), file_name="dup.png"),
+                ]
+            )
+
+    def test_single_file_over_cap_raises_value_error(self, tmp_path: Path) -> None:
+        big = tmp_path / "big.bin"
+        # Sparse file: logical size over cap, real disk usage near-zero --
+        # cap check reads size via stat, never loads oversized content.
+        with big.open("wb") as handle:
+            handle.seek(_MAX_TOTAL_UPLOAD_BYTES)
+            handle.write(b"\0")
+
+        with pytest.raises(ValueError, match=r"big\.bin"):
+            _read_attachment_files([DocumentAttachmentSpec(file_path=str(big))])
+
+    def test_total_over_cap_lists_every_file(self, tmp_path: Path) -> None:
+        first = tmp_path / "first.bin"
+        second = tmp_path / "second.bin"
+        half_cap_over = _MAX_TOTAL_UPLOAD_BYTES // 2 + 1
+        for path in (first, second):
+            with path.open("wb") as handle:
+                handle.seek(half_cap_over)
+                handle.write(b"\0")
+
+        with pytest.raises(ValueError, match=r"first\.bin.*second\.bin"):
+            _read_attachment_files(
+                [
+                    DocumentAttachmentSpec(file_path=str(first)),
+                    DocumentAttachmentSpec(file_path=str(second)),
+                ]
+            )
+
+    def test_read_failure_after_validation_raises_value_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Stat pass, read fail (deleted/perms mid-call) = ValueError, not OSError.
+        target = tmp_path / "vanish.png"
+        target.write_bytes(b"png")
+
+        def explode(self: Path) -> bytes:
+            raise OSError("gone")
+
+        monkeypatch.setattr(Path, "read_bytes", explode)
+        with pytest.raises(ValueError, match=r"Cannot read .*vanish\.png"):
+            _read_attachment_files([DocumentAttachmentSpec(file_path=str(target))])
+
+
+class TestCreateDocumentAttachmentsDryRun:
+    """dry_run return preview without calling Polarion; files still validated."""
+
+    async def test_dry_run_no_post_multipart_call(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        file_path = tmp_path / "shot.png"
+        file_path.write_bytes(b"pngdata")
+        mock_client.post_multipart = AsyncMock()
+
+        result = await create_document_attachments(
+            mock_ctx,
+            project_id="P",
+            space_id="S",
+            document_name="D",
+            attachments=[DocumentAttachmentSpec(file_path=str(file_path))],
+            dry_run=True,
+        )
+
+        mock_client.post_multipart.assert_not_called()
+        assert result.created is False
+        assert result.dry_run is True
+        assert result.attachment_ids == []
+
+    async def test_dry_run_payload_preview_shape(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        file_path = tmp_path / "shot.png"
+        file_path.write_bytes(b"pngdata")
+
+        result = await create_document_attachments(
+            mock_ctx,
+            project_id="P",
+            space_id="S",
+            document_name="D",
+            attachments=[
+                DocumentAttachmentSpec(file_path=str(file_path), title="Shot")
+            ],
+            dry_run=True,
+        )
+
+        assert result.payload_preview is not None
+        data = result.payload_preview["data"]
+        assert isinstance(data, list)
+        assert data[0]["attributes"]["fileName"] == "shot.png"  # type: ignore[index]
+        assert data[0]["attributes"]["title"] == "Shot"  # type: ignore[index]
+        assert result.payload_preview["files"] == [
+            {"file_name": "shot.png", "size_bytes": 7}
+        ]
+
+    async def test_dry_run_still_validates_files(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        missing = tmp_path / "missing.png"
+
+        with pytest.raises(ValueError, match=str(missing)):
+            await create_document_attachments(
+                mock_ctx,
+                project_id="P",
+                space_id="S",
+                document_name="D",
+                attachments=[DocumentAttachmentSpec(file_path=str(missing))],
+                dry_run=True,
+            )
+
+
+class TestCreateDocumentAttachmentsHappyPath:
+    """Successful upload extracts ordered bare attachment ids."""
+
+    async def test_returns_ordered_attachment_ids(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        first = tmp_path / "a.png"
+        second = tmp_path / "b.png"
+        first.write_bytes(b"aaa")
+        second.write_bytes(b"bbbb")
+        mock_client.post_multipart = AsyncMock(
+            return_value={
+                "data": [
+                    {"type": "document_attachments", "id": "P/S/D/a.png"},
+                    {"type": "document_attachments", "id": "P/S/D/b.png"},
+                ]
+            }
+        )
+
+        result = await create_document_attachments(
+            mock_ctx,
+            project_id="P",
+            space_id="S",
+            document_name="D",
+            attachments=[
+                DocumentAttachmentSpec(file_path=str(first)),
+                DocumentAttachmentSpec(file_path=str(second)),
+            ],
+            dry_run=False,
+        )
+
+        assert result.created is True
+        assert result.dry_run is False
+        assert result.attachment_ids == ["a.png", "b.png"]
+        assert result.payload_preview is None
+
+    async def test_post_multipart_called_with_ordered_parts(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        first = tmp_path / "a.png"
+        second = tmp_path / "b.png"
+        first.write_bytes(b"aaa")
+        second.write_bytes(b"bbbb")
+        mock_client.post_multipart = AsyncMock(
+            return_value={
+                "data": [
+                    {"type": "document_attachments", "id": "P/S/D/a.png"},
+                    {"type": "document_attachments", "id": "P/S/D/b.png"},
+                ]
+            }
+        )
+
+        await create_document_attachments(
+            mock_ctx,
+            project_id="P",
+            space_id="S",
+            document_name="D",
+            attachments=[
+                DocumentAttachmentSpec(file_path=str(first)),
+                DocumentAttachmentSpec(file_path=str(second)),
+            ],
+            dry_run=False,
+        )
+
+        call = mock_client.post_multipart.call_args
+        assert call[0][0] == "/projects/P/spaces/S/documents/D/attachments"
+        resource = json.loads(call.kwargs["data"]["resource"])
+        assert [item["attributes"]["fileName"] for item in resource["data"]] == [
+            "a.png",
+            "b.png",
+        ]
+        assert call.kwargs["files"] == [
+            ("files", ("a.png", b"aaa", "application/octet-stream")),
+            ("files", ("b.png", b"bbbb", "application/octet-stream")),
+        ]
+
+    async def test_no_attachment_ids_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "a.png"
+        path.write_bytes(b"a")
+        mock_client.post_multipart = AsyncMock(return_value={"data": []})
+
+        with pytest.raises(RuntimeError, match="list_document_attachments"):
+            await create_document_attachments(
+                mock_ctx,
+                project_id="P",
+                space_id="S",
+                document_name="D",
+                attachments=[DocumentAttachmentSpec(file_path=str(path))],
+                dry_run=False,
+            )
+
+
+class TestCreateDocumentAttachmentsValidationBeforeCall:
+    """Local pre-request validation blocks the POST entirely."""
+
+    async def test_missing_file_raises_value_error_no_post(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        missing = tmp_path / "missing.png"
+        mock_client.post_multipart = AsyncMock()
+
+        with pytest.raises(ValueError, match=str(missing)):
+            await create_document_attachments(
+                mock_ctx,
+                project_id="P",
+                space_id="S",
+                document_name="D",
+                attachments=[DocumentAttachmentSpec(file_path=str(missing))],
+                dry_run=False,
+            )
+        mock_client.post_multipart.assert_not_called()
+
+    async def test_directory_path_raises_value_error_no_post(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        directory = tmp_path / "adir"
+        directory.mkdir()
+        mock_client.post_multipart = AsyncMock()
+
+        with pytest.raises(ValueError, match="directory"):
+            await create_document_attachments(
+                mock_ctx,
+                project_id="P",
+                space_id="S",
+                document_name="D",
+                attachments=[DocumentAttachmentSpec(file_path=str(directory))],
+                dry_run=False,
+            )
+        mock_client.post_multipart.assert_not_called()
+
+    async def test_duplicate_file_name_raises_value_error_no_post(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        first = tmp_path / "a.png"
+        second = tmp_path / "b.png"
+        first.write_bytes(b"1")
+        second.write_bytes(b"2")
+        mock_client.post_multipart = AsyncMock()
+
+        with pytest.raises(ValueError, match=r"dup\.png"):
+            await create_document_attachments(
+                mock_ctx,
+                project_id="P",
+                space_id="S",
+                document_name="D",
+                attachments=[
+                    DocumentAttachmentSpec(file_path=str(first), file_name="dup.png"),
+                    DocumentAttachmentSpec(file_path=str(second), file_name="dup.png"),
+                ],
+                dry_run=False,
+            )
+        mock_client.post_multipart.assert_not_called()
+
+    async def test_single_file_over_cap_raises_value_error_no_post(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        big = tmp_path / "big.bin"
+        with big.open("wb") as handle:
+            handle.seek(_MAX_TOTAL_UPLOAD_BYTES)
+            handle.write(b"\0")
+        mock_client.post_multipart = AsyncMock()
+
+        with pytest.raises(ValueError, match=r"big\.bin"):
+            await create_document_attachments(
+                mock_ctx,
+                project_id="P",
+                space_id="S",
+                document_name="D",
+                attachments=[DocumentAttachmentSpec(file_path=str(big))],
+                dry_run=False,
+            )
+        mock_client.post_multipart.assert_not_called()
+
+    async def test_total_over_cap_raises_value_error_no_post(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        first = tmp_path / "first.bin"
+        second = tmp_path / "second.bin"
+        half_cap_over = _MAX_TOTAL_UPLOAD_BYTES // 2 + 1
+        for path in (first, second):
+            with path.open("wb") as handle:
+                handle.seek(half_cap_over)
+                handle.write(b"\0")
+        mock_client.post_multipart = AsyncMock()
+
+        with pytest.raises(ValueError, match=r"first\.bin.*second\.bin"):
+            await create_document_attachments(
+                mock_ctx,
+                project_id="P",
+                space_id="S",
+                document_name="D",
+                attachments=[
+                    DocumentAttachmentSpec(file_path=str(first)),
+                    DocumentAttachmentSpec(file_path=str(second)),
+                ],
+                dry_run=False,
+            )
+        mock_client.post_multipart.assert_not_called()
+
+
+class TestCreateDocumentAttachmentsErrorMapping:
+    """Error mapping per spec: 409 duplicate fileName, 404, auth, other."""
+
+    async def test_conflict_raises_value_error_mentioning_list(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "a.png"
+        path.write_bytes(b"a")
+        mock_client.post_multipart = AsyncMock(
+            side_effect=PolarionError("dup", status_code=409)
+        )
+
+        with pytest.raises(ValueError, match="list_document_attachments"):
+            await create_document_attachments(
+                mock_ctx,
+                project_id="P",
+                space_id="S",
+                document_name="D",
+                attachments=[DocumentAttachmentSpec(file_path=str(path))],
+                dry_run=False,
+            )
+
+    async def test_not_found_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "a.png"
+        path.write_bytes(b"a")
+        mock_client.post_multipart = AsyncMock(
+            side_effect=PolarionNotFoundError("missing", status_code=404)
+        )
+
+        with pytest.raises(ValueError, match="list_documents"):
+            await create_document_attachments(
+                mock_ctx,
+                project_id="P",
+                space_id="S",
+                document_name="D",
+                attachments=[DocumentAttachmentSpec(file_path=str(path))],
+                dry_run=False,
+            )
+
+    async def test_auth_error_raises_permission_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "a.png"
+        path.write_bytes(b"a")
+        mock_client.post_multipart = AsyncMock(
+            side_effect=PolarionAuthError("forbidden", status_code=403)
+        )
+
+        with pytest.raises(PermissionError, match="POLARION_TOKEN"):
+            await create_document_attachments(
+                mock_ctx,
+                project_id="P",
+                space_id="S",
+                document_name="D",
+                attachments=[DocumentAttachmentSpec(file_path=str(path))],
+                dry_run=False,
+            )
+
+    async def test_other_polarion_error_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "a.png"
+        path.write_bytes(b"a")
+        mock_client.post_multipart = AsyncMock(
+            side_effect=PolarionError("boom", status_code=400)
+        )
+
+        with pytest.raises(RuntimeError, match="Failed to create document attachments"):
+            await create_document_attachments(
+                mock_ctx,
+                project_id="P",
+                space_id="S",
+                document_name="D",
+                attachments=[DocumentAttachmentSpec(file_path=str(path))],
+                dry_run=False,
+            )
+
+
+class TestCreateDocumentAttachmentsFieldValidation:
+    """``attachments`` 1..10 list bounds -- ``TypeAdapter`` rebuild (Field
+    constraints bypass FastMCP JSON Schema gate on direct call).
+    """
+
+    @staticmethod
+    def _adapter_for(param_name: str) -> TypeAdapter[object]:
+        hints = get_type_hints(create_document_attachments)
+        sig = inspect.signature(create_document_attachments)
+        field_info = sig.parameters[param_name].default
+        return TypeAdapter(Annotated[hints[param_name], field_info])
+
+    def test_empty_list_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("attachments").validate_python([])
+
+    def test_over_max_rejected(self) -> None:
+        specs = [{"file_path": f"/data/{i}.png"} for i in range(11)]
+        with pytest.raises(ValidationError):
+            self._adapter_for("attachments").validate_python(specs)
+
+    def test_at_max_accepted(self) -> None:
+        specs = [{"file_path": f"/data/{i}.png"} for i in range(10)]
+        validated = self._adapter_for("attachments").validate_python(specs)
+        assert isinstance(validated, list)
+        assert len(validated) == 10
+
+    def test_at_minimum_accepted(self) -> None:
+        validated = self._adapter_for("attachments").validate_python(
+            [{"file_path": "/data/a.png"}]
+        )
+        assert len(validated) == 1

@@ -806,6 +806,227 @@ class TestGetBytes:
             assert route.call_count == 1
 
 
+class TestPostMultipart:
+    """``post_multipart`` — multipart/form-data POST, same delay/retry
+    contract as :meth:`post`.
+    """
+
+    _PATH = "/projects/P1/spaces/S1/documents/D1/attachments"
+
+    async def test_returns_json_and_sends_multipart_body(self) -> None:
+        with respx.mock(base_url=BASE) as mock:
+            route = mock.post(self._PATH).mock(
+                return_value=httpx.Response(
+                    201,
+                    json={"data": [{"type": "document_attachments", "id": "a.png"}]},
+                ),
+            )
+
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
+                result = await client.post_multipart(
+                    self._PATH,
+                    data={"resource": json.dumps({"data": [{"type": "x"}]})},
+                    files=[
+                        (
+                            "files",
+                            ("a.png", b"binary-content", "application/octet-stream"),
+                        )
+                    ],
+                )
+
+            assert result["data"] == [{"type": "document_attachments", "id": "a.png"}]
+
+            request = route.calls.last.request
+            content_type = request.headers["content-type"]
+            assert content_type.startswith("multipart/form-data; boundary=")
+            boundary = content_type.split("boundary=", 1)[1]
+
+            body = request.content
+            assert boundary.encode() in body
+            assert b'name="resource"' in body
+            assert b'name="files"; filename="a.png"' in body
+            assert b"binary-content" in body
+
+    async def test_write_delay_applied(self) -> None:
+        """Same post-success delay contract as :meth:`post`."""
+        with respx.mock(base_url=BASE) as mock:
+            mock.post(self._PATH).mock(
+                return_value=httpx.Response(201, json={"data": []}),
+            )
+
+            write_delay = 0.2
+            async with PolarionClient(
+                _config(), write_delay=write_delay, min_interval=0
+            ) as client:
+                start = asyncio.get_running_loop().time()
+                await client.post_multipart(
+                    self._PATH,
+                    data={"resource": "{}"},
+                    files=[("files", ("a.png", b"x", "application/octet-stream"))],
+                )
+                elapsed = asyncio.get_running_loop().time() - start
+
+            assert elapsed >= write_delay * 0.9
+
+    async def test_retries_on_429_then_succeeds(self) -> None:
+        with respx.mock(base_url=BASE) as mock:
+            route = mock.post(self._PATH).mock(
+                side_effect=[
+                    httpx.Response(429, json={"error": "Too Many Requests"}),
+                    httpx.Response(201, json={"data": []}),
+                ],
+            )
+
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
+                result = await client.post_multipart(
+                    self._PATH,
+                    data={"resource": "{}"},
+                    files=[("files", ("a.png", b"x", "application/octet-stream"))],
+                )
+
+            assert result == {"data": []}
+            assert route.call_count == 2
+
+    async def test_retries_on_503_then_succeeds(self) -> None:
+        with respx.mock(base_url=BASE) as mock:
+            route = mock.post(self._PATH).mock(
+                side_effect=[
+                    httpx.Response(503, json={"error": "Unavailable"}),
+                    httpx.Response(201, json={"data": []}),
+                ],
+            )
+
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
+                result = await client.post_multipart(
+                    self._PATH,
+                    data={"resource": "{}"},
+                    files=[("files", ("a.png", b"x", "application/octet-stream"))],
+                )
+
+            assert result == {"data": []}
+            assert route.call_count == 2
+
+    async def test_no_retry_on_400(self) -> None:
+        with respx.mock(base_url=BASE) as mock:
+            route = mock.post(self._PATH).mock(
+                return_value=httpx.Response(400, json={"error": "Bad Request"}),
+            )
+
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
+                with pytest.raises(PolarionError) as exc_info:
+                    await client.post_multipart(
+                        self._PATH,
+                        data={"resource": "{}"},
+                        files=[("files", ("a.png", b"x", "application/octet-stream"))],
+                    )
+
+            assert type(exc_info.value) is PolarionError
+            assert route.call_count == 1
+
+    async def test_no_retry_on_409_duplicate_filename(self) -> None:
+        with respx.mock(base_url=BASE) as mock:
+            route = mock.post(self._PATH).mock(
+                return_value=httpx.Response(
+                    409,
+                    json={"errors": [{"detail": "same ID already exists"}]},
+                ),
+            )
+
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
+                with pytest.raises(PolarionError) as exc_info:
+                    await client.post_multipart(
+                        self._PATH,
+                        data={"resource": "{}"},
+                        files=[("files", ("a.png", b"x", "application/octet-stream"))],
+                    )
+
+            assert exc_info.value.status_code == 409
+            assert route.call_count == 1
+
+    async def test_no_retry_on_413(self) -> None:
+        with respx.mock(base_url=BASE) as mock:
+            route = mock.post(self._PATH).mock(
+                return_value=httpx.Response(413, json={"error": "Too Large"}),
+            )
+
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
+                with pytest.raises(PolarionError) as exc_info:
+                    await client.post_multipart(
+                        self._PATH,
+                        data={"resource": "{}"},
+                        files=[("files", ("a.png", b"x", "application/octet-stream"))],
+                    )
+
+            assert exc_info.value.status_code == 413
+            assert route.call_count == 1
+
+    async def test_401_raises_auth_error(self) -> None:
+        with respx.mock(base_url=BASE) as mock:
+            mock.post(self._PATH).mock(
+                return_value=httpx.Response(401, json={"error": "Unauthorized"}),
+            )
+
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
+                with pytest.raises(PolarionAuthError) as exc_info:
+                    await client.post_multipart(
+                        self._PATH,
+                        data={"resource": "{}"},
+                        files=[("files", ("a.png", b"x", "application/octet-stream"))],
+                    )
+
+            assert exc_info.value.status_code == 401
+
+    async def test_403_raises_auth_error(self) -> None:
+        with respx.mock(base_url=BASE) as mock:
+            mock.post(self._PATH).mock(
+                return_value=httpx.Response(403, json={"error": "Forbidden"}),
+            )
+
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
+                with pytest.raises(PolarionAuthError) as exc_info:
+                    await client.post_multipart(
+                        self._PATH,
+                        data={"resource": "{}"},
+                        files=[("files", ("a.png", b"x", "application/octet-stream"))],
+                    )
+
+            assert exc_info.value.status_code == 403
+
+    async def test_404_raises_not_found_error(self) -> None:
+        with respx.mock(base_url=BASE) as mock:
+            mock.post(self._PATH).mock(
+                return_value=httpx.Response(404, json={"error": "Not Found"}),
+            )
+
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
+                with pytest.raises(PolarionNotFoundError) as exc_info:
+                    await client.post_multipart(
+                        self._PATH,
+                        data={"resource": "{}"},
+                        files=[("files", ("a.png", b"x", "application/octet-stream"))],
+                    )
+
+            assert exc_info.value.status_code == 404
+
+
 class TestContextManager:
     """Async context-manager protocol."""
 
