@@ -3,26 +3,16 @@
 names (Polarion project/space/document ids) into PR/issue/commit/release/
 gist/repo text.
 
-Pattern file `.claude/sensitive-patterns.local` — untracked, one regex per
-line, `#` comments, resolved vs `CLAUDE_PROJECT_DIR` (hook cwd not
-guaranteed repo root). Absent or empty file = allow all, so contributors
-without a private deployment never hit this hook. Unreadable file or
-dangling symlink = fail closed.
+Pattern file `.claude/sensitive-patterns.local`: untracked, one regex per
+line, `#` comments, resolved vs `CLAUDE_PROJECT_DIR`. Absent/empty = allow
+all; unreadable or dangling symlink = fail closed.
 
-Scanned: whole command string + contents of files the command ship as text
-— body/notes/message flags (--body-file/--notes-file/--file/-F/--field/
---input, gh api + gh workflow run field=@file), `gh gist create` +
-`gh release create|upload` positional files, `gh gist edit -a/--add`,
-`< file` redirect feeding a stdin body (`-`, `field=@-`, bare `gh gist
-create`, `workflow run --json`). Shell operators own tokens even glued
-(`x;gh`, `<file`, newline) — flags resolve per sub-command, quotes
-protect. Referenced-file reads capped at MAX_SCAN_BYTES. Outward commands
-only — local grep/cat of sensitive names stay allowed. Not expanded:
-command substitution (`--body "$(cat f)"`), pipe sources
-(`cat f | gh ...`), wrapper-quoted scripts (`bash -c 'gh ...'`, quoted
-`eval` args) — hook see literal tokens only; unquoted wrappers
-(`xargs gh ...`) stay detected. Bare `git push` ship no branch name in
-command text — private branch name caught only when ref typed explicit.
+Outward commands only — local grep/cat of sensitive names stay allowed.
+Scanned: command string + files it ship as text (file flags, gh api/
+workflow `field=@file`, gist/release positionals, `< file` stdin
+redirects — flag sets below define surface). Not expanded: command
+substitution, pipe sources, wrapper-quoted scripts (`bash -c 'gh ...'`;
+unquoted `xargs gh` stay detected). Bare `git push` ship no branch name.
 
 Exit 0 = allow, exit 2 = block.
 """
@@ -41,11 +31,9 @@ PATTERN_FILENAME = ".claude/sensitive-patterns.local"
 # Referenced-file read cap — huge release asset must not stall hook.
 MAX_SCAN_BYTES = 5_000_000
 
-# gh gist/release/repo/label/workflow included: all publish text (repo via
-# --description, workflow via dispatch inputs). git push = branch/tag ref
-# names ride command string; commit contents already guarded at git commit.
-# Detection = token walk, not regex — option-tolerant regex (`git -C x
-# commit`) = exponential backtracking (CodeQL py/redos).
+# All publish text (repo via --description, workflow via dispatch inputs);
+# git push = ref names in command string. Detection = token walk —
+# option-tolerant regex = exponential backtracking (CodeQL py/redos).
 GH_OUTWARD_SUBCOMMANDS = frozenset(
     {"pr", "issue", "api", "release", "gist", "repo", "label", "workflow"}
 )
@@ -85,8 +73,7 @@ RELEASE_VALUE_FLAGS = frozenset(
     }
 )
 SHARED_VALUE_FLAGS = frozenset({"-R", "--repo"})
-# Shell operators tokenized standalone — glued `x;gh`/`<file` split; newline
-# out of whitespace = separator token (multi-line compound).
+# Operators own tokens even glued (`x;gh`, `<file`); newline = separator.
 PUNCTUATION_CHARS = "();<>|&\n"
 SEPARATOR_CHARS = frozenset(";&|()\n")
 REDIRECT_OPS = frozenset({">", ">>", "<", "<<"})
@@ -256,9 +243,8 @@ def scan(
 def referenced_file_texts(cmd: str, cwd: str | None = None) -> list[str]:
     """Contents of files the command ship as text; unreadable skipped.
 
-    Relative paths anchor to ``cwd`` (Bash session dir from hook payload —
-    hook process cwd differ). Binary decoded lossy, read capped at
-    MAX_SCAN_BYTES — crash on read = exit 1 = fail open.
+    Relative paths anchor to ``cwd`` (Bash session dir — hook cwd differ);
+    binary decoded lossy — crash on read = exit 1 = fail open.
     """
     try:
         argv = tokenize(cmd)
@@ -304,8 +290,7 @@ def has_pair(seg: list[str], first: str, second: str) -> bool:
 def segment_paths(seg: list[str]) -> list[str]:
     """File paths one command segment ship as outward text."""
     gist_edit = has_pair(seg, "gist", "edit")
-    # gh workflow run share gh api @file/@- field syntax (dispatch inputs
-    # publish on run page); --json read inputs from stdin.
+    # workflow run share gh api @file/@- syntax; --json read stdin.
     workflow_run = has_pair(seg, "workflow", "run")
     at_field_syntax = has_pair(seg, "gh", "api") or workflow_run
     paths: list[str] = []
@@ -316,7 +301,6 @@ def segment_paths(seg: list[str]) -> list[str]:
         if flag in API_FIELD_FLAGS and at_field_syntax:
             field_at = FIELD_AT_RE.match(value)
             if field_at and field_at.group(1) == "-":
-                # field=@- read stdin.
                 stdin_body = True
             elif field_at:
                 paths.append(field_at.group(1))
@@ -341,8 +325,7 @@ def segment_paths(seg: list[str]) -> list[str]:
     positional, positional_stdin = positional_paths(seg)
     paths.extend(positional)
     if stdin_body or positional_stdin:
-        # `--body-file -` / `--input -` / positional `-`: body ride stdin —
-        # scan `< file` redirect source. Pipe sources stay unexpanded.
+        # Stdin body — scan `< file` source; pipes stay unexpanded.
         paths.extend(
             seg[i + 1] for i, arg in enumerate(seg) if arg == "<" and i + 1 < len(seg)
         )

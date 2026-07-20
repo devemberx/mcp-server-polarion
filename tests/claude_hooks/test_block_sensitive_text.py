@@ -78,8 +78,7 @@ class TestOutward:
         assert guard.outward("env GIT_TRACE=1 git commit -m x")
 
     def test_pathological_options_linear_time(self) -> None:
-        """CodeQL py/redos: dash-leading option runs must not backtrack —
-        `-C -!` shape let value double as standalone option."""
+        """CodeQL py/redos regression — `-C -!` option runs must not backtrack."""
         assert not guard.outward("git " + "-C -! " * 40 + "status")
 
     def test_unparseable_falls_back_to_regex(self) -> None:
@@ -88,17 +87,16 @@ class TestOutward:
         assert not guard.outward("grep 'unterminated")
 
     def test_separator_attached_outward(self) -> None:
-        """Separator glued to neighbor token (`hi;gh`) must not hide command."""
+        """Glued `hi;gh` must not hide command."""
         assert guard.outward("echo hi;gh pr create --body x")
         assert guard.outward("true &&gh pr create --body x")
 
     def test_quoted_separator_text_not_outward(self) -> None:
-        """Quoted mention = data, not command."""
+        """Quoted mention = data."""
         assert not guard.outward("echo 'hi;gh pr create'")
 
     def test_wrapper_quoted_script_not_detected(self) -> None:
-        """Known limitation (module docstring) — wrapper-quoted script =
-        single data token, inner gh invisible."""
+        """Known limitation (module docstring) — quoted script = single token."""
         assert not guard.outward("bash -c 'gh pr create --body x'")
 
     def test_xargs_unquoted_wrapper_detected(self) -> None:
@@ -226,7 +224,7 @@ class TestMask:
         assert guard.mask("SecretDoc\\b") == "Se…(11 chars)"
 
     def test_inline_flag_prefix_stripped(self) -> None:
-        """(?i)-style prefix carries no name chars — preview must skip it."""
+        """(?i) prefix carry no name chars."""
         assert guard.mask("(?i)secretdoc\\b") == "se…(15 chars)"
 
     def test_short_pattern_fully_hidden(self) -> None:
@@ -249,8 +247,7 @@ class TestReferencedFileTexts:
         ]
 
     def test_body_file_path_containing_equals(self, tmp_path: Path) -> None:
-        """`=` in filename is still a path for long flags — only gh api
-        -F/--field carries field=value syntax."""
+        """`=` in path still file for long flags — field=value only on gh api."""
         f = tmp_path / "a=b.md"
         f.write_text("eq path")
         assert guard.referenced_file_texts(f"gh pr create --body-file {f}") == [
@@ -263,7 +260,7 @@ class TestReferencedFileTexts:
         assert guard.referenced_file_texts(f"gh api /x -F body=@{f}") == ["api body"]
 
     def test_gh_api_field_long_form(self, tmp_path: Path) -> None:
-        """--field = documented long spelling of -F, identical @file semantics."""
+        """--field = long -F, same @file semantics."""
         f = tmp_path / "b.md"
         f.write_text("api body")
         assert guard.referenced_file_texts(f"gh api /x --field body=@{f}") == [
@@ -310,15 +307,14 @@ class TestReferencedFileTexts:
         assert guard.referenced_file_texts(f"git commit -F {f}") == ["commit msg"]
 
     def test_compound_commit_file_next_to_gh_api(self, tmp_path: Path) -> None:
-        """Flags resolve per shell segment — gh api in a later segment must
-        not swallow a git commit -F file in an earlier one."""
+        """Later gh api segment must not swallow earlier commit -F file."""
         f = tmp_path / "msg.txt"
         f.write_text("commit msg")
         cmd = f"git commit -F {f} && gh api /x -f body=z"
         assert guard.referenced_file_texts(cmd) == ["commit msg"]
 
     def test_gist_create_positional_files(self, tmp_path: Path) -> None:
-        """gist publish file contents themselves — positional args are files."""
+        """Positional args = published files."""
         a = tmp_path / "a.md"
         a.write_text("gist a")
         b = tmp_path / "b.md"
@@ -343,7 +339,7 @@ class TestReferencedFileTexts:
         assert guard.referenced_file_texts(f"gh gist create --public {f}") == ["gist a"]
 
     def test_gist_create_stops_at_separator(self, tmp_path: Path) -> None:
-        """Local cat after && must stay unscanned — docstring promise."""
+        """Local segment after && stay unscanned."""
         a = tmp_path / "pub.md"
         a.write_text("gist a")
         b = tmp_path / "local.md"
@@ -426,7 +422,7 @@ class TestReferencedFileTexts:
         assert guard.referenced_file_texts(f"git tag -a {f} -m x") == []
 
     def test_release_create_positional_asset(self, tmp_path: Path) -> None:
-        """Release assets publish like gist files — text asset must be scanned."""
+        """Text asset scanned like gist file."""
         f = tmp_path / "notes.md"
         f.write_text("asset text")
         cmd = f"gh release create v1.0.0 {f} --notes ok"
@@ -440,7 +436,7 @@ class TestReferencedFileTexts:
         ]
 
     def test_release_tag_and_flag_values_not_read(self, tmp_path: Path) -> None:
-        """First release positional = tag name; value-flag args = metadata."""
+        """First positional = tag; flag values = metadata."""
         tag = tmp_path / "v1.0.0"
         tag.write_text("tag decoy")
         decoy = tmp_path / "title.md"
@@ -449,7 +445,7 @@ class TestReferencedFileTexts:
         assert guard.referenced_file_texts(cmd) == []
 
     def test_stdin_body_file_redirect_read(self, tmp_path: Path) -> None:
-        """`--body-file -` + `< file` ship the redirected file outward."""
+        """`--body-file -` + `< file` = outward."""
         f = tmp_path / "body.md"
         f.write_text("redirected body")
         cmd = f"gh pr create --title x --body-file - < {f}"
@@ -469,21 +465,20 @@ class TestReferencedFileTexts:
         assert guard.referenced_file_texts("gh api /x -F body=inline") == []
 
     def test_newline_compound_commit_file_next_to_gh_api(self, tmp_path: Path) -> None:
-        """Newline = separator too — gh api on next line must not swallow
-        git commit -F file above as api field."""
+        """Newline separator — next-line gh api must not swallow commit -F file."""
         f = tmp_path / "msg.txt"
         f.write_text("commit msg")
         cmd = f"git commit -F {f}\ngh api /x -f body=z"
         assert guard.referenced_file_texts(cmd) == ["commit msg"]
 
     def test_gist_create_attached_stdin_redirect_read(self, tmp_path: Path) -> None:
-        """`<file` glued redirect publish same as `< file`."""
+        """`<file` glued = same as `< file`."""
         f = tmp_path / "pub.md"
         f.write_text("gist body")
         assert guard.referenced_file_texts(f"gh gist create <{f}") == ["gist body"]
 
     def test_gist_create_attached_separator_stops_segment(self, tmp_path: Path) -> None:
-        """`&&cat` glued separator must still end gist segment."""
+        """`&&cat` glued still end segment."""
         a = tmp_path / "pub.md"
         a.write_text("gist a")
         b = tmp_path / "local.md"
@@ -492,8 +487,7 @@ class TestReferencedFileTexts:
         assert guard.referenced_file_texts(cmd) == ["gist a"]
 
     def test_workflow_run_field_at_file(self, tmp_path: Path) -> None:
-        """gh workflow run -F share gh api @file syntax — dispatch inputs
-        publish on the run page."""
+        """workflow run -F share gh api @file syntax — inputs publish on run page."""
         f = tmp_path / "inputs.md"
         f.write_text("dispatch input")
         cmd = f"gh workflow run deploy -F notes=@{f}"
@@ -512,7 +506,7 @@ class TestReferencedFileTexts:
     def test_oversized_file_truncated(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Unbounded read of huge release asset = hook stall — cap read."""
+        """Huge asset must not stall hook."""
         monkeypatch.setattr(guard, "MAX_SCAN_BYTES", 8, raising=False)
         f = tmp_path / "big.bin"
         f.write_bytes(b"AAAAAAAA tail beyond cap")

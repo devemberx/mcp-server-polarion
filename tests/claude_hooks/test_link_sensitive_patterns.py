@@ -17,7 +17,7 @@ linker = load_module_from_path(
 
 class TestWorktreeMainRoot:
     def test_main_checkout_none(self, tmp_path: Path) -> None:
-        """Main checkout `.git` = directory — not a worktree."""
+        """`.git` directory = main checkout."""
         (tmp_path / ".git").mkdir()
         assert linker.worktree_main_root(tmp_path) is None
 
@@ -29,7 +29,7 @@ class TestWorktreeMainRoot:
         assert linker.worktree_main_root(wt) == main
 
     def test_submodule_layout_none(self, tmp_path: Path) -> None:
-        """Submodule gitdir = .git/modules/... — not a worktree, skip."""
+        """`.git/modules/...` gitdir ≠ worktree."""
         wt = tmp_path / "sub"
         wt.mkdir()
         (wt / ".git").write_text(f"gitdir: {tmp_path}/.git/modules/sub\n")
@@ -45,8 +45,7 @@ class TestWorktreeMainRoot:
         assert linker.worktree_main_root(wt) is None
 
     def test_relative_gitdir_anchored_to_root(self, tmp_path: Path) -> None:
-        """worktree.useRelativePaths write relative gitdir — anchor to checkout
-        dir, not process cwd (silent no-link = guard off in worktree)."""
+        """Relative gitdir (worktree.useRelativePaths) anchor to checkout dir."""
         wt = tmp_path / "wt"
         wt.mkdir()
         (wt / ".git").write_text("gitdir: ../main/.git/worktrees/wt\n")
@@ -95,7 +94,7 @@ class TestEnsureLink:
         assert target.read_text() == "Local\\b\n"
 
     def test_relative_main_root_links(self, tmp_path: Path) -> None:
-        """Dotted main root from relative gitdir still link correctly."""
+        """Dotted main root still link."""
         wt, _main = self._layout(tmp_path)
         assert linker.ensure_link(wt, wt / ".." / "main") is not None
         target = wt / ".claude" / "sensitive-patterns.local"

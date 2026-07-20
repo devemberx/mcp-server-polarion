@@ -2,11 +2,10 @@
 """SessionStart hook: auto-link untracked `.claude/sensitive-patterns.local`
 into git worktree checkouts.
 
-Pattern file untracked (private names) — `git worktree add` never carry it,
-and a worktree session without it silently run sensitive-text guard off.
-Link main checkout's file at session start; contributor without one =
-no-op. Existing file/link never touched — local copy = deliberate,
-dangling link = guard fail closed, no silent repair.
+Pattern file untracked — worktree checkout without it silently run guard
+off. Link main checkout's file at session start; no source = no-op.
+Existing file/link never touched — local copy = deliberate, dangling
+link = guard fail closed, no silent repair.
 
 Exit always 0 — setup helper, never block session.
 """
@@ -40,8 +39,7 @@ def worktree_main_root(root: Path) -> Path | None:
         return None
     gitdir = Path(match.group(1))
     if not gitdir.is_absolute():
-        # worktree.useRelativePaths / --relative-paths write gitdir relative
-        # to `.git` file dir — anchor there, never process cwd.
+        # Relative gitdir (worktree.useRelativePaths) anchor to `.git` dir.
         gitdir = root / gitdir
     if gitdir.parent.name != "worktrees" or gitdir.parent.parent.name != ".git":
         return None
