@@ -46,6 +46,7 @@ from mcp_server_polarion.tools._shared.pagination import (
     make_page,
 )
 from mcp_server_polarion.tools._shared.parse import (
+    extract_created_full_ids,
     extract_relationship_id,
     extract_short_id,
     parse_included_work_item_map,
@@ -55,22 +56,6 @@ from mcp_server_polarion.tools._shared.parse import (
 )
 
 logger = logging.getLogger("mcp_server_polarion.tools.links")
-
-
-def _extract_created_link_ids(response: dict[str, object]) -> list[str]:
-    """Composite link ids verbatim, input order, from bulk create response —
-    the path ids for later PATCH / DELETE. Empty on malformed shapes.
-    """
-    data = response.get("data")
-    if not isinstance(data, list):
-        return []
-    ids: list[str] = []
-    for item in data:
-        if isinstance(item, dict):
-            item_id = item.get("id")
-            if isinstance(item_id, str):
-                ids.append(item_id)
-    return ids
 
 
 def _build_create_links_payload(
@@ -441,14 +426,10 @@ async def create_work_item_links(
     except PolarionError as exc:
         raise RuntimeError(f"Failed to create work item links: {exc.message}") from exc
 
-    link_ids = _extract_created_link_ids(response)
-    if len(link_ids) != len(links):
-        raise RuntimeError(
-            f"Polarion accepted the bulk create-link request but returned "
-            f"{len(link_ids)} ids for {len(links)} requested links. The batch "
-            "may be partially created; verify with list_work_item_links before "
-            "retrying."
-        )
+    # Composite link ids verbatim = path ids for later PATCH / DELETE.
+    link_ids = extract_created_full_ids(
+        response, expected_count=len(links), list_tool="list_work_item_links"
+    )
 
     return WorkItemLinksCreateResult(
         created=True,

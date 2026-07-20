@@ -1268,13 +1268,44 @@ class TestCreateDocumentAttachmentsHappyPath:
         path.write_bytes(b"a")
         mock_client.post_multipart = AsyncMock(return_value={"data": []})
 
-        with pytest.raises(RuntimeError, match="list_document_attachments"):
+        with pytest.raises(
+            RuntimeError, match=r"0 ids for 1 submitted.*list_document_attachments"
+        ):
             await create_document_attachments(
                 mock_ctx,
                 project_id="P",
                 space_id="S",
                 document_name="D",
                 attachments=[DocumentAttachmentSpec(file_path=str(path))],
+                dry_run=False,
+            )
+
+    async def test_short_id_echo_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        """201 echoing fewer ids than uploaded must raise, not short list."""
+        first = tmp_path / "a.png"
+        second = tmp_path / "b.png"
+        first.write_bytes(b"aaa")
+        second.write_bytes(b"bbbb")
+        mock_client.post_multipart = AsyncMock(
+            return_value={
+                "data": [{"type": "document_attachments", "id": "P/S/D/a.png"}]
+            }
+        )
+
+        with pytest.raises(
+            RuntimeError, match=r"1 ids for 2 submitted.*list_document_attachments"
+        ):
+            await create_document_attachments(
+                mock_ctx,
+                project_id="P",
+                space_id="S",
+                document_name="D",
+                attachments=[
+                    DocumentAttachmentSpec(file_path=str(first)),
+                    DocumentAttachmentSpec(file_path=str(second)),
+                ],
                 dry_run=False,
             )
 

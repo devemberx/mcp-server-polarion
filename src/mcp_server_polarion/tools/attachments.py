@@ -512,13 +512,11 @@ async def create_document_attachments(  # noqa: PLR0913
             f"Failed to create document attachments: {exc.message}"
         ) from exc
 
-    attachment_ids = extract_created_short_ids(response)
-    if not attachment_ids:
-        raise RuntimeError(
-            "Polarion returned no attachment IDs after creation."
-            " The POST may have succeeded -- verify with"
-            " `list_document_attachments`."
-        )
+    attachment_ids = extract_created_short_ids(
+        response,
+        expected_count=len(attachments),
+        list_tool="list_document_attachments",
+    )
 
     return AttachmentsCreateResult(
         created=True,
