@@ -1414,6 +1414,25 @@ class TestCreateDocumentAttachmentsErrorMapping:
                 dry_run=False,
             )
 
+    async def test_payload_too_large_raises_runtime_error_with_remedy(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "a.png"
+        path.write_bytes(b"a")
+        mock_client.post_multipart = AsyncMock(
+            side_effect=PolarionError("too large", status_code=413)
+        )
+
+        with pytest.raises(RuntimeError, match=r"reduce.*size|split"):
+            await create_document_attachments(
+                mock_ctx,
+                project_id="P",
+                space_id="S",
+                document_name="D",
+                attachments=[DocumentAttachmentSpec(file_path=str(path))],
+                dry_run=False,
+            )
+
     async def test_other_polarion_error_raises_runtime_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
     ) -> None:

@@ -41,6 +41,7 @@ _MAX_TOTAL_UPLOAD_BYTES: Final[int] = 25 * 1024 * 1024
 _MAX_ATTACHMENTS_PER_CALL: Final[int] = 10
 
 _HTTP_CONFLICT: Final[int] = 409
+_HTTP_PAYLOAD_TOO_LARGE: Final[int] = 413
 
 # Extension -> Image format arg; bitmap formats major LLM hosts render.
 # Static, not mimetypes.guess_type: guess_type read system mime files +
@@ -482,6 +483,11 @@ async def create_document_attachments(  # noqa: PLR0913
                 f" on '{document_name}' -- the whole batch was rejected."
                 " Check `list_document_attachments` first or pick new"
                 " file_name values."
+            ) from exc
+        if exc.status_code == _HTTP_PAYLOAD_TOO_LARGE:
+            raise RuntimeError(
+                "Server upload cap is below the 25 MiB client cap --"
+                " reduce file size or split the batch across calls."
             ) from exc
         raise RuntimeError(
             f"Failed to create document attachments: {exc.message}"
