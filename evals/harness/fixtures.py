@@ -48,6 +48,9 @@ DOC_ATTACHMENT_CONTENT = (
     b"\x00\x00\x06\x00\x020\x81\xd0/\x00\x00\x00\x00IEND\xaeB`\x82"
 )
 
+# Attachment on FLOATING_TASK_ID.
+WORKITEM_ATTACHMENT_ID = "1-fake-screenshot.png"
+
 # Second document + requirement traceability seeds (orchestration cases).
 PARENT_DOC = "FakeParentDoc"
 PARENT_MODULE_ID = f"{PROJECT}/{SPACE}/{PARENT_DOC}"
@@ -89,6 +92,7 @@ class WorkItem:
     # into resource attributes dict shadow real attributes.
     custom_fields: dict[str, str] = field(default_factory=dict)
     comments: list[Comment] = field(default_factory=list)
+    attachments: list[Attachment] = field(default_factory=list)
 
 
 @dataclass
@@ -134,9 +138,10 @@ class TestRun:
 
 @dataclass
 class Attachment:
-    """Document attachment. ``attachment_id`` carry server-assigned numeric
-    prefix and is the token body HTML reference as ``attachment:{id}``.
-    Polarion serve no mime type and no created timestamp here.
+    """Document or work-item attachment. ``attachment_id`` carry server-
+    assigned numeric prefix; doc body token ``attachment:{id}``, work item
+    body token ``workitemimg:{id}``. Polarion serve no mime type and no
+    created timestamp here.
     """
 
     attachment_id: str
@@ -173,7 +178,6 @@ class Seeds:
 
 
 SEEDS = Seeds(
-    # Structure mirror MCP_Test_Project; every string synthetic.
     work_items={
         DOC_HEADING_ID: WorkItem(
             DOC_HEADING_ID,
@@ -191,6 +195,7 @@ SEEDS = Seeds(
             # One root comment so list_work_item_comments return populated
             # page; work-item comment ids 3-segment + carry title.
             comments=[Comment("c-1", "Fake work item comment", title="Initial note")],
+            attachments=[Attachment(WORKITEM_ATTACHMENT_ID, "fake-screenshot", 4096)],
         ),
         FLOATING_HEADING_ID: WorkItem(
             FLOATING_HEADING_ID, "Floating heading", "heading"
@@ -262,8 +267,7 @@ SEEDS = Seeds(
         ),
     },
     # Forward (outgoing) work-item links: source short id -> [(role, target
-    # short id)]. CHILD_REQ has parent + test case; UNCOVERED_REQ deliberately
-    # none.
+    # short id)].
     links={
         CHILD_REQ_ID: [("satisfies", PARENT_REQ_ID), ("verifies", TESTCASE_ID)],
     },

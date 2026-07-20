@@ -274,15 +274,15 @@ class FakePolarion:
         return resources
 
     def _attachment_resources(
-        self, attachments: list[Attachment], base: str
+        self, attachments: list[Attachment], base: str, resource_type: str
     ) -> list[dict[str, Any]]:
         """``attributes.id`` = bare token body HTML reference; resource id
-        prefix it with 4-segment document base. Polarion serve no ``created``
-        and no mime type here.
+        prefix it with base (4-segment document or 3-segment work item).
+        Polarion serve no ``created`` and no mime type here.
         """
         return [
             {
-                "type": "document_attachments",
+                "type": resource_type,
                 "id": f"{base}/{attachment.attachment_id}",
                 "attributes": {
                     "id": attachment.attachment_id,
@@ -415,6 +415,27 @@ class FakePolarion:
                 json={
                     "data": data,
                     "included": self._author_included() if data else [],
+                    "meta": {"totalCount": len(data)},
+                },
+            )
+
+        wi_attachments = re.search(r"/workitems/([^/]+)/attachments$", path)
+        if wi_attachments:
+            wi = self.seeds.work_items.get(wi_attachments.group(1))
+            if wi is None:
+                return httpx.Response(404, json={"errors": [{"status": "404"}]})
+            data = self._attachment_resources(
+                wi.attachments,
+                f"{PROJECT}/{wi_attachments.group(1)}",
+                "workitem_attachments",
+            )
+            return httpx.Response(
+                200,
+                json={
+                    "data": data,
+                    "included": self._author_included() if data else [],
+                    # Live: totalCount serve every multi-page page; fake
+                    # always emit it -- diverges from doc route's omit.
                     "meta": {"totalCount": len(data)},
                 },
             )
@@ -561,7 +582,7 @@ class FakePolarion:
             if doc is None:
                 return httpx.Response(404, json={"errors": [{"status": "404"}]})
             data = self._attachment_resources(
-                doc.attachments, f"{PROJECT}/{SPACE}/{name}"
+                doc.attachments, f"{PROJECT}/{SPACE}/{name}", "document_attachments"
             )
             return httpx.Response(
                 200,
