@@ -313,6 +313,21 @@ def _build_document_attachments_payload(
     return {"data": items}
 
 
+def _reject_separator_file_names(file_names: Sequence[str]) -> None:
+    """fileName become attachment id; '/' or '\\' inside shift id path
+    segments (server behavior unverified) -- fail closed. Windows file_path
+    on POSIX land here too: basename = unsplit whole string.
+    """
+    invalid = sorted({name for name in file_names if "/" in name or "\\" in name})
+    if invalid:
+        raise ValueError(
+            f"file_name(s) {invalid} contain a path separator -- file_name"
+            " becomes the attachment id and must be a bare file name;"
+            " directories belong in file_path (set an explicit file_name"
+            " override for non-POSIX paths)."
+        )
+
+
 def _reject_duplicate_file_names(file_names: Sequence[str]) -> None:
     """Each file_name becomes the attachment id -- a collision within one
     call has no merge semantics (unlike e.g. link-batch dup ids), so name
@@ -333,11 +348,13 @@ def _read_attachment_files(
     specs: Sequence[DocumentAttachmentSpec],
 ) -> list[tuple[str, bytes]]:
     """Resolve + read each spec's local file, order preserved. Fails closed
-    before any Polarion call: missing/dir path, duplicate effective
-    file_name, or a size cap breach all raise ValueError. Size checked via
-    stat before reading bytes, so an oversized file never loads into memory.
+    before any Polarion call: missing/dir path, separator or duplicate
+    effective file_name, or a size cap breach all raise ValueError. Size
+    checked via stat before reading bytes, so an oversized file never loads
+    into memory; total re-checked post-read (file can grow mid-call).
     """
     file_names = [_effective_file_name(spec) for spec in specs]
+    _reject_separator_file_names(file_names)
     _reject_duplicate_file_names(file_names)
 
     sizes: list[tuple[str, int]] = []
@@ -380,6 +397,16 @@ def _read_attachment_files(
         except OSError as exc:
             raise ValueError(f"Cannot read '{spec.file_path}': {exc}.") from exc
         results.append((file_name, content))
+
+    # Stat-time cap alone = TOCTOU: file can grow between stat + read.
+    total_read = sum(len(content) for _, content in results)
+    if total_read > _MAX_TOTAL_UPLOAD_BYTES:
+        raise ValueError(
+            f"Total bytes read ({total_read}) exceeds the"
+            f" {_MAX_TOTAL_UPLOAD_BYTES} byte per-call cap -- a file grew"
+            " between size check and read; retry, or split the files across"
+            " multiple calls."
+        )
     return results
 
 
@@ -428,7 +455,8 @@ async def create_document_attachments(  # noqa: PLR0913
     file_path and file_name first. A file_name colliding with another item
     in the same call, or with an existing attachment on the document,
     rejects the whole batch -- check list_document_attachments first or
-    pick a new file_name. NOT idempotent -- a retry duplicates.
+    pick a new file_name. NOT idempotent -- retrying a success is rejected
+    as a duplicate, not silently merged.
     """
     files = _read_attachment_files(attachments)
     payload = _build_document_attachments_payload(attachments)

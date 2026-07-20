@@ -1043,6 +1043,25 @@ class TestReadAttachmentFiles:
                 ]
             )
 
+    def test_file_name_with_slash_raises_value_error(self, tmp_path: Path) -> None:
+        # fileName become attachment id; '/' inside shift id path segments
+        # (server behavior unverified) -- fail closed.
+        path = tmp_path / "a.png"
+        path.write_bytes(b"1")
+
+        with pytest.raises(ValueError, match=r"path separator"):
+            _read_attachment_files(
+                [DocumentAttachmentSpec(file_path=str(path), file_name="sub/a.png")]
+            )
+
+    def test_windows_file_path_basename_raises_separator_error(self) -> None:
+        # Windows path on POSIX: basename = unsplit whole string with '\\' --
+        # separator error name real cause, not "does not exist".
+        with pytest.raises(ValueError, match=r"path separator"):
+            _read_attachment_files(
+                [DocumentAttachmentSpec(file_path="C:\\Users\\x\\shot.png")]
+            )
+
     def test_single_file_over_cap_raises_value_error(self, tmp_path: Path) -> None:
         big = tmp_path / "big.bin"
         # Sparse file: logical size over cap, real disk usage near-zero --
@@ -1083,6 +1102,21 @@ class TestReadAttachmentFiles:
 
         monkeypatch.setattr(Path, "read_bytes", explode)
         with pytest.raises(ValueError, match=r"Cannot read .*vanish\.png"):
+            _read_attachment_files([DocumentAttachmentSpec(file_path=str(target))])
+
+    def test_file_grown_past_cap_between_stat_and_read_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Stat under cap, file grow before read = post-read total re-check
+        # catch it -- stat-time cap alone = TOCTOU bypass.
+        target = tmp_path / "grow.bin"
+        target.write_bytes(b"small")
+
+        def grown(self: Path) -> bytes:
+            return b"\0" * (_MAX_TOTAL_UPLOAD_BYTES + 1)
+
+        monkeypatch.setattr(Path, "read_bytes", grown)
+        with pytest.raises(ValueError, match=r"grew"):
             _read_attachment_files([DocumentAttachmentSpec(file_path=str(target))])
 
 
