@@ -1044,8 +1044,7 @@ class TestReadAttachmentFiles:
             )
 
     def test_file_name_with_slash_raises_value_error(self, tmp_path: Path) -> None:
-        # fileName become attachment id; '/' inside shift id path segments
-        # (server behavior unverified) -- fail closed.
+        # Separator shift id path segments (server unverified) -- fail closed.
         path = tmp_path / "a.png"
         path.write_bytes(b"1")
 

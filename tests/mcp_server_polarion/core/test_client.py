@@ -807,9 +807,7 @@ class TestGetBytes:
 
 
 class TestPostMultipart:
-    """``post_multipart`` — multipart/form-data POST, same delay/retry
-    contract as :meth:`post`.
-    """
+    """multipart/form-data POST; same delay/retry contract as :meth:`post`."""
 
     _PATH = "/projects/P1/spaces/S1/documents/D1/attachments"
 
@@ -850,7 +848,7 @@ class TestPostMultipart:
             assert b"binary-content" in body
 
     async def test_write_delay_applied(self) -> None:
-        """Same post-success delay contract as :meth:`post`."""
+        """Post-success delay, same as :meth:`post`."""
         with respx.mock(base_url=BASE) as mock:
             mock.post(self._PATH).mock(
                 return_value=httpx.Response(201, json={"data": []}),

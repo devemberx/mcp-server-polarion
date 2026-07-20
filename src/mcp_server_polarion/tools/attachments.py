@@ -36,7 +36,7 @@ from mcp_server_polarion.tools._shared.parse import (
     parse_attachments_page,
 )
 
-# Total upload bytes per call, whole batch -- fail closed before any request.
+# Whole batch; fail closed before any request.
 _MAX_TOTAL_UPLOAD_BYTES: Final[int] = 25 * 1024 * 1024
 _MAX_ATTACHMENTS_PER_CALL: Final[int] = 10
 
@@ -292,17 +292,15 @@ async def list_work_item_attachments(
 
 
 def _effective_file_name(spec: DocumentAttachmentSpec) -> str:
-    """spec.file_name override, else file_path's basename -- becomes the
-    attachment id (fileName), so a collision within one batch must reject.
-    """
+    """Effective name become attachment id (fileName) -- batch collision must reject."""
     return spec.file_name if spec.file_name else Path(spec.file_path).name
 
 
 def _build_document_attachments_payload(
     specs: Sequence[DocumentAttachmentSpec],
 ) -> dict[str, JsonValue]:
-    """POST body for .../documents/{d}/attachments; fileName always present,
-    title skipped when unset (skip-None rule). Pure -- no disk access.
+    """POST .../documents/{d}/attachments body; title skip when unset
+    (skip-None rule). Pure -- no disk access.
     """
     items: list[JsonValue] = []
     for spec in specs:
@@ -329,10 +327,7 @@ def _reject_separator_file_names(file_names: Sequence[str]) -> None:
 
 
 def _reject_duplicate_file_names(file_names: Sequence[str]) -> None:
-    """Each file_name becomes the attachment id -- a collision within one
-    call has no merge semantics (unlike e.g. link-batch dup ids), so name
-    the fix directly: rename one file.
-    """
+    """In-call collision has no merge semantics (unlike link-batch dup) -- reject."""
     duplicates = sorted(
         name for name, count in Counter(file_names).items() if count > 1
     )
@@ -347,11 +342,8 @@ def _reject_duplicate_file_names(file_names: Sequence[str]) -> None:
 def _read_attachment_files(
     specs: Sequence[DocumentAttachmentSpec],
 ) -> list[tuple[str, bytes]]:
-    """Resolve + read each spec's local file, order preserved. Fails closed
-    before any Polarion call: missing/dir path, separator or duplicate
-    effective file_name, or a size cap breach all raise ValueError. Size
-    checked via stat before reading bytes, so an oversized file never loads
-    into memory; total re-checked post-read (file can grow mid-call).
+    """Read spec files, order preserved; every reject raise ValueError before
+    any Polarion call. Stat cap check pre-read keep oversized file out of memory.
     """
     file_names = [_effective_file_name(spec) for spec in specs]
     _reject_separator_file_names(file_names)
@@ -414,8 +406,7 @@ def _read_attachment_files(
     tags={"write"},
     timeout=60.0,
     annotations={
-        # Additive: non-destructive, non-idempotent (retry duplicates rejected
-        # by server, not by us), open world (files come from local disk).
+        # Non-idempotent: server reject retry dup. Open world: files from local disk.
         "readOnlyHint": False,
         "destructiveHint": False,
         "idempotentHint": False,

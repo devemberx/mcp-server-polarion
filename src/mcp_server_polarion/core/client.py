@@ -232,9 +232,8 @@ class PolarionClient:
         backoff = _INITIAL_BACKOFF_SECONDS
         loop = asyncio.get_running_loop()
 
-        # Client pin Content-Type: application/json client-wide; multipart
-        # need real boundary header or httpx keep stale json one (setdefault
-        # skip already-present key) — override per-request, own boundary.
+        # Client-wide Content-Type: application/json stick on multipart (httpx
+        # setdefault skip present key) — override per-request, own boundary.
         multipart_headers: dict[str, str] | None = None
         if files is not None:
             boundary = uuid.uuid4().hex
