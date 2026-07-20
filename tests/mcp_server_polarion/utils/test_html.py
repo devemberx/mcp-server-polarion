@@ -363,14 +363,14 @@ class TestHtmlToMarkdownPolarionRteLinks:
         result = html_to_markdown(html)
         assert "[see ticket](polarion:workitem/MCPT-7)" in result
 
-    def test_korean_item_name_is_url_encoded(self) -> None:
+    def test_non_ascii_item_name_is_url_encoded(self) -> None:
         html = (
             '<p><span class="polarion-rte-link" data-type="richPage" '
-            'data-item-name="설계 문서" data-space-name="Design"></span></p>'
+            'data-item-name="schéma détaillé" data-space-name="Design"></span></p>'
         )
         result = html_to_markdown(html)
-        # %EC%84%A4%EA%B3%84%20%EB%AC%B8%EC%84%9C == "설계 문서"
-        assert "polarion:Design/%EC%84%A4%EA%B3%84%20%EB%AC%B8%EC%84%9C" in result
+        # sch%C3%A9ma%20d%C3%A9taill%C3%A9 == "schéma détaillé"
+        assert "polarion:Design/sch%C3%A9ma%20d%C3%A9taill%C3%A9" in result
 
     def test_span_without_target_metadata_does_not_crash(self) -> None:
         # Span carry no usable target metadata — surrounding text must still render.
@@ -892,12 +892,12 @@ class TestPolarionifyCaptions:
     """Table:/Figure: paragraph → native caption widget."""
 
     def test_table_caption_converted(self) -> None:
-        html = "<table><tr><td>x</td></tr></table><p>Table: 병합 테스트</p>"
+        html = "<table><tr><td>x</td></tr></table><p>Table: résultats fusionnés</p>"
         result = polarionify_html(html)
         assert 'class="polarion-rte-caption-paragraph"' in result
         assert 'data-sequence="Table"' in result
         assert 'class="polarion-rte-caption"' in result
-        assert "병합 테스트" in result
+        assert "résultats fusionnés" in result
         assert "Table:" not in result
 
     def test_caption_paragraph_shape(self) -> None:
@@ -911,10 +911,10 @@ class TestPolarionifyCaptions:
         )
 
     def test_figure_caption_after_image_paragraph(self) -> None:
-        html = '<p><img src="x.png" alt="x"/></p><p>Figure: 다이어그램</p>'
+        html = '<p><img src="x.png" alt="x"/></p><p>Figure: schéma détaillé</p>'
         result = polarionify_html(html)
         assert 'data-sequence="Figure"' in result
-        assert "다이어그램" in result
+        assert "schéma détaillé" in result
 
     def test_non_adjacent_table_paragraph_untouched(self) -> None:
         html = "<p>Table: just prose</p><p>other</p>"
@@ -947,16 +947,17 @@ class TestPolarionifyPipeline:
 
     def test_markdown_table_with_caption_end_to_end(self) -> None:
         markdown = (
-            "intro\n\n| 도구 | 결과 |\n| --- | --- |\n| a | b |\n\nTable: 테스트 표\n"
+            "intro\n\n| outil | résultat |\n| --- | --- |\n| a | b |\n\n"
+            "Table: tableau résumé\n"
         )
         result = polarionify_html(sanitize_html(markdown_to_html(markdown)))
         assert 'class="polarion-Document-table"' in result
         assert 'data-sequence="Table"' in result
-        assert "테스트 표" in result
+        assert "tableau résumé" in result
 
     def test_markdown_image_stripped_so_figure_caption_stays_prose(self) -> None:
         # sanitize_html drop <img> — Figure: paragraph lose anchor.
-        markdown = "![alt](https://example.com/x.png)\n\nFigure: 그림 캡션\n"
+        markdown = "![alt](https://example.com/x.png)\n\nFigure: légende de figure\n"
         result = polarionify_html(sanitize_html(markdown_to_html(markdown)))
         assert "polarion-rte-caption" not in result
-        assert "Figure: 그림 캡션" in result
+        assert "Figure: légende de figure" in result

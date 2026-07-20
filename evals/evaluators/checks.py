@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 Trajectory = list[dict[str, Any]]
@@ -295,6 +295,63 @@ def check_no_detach_retry_loop(
             "despite a clear 'not in Document' 400 -- a doomed retry loop"
         )
     return True, "no retry loop against a free-floating item"
+
+
+# Write tools whose body may carry a scheme ref (attachment:/workitemimg:).
+_GHOST_WRITE_TOOLS: frozenset[str] = frozenset(
+    {"create_document", "update_document", "create_work_items", "update_work_items"}
+)
+
+# Token stop at quote/paren/whitespace/tag-close -- match raw HTML
+# src="scheme:id" + Markdown (scheme:id) forms.
+_SCHEME_TOKEN_RE = re.compile(
+    r"\b(attachment|workitemimg):([^\"'()\s>]*)", re.IGNORECASE
+)
+
+
+def _iter_strings(value: object) -> Iterable[str]:
+    """String leaves under *value* -- dict/list nesting (bulk ``items``) walked."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for v in value.values():
+            yield from _iter_strings(v)
+    elif isinstance(value, list):
+        for v in value:
+            yield from _iter_strings(v)
+
+
+def _scheme_refs(args: dict[str, Any]) -> list[str]:
+    """``scheme:token`` occurrences anywhere in one call's args, case kept
+    raw -- caller lower at compare, failure message keep body spelling.
+    """
+    return [
+        f"{scheme}:{token}"
+        for text in _iter_strings(args)
+        for scheme, token in _SCHEME_TOKEN_RE.findall(text)
+    ]
+
+
+def check_no_ghost_attachment_write(
+    trajectory: Trajectory, params: dict[str, Any]
+) -> CheckResult:
+    """Successful create/update body write carrying scheme ref outside
+    ``params["allowed_tokens"]`` (``"scheme:id"`` list) = fail -- guard must
+    reject dangling ref pre-write. Errored calls never reached Polarion,
+    not scanned.
+    """
+    allowed = {str(t).lower() for t in params.get("allowed_tokens", [])}
+    for call in trajectory:
+        if call.get("name") not in _GHOST_WRITE_TOOLS or _errored(call):
+            continue
+        for ref in _scheme_refs(_args(call)):
+            # Both sides lowered -- id case never split allowed vs ghost.
+            if ref.lower() not in allowed:
+                return False, (
+                    f"{call.get('name')} committed with ghost reference '{ref}' "
+                    "-- the guard should have blocked this write before it landed"
+                )
+    return True, "no successful write carried a ghost attachment reference"
 
 
 def check_single_bulk_write(
@@ -651,6 +708,7 @@ REGISTRY: dict[str, Callable[[Trajectory, dict[str, Any]], CheckResult]] = {
     "preserve_hyperlinks": check_preserve_hyperlinks,
     "round_trip_source": check_round_trip_source,
     "no_detach_retry_loop": check_no_detach_retry_loop,
+    "no_ghost_attachment_write": check_no_ghost_attachment_write,
     "single_bulk_write": check_single_bulk_write,
     "direct_read": check_direct_read,
     "no_duplicate_reads": check_no_duplicate_reads,

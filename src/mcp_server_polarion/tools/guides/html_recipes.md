@@ -45,6 +45,37 @@ For figures use `Figure` in both the leading text and `data-sequence`:
 <p class="polarion-rte-caption-paragraph" style="text-align: left;">Figure <span data-sequence="Figure" class="polarion-rte-caption">#</span> Caption text</p>
 ```
 
+## Image from uploaded attachments (update tools only)
+
+Embed an already-uploaded work item attachment as an inline image:
+
+```html
+<img src="workitemimg:{id}" style="max-width: 650px;"/>
+```
+
+`{id}` is the `id` field from `list_work_item_attachments` (short form, e.g.
+`1-diagram.svg` — Polarion may prefix it with a number). Non-image files
+embed the same way; the portal renders them with a generic icon.
+
+Non-ASCII or space-containing file names: the stored body token is
+URL-encoded (`workitemimg:1-test%20file.txt` for id
+`1-test file.txt`) — either the encoded token or the raw id is accepted here.
+
+Polarion never validates this reference; a dangling id would otherwise
+persist and render like a real image. This server blocks the write instead
+— call list_work_item_attachments first to confirm the id exists.
+
+Document bodies (update_document) embed the same way with the `attachment:`
+scheme — `<img src="attachment:{id}"/>`, id from `list_document_attachments`;
+every rule above applies unchanged. Schemes never cross: `attachment:` never
+resolves in a work item description, `workitemimg:` never resolves in a
+document body — use the scheme matching the body you're editing.
+
+Sizing: inline style only — never `width=`/`height=` HTML attributes.
+Default embed: `style="max-width: 650px;"`. To resize, mirror the portal's
+own resize output: `style="width: 600px;height: 399px;"` — both values in
+px, keeping the image's aspect ratio.
+
 ## Links to work items, cross references, wiki pages
 
 Rendered links are empty `polarion-rte-link` spans — the target lives in

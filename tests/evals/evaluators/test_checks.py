@@ -488,6 +488,123 @@ class TestCheckNoDetachRetryLoop:
         assert passed is True
 
 
+class TestCheckNoGhostAttachmentWrite:
+    _PARAMS: ClassVar[dict[str, Any]] = {
+        "allowed_tokens": ["workitemimg:1-fake-screenshot.png"]
+    }
+
+    def test_no_write_at_all_passes(self) -> None:
+        trajectory = [
+            _call("get_work_item", {"project_id": "P", "work_item_id": "MCPT-200"})
+        ]
+        passed, _ = checks.check_no_ghost_attachment_write(trajectory, self._PARAMS)
+        assert passed is True
+
+    def test_errored_write_is_not_a_landed_ghost(self) -> None:
+        # Errored call never reached Polarion -- bad ref there not a
+        # landed ghost.
+        trajectory = [
+            _update_call(
+                {
+                    "work_item_id": "MCPT-200",
+                    "description_html": '<img src="workitemimg:BOGUS-ID"/>',
+                },
+            )
+        ]
+        trajectory[0]["result"] = {"error": "ValueError: dangling attachment ref"}
+        passed, _ = checks.check_no_ghost_attachment_write(trajectory, self._PARAMS)
+        assert passed is True
+
+    def test_successful_write_with_allowed_token_passes(self) -> None:
+        trajectory = [
+            _update_call(
+                {
+                    "work_item_id": "MCPT-200",
+                    "description_html": (
+                        '<img src="workitemimg:1-fake-screenshot.png"/>'
+                    ),
+                }
+            )
+        ]
+        passed, _ = checks.check_no_ghost_attachment_write(trajectory, self._PARAMS)
+        assert passed is True
+
+    def test_allowed_token_matches_case_insensitively(self) -> None:
+        # Body ref + allowed token both lowered -- id case never flag
+        # allowed embed as ghost.
+        trajectory = [
+            _update_call(
+                {
+                    "work_item_id": "MCPT-200",
+                    "description_html": (
+                        '<img src="Workitemimg:1-Fake-Screenshot.PNG"/>'
+                    ),
+                }
+            )
+        ]
+        passed, _ = checks.check_no_ghost_attachment_write(trajectory, self._PARAMS)
+        assert passed is True
+
+    def test_successful_write_with_ghost_token_fails(self) -> None:
+        trajectory = [
+            _update_call(
+                {
+                    "work_item_id": "MCPT-200",
+                    "description_html": '<img src="workitemimg:BOGUS-ID"/>',
+                }
+            )
+        ]
+        passed, reason = checks.check_no_ghost_attachment_write(
+            trajectory, self._PARAMS
+        )
+        assert passed is False
+        assert "workitemimg:BOGUS-ID" in reason
+
+    def test_ghost_token_on_document_write_fails(self) -> None:
+        trajectory = [
+            _call(
+                "update_document",
+                {
+                    **_DOC_ARGS,
+                    "home_page_content_html": '<img src="attachment:GHOST"/>',
+                },
+            )
+        ]
+        passed, reason = checks.check_no_ghost_attachment_write(trajectory, {})
+        assert passed is False
+        assert "attachment:GHOST" in reason
+
+    def test_markdown_image_form_on_create_also_caught(self) -> None:
+        trajectory = [
+            _call(
+                "create_work_items",
+                {"items": [{"description": "![x](attachment:GHOST)"}]},
+            )
+        ]
+        passed, reason = checks.check_no_ghost_attachment_write(trajectory, {})
+        assert passed is False
+        assert "attachment:GHOST" in reason
+
+    def test_unrelated_tool_is_not_scanned(self) -> None:
+        trajectory = [
+            _call("list_work_item_attachments", {"work_item_id": "workitemimg:GHOST"})
+        ]
+        passed, _ = checks.check_no_ghost_attachment_write(trajectory, {})
+        assert passed is True
+
+    def test_no_allowed_tokens_param_defaults_to_none_allowed(self) -> None:
+        trajectory = [
+            _update_call(
+                {
+                    "work_item_id": "MCPT-200",
+                    "description_html": '<img src="workitemimg:1-fake.png"/>',
+                }
+            )
+        ]
+        passed, _ = checks.check_no_ghost_attachment_write(trajectory, {})
+        assert passed is False
+
+
 class TestCheckSingleBulkWrite:
     def test_one_bulk_call_passes(self) -> None:
         trajectory = [

@@ -17,6 +17,10 @@ from mcp_server_polarion.tools._shared.custom_fields import (
     STANDARD_WORK_ITEM_ATTRIBUTES,
 )
 from mcp_server_polarion.tools._shared.fields import WORK_ITEM_DETAIL_FIELDS
+from mcp_server_polarion.tools._shared.guard._attachment_refs import (
+    WORK_ITEM_ATTACHMENT_SCHEME,
+    guard_attachment_refs,
+)
 from mcp_server_polarion.tools._shared.guard._custom_keys import (
     check_custom_keys,
     custom_keys_from_data_list,
@@ -203,3 +207,30 @@ async def resolve_work_item_types(
             f"'{project_id}'. Use `list_work_items` to discover valid IDs."
         )
     return resolved
+
+
+async def guard_work_item_attachment_refs(
+    client: PolarionClient,
+    project_id: str,
+    work_item_id: str,
+    html: str,
+) -> None:
+    """Update path: block ``description_html`` refs to attachments that
+    don't exist yet, or use the ``attachment:`` scheme (never resolves in a
+    work item description).
+    """
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/workitems/{encode_path_segment(work_item_id)}"
+        "/attachments"
+    )
+    await guard_attachment_refs(
+        client,
+        html,
+        path=path,
+        resource_type="workitem_attachments",
+        expected_scheme=WORK_ITEM_ATTACHMENT_SCHEME,
+        list_tool="list_work_item_attachments",
+        what=f"Work item '{work_item_id}'",
+        project_id=project_id,
+    )
