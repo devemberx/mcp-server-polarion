@@ -36,6 +36,14 @@ from .fixtures import (
 )
 
 
+def _error_response(status: int, detail: str) -> httpx.Response:
+    """JSON:API error body, live wire shape."""
+    return httpx.Response(
+        status,
+        json={"errors": [{"status": str(status), "detail": detail}]},
+    )
+
+
 @dataclass
 class FakePolarion:
     """Seeded, structure-faithful fake Polarion served over respx."""
@@ -624,6 +632,8 @@ class FakePolarion:
         return httpx.Response(404, json={"errors": [{"status": "404", "path": path}]})
 
     def _handle_mutation(self, request: httpx.Request, path: str) -> httpx.Response:
+        # Multipart request content = lazy stream; materialize before access.
+        request.read()
         body: Any = None
         if request.content:
             try:
@@ -631,6 +641,12 @@ class FakePolarion:
             except json.JSONDecodeError:
                 body = None
         self.mutations.append({"method": request.method, "path": path, "json": body})
+
+        doc_attachments = re.search(
+            rf"/spaces/{SPACE}/documents/([^/]+)/attachments$", path
+        )
+        if doc_attachments and request.method == "POST":
+            return self._post_document_attachments(request, doc_attachments.group(1))
 
         # Resource-creating POSTs must echo one id per submitted entry (tool
         # layer raise on count mismatch, so bulk cases need N ids); action
@@ -790,6 +806,72 @@ class FakePolarion:
             if testrecords:
                 return self._patch_testrecords(testrecords.group(1), body)
         return httpx.Response(204)
+
+    def _post_document_attachments(
+        self, request: httpx.Request, doc_name: str
+    ) -> httpx.Response:
+        """Multipart upload route, live contract 2026-07-20: ``resource`` =
+        plain form field, ordered ``files`` parts; 201 = list of
+        type/id/links entries in input order; dup fileName 409 atomic.
+        """
+        content_type = request.headers.get("content-type", "")
+        if not content_type.startswith("multipart/form-data"):
+            return _error_response(415, "Unsupported Media Type")
+
+        # Minimal multipart split — no boundary match = zero parts = 400 below.
+        boundary_match = re.search(r'boundary="?([^";]+)"?', content_type)
+        marker = f"--{boundary_match.group(1)}".encode() if boundary_match else b"\x00"
+        resource_raw: bytes | None = None
+        file_part_count = 0
+        for segment in request.content.split(marker):
+            head, separator, payload = segment.partition(b"\r\n\r\n")
+            if not separator:
+                continue  # preamble / closing "--" segment
+            disposition = head.decode("utf-8", errors="replace")
+            if 'name="resource"' in disposition:
+                resource_raw = payload.rstrip(b"\r\n")
+            elif 'name="files"' in disposition:
+                file_part_count += 1
+
+        if resource_raw is None:
+            return _error_response(400, "Resource data not found in request.")
+        try:
+            entries = json.loads(resource_raw).get("data", [])
+        except json.JSONDecodeError:
+            return _error_response(400, "Resource data not found in request.")
+
+        doc = self.seeds.documents.get(doc_name)
+        if doc is None:
+            return httpx.Response(404, json={"errors": [{"status": "404"}]})
+
+        file_names = [
+            entry.get("attributes", {}).get("fileName", "") for entry in entries
+        ]
+        if not all(file_names) or len(file_names) != file_part_count:
+            return _error_response(400, "File data not found for entry.")
+        existing = {a.attachment_id for a in doc.attachments}
+        if existing & set(file_names):
+            return _error_response(409, "A resource with the same ID already exists.")
+
+        base = f"{POLARION_HOST}{API_PREFIX}/projects/{PROJECT}/spaces/{SPACE}"
+        return httpx.Response(
+            201,
+            json={
+                "data": [
+                    {
+                        "type": "document_attachments",
+                        "id": f"{PROJECT}/{SPACE}/{doc_name}/{name}",
+                        "links": {
+                            "self": f"{base}/documents/{doc_name}/attachments/{name}",
+                            "content": (
+                                f"{base}/documents/{doc_name}/attachments/{name}/content"
+                            ),
+                        },
+                    }
+                    for name in file_names
+                ]
+            },
+        )
 
     def _patch_testrecords(self, run_id: str, body: Any) -> httpx.Response:
         """Every submitted id must be the path run's seeded, non-template
