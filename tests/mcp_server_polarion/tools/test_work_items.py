@@ -24,7 +24,6 @@ from mcp_server_polarion.models import (
     WorkItemsUpdateResult,
     WorkItemUpdateSpec,
 )
-from mcp_server_polarion.tools import work_items as _mod
 from mcp_server_polarion.tools._shared import cache as _cache_mod
 from mcp_server_polarion.tools._shared.cache import store_work_item_custom_keys
 from mcp_server_polarion.tools._shared.fields import MAX_BULK_ITEMS
@@ -1685,35 +1684,12 @@ class TestCreateWorkItemsAttachmentRefGuard:
         assert result.created is True  # type: ignore[attr-defined]
         mock_client.post.assert_awaited_once()
 
-    async def test_markdown_image_syntax_is_sanitized_away_before_guard_sees_it(
+    async def test_markdown_image_ref_rejected_before_create(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """sanitize_html drop <img> (not in ALLOWED_TAGS) before guard ever
-        runs -- same conversion pipeline as create_document, same finding.
+        """Guard runs on markdown_to_html output PRE-sanitize_html -- same
+        conversion pipeline as create_document, same finding.
         """
-        mock_client.post.return_value = {
-            "data": [{"type": "workitems", "id": "MyProj/MCPT-1"}]
-        }
-
-        result = await _call_create_wi(
-            mock_ctx, description="![x](workitemimg:ghost.png)"
-        )
-
-        assert result.created is True  # type: ignore[attr-defined]
-        mock_client.post.assert_awaited_once()
-
-    async def test_ref_surviving_conversion_blocks_write_before_post(
-        self,
-        mock_ctx: MagicMock,
-        mock_client: AsyncMock,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """Prove guard call itself wired: bypass sanitize_html (step that
-        neuters real callers, per test above) so converted <img> ref reach
-        reject_any_scheme_refs.
-        """
-        monkeypatch.setattr(_mod, "sanitize_html", lambda html: html)
-
         with pytest.raises(ValueError, match="attachments cannot exist"):
             await _call_create_wi(mock_ctx, description="![x](workitemimg:ghost.png)")
         mock_client.post.assert_not_called()

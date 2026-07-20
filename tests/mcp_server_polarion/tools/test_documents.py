@@ -4295,31 +4295,24 @@ class TestCreateDocumentAttachmentRefGuard:
         assert result.created is True  # type: ignore[attr-defined]
         mock_client.post.assert_awaited_once()
 
-    async def test_markdown_image_syntax_is_sanitized_away_before_guard_sees_it(
+    async def test_markdown_image_ref_rejected_before_create(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """sanitize_html drop <img> (not in ALLOWED_TAGS) before guard ever
-        runs -- Markdown image syntax can't reach it via this pipeline.
-        Settles spec UNVERIFIED item 1: reject_any_scheme_refs wired (see
-        test below) but structurally unreachable from Markdown
-        home_page_content input given current sanitizer allowlist.
+        """Guard runs on markdown_to_html output PRE-sanitize_html -- Markdown
+        image syntax converts to a real <img> tag before the sanitizer would
+        strip it (img not in ALLOWED_TAGS), so the ref is caught.
         """
-        mock_client.post.return_value = {
-            "data": [{"type": "documents", "id": "MyProj/_default/Doc"}]
-        }
-
-        result = await _call_create_doc(
-            mock_ctx, home_page_content="![x](attachment:ghost.png)"
-        )
-
-        assert result.created is True  # type: ignore[attr-defined]
-        mock_client.post.assert_awaited_once()
+        with pytest.raises(ValueError, match="attachments cannot exist"):
+            await _call_create_doc(
+                mock_ctx, home_page_content="![x](attachment:ghost.png)"
+            )
+        mock_client.post.assert_not_called()
 
     async def test_raw_inline_img_tag_is_html_escaped_before_guard_sees_it(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         """markdown_to_html disable html_inline -- raw <img> markup render
-        as literal escaped text, never a real tag.
+        as literal escaped text, never a real tag, even pre-sanitize.
         """
         mock_client.post.return_value = {
             "data": [{"type": "documents", "id": "MyProj/_default/Doc"}]
@@ -4332,24 +4325,6 @@ class TestCreateDocumentAttachmentRefGuard:
 
         assert result.created is True  # type: ignore[attr-defined]
         mock_client.post.assert_awaited_once()
-
-    async def test_ref_surviving_conversion_blocks_write_before_post(
-        self,
-        mock_ctx: MagicMock,
-        mock_client: AsyncMock,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """Prove guard call itself wired: bypass sanitize_html (step that
-        neuters real callers, per two tests above) so converted <img> ref
-        reach reject_any_scheme_refs.
-        """
-        monkeypatch.setattr(_mod, "sanitize_html", lambda html: html)
-
-        with pytest.raises(ValueError, match="attachments cannot exist"):
-            await _call_create_doc(
-                mock_ctx, home_page_content="![x](attachment:ghost.png)"
-            )
-        mock_client.post.assert_not_called()
 
 
 class TestUpdateDocumentAttachmentRefGuard:

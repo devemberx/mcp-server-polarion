@@ -1137,19 +1137,20 @@ async def create_document(  # noqa: PLR0913
     if custom_fields:
         await guard_document_custom_fields(client, project_id, type, custom_fields)
 
-    home_page_content_html = (
-        stamp_block_ids(
-            polarionify_html(sanitize_html(markdown_to_html(home_page_content)))
+    if home_page_content:
+        raw_home_page_content_html = markdown_to_html(home_page_content)
+        # Check raw conversion output -- sanitize_html strip <img> (not in
+        # ALLOWED_TAGS), hide Markdown image refs from guard otherwise.
+        reject_any_scheme_refs([raw_home_page_content_html], "document")
+        home_page_content_html = stamp_block_ids(
+            polarionify_html(sanitize_html(raw_home_page_content_html))
         )
-        if home_page_content
-        else ""
-    )
+    else:
+        home_page_content_html = ""
     if home_page_content_html and first_anchorless_block(home_page_content_html):
         raise RuntimeError(
             "stamp_block_ids left an anchorless block in new document body."
         )
-    if home_page_content_html:
-        reject_any_scheme_refs([home_page_content_html], "document")
 
     payload = _build_create_document_payload(
         document_name=document_name,

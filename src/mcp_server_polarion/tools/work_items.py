@@ -270,13 +270,16 @@ async def create_work_items(
                 client, project_id, spec.type, spec.custom_fields
             )
 
-    descriptions_html = [
-        polarionify_html(sanitize_html(markdown_to_html(spec.description)))
-        if spec.description
-        else ""
-        for spec in items
+    raw_descriptions_html = [
+        markdown_to_html(spec.description) if spec.description else "" for spec in items
     ]
-    reject_any_scheme_refs(descriptions_html, "work item")
+    # Check raw conversion output -- sanitize_html strip <img> (not in
+    # ALLOWED_TAGS), hide Markdown image refs from guard otherwise.
+    reject_any_scheme_refs(raw_descriptions_html, "work item")
+    descriptions_html = [
+        polarionify_html(sanitize_html(raw)) if raw else ""
+        for raw in raw_descriptions_html
+    ]
 
     payload = _build_create_work_items_payload(
         specs=items,
