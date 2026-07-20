@@ -3269,7 +3269,7 @@ class TestCreateDocumentHappyPath:
             title="t",
             type="generic",
             status=None,
-            home_page_content="| a |\n| --- |\n| 1 |\n\nTable: 표 캡션\n",
+            home_page_content="| a |\n| --- |\n| 1 |\n\nTable: légende\n",
             custom_fields=None,
             dry_run=False,
         )

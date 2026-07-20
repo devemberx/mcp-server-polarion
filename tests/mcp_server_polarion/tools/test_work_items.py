@@ -562,7 +562,7 @@ class TestCreateWorkItemsHappyPath:
                     title="t",
                     type="task",
                     description=(
-                        "| a | b |\n| --- | --- |\n| 1 | 2 |\n\nTable: 캡션\n"
+                        "| a | b |\n| --- | --- |\n| 1 | 2 |\n\nTable: légende\n"
                     ),
                 )
             ],
@@ -573,7 +573,7 @@ class TestCreateWorkItemsHappyPath:
         desc_html = kwargs["json"]["data"][0]["attributes"]["description"]["value"]
         assert 'class="polarion-Document-table"' in desc_html
         assert 'data-sequence="Table"' in desc_html
-        assert "캡션" in desc_html
+        assert "légende" in desc_html
 
     async def test_rich_text_custom_field_value_not_polarionified(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
