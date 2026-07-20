@@ -29,7 +29,6 @@ from mcp_server_polarion.tools.links import (
     _build_create_links_payload,
     _build_delete_links_payload,
     _build_update_link_payload,
-    _extract_created_link_ids,
     create_work_item_links,
     delete_work_item_links,
     list_work_item_links,
@@ -518,37 +517,6 @@ class TestBuildCreateLinksPayload:
         ]
 
 
-class TestExtractCreatedLinkIds:
-    """Private ``_extract_created_link_ids`` helper."""
-
-    def test_extracts_in_order(self) -> None:
-        response: dict[str, object] = {
-            "data": [
-                {"type": "linkedworkitems", "id": "P/WI-1/parent/P/WI-2"},
-                {"type": "linkedworkitems", "id": "P/WI-1/verifies/P/WI-3"},
-            ]
-        }
-        assert _extract_created_link_ids(response) == [
-            "P/WI-1/parent/P/WI-2",
-            "P/WI-1/verifies/P/WI-3",
-        ]
-
-    def test_skips_entries_missing_id(self) -> None:
-        response: dict[str, object] = {
-            "data": [
-                {"type": "linkedworkitems", "id": "P/WI-1/parent/P/WI-2"},
-                {"type": "linkedworkitems"},
-            ]
-        }
-        assert _extract_created_link_ids(response) == ["P/WI-1/parent/P/WI-2"]
-
-    def test_returns_empty_on_missing_data(self) -> None:
-        assert _extract_created_link_ids({}) == []
-
-    def test_returns_empty_on_non_list_data(self) -> None:
-        assert _extract_created_link_ids({"data": "oops"}) == []
-
-
 class TestCreateWorkItemLinksDryRun:
     """``create_work_item_links`` with ``dry_run=True``."""
 
@@ -879,7 +847,7 @@ class TestCreateWorkItemLinksResponseParsing:
     ) -> None:
         mock_client.post.return_value = {"data": []}
 
-        with pytest.raises(RuntimeError, match="0 ids for 1 requested links"):
+        with pytest.raises(RuntimeError, match="0 ids for 1 submitted"):
             await create_work_item_links(
                 mock_ctx,
                 project_id="MyProj",
@@ -895,7 +863,7 @@ class TestCreateWorkItemLinksResponseParsing:
     ) -> None:
         mock_client.post.return_value = {"data": [{"type": "linkedworkitems"}]}
 
-        with pytest.raises(RuntimeError, match="0 ids for 1 requested links"):
+        with pytest.raises(RuntimeError, match="0 ids for 1 submitted"):
             await create_work_item_links(
                 mock_ctx,
                 project_id="MyProj",
@@ -919,7 +887,9 @@ class TestCreateWorkItemLinksResponseParsing:
             ]
         }
 
-        with pytest.raises(RuntimeError, match="1 ids for 2 requested links"):
+        with pytest.raises(
+            RuntimeError, match=r"1 ids for 2 submitted.*list_work_item_links"
+        ):
             await create_work_item_links(
                 mock_ctx,
                 project_id="MyProj",

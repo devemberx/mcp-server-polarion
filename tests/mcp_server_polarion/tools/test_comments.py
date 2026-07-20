@@ -997,13 +997,34 @@ class TestCreateDocumentCommentsErrors:
     ) -> None:
         """201 with no IDs must raise, not silently return created=True."""
         mock_client.post.return_value = {}
-        with pytest.raises(RuntimeError, match="no comment IDs"):
+        with pytest.raises(
+            RuntimeError, match=r"0 ids for 1 submitted.*list_document_comments"
+        ):
             await create_document_comments(
                 mock_ctx,
                 project_id="P",
                 space_id="S",
                 document_name="D",
                 comments=[CommentSpec(text="hi")],
+                dry_run=False,
+            )
+
+    async def test_short_id_echo_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """201 echoing fewer ids than submitted must raise, not short list."""
+        mock_client.post.return_value = {
+            "data": [{"type": "document_comments", "id": "P/S/D/1"}]
+        }
+        with pytest.raises(
+            RuntimeError, match=r"1 ids for 2 submitted.*list_document_comments"
+        ):
+            await create_document_comments(
+                mock_ctx,
+                project_id="P",
+                space_id="S",
+                document_name="D",
+                comments=[CommentSpec(text="hi"), CommentSpec(text="ho")],
                 dry_run=False,
             )
 
@@ -1307,12 +1328,35 @@ class TestCreateWorkItemCommentsErrors:
     ) -> None:
         """201 with no IDs must raise, not silently return created=True."""
         mock_client.post.return_value = {}
-        with pytest.raises(RuntimeError, match="no comment IDs"):
+        with pytest.raises(
+            RuntimeError, match=r"0 ids for 1 submitted.*list_work_item_comments"
+        ):
             await create_work_item_comments(
                 mock_ctx,
                 project_id="P",
                 work_item_id="MCPT-1",
                 comments=[WorkItemCommentSpec(text="hi")],
+                dry_run=False,
+            )
+
+    async def test_short_id_echo_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """201 echoing fewer ids than submitted must raise, not short list."""
+        mock_client.post.return_value = {
+            "data": [{"type": "workitem_comments", "id": "P/MCPT-1/1"}]
+        }
+        with pytest.raises(
+            RuntimeError, match=r"1 ids for 2 submitted.*list_work_item_comments"
+        ):
+            await create_work_item_comments(
+                mock_ctx,
+                project_id="P",
+                work_item_id="MCPT-1",
+                comments=[
+                    WorkItemCommentSpec(text="hi"),
+                    WorkItemCommentSpec(text="ho"),
+                ],
                 dry_run=False,
             )
 

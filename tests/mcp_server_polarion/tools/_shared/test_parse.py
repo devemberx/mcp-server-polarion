@@ -5,6 +5,8 @@ text-format branches, phantom-editor skip.
 
 from __future__ import annotations
 
+import pytest
+
 from mcp_server_polarion.models import Attachment, Comment, WorkItemSummary
 from mcp_server_polarion.tools._shared.parse import (
     _parse_attachment,
@@ -111,13 +113,32 @@ class TestExtractCreatedShortIds:
                 {"type": "testruns", "id": "MyProj/TR-043"},
             ]
         }
-        assert extract_created_short_ids(response) == ["MCPT-042", "TR-043"]
+        assert extract_created_short_ids(
+            response, expected_count=2, list_tool="list_work_items"
+        ) == ["MCPT-042", "TR-043"]
 
-    def test_returns_empty_when_data_missing(self) -> None:
-        assert extract_created_short_ids({}) == []
+    def test_short_echo_raises_with_counts_and_list_tool(self) -> None:
+        response: dict[str, object] = {
+            "data": [{"type": "workitems", "id": "MyProj/MCPT-1"}]
+        }
+        with pytest.raises(
+            RuntimeError, match=r"1 ids for 2 submitted.*list_work_items"
+        ):
+            extract_created_short_ids(
+                response, expected_count=2, list_tool="list_work_items"
+            )
 
-    def test_returns_empty_when_data_not_a_list(self) -> None:
-        assert extract_created_short_ids({"data": {"id": "MyProj/MCPT-1"}}) == []
+    def test_data_missing_raises_zero_count(self) -> None:
+        with pytest.raises(RuntimeError, match="0 ids for 1 submitted"):
+            extract_created_short_ids({}, expected_count=1, list_tool="list_x")
+
+    def test_data_not_a_list_raises_zero_count(self) -> None:
+        with pytest.raises(RuntimeError, match="0 ids for 1 submitted"):
+            extract_created_short_ids(
+                {"data": {"id": "MyProj/MCPT-1"}},
+                expected_count=1,
+                list_tool="list_x",
+            )
 
     def test_skips_entries_missing_id_or_not_dict(self) -> None:
         response: dict[str, object] = {
@@ -127,11 +148,24 @@ class TestExtractCreatedShortIds:
                 "not a dict",
             ]
         }
-        assert extract_created_short_ids(response) == ["MCPT-1"]
+        assert extract_created_short_ids(
+            response, expected_count=1, list_tool="list_x"
+        ) == ["MCPT-1"]
+
+    def test_skipped_entries_shrink_echo_below_expected(self) -> None:
+        # Malformed entries drop from echo -- guard count them missing.
+        response: dict[str, object] = {
+            "data": [
+                {"type": "workitems", "id": "MyProj/MCPT-1"},
+                {"type": "workitems"},
+            ]
+        }
+        with pytest.raises(RuntimeError, match="1 ids for 2 submitted"):
+            extract_created_short_ids(response, expected_count=2, list_tool="list_x")
 
 
 class TestExtractCreatedFullIds:
-    """Tests for `extract_created_full_ids` (testrecord 5-segment ids)."""
+    """Tests for `extract_created_full_ids` (composite 5-segment ids)."""
 
     def test_extracts_full_ids_verbatim_in_order(self) -> None:
         # 5-segment testrecord id: project/testRun/testCaseProject/testCaseId/
@@ -148,16 +182,35 @@ class TestExtractCreatedFullIds:
                 },
             ]
         }
-        assert extract_created_full_ids(response) == [
+        assert extract_created_full_ids(
+            response, expected_count=2, list_tool="list_test_records"
+        ) == [
             "MCP_Test_Project/run1/MCP_Test_Project/MCPT-568/0",
             "MCP_Test_Project/run1/MCP_Test_Project/MCPT-569/1",
         ]
 
-    def test_returns_empty_when_data_missing(self) -> None:
-        assert extract_created_full_ids({}) == []
+    def test_short_echo_raises_with_counts_and_list_tool(self) -> None:
+        response: dict[str, object] = {
+            "data": [{"type": "testrecords", "id": "p/r/p/WI-1/0"}]
+        }
+        with pytest.raises(
+            RuntimeError, match=r"1 ids for 2 submitted.*list_test_records"
+        ):
+            extract_created_full_ids(
+                response, expected_count=2, list_tool="list_test_records"
+            )
 
-    def test_returns_empty_when_data_not_a_list(self) -> None:
-        assert extract_created_full_ids({"data": {"id": "p/r/p/WI-1/0"}}) == []
+    def test_data_missing_raises_zero_count(self) -> None:
+        with pytest.raises(RuntimeError, match="0 ids for 1 submitted"):
+            extract_created_full_ids({}, expected_count=1, list_tool="list_x")
+
+    def test_data_not_a_list_raises_zero_count(self) -> None:
+        with pytest.raises(RuntimeError, match="0 ids for 1 submitted"):
+            extract_created_full_ids(
+                {"data": {"id": "p/r/p/WI-1/0"}},
+                expected_count=1,
+                list_tool="list_x",
+            )
 
     def test_skips_entries_missing_id_or_not_dict(self) -> None:
         response: dict[str, object] = {
@@ -167,7 +220,9 @@ class TestExtractCreatedFullIds:
                 "not a dict",
             ]
         }
-        assert extract_created_full_ids(response) == ["p/r/p/WI-1/0"]
+        assert extract_created_full_ids(
+            response, expected_count=1, list_tool="list_x"
+        ) == ["p/r/p/WI-1/0"]
 
 
 class TestParseIncludedWorkItemMap:
