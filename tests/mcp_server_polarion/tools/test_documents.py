@@ -4271,3 +4271,160 @@ class TestUpdateDocumentAnchorlessGuard:
                 mock_ctx, home_page_content_html="<p>Note</p>", dry_run=True
             )
         mock_client.patch.assert_not_called()
+
+
+class TestCreateDocumentAttachmentRefGuard:
+    """Greenfield create -- any scheme ref in converted body block write
+    outright, resource can't own attachments before it exists.
+    """
+
+    async def test_clean_markdown_body_is_unaffected(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {
+            "data": [{"type": "documents", "id": "MyProj/_default/Doc"}]
+        }
+
+        result = await _call_create_doc(
+            mock_ctx, home_page_content="Plain paragraph, no refs."
+        )
+
+        assert result.created is True  # type: ignore[attr-defined]
+        mock_client.post.assert_awaited_once()
+
+    async def test_markdown_image_syntax_is_sanitized_away_before_guard_sees_it(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """sanitize_html drop <img> (not in ALLOWED_TAGS) before guard ever
+        runs -- Markdown image syntax can't reach it via this pipeline.
+        Settles spec UNVERIFIED item 1: reject_any_scheme_refs wired (see
+        test below) but structurally unreachable from Markdown
+        home_page_content input given current sanitizer allowlist.
+        """
+        mock_client.post.return_value = {
+            "data": [{"type": "documents", "id": "MyProj/_default/Doc"}]
+        }
+
+        result = await _call_create_doc(
+            mock_ctx, home_page_content="![x](attachment:ghost.png)"
+        )
+
+        assert result.created is True  # type: ignore[attr-defined]
+        mock_client.post.assert_awaited_once()
+
+    async def test_raw_inline_img_tag_is_html_escaped_before_guard_sees_it(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """markdown_to_html disable html_inline -- raw <img> markup render
+        as literal escaped text, never a real tag.
+        """
+        mock_client.post.return_value = {
+            "data": [{"type": "documents", "id": "MyProj/_default/Doc"}]
+        }
+
+        result = await _call_create_doc(
+            mock_ctx,
+            home_page_content='before <img src="workitemimg:ghost.png"/> after',
+        )
+
+        assert result.created is True  # type: ignore[attr-defined]
+        mock_client.post.assert_awaited_once()
+
+    async def test_ref_surviving_conversion_blocks_write_before_post(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Prove guard call itself wired: bypass sanitize_html (step that
+        neuters real callers, per two tests above) so converted <img> ref
+        reach reject_any_scheme_refs.
+        """
+        monkeypatch.setattr(_mod, "sanitize_html", lambda html: html)
+
+        with pytest.raises(ValueError, match="attachments cannot exist"):
+            await _call_create_doc(
+                mock_ctx, home_page_content="![x](attachment:ghost.png)"
+            )
+        mock_client.post.assert_not_called()
+
+
+def _attachments_get_response(short_ids: list[str]) -> dict[str, object]:
+    """Attachments-list GET reply (``@basic`` fieldset) for guard tests."""
+    return {
+        "data": [
+            {"type": "attachments", "id": i, "attributes": {"id": i}} for i in short_ids
+        ]
+    }
+
+
+class TestUpdateDocumentAttachmentRefGuard:
+    """``update_document`` verify ``home_page_content_html`` attachment refs
+    against live attachment list before PATCH.
+    """
+
+    async def test_dangling_ref_raises_before_patch(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _attachments_get_response(["1-real.png"])
+
+        with pytest.raises(ValueError, match="list_document_attachments"):
+            await _call_update_doc(
+                mock_ctx,
+                home_page_content_html=(
+                    '<p id="b1"><img src="attachment:ghost.png"/></p>'
+                ),
+            )
+        mock_client.patch.assert_not_called()
+
+    async def test_matching_ref_allows_patch(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _attachments_get_response(["1-real.png"])
+        mock_client.patch.return_value = {}
+
+        result = await _call_update_doc(
+            mock_ctx,
+            home_page_content_html=(
+                '<p id="b1"><img src="attachment:1-real.png"/></p>'
+            ),
+        )
+
+        assert result.updated is True  # type: ignore[attr-defined]
+        mock_client.patch.assert_awaited_once()
+
+    async def test_dry_run_still_queries_attachments(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _attachments_get_response(["1-real.png"])
+
+        result = await _call_update_doc(
+            mock_ctx,
+            home_page_content_html=(
+                '<p id="b1"><img src="attachment:1-real.png"/></p>'
+            ),
+            dry_run=True,
+        )
+
+        assert result.dry_run is True  # type: ignore[attr-defined]
+        mock_client.get.assert_awaited()
+        mock_client.patch.assert_not_called()
+
+    async def test_no_ref_html_adds_no_attachments_get(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.return_value = {}
+
+        await _call_update_doc(
+            mock_ctx, home_page_content_html='<p id="b1">No refs here</p>'
+        )
+
+        mock_client.get.assert_not_awaited()
+
+
+class TestUpdateDocumentAttachmentRefDocstringClause:
+    """Lock attachment-ref validation clause into public docstring."""
+
+    def test_docstring_names_list_document_attachments(self) -> None:
+        document = update_document.__doc__ or ""
+        assert "list_document_attachments" in document

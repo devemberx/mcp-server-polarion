@@ -45,6 +45,33 @@ For figures use `Figure` in both the leading text and `data-sequence`:
 <p class="polarion-rte-caption-paragraph" style="text-align: left;">Figure <span data-sequence="Figure" class="polarion-rte-caption">#</span> Caption text</p>
 ```
 
+## Image from work item attachments (update_work_items only)
+
+Embed an already-uploaded work item attachment as an inline image:
+
+```html
+<img src="workitemimg:{id}" style="max-width: 650px;"/>
+```
+
+`{id}` is the `id` field from `list_work_item_attachments` (short form, e.g.
+`1-diagram.svg` — Polarion may prefix it with a number). Non-image files
+embed the same way; the portal renders them with a generic icon.
+
+Non-ASCII or space-containing file names: the stored body token is
+URL-encoded (`workitemimg:1-%ED%85%8C%EC%8A%A4%ED%8A%B8.txt` for id
+`1-테스트.txt`) — either the encoded token or the raw id is accepted here.
+
+Polarion never validates this reference; a dangling id would otherwise
+persist and render like a real image. This server blocks the write instead
+— call list_work_item_attachments first to confirm the id exists.
+
+`attachment:` is the document-body scheme and never resolves in a work item
+description (and `workitemimg:` never resolves in a document body) — use
+the scheme matching the body you're editing.
+
+Sizing: inline `style="max-width: ..."` only, matching portal output —
+never `width=`/`height=` attributes.
+
 ## Links to work items, cross references, wiki pages
 
 Rendered links are empty `polarion-rte-link` spans — the target lives in

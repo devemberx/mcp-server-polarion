@@ -24,6 +24,7 @@ from mcp_server_polarion.models import (
     WorkItemsUpdateResult,
     WorkItemUpdateSpec,
 )
+from mcp_server_polarion.tools import work_items as _mod
 from mcp_server_polarion.tools._shared import cache as _cache_mod
 from mcp_server_polarion.tools._shared.cache import store_work_item_custom_keys
 from mcp_server_polarion.tools._shared.fields import MAX_BULK_ITEMS
@@ -1662,6 +1663,136 @@ class TestEnumGuardUpdateWorkItems:
             )
 
         mock_client.patch.assert_not_called()
+
+
+class TestCreateWorkItemsAttachmentRefGuard:
+    """Greenfield create -- any scheme ref in converted description block
+    write outright, item can't own attachments before it exists.
+    """
+
+    async def test_clean_markdown_description_is_unaffected(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {
+            "data": [{"type": "workitems", "id": "MyProj/MCPT-1"}]
+        }
+
+        result = await _call_create_wi(mock_ctx, description="Plain paragraph.")
+
+        assert result.created is True  # type: ignore[attr-defined]
+        mock_client.post.assert_awaited_once()
+
+    async def test_markdown_image_syntax_is_sanitized_away_before_guard_sees_it(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """sanitize_html drop <img> (not in ALLOWED_TAGS) before guard ever
+        runs -- same conversion pipeline as create_document, same finding.
+        """
+        mock_client.post.return_value = {
+            "data": [{"type": "workitems", "id": "MyProj/MCPT-1"}]
+        }
+
+        result = await _call_create_wi(
+            mock_ctx, description="![x](workitemimg:ghost.png)"
+        )
+
+        assert result.created is True  # type: ignore[attr-defined]
+        mock_client.post.assert_awaited_once()
+
+    async def test_ref_surviving_conversion_blocks_write_before_post(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Prove guard call itself wired: bypass sanitize_html (step that
+        neuters real callers, per test above) so converted <img> ref reach
+        reject_any_scheme_refs.
+        """
+        monkeypatch.setattr(_mod, "sanitize_html", lambda html: html)
+
+        with pytest.raises(ValueError, match="attachments cannot exist"):
+            await _call_create_wi(mock_ctx, description="![x](workitemimg:ghost.png)")
+        mock_client.post.assert_not_called()
+
+
+def _attachments_get_response(short_ids: list[str]) -> dict[str, object]:
+    """Attachments-list GET reply (``@basic`` fieldset) for guard tests."""
+    return {
+        "data": [
+            {"type": "attachments", "id": i, "attributes": {"id": i}} for i in short_ids
+        ]
+    }
+
+
+class TestUpdateWorkItemsAttachmentRefGuard:
+    """``update_work_items`` verify each item's ``description_html``
+    attachment refs against its live attachment list before PATCH.
+    """
+
+    async def test_dangling_ref_in_second_item_names_batch_position(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = [
+            _existence_response(("MCPT-1", "task"), ("MCPT-2", "task")),
+            _attachments_get_response(["1-real.png"]),
+            _attachments_get_response(["1-real.png"]),
+        ]
+
+        with pytest.raises(ValueError) as exc:
+            await _call_update(
+                mock_ctx,
+                items=[
+                    _spec(
+                        work_item_id="MCPT-1",
+                        description_html='<img src="workitemimg:1-real.png"/>',
+                    ),
+                    _spec(
+                        work_item_id="MCPT-2",
+                        description_html='<img src="workitemimg:ghost.png"/>',
+                    ),
+                ],
+            )
+
+        message = str(exc.value)
+        assert "items[1] ('MCPT-2')" in message
+        assert "list_work_item_attachments" in message
+        mock_client.patch.assert_not_called()
+
+    async def test_valid_ref_item_passes(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = [
+            _existence_response(("MCPT-1", "task")),
+            _attachments_get_response(["1-real.png"]),
+        ]
+        mock_client.patch.return_value = {}
+
+        result = await _call_update(
+            mock_ctx,
+            items=[_spec(description_html='<img src="workitemimg:1-real.png"/>')],
+        )
+
+        assert result.updated is True
+        mock_client.patch.assert_awaited_once()
+
+    async def test_spec_without_description_html_adds_no_attachments_get(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _existence_response(("MCPT-1", "task"))
+        mock_client.patch.return_value = {}
+
+        await _call_update(mock_ctx, items=[_spec(title="t")])
+
+        assert mock_client.get.await_count == 1
+
+
+class TestUpdateWorkItemsAttachmentRefDocstringClause:
+    """Lock attachment-ref validation clause into public docstring."""
+
+    def test_docstring_names_list_work_item_attachments(self) -> None:
+        document = update_work_items.__doc__ or ""
+        assert "list_work_item_attachments" in document
 
 
 class TestListWorkItems:

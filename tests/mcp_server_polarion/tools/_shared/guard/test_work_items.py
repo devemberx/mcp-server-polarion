@@ -16,6 +16,7 @@ from mcp_server_polarion.tools._shared.cache import (
     store_work_item_custom_keys,
 )
 from mcp_server_polarion.tools._shared.guard import (
+    guard_work_item_attachment_refs,
     guard_work_item_custom_fields,
     guard_work_item_enums,
     resolve_work_item_types,
@@ -25,6 +26,7 @@ from mcp_server_polarion.tools._shared.guard.work_items import (
     _check_work_item_custom_keys,
 )
 from tests.mcp_server_polarion.tools._shared.guard._builders import (
+    attachments_response,
     enum_response,
 )
 
@@ -549,3 +551,90 @@ class TestResolveWorkItemTypes:
 
         with pytest.raises(PermissionError, match="lacks permission"):
             await resolve_work_item_types(mock_client, "P", ["A"])
+
+
+class TestGuardWorkItemAttachmentRefs:
+    """Update-path guard on ``description_html`` attachment refs."""
+
+    async def test_no_refs_returns_without_get(self, mock_client: AsyncMock) -> None:
+        await guard_work_item_attachment_refs(
+            mock_client, "P", "WI-1", "<p>no refs here</p>"
+        )
+
+        mock_client.get.assert_not_awaited()
+
+    async def test_matching_raw_ref_passes(self, mock_client: AsyncMock) -> None:
+        mock_client.get.return_value = attachments_response(["1-x.png"], meta=False)
+
+        await guard_work_item_attachment_refs(
+            mock_client, "P", "WI-1", '<img src="workitemimg:1-x.png"/>'
+        )  # must not raise
+
+    async def test_url_encoded_token_matches_raw_id(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = attachments_response(
+            ["1-테스트.txt"], meta=False
+        )
+
+        await guard_work_item_attachment_refs(
+            mock_client,
+            "P",
+            "WI-1",
+            '<img src="workitemimg:1-%ED%85%8C%EC%8A%A4%ED%8A%B8.txt"/>',
+        )  # must not raise
+
+    async def test_dangling_ref_rejects_naming_list_tool(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = attachments_response(["1-real.png"], meta=False)
+
+        with pytest.raises(ValueError, match="list_work_item_attachments") as exc:
+            await guard_work_item_attachment_refs(
+                mock_client, "P", "WI-1", '<img src="workitemimg:1-ghost.png"/>'
+            )
+
+        assert "1-ghost.png" in str(exc.value)
+
+    async def test_wrong_scheme_rejects_before_any_get(
+        self, mock_client: AsyncMock
+    ) -> None:
+        with pytest.raises(ValueError, match="workitemimg") as exc:
+            await guard_work_item_attachment_refs(
+                mock_client, "P", "WI-1", '<img src="attachment:1-x.png"/>'
+            )
+
+        assert "attachment" in str(exc.value)
+        mock_client.get.assert_not_awaited()
+
+    async def test_get_failure_blocks_write(self, mock_client: AsyncMock) -> None:
+        mock_client.get.side_effect = PolarionError("backend down")
+
+        with pytest.raises(RuntimeError, match="Refusing the write"):
+            await guard_work_item_attachment_refs(
+                mock_client, "P", "WI-1", '<img src="workitemimg:1-x.png"/>'
+            )
+
+    async def test_auth_error_raises_permission_error(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
+
+        with pytest.raises(PermissionError, match="lacks permission"):
+            await guard_work_item_attachment_refs(
+                mock_client, "P", "WI-1", '<img src="workitemimg:1-x.png"/>'
+            )
+
+    async def test_get_uses_encoded_path_and_basic_fieldset(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = attachments_response(["1-x.png"], meta=False)
+
+        await guard_work_item_attachment_refs(
+            mock_client, "P", "WI 1", '<img src="workitemimg:1-x.png"/>'
+        )
+
+        path = mock_client.get.call_args.args[0]
+        params = mock_client.get.call_args.kwargs["params"]
+        assert path == "/projects/P/workitems/WI%201/attachments"
+        assert params["fields[workitem_attachments]"] == "@basic"

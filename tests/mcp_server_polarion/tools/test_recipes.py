@@ -55,6 +55,15 @@ class TestGetHtmlRecipes:
         assert "custom field" in result.recipes.lower()
         assert "polarion_wiki" in result.recipes
 
+    async def test_recipes_cover_work_item_attachment_images(self) -> None:
+        result = await get_html_recipes()
+        for marker in (
+            "Image from work item attachments",
+            "workitemimg:",
+            "list_work_item_attachments",
+        ):
+            assert marker in result.recipes
+
     async def test_recipes_stay_in_sync_with_pipeline_constants(self) -> None:
         # Guide must quote the exact styles polarionify_html injects.
         result = await get_html_recipes()

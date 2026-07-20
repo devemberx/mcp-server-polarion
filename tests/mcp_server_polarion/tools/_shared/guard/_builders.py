@@ -28,3 +28,20 @@ def workitems_response(project_id: str, short_ids: list[str]) -> dict[str, objec
         "data": [{"type": "workitems", "id": f"{project_id}/{i}"} for i in short_ids],
         "meta": {"totalCount": len(short_ids)},
     }
+
+
+def attachments_response(
+    short_ids: list[str], *, meta: bool = True
+) -> dict[str, object]:
+    """Document/work-item attachments list response (``@basic`` fieldset).
+    Live: ``meta.totalCount`` absent on a normal (non-overshoot) page --
+    ``meta=False`` mirrors that.
+    """
+    response: dict[str, object] = {
+        "data": [
+            {"type": "attachments", "id": i, "attributes": {"id": i}} for i in short_ids
+        ]
+    }
+    if meta:
+        response["meta"] = {"totalCount": len(short_ids)}
+    return response

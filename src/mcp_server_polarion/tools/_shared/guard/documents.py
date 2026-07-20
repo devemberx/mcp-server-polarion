@@ -12,6 +12,11 @@ from mcp_server_polarion.tools._shared.custom_fields import (
     STANDARD_DOCUMENT_ATTRIBUTES,
 )
 from mcp_server_polarion.tools._shared.fields import DOCUMENT_DETAIL_FIELDS
+from mcp_server_polarion.tools._shared.guard._attachment_refs import (
+    check_refs_against_ids,
+    extract_scheme_refs,
+    fetch_attachment_ids,
+)
 from mcp_server_polarion.tools._shared.guard._custom_keys import check_custom_keys
 from mcp_server_polarion.tools._shared.guard._http import guarded_pages
 from mcp_server_polarion.tools._shared.guard.enums import (
@@ -23,6 +28,8 @@ from mcp_server_polarion.tools._shared.helpers import (
     format_option_list,
 )
 from mcp_server_polarion.tools._shared.sql import one_heading_per_document_sql
+
+_DOCUMENT_ATTACHMENT_SCHEME = "attachment"
 
 
 async def guard_document_enums(
@@ -131,4 +138,50 @@ async def guard_document_custom_fields(
     await _check_document_custom_keys(client, project_id, document_type, custom_fields)
     await check_custom_field_enum_values(
         client, project_id, "documents", document_type, custom_fields
+    )
+
+
+async def guard_document_attachment_refs(
+    client: PolarionClient,
+    project_id: str,
+    space_id: str,
+    document_name: str,
+    html: str,
+) -> None:
+    """Update path: block ``home_page_content_html`` refs to attachments
+    that don't exist yet, or use the ``workitemimg:`` scheme (never resolves
+    in a document body).
+    """
+    refs = extract_scheme_refs(html)
+    if not refs:
+        return
+    what = f"Document '{space_id}/{document_name}'"
+    if any(scheme != _DOCUMENT_ATTACHMENT_SCHEME for scheme, _token in refs):
+        # Wrong scheme never resolves regardless of real attachment.
+        # Reject before GET -- dummy id set safe, refs loop always raise
+        # here (mismatch guaranteed present) before reaching unmatched
+        # token check.
+        check_refs_against_ids(
+            refs,
+            frozenset(),
+            expected_scheme=_DOCUMENT_ATTACHMENT_SCHEME,
+            list_tool="list_document_attachments",
+            what=what,
+        )
+
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/spaces/{encode_path_segment(space_id)}"
+        f"/documents/{encode_path_segment(document_name)}"
+        "/attachments"
+    )
+    valid_ids = await fetch_attachment_ids(
+        client, path, "document_attachments", what=what, project_id=project_id
+    )
+    check_refs_against_ids(
+        refs,
+        valid_ids,
+        expected_scheme=_DOCUMENT_ATTACHMENT_SCHEME,
+        list_tool="list_document_attachments",
+        what=what,
     )

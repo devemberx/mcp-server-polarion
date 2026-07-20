@@ -37,8 +37,10 @@ from mcp_server_polarion.tools._shared.fields import (
 )
 from mcp_server_polarion.tools._shared.guard import (
     guard_hyperlink_roles,
+    guard_work_item_attachment_refs,
     guard_work_item_custom_fields,
     guard_work_item_enums,
+    reject_any_scheme_refs,
     resolve_work_item_types,
 )
 from mcp_server_polarion.tools._shared.helpers import (
@@ -274,6 +276,7 @@ async def create_work_items(
         else ""
         for spec in items
     ]
+    reject_any_scheme_refs(descriptions_html, "work item")
 
     payload = _build_create_work_items_payload(
         specs=items,
@@ -329,7 +332,7 @@ async def create_work_items(
         "openWorldHint": True,
     },
 )
-async def update_work_items(  # noqa: PLR0913
+async def update_work_items(  # noqa: PLR0912, PLR0913
     ctx: Context,
     project_id: str = Field(min_length=1, description="Polarion project ID."),
     items: list[WorkItemUpdateSpec] = Field(  # noqa: B008
@@ -366,7 +369,9 @@ async def update_work_items(  # noqa: PLR0913
     create_work_items Markdown, formats never mix. To add a table, caption,
     link, or widget, call get_html_recipes first and adapt its template
     before writing description_html — hand-written table markup is
-    rejected.
+    rejected. Attachment image references (workitemimg:{id}) in the body
+    are checked against the item's real attachments before the write —
+    confirm ids via list_work_item_attachments first.
 
     custom_fields is partial; keys outside the type schema are rejected,
     values are not validated — resolve via list_work_item_enum_options
@@ -419,6 +424,10 @@ async def update_work_items(  # noqa: PLR0913
                 # attribute to its batch position like other guards.
                 await guard_hyperlink_roles(
                     client, project_id, [h.role for h in spec.hyperlinks]
+                )
+            if spec.description_html:
+                await guard_work_item_attachment_refs(
+                    client, project_id, spec.work_item_id, spec.description_html
                 )
 
     query_params = _update_query_params(workflow_action, change_type_to)

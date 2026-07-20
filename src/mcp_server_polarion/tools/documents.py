@@ -46,9 +46,11 @@ from mcp_server_polarion.tools._shared.fields import (
     WORK_ITEM_PART_FIELDS,
 )
 from mcp_server_polarion.tools._shared.guard import (
+    guard_document_attachment_refs,
     guard_document_custom_fields,
     guard_document_enums,
     guard_work_item_link_roles,
+    reject_any_scheme_refs,
 )
 from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
@@ -926,6 +928,9 @@ async def update_document(  # noqa: PLR0913
     - Polarion-specific constructs (tables, captions, links, TOC/TOF widgets,
       page breaks) must be adapted from get_html_recipes templates, never
       hand-written.
+    - Attachment image references (attachment:{id}) in the body are checked
+      against the document's real attachments before the write — confirm
+      ids via list_document_attachments first.
 
     workflow_action must pair with at least one attribute. Unknown
     status/type ids and custom_fields keys outside the type schema are
@@ -1000,6 +1005,11 @@ async def update_document(  # noqa: PLR0913
         )
         await guard_document_custom_fields(
             client, project_id, effective_type, custom_fields
+        )
+
+    if home_page_content_html is not None:
+        await guard_document_attachment_refs(
+            client, project_id, space_id, document_name, home_page_content_html
         )
 
     if dry_run:
@@ -1138,6 +1148,8 @@ async def create_document(  # noqa: PLR0913
         raise RuntimeError(
             "stamp_block_ids left an anchorless block in new document body."
         )
+    if home_page_content_html:
+        reject_any_scheme_refs([home_page_content_html], "document")
 
     payload = _build_create_document_payload(
         document_name=document_name,
