@@ -108,5 +108,7 @@ exclude_lines = [
     "if TYPE_CHECKING:",
     "raise NotImplementedError",
     "@overload",
-    '\.\.\.',
+    # Statement-only Ellipsis stub; bare pattern matched "..." inside Field
+    # description strings = whole tool bodies dropped from measurement (#212).
+    '^\s*\.\.\.\s*$',
 ]
