@@ -176,6 +176,37 @@ class TestExtractBody:
         assert hook.extract_body("gh issue create --title only") is None
 
 
+class TestHeredocBody:
+    def test_inner_double_quotes_keep_full_payload(self) -> None:
+        # shlex-only path truncate at first inner quote — regression #211.
+        cmd = (
+            "gh issue create --title 'tools: x' --body \"$(cat <<'EOF'\n"
+            "### Origin\n\n"
+            'PR "quoted" #210\n\n'
+            "### Finding\n\ndetail\n"
+            "EOF\n"
+            ')"'
+        )
+        assert hook.extract_body(cmd) == (
+            '### Origin\n\nPR "quoted" #210\n\n### Finding\n\ndetail'
+        )
+
+    def test_missing_close_marker_extracts_nothing(self) -> None:
+        # No close = shell error anyway — never validate half a body.
+        cmd = "gh issue create --body \"$(cat <<'EOF'\n### Origin\n)\""
+        assert hook.extract_body(cmd) is None
+
+    def test_body_file_beside_unrelated_heredoc(self, tmp_path: Path) -> None:
+        f = tmp_path / "b.md"
+        f.write_text("from file")
+        cmd = f"cat <<'EOF' >/dev/null\nnoise\nEOF\ngh issue create --body-file {f}"
+        assert hook.extract_body(cmd) == "from file"
+
+    def test_plain_quoted_body_untouched(self) -> None:
+        # No $(cat <<...) after flag — shlex path stay in charge.
+        assert hook.extract_body('gh issue create --body "simple"') == "simple"
+
+
 class TestExtractTitle:
     def test_long_flag(self) -> None:
         assert hook.extract_title("gh issue create --title 'follow up'") == "follow up"

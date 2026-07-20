@@ -58,6 +58,14 @@ PR_CREATE_EDIT_RE = re.compile(r"\bgh\s+pr\s+(create|edit)\b")
 PR_COMMENT_RE = re.compile(r"\bgh\s+pr\s+comment\b")
 GH_API_RE = re.compile(r"\bgh\s+api\b")
 
+# --body "$(cat <<'EOF' ...)" form: shlex know neither $() nor heredoc — first
+# inner double quote end token early, truncated body get validated. Detect on
+# raw cmd, slice payload direct. --body-file never match ([=\s] after flag).
+BODY_HEREDOC_RE = re.compile(
+    r"(?<!\S)(?:--body|-b)[=\s]+[\"']?\$\(\s*cat\s*<<-?\s*"
+    r"(?:'(?P<sq>[^']+)'|\"(?P<dq>[^\"]+)\"|(?P<bare>\w+))"
+)
+
 
 def main() -> int:
     try:
@@ -129,6 +137,11 @@ def classify(cmd: str) -> str | None:
 
 
 def extract_body(cmd: str) -> str | None:
+    heredoc = BODY_HEREDOC_RE.search(cmd)
+    if heredoc is not None:
+        # Never fall through to shlex here — truncated token would validate.
+        return _heredoc_payload(cmd, heredoc)
+
     try:
         argv = shlex.split(cmd)
     except ValueError:
@@ -163,6 +176,23 @@ def extract_body(cmd: str) -> str | None:
             return _read_file(nxt)
         i += 1
     return None
+
+
+def _heredoc_payload(cmd: str, opener: re.Match[str]) -> str | None:
+    """Slice heredoc payload out of raw cmd — lines between BODY_HEREDOC_RE
+    match and closing marker line. Malformed (no newline / no close) = None;
+    shell would error on same command, nothing sound to validate.
+    """
+    marker = opener.group("sq") or opener.group("dq") or opener.group("bare")
+    nl = cmd.find("\n", opener.end())
+    if nl == -1:
+        return None
+    rest = cmd[nl + 1 :]
+    # \t* = <<- tab-stripped close; trailing \n strip mirror $() behavior.
+    close = re.search(rf"^\t*{re.escape(marker)}\s*$", rest, re.MULTILINE)
+    if close is None:
+        return None
+    return rest[: close.start()].rstrip("\n")
 
 
 def _read_file(path: str) -> str | None:

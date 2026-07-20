@@ -93,6 +93,57 @@ class TestBodyExtractBody:
         assert body.extract_body("gh pr edit --title only") is None
 
 
+HEREDOC_CMD = (
+    "gh pr create --title 'fix: x' --body \"$(cat <<'EOF'\n"
+    "## Changes\n"
+    '- Pipeline said "run gates" before push\n'
+    "- second bullet\n"
+    "EOF\n"
+    ')"'
+)
+
+
+class TestHeredocBody:
+    def test_inner_double_quotes_keep_full_payload(self) -> None:
+        # shlex-only path truncate at first inner quote — regression #211.
+        assert body.extract_body(HEREDOC_CMD) == (
+            '## Changes\n- Pipeline said "run gates" before push\n- second bullet'
+        )
+
+    def test_inner_double_quotes_count_real_bullets(self) -> None:
+        extracted = body.extract_body(HEREDOC_CMD)
+        assert extracted is not None
+        assert body.changes_format_errors(extracted) == []
+
+    def test_unquoted_marker(self) -> None:
+        cmd = 'gh pr create --body "$(cat <<PR_BODY\nplain text\nPR_BODY\n)"'
+        assert body.extract_body(cmd) == "plain text"
+
+    def test_body_equals_form(self) -> None:
+        cmd = "gh pr edit 5 --body=\"$(cat <<'EOF'\nplain text\nEOF\n)\""
+        assert body.extract_body(cmd) == "plain text"
+
+    def test_odd_quote_count_still_extracts(self) -> None:
+        # Lone inner quote = shlex ValueError; heredoc slice unaffected.
+        cmd = 'gh pr create --body "$(cat <<\'EOF\'\nsaid "partial\nEOF\n)"'
+        assert body.extract_body(cmd) == 'said "partial'
+
+    def test_missing_close_marker_extracts_nothing(self) -> None:
+        # No close = shell error anyway — never validate half a body.
+        cmd = "gh pr create --body \"$(cat <<'EOF'\n- one\n)\""
+        assert body.extract_body(cmd) is None
+
+    def test_body_file_beside_unrelated_heredoc(self, tmp_path: Path) -> None:
+        f = tmp_path / "b.md"
+        f.write_text("from file")
+        cmd = f"cat <<'EOF' >/dev/null\nnoise\nEOF\ngh pr create --body-file {f}"
+        assert body.extract_body(cmd) == "from file"
+
+    def test_plain_quoted_body_untouched(self) -> None:
+        # No $(cat <<...) after flag — shlex path stay in charge.
+        assert body.extract_body('gh pr create --body "simple"') == "simple"
+
+
 class TestExtractTitle:
     def test_long_flag(self) -> None:
         assert body.extract_title("gh pr create --title 'fix: x'") == "fix: x"
