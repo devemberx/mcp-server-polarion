@@ -12,6 +12,7 @@ import asyncio
 import logging
 import re
 import types
+import uuid
 from typing import Final
 
 import httpx
@@ -168,6 +169,21 @@ class PolarionClient:
             await asyncio.sleep(self._write_delay)
             return result
 
+    async def post_multipart(
+        self,
+        path: str,
+        *,
+        data: dict[str, str],
+        files: list[tuple[str, tuple[str, bytes, str]]],
+    ) -> dict[str, object]:
+        """``POST`` ``multipart/form-data``; same delay contract as :meth:`post`.
+        ``files`` order-matched to ``data`` JSON — caller build the pairing.
+        """
+        async with self._get_request_lock():
+            result = await self._request("POST", path, data=data, files=files)
+            await asyncio.sleep(self._write_delay)
+            return result
+
     async def patch(
         self,
         path: str,
@@ -195,16 +211,19 @@ class PolarionClient:
             await asyncio.sleep(self._write_delay)
             return result
 
-    async def _request(
+    async def _request(  # noqa: PLR0913
         self,
         method: str,
         path: str,
         *,
         params: dict[str, str | int] | None = None,
         json: dict[str, object] | None = None,
+        data: dict[str, str] | None = None,
+        files: list[tuple[str, tuple[str, bytes, str]]] | None = None,
     ) -> dict[str, object]:
         """Execute with error mapping; retry 429/5xx up to ``_MAX_RETRIES``
-        with exponential backoff, other errors raise immediately.
+        with exponential backoff, other errors raise immediately. ``files``
+        set → multipart body, ``data`` = its plain form fields.
         """
         # Lock held across retries — release mid-backoff = other caller hit same 429.
         # Pace before first attempt; backoffs widen gap.
@@ -212,6 +231,15 @@ class PolarionClient:
         last_exception: PolarionError | None = None
         backoff = _INITIAL_BACKOFF_SECONDS
         loop = asyncio.get_running_loop()
+
+        # Client-wide Content-Type: application/json stick on multipart (httpx
+        # setdefault skip present key) — override per-request, own boundary.
+        multipart_headers: dict[str, str] | None = None
+        if files is not None:
+            boundary = uuid.uuid4().hex
+            multipart_headers = {
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+            }
 
         for attempt in range(_MAX_RETRIES + 1):
             # Stamp per attempt — next request pace from last sent, not stale first.
@@ -222,6 +250,9 @@ class PolarionClient:
                     path,
                     params=params,
                     json=json,
+                    data=data,
+                    files=files,
+                    headers=multipart_headers,
                 )
             except httpx.HTTPError as exc:
                 raise PolarionError(
