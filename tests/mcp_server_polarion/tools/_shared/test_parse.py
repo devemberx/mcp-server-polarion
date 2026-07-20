@@ -224,6 +224,17 @@ class TestExtractCreatedFullIds:
             response, expected_count=1, list_tool="list_x"
         ) == ["p/r/p/WI-1/0"]
 
+    def test_skipped_entries_shrink_echo_below_expected(self) -> None:
+        # Malformed entries drop from echo -- guard count them missing.
+        response: dict[str, object] = {
+            "data": [
+                {"type": "testrecords", "id": "p/r/p/WI-1/0"},
+                {"type": "testrecords"},
+            ]
+        }
+        with pytest.raises(RuntimeError, match="1 ids for 2 submitted"):
+            extract_created_full_ids(response, expected_count=2, list_tool="list_x")
+
 
 class TestParseIncludedWorkItemMap:
     """Tests for `parse_included_work_item_map`."""
