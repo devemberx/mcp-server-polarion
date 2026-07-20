@@ -8,8 +8,10 @@
 # on outward commands (gh pr/issue/api/release/gist/repo/label/workflow,
 # git commit/tag/push — push catch private names in branch names).
 #
-# Untracked = absent in fresh worktree checkouts — copy or symlink the
-# .local file into each worktree you publish from.
+# Untracked = absent in fresh worktree checkouts. Claude sessions started
+# inside a worktree auto-link it from the main checkout
+# (link_sensitive_patterns.py SessionStart hook); outside Claude, copy or
+# symlink the .local file into each worktree you publish from.
 #
 # ExamplePrivateProject\b
 # (?i)examplespace/exampleprivatedoc\b

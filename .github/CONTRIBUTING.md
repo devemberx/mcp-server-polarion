@@ -125,8 +125,10 @@ Want it checked locally as you commit? Enable the optional hook:
   projects, spaces, or documents you test against — describe them generically ("live testdrive
   project"). If you work against a private instance, copy `.claude/sensitive-patterns.example` to
   `.claude/sensitive-patterns.local` (untracked) and the `block_sensitive_text.py` Claude hook
-  blocks outward commands containing those names. The `.local` file is untracked, so copy or
-  symlink it into each git worktree you publish from — a checkout without it skips the guard.
+  blocks outward commands containing those names. The `.local` file is untracked, so a checkout
+  without it skips the guard; Claude sessions started inside a git worktree symlink it from the
+  main checkout automatically (`link_sensitive_patterns.py` SessionStart hook) — outside Claude,
+  copy or symlink it yourself.
 
 ### Review and merge
 
