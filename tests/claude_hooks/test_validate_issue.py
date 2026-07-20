@@ -191,6 +191,32 @@ class TestHeredocBody:
             '### Origin\n\nPR "quoted" #210\n\n### Finding\n\ndetail'
         )
 
+    def test_double_quoted_marker(self) -> None:
+        cmd = 'gh issue create --body "$(cat <<"EOF"\nplain text\nEOF\n)"'
+        assert hook.extract_body(cmd) == "plain text"
+
+    def test_crlf_body_no_trailing_cr(self) -> None:
+        cmd = (
+            "gh issue create --body \"$(cat <<'EOF'\r\n"
+            "### Origin\r\n\r\n"
+            'PR "quoted" #210\r\n'
+            "EOF\r\n"
+            ')"'
+        )
+        extracted = hook.extract_body(cmd)
+        assert extracted is not None
+        assert not extracted.endswith("\r")
+        assert extracted.startswith("### Origin")
+
+    def test_bare_heredoc_skips_tab_indented_close(self) -> None:
+        # Shell close bare << at column 0 only — indented marker = still open.
+        cmd = "gh issue create --body \"$(cat <<'EOF'\n### Origin\n\tEOF\n)\""
+        assert hook.extract_body(cmd) is None
+
+    def test_dash_heredoc_accepts_tab_indented_close(self) -> None:
+        cmd = "gh issue create --body \"$(cat <<-'EOF'\n### Origin\n\tEOF\n)\""
+        assert hook.extract_body(cmd) == "### Origin"
+
     def test_missing_close_marker_extracts_nothing(self) -> None:
         # No close = shell error anyway — never validate half a body.
         cmd = "gh issue create --body \"$(cat <<'EOF'\n### Origin\n)\""

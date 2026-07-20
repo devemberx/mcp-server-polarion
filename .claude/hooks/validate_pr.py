@@ -62,7 +62,7 @@ GH_API_RE = re.compile(r"\bgh\s+api\b")
 # inner double quote end token early, truncated body get validated. Detect on
 # raw cmd, slice payload direct. --body-file never match ([=\s] after flag).
 BODY_HEREDOC_RE = re.compile(
-    r"(?<!\S)(?:--body|-b)[=\s]+[\"']?\$\(\s*cat\s*<<-?\s*"
+    r"(?<!\S)(?:--body|-b)[=\s]+[\"']?\$\(\s*cat\s*<<(?P<dash>-)?\s*"
     r"(?:'(?P<sq>[^']+)'|\"(?P<dq>[^\"]+)\"|(?P<bare>\w+))"
 )
 
@@ -188,11 +188,13 @@ def _heredoc_payload(cmd: str, opener: re.Match[str]) -> str | None:
     if nl == -1:
         return None
     rest = cmd[nl + 1 :]
-    # \t* = <<- tab-stripped close; trailing \n strip mirror $() behavior.
-    close = re.search(rf"^\t*{re.escape(marker)}\s*$", rest, re.MULTILINE)
+    # Shell close bare << at column 0 only; <<- allow leading tabs.
+    indent = r"\t*" if opener.group("dash") else ""
+    close = re.search(rf"^{indent}{re.escape(marker)}\s*$", rest, re.MULTILINE)
     if close is None:
         return None
-    return rest[: close.start()].rstrip("\n")
+    # Trailing newline strip mirror $(); \r keep CRLF input clean.
+    return rest[: close.start()].rstrip("\r\n")
 
 
 def _read_file(path: str) -> str | None:

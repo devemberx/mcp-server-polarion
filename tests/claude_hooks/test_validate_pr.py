@@ -123,6 +123,33 @@ class TestHeredocBody:
         cmd = "gh pr edit 5 --body=\"$(cat <<'EOF'\nplain text\nEOF\n)\""
         assert body.extract_body(cmd) == "plain text"
 
+    def test_double_quoted_marker(self) -> None:
+        cmd = 'gh pr create --body "$(cat <<"EOF"\nplain text\nEOF\n)"'
+        assert body.extract_body(cmd) == "plain text"
+
+    def test_crlf_body_no_trailing_cr(self) -> None:
+        cmd = (
+            "gh pr create --body \"$(cat <<'EOF'\r\n"
+            "## Changes\r\n"
+            '- said "quote" one\r\n'
+            "- two\r\n"
+            "EOF\r\n"
+            ')"'
+        )
+        extracted = body.extract_body(cmd)
+        assert extracted is not None
+        assert not extracted.endswith("\r")
+        assert body.changes_format_errors(extracted) == []
+
+    def test_bare_heredoc_skips_tab_indented_close(self) -> None:
+        # Shell close bare << at column 0 only — indented marker = still open.
+        cmd = "gh pr create --body \"$(cat <<'EOF'\n- one\n\tEOF\n)\""
+        assert body.extract_body(cmd) is None
+
+    def test_dash_heredoc_accepts_tab_indented_close(self) -> None:
+        cmd = "gh pr create --body \"$(cat <<-'EOF'\n- one\n\tEOF\n)\""
+        assert body.extract_body(cmd) == "- one"
+
     def test_odd_quote_count_still_extracts(self) -> None:
         # Lone inner quote = shlex ValueError; heredoc slice unaffected.
         cmd = 'gh pr create --body "$(cat <<\'EOF\'\nsaid "partial\nEOF\n)"'
