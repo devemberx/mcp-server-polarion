@@ -33,6 +33,7 @@ from evals.harness.fixtures import (
     TEST_RUN_ID_2,
     TEST_RUN_TEMPLATE_ID,
     TESTCASE_ID,
+    WORKITEM_ATTACHMENT_CONTENT,
     WORKITEM_ATTACHMENT_ID,
     Attachment,
 )
@@ -337,6 +338,45 @@ class TestReadRouting:
     def test_workitem_attachments_unseeded_work_item_404(self) -> None:
         response = _get(
             FakePolarion(), f"/projects/{PROJECT}/workitems/MCPT-9999/attachments"
+        )
+        assert response.status_code == 404
+
+    def test_workitem_attachment_content_serves_seeded_bytes(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}/attachments/"
+            f"{WORKITEM_ATTACHMENT_ID}/content",
+            headers=_BYTES_ACCEPT,
+        )
+        assert response.status_code == 200
+        assert response.content == WORKITEM_ATTACHMENT_CONTENT
+
+    def test_workitem_attachment_content_json_only_accept_is_406(self) -> None:
+        # Live-verified 2026-07-21: same 406 contract as doc route.
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}/attachments/"
+            f"{WORKITEM_ATTACHMENT_ID}/content",
+            headers={"Accept": "application/json"},
+        )
+        assert response.status_code == 406
+        assert _json(response)["errors"]
+
+    def test_workitem_attachment_content_unseeded_attachment_is_404(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}/attachments/"
+            "999-not-real.png/content",
+            headers=_BYTES_ACCEPT,
+        )
+        assert response.status_code == 404
+
+    def test_workitem_attachment_content_unseeded_work_item_is_404(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/workitems/MCPT-9999/attachments/"
+            f"{WORKITEM_ATTACHMENT_ID}/content",
+            headers=_BYTES_ACCEPT,
         )
         assert response.status_code == 404
 
