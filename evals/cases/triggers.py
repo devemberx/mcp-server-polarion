@@ -26,9 +26,9 @@ from evals.harness.fixtures import (
 
 MIN_PASS_RATE = 1.0
 
-# Real repo file: upload trigger need existing local path (tool read disk
+# Checked-in 1x1 PNG: upload trigger need existing local path (tool read disk
 # pre-request; missing path = ValueError before any tool-routing signal).
-_UPLOAD_ASSET = Path(__file__).resolve().parents[2] / ".github" / "assets" / "icon.png"
+_UPLOAD_ASSET = Path(__file__).resolve().parents[1] / "assets" / "upload.png"
 
 
 def _case(
