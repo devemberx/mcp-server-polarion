@@ -264,11 +264,16 @@ reviewed. Placing it after PASS would ship unreviewed edits.
   if main moved, update the branch and let checks re-run.
 - **Worktree exit — final step:** with CI green and follow-ups exported, ask
   the user keep/remove and call `ExitWorktree`. PR still in review → keep
-  (fix rounds re-enter the same worktree); merged → remove
-  (`discard_changes: true` is expected there: `.pipeline/` is uncommitted and
-  the branch commits live on origin, not main). Don't end the pipeline with
-  the session parked in the worktree — an open editor window holds the lock
-  indefinitely and the session-exit keep/remove prompt never fires.
+  (fix rounds re-enter the same worktree); merged → remove. For remove,
+  first call without `discard_changes` and read the refusal list: expected
+  entries are `.pipeline/` files and branch commits already on origin —
+  anything else is unsaved work, stop and confirm with the user before
+  re-invoking with `discard_changes: true`. Don't end the pipeline with the
+  session parked in the worktree — an open editor window holds the lock
+  indefinitely and the session-exit keep/remove prompt never fires. Scope
+  caveat: ExitWorktree only reaches worktrees its own session created; a
+  worktree kept past session end gets removed later by hand
+  (`git worktree remove` + `git branch -D` after merge).
 
 ## Common Rationalizations
 
@@ -336,4 +341,5 @@ reviewed. Placing it after PASS would ship unreviewed edits.
 - [ ] PR CI checks all green (`gh pr checks <PR#> --watch --fail-fast`),
       branch up to date with main
 - [ ] Session left the worktree via `ExitWorktree` (keep while PR in review,
-      remove once merged) — no lingering locked worktree
+      remove once merged — refusal list checked before `discard_changes`) —
+      no lingering locked worktree
