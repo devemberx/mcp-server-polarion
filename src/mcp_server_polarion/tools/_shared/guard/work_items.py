@@ -18,6 +18,7 @@ from mcp_server_polarion.tools._shared.custom_fields import (
 )
 from mcp_server_polarion.tools._shared.fields import WORK_ITEM_DETAIL_FIELDS
 from mcp_server_polarion.tools._shared.guard._attachment_refs import (
+    WORK_ITEM_ATTACHMENT_SCHEME,
     guard_attachment_refs,
 )
 from mcp_server_polarion.tools._shared.guard._custom_keys import (
@@ -40,8 +41,6 @@ from mcp_server_polarion.tools._shared.helpers import (
 )
 from mcp_server_polarion.tools._shared.parse import extract_short_id
 from mcp_server_polarion.tools._shared.sql import one_item_per_custom_field_sql
-
-_WORK_ITEM_ATTACHMENT_SCHEME = "workitemimg"
 
 
 async def guard_work_item_enums(  # noqa: PLR0913
@@ -230,7 +229,7 @@ async def guard_work_item_attachment_refs(
         html,
         path=path,
         resource_type="workitem_attachments",
-        expected_scheme=_WORK_ITEM_ATTACHMENT_SCHEME,
+        expected_scheme=WORK_ITEM_ATTACHMENT_SCHEME,
         list_tool="list_work_item_attachments",
         what=f"Work item '{work_item_id}'",
         project_id=project_id,

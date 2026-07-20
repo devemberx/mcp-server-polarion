@@ -1007,7 +1007,7 @@ async def update_document(  # noqa: PLR0913
             client, project_id, effective_type, custom_fields
         )
 
-    if home_page_content_html is not None:
+    if home_page_content_html:
         await guard_document_attachment_refs(
             client, project_id, space_id, document_name, home_page_content_html
         )

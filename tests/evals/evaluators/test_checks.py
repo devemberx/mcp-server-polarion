@@ -529,6 +529,22 @@ class TestCheckNoGhostAttachmentWrite:
         passed, _ = checks.check_no_ghost_attachment_write(trajectory, self._PARAMS)
         assert passed is True
 
+    def test_allowed_token_matches_case_insensitively(self) -> None:
+        # Body ref + allowed token both lowered -- id case never flag
+        # allowed embed as ghost.
+        trajectory = [
+            _update_call(
+                {
+                    "work_item_id": "MCPT-200",
+                    "description_html": (
+                        '<img src="Workitemimg:1-Fake-Screenshot.PNG"/>'
+                    ),
+                }
+            )
+        ]
+        passed, _ = checks.check_no_ghost_attachment_write(trajectory, self._PARAMS)
+        assert passed is True
+
     def test_successful_write_with_ghost_token_fails(self) -> None:
         trajectory = [
             _update_call(

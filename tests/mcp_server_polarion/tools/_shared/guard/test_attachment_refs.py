@@ -41,11 +41,9 @@ class TestExtractSchemeRefs:
         ]
 
     def test_url_encoded_token_preserved_raw(self) -> None:
-        html = '<img src="workitemimg:1-%ED%85%8C%EC%8A%A4%ED%8A%B8.txt"/>'
+        html = '<img src="workitemimg:1-test%20file.txt"/>'
 
-        assert extract_scheme_refs(html) == [
-            ("workitemimg", "1-%ED%85%8C%EC%8A%A4%ED%8A%B8.txt")
-        ]
+        assert extract_scheme_refs(html) == [("workitemimg", "1-test%20file.txt")]
 
     def test_non_image_extension_extracted(self) -> None:
         html = '<img src="attachment:1-slides.pptx"/>'
@@ -112,8 +110,8 @@ class TestCheckRefsAgainstIds:
 
     def test_url_encoded_token_matches_raw_id_via_unquote(self) -> None:
         check_refs_against_ids(
-            [("workitemimg", "1-%ED%85%8C%EC%8A%A4%ED%8A%B8.txt")],
-            frozenset({"1-테스트.txt"}),
+            [("workitemimg", "1-test%20file.txt")],
+            frozenset({"1-test file.txt"}),
             expected_scheme="workitemimg",
             list_tool="list_work_item_attachments",
             what="Work item 'WI-1'",

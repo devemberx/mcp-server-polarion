@@ -58,9 +58,11 @@ class TestGetHtmlRecipes:
     async def test_recipes_cover_work_item_attachment_images(self) -> None:
         result = await get_html_recipes()
         for marker in (
-            "Image from work item attachments",
+            "Image from uploaded attachments",
             "workitemimg:",
             "list_work_item_attachments",
+            "attachment:",
+            "list_document_attachments",
         ):
             assert marker in result.recipes
 

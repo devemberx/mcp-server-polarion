@@ -16,9 +16,12 @@ from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.tools._shared.guard._http import guarded_pages
 from mcp_server_polarion.tools._shared.helpers import format_option_list
 
-# Body-embedded schemes; prefix match case-insensitive (hand-written HTML may
-# write "Attachment:").
-_SCHEMES: tuple[str, ...] = ("attachment", "workitemimg")
+# Single source for body-embedded schemes -- domain wrappers import these,
+# no per-module literals. Prefix match case-insensitive (hand-written HTML
+# may write "Attachment:").
+DOCUMENT_ATTACHMENT_SCHEME = "attachment"
+WORK_ITEM_ATTACHMENT_SCHEME = "workitemimg"
+_SCHEMES: tuple[str, ...] = (DOCUMENT_ATTACHMENT_SCHEME, WORK_ITEM_ATTACHMENT_SCHEME)
 
 
 def extract_scheme_refs(html: str) -> list[tuple[str, str]]:
@@ -66,6 +69,19 @@ def reject_any_scheme_refs(htmls: Iterable[str], what: str) -> None:
             )
 
 
+def _reject_wrong_scheme(
+    refs: list[tuple[str, str]], *, expected_scheme: str, what: str
+) -> None:
+    """First ref with ``scheme != expected_scheme`` -> ``ValueError``."""
+    for scheme, token in refs:
+        if scheme != expected_scheme:
+            raise ValueError(
+                f"{what} references '{scheme}:{token}', but only "
+                f"'{expected_scheme}:' refs resolve here -- wrong-scheme "
+                "refs never resolve, remove it or use the matching scheme."
+            )
+
+
 def check_refs_against_ids(
     refs: list[tuple[str, str]],
     valid_ids: frozenset[str],
@@ -82,13 +98,7 @@ def check_refs_against_ids(
     portal stores URL-encoded tokens for non-ASCII names, the list API
     serves raw ids.
     """
-    for scheme, token in refs:
-        if scheme != expected_scheme:
-            raise ValueError(
-                f"{what} references '{scheme}:{token}', but only "
-                f"'{expected_scheme}:' refs resolve here -- wrong-scheme "
-                "refs never resolve, remove it or use the matching scheme."
-            )
+    _reject_wrong_scheme(refs, expected_scheme=expected_scheme, what=what)
 
     unmatched = sorted(
         {
@@ -151,18 +161,9 @@ async def guard_attachment_refs(  # noqa: PLR0913
     refs = extract_scheme_refs(html)
     if not refs:
         return
-    if any(scheme != expected_scheme for scheme, _token in refs):
-        # Wrong scheme never resolves regardless of real attachment.
-        # Reject before GET -- dummy id set safe, refs loop always raise
-        # here (mismatch guaranteed present) before reaching unmatched
-        # token check.
-        check_refs_against_ids(
-            refs,
-            frozenset(),
-            expected_scheme=expected_scheme,
-            list_tool=list_tool,
-            what=what,
-        )
+    # Wrong scheme never resolve regardless of real attachments -- reject
+    # before GET spend.
+    _reject_wrong_scheme(refs, expected_scheme=expected_scheme, what=what)
 
     valid_ids = await fetch_attachment_ids(
         client, path, resource_type, what=what, project_id=project_id

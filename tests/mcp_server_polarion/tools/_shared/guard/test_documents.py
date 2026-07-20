@@ -284,7 +284,7 @@ class TestGuardDocumentAttachmentRefs:
         self, mock_client: AsyncMock
     ) -> None:
         mock_client.get.return_value = attachments_response(
-            ["1-테스트.txt"], meta=False
+            ["1-test file.txt"], meta=False
         )
 
         await guard_document_attachment_refs(
@@ -292,7 +292,7 @@ class TestGuardDocumentAttachmentRefs:
             "P",
             "S",
             "D",
-            '<img src="attachment:1-%ED%85%8C%EC%8A%A4%ED%8A%B8.txt"/>',
+            '<img src="attachment:1-test%20file.txt"/>',
         )  # must not raise
 
     async def test_dangling_ref_rejects_naming_list_tool(

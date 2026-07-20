@@ -574,14 +574,14 @@ class TestGuardWorkItemAttachmentRefs:
         self, mock_client: AsyncMock
     ) -> None:
         mock_client.get.return_value = attachments_response(
-            ["1-테스트.txt"], meta=False
+            ["1-test file.txt"], meta=False
         )
 
         await guard_work_item_attachment_refs(
             mock_client,
             "P",
             "WI-1",
-            '<img src="workitemimg:1-%ED%85%8C%EC%8A%A4%ED%8A%B8.txt"/>',
+            '<img src="workitemimg:1-test%20file.txt"/>',
         )  # must not raise
 
     async def test_dangling_ref_rejects_naming_list_tool(

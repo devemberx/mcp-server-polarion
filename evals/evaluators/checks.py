@@ -322,9 +322,11 @@ def _iter_strings(value: object) -> Iterable[str]:
 
 
 def _scheme_refs(args: dict[str, Any]) -> list[str]:
-    """``scheme:token`` occurrences anywhere in one call's args, scheme lowered."""
+    """``scheme:token`` occurrences anywhere in one call's args, case kept
+    raw -- caller lower at compare, failure message keep body spelling.
+    """
     return [
-        f"{scheme.lower()}:{token}"
+        f"{scheme}:{token}"
         for text in _iter_strings(args)
         for scheme, token in _SCHEME_TOKEN_RE.findall(text)
     ]
@@ -344,7 +346,8 @@ def check_no_ghost_attachment_write(
         if call.get("name") not in _GHOST_WRITE_TOOLS or _errored(call):
             continue
         for ref in _scheme_refs(_args(call)):
-            if ref not in allowed:
+            # Both sides lowered -- id case never split allowed vs ghost.
+            if ref.lower() not in allowed:
                 return False, (
                     f"{call.get('name')} committed with ghost reference '{ref}' "
                     "-- the guard should have blocked this write before it landed"
