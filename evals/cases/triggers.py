@@ -22,6 +22,7 @@ from evals.harness.fixtures import (
     SPACE,
     TEST_RUN_ID,
     TESTCASE_ID,
+    WORKITEM_ATTACHMENT_ID,
 )
 
 MIN_PASS_RATE = 1.0
@@ -175,6 +176,23 @@ CASES: list[Case] = [
         covers=["list_work_item_attachments"],
         expect="list_work_item_attachments",
         reject=["read_work_item"],
+    ),
+    _case(
+        "TRIG-WI-ATTACHMENT-CONTENT",
+        f"Show me the image attachment '{WORKITEM_ATTACHMENT_ID}' from work "
+        f"item '{FLOATING_TASK_ID}' in the '{PROJECT}' project.",
+        "triggers_tool",
+        intent="Viewing a work item attachment's image content must call "
+        "get_work_item_attachment_content with the exact ids; the document-"
+        "side sibling and metadata listing do not render it.",
+        covers=["get_work_item_attachment_content"],
+        expect="get_work_item_attachment_content",
+        reject=["get_document_attachment_content", "list_work_item_attachments"],
+        match={
+            "project_id": PROJECT,
+            "work_item_id": FLOATING_TASK_ID,
+            "attachment_id": WORKITEM_ATTACHMENT_ID,
+        },
     ),
     _case(
         "TRIG-DOC-ENUM",

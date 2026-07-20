@@ -28,6 +28,7 @@ from .fixtures import (
     TEST_RUN_ID,
     TESTCASE_ID,
     TS,
+    WORKITEM_ATTACHMENT_CONTENT,
     Attachment,
     Comment,
     Seeds,
@@ -446,6 +447,26 @@ class FakePolarion:
                     # always emit it -- diverges from doc route's omit.
                     "meta": {"totalCount": len(data)},
                 },
+            )
+
+        # WI content mirror doc route: 406 without octet-stream Accept
+        # (live-verified for WI endpoint 2026-07-21), 404 unseeded work item
+        # or attachment id, else raw bytes. No space axis on work items.
+        wi_attachment_content = re.search(
+            r"/workitems/([^/]+)/attachments/([^/]+)/content$", path
+        )
+        if wi_attachment_content:
+            wi_id, attachment_id = wi_attachment_content.groups()
+            if "application/octet-stream" not in request.headers.get("accept", ""):
+                return httpx.Response(406, json={"errors": [{"status": "406"}]})
+            wi = self.seeds.work_items.get(wi_id)
+            known_ids = {a.attachment_id for a in wi.attachments} if wi else set()
+            if wi is None or attachment_id not in known_ids:
+                return httpx.Response(404, json={"errors": [{"status": "404"}]})
+            return httpx.Response(
+                200,
+                content=WORKITEM_ATTACHMENT_CONTENT,
+                headers={"Content-Type": "application/octet-stream"},
             )
 
         # query=linkedWorkItems:{wi} = back-link fallback (sources -> target).
