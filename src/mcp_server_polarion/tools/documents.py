@@ -884,9 +884,9 @@ async def update_document(  # noqa: PLR0913
         description=(
             "New body as raw HTML from "
             "get_document(include_home_page_content_html=True); '' rejected; "
-            "anchorless blocks get id= auto-stamped. New tables, captions, or "
-            "other Polarion constructs: call get_html_recipes first and adapt "
-            "a template."
+            "anchorless blocks get id= auto-stamped. New tables, captions, "
+            "images, or other Polarion constructs: call get_html_recipes "
+            "first and adapt a template."
         ),
     ),
     auto_suspect: bool | None = Field(
@@ -925,12 +925,10 @@ async def update_document(  # noqa: PLR0913
       move_work_item_to_document, NOT this tool.
     - A polarion_wiki macro name=module-workitem <div> leaves the work item's
       module unset — attach via move_work_item_to_document.
-    - Polarion-specific constructs (tables, captions, links, TOC/TOF widgets,
-      page breaks) must be adapted from get_html_recipes templates, never
-      hand-written.
-    - Attachment image references (attachment:{id}) in the body are checked
-      against the document's real attachments before the write — confirm
-      ids via list_document_attachments first.
+    - Polarion-specific constructs (tables, captions, image embeds, links,
+      TOC/TOF widgets, page breaks) must be adapted from get_html_recipes
+      templates, never hand-written. attachment:{id} image refs must name
+      an existing attachment — confirm via list_document_attachments first.
 
     workflow_action must pair with at least one attribute. Unknown
     status/type ids and custom_fields keys outside the type schema are

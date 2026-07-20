@@ -369,11 +369,10 @@ async def update_work_items(  # noqa: PLR0912, PLR0913
     description_html is raw Polarion HTML, sent verbatim — source from
     get_work_item(include_description_html=True); greenfield bodies use
     create_work_items Markdown, formats never mix. To add a table, caption,
-    link, or widget, call get_html_recipes first and adapt its template
-    before writing description_html — hand-written table markup is
-    rejected. Attachment image references (workitemimg:{id}) in the body
-    are checked against the item's real attachments before the write —
-    confirm ids via list_work_item_attachments first.
+    image, link, or widget, call get_html_recipes first and adapt its
+    template before writing description_html — hand-written table markup is
+    rejected. workitemimg:{id} image refs must name an existing attachment
+    — confirm via list_work_item_attachments first.
 
     custom_fields is partial; keys outside the type schema are rejected,
     values are not validated — resolve via list_work_item_enum_options
