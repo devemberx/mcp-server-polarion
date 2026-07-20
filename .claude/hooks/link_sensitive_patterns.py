@@ -39,6 +39,10 @@ def worktree_main_root(root: Path) -> Path | None:
     if match is None:
         return None
     gitdir = Path(match.group(1))
+    if not gitdir.is_absolute():
+        # worktree.useRelativePaths / --relative-paths write gitdir relative
+        # to `.git` file dir — anchor there, never process cwd.
+        gitdir = root / gitdir
     if gitdir.parent.name != "worktrees" or gitdir.parent.parent.name != ".git":
         return None
     return gitdir.parent.parent.parent

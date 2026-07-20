@@ -44,6 +44,16 @@ class TestWorktreeMainRoot:
         (wt / ".git").write_text("not a gitdir line\n")
         assert linker.worktree_main_root(wt) is None
 
+    def test_relative_gitdir_anchored_to_root(self, tmp_path: Path) -> None:
+        """worktree.useRelativePaths write relative gitdir — anchor to checkout
+        dir, not process cwd (silent no-link = guard off in worktree)."""
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        (wt / ".git").write_text("gitdir: ../main/.git/worktrees/wt\n")
+        root = linker.worktree_main_root(wt)
+        assert root is not None
+        assert root.resolve() == (tmp_path / "main").resolve()
+
 
 class TestEnsureLink:
     def _layout(self, tmp_path: Path, with_source: bool = True) -> tuple[Path, Path]:
@@ -83,6 +93,13 @@ class TestEnsureLink:
         assert linker.ensure_link(wt, main) is None
         assert not target.is_symlink()
         assert target.read_text() == "Local\\b\n"
+
+    def test_relative_main_root_links(self, tmp_path: Path) -> None:
+        """Dotted main root from relative gitdir still link correctly."""
+        wt, _main = self._layout(tmp_path)
+        assert linker.ensure_link(wt, wt / ".." / "main") is not None
+        target = wt / ".claude" / "sensitive-patterns.local"
+        assert target.read_text() == "Secret\\b\n"
 
     def test_dangling_symlink_untouched(self, tmp_path: Path) -> None:
         """Dangling link = broken install — guard fail closed, no silent repair."""
