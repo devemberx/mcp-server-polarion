@@ -262,6 +262,13 @@ reviewed. Placing it after PASS would ship unreviewed edits.
   A red check is a Stage 4 gate failure, not a review finding: fix, re-run
   gates, and if code changed re-enter Stage 6. Protection is strict-mode, so
   if main moved, update the branch and let checks re-run.
+- **Worktree exit — final step:** with CI green and follow-ups exported, ask
+  the user keep/remove and call `ExitWorktree`. PR still in review → keep
+  (fix rounds re-enter the same worktree); merged → remove
+  (`discard_changes: true` is expected there: `.pipeline/` is uncommitted and
+  the branch commits live on origin, not main). Don't end the pipeline with
+  the session parked in the worktree — an open editor window holds the lock
+  indefinitely and the session-exit keep/remove prompt never fires.
 
 ## Common Rationalizations
 
@@ -328,3 +335,5 @@ reviewed. Placing it after PASS would ship unreviewed edits.
       links recorded
 - [ ] PR CI checks all green (`gh pr checks <PR#> --watch --fail-fast`),
       branch up to date with main
+- [ ] Session left the worktree via `ExitWorktree` (keep while PR in review,
+      remove once merged) — no lingering locked worktree
