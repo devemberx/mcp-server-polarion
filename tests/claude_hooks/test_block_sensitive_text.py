@@ -74,6 +74,19 @@ class TestOutward:
     def test_local(self, cmd: str) -> None:
         assert not guard.outward(cmd)
 
+    def test_env_prefix_git_commit_outward(self) -> None:
+        assert guard.outward("env GIT_TRACE=1 git commit -m x")
+
+    def test_pathological_options_linear_time(self) -> None:
+        """CodeQL py/redos: dash-leading option runs must not backtrack —
+        `-C -!` shape let value double as standalone option."""
+        assert not guard.outward("git " + "-C -! " * 40 + "status")
+
+    def test_unparseable_falls_back_to_regex(self) -> None:
+        """Unbalanced quote break shlex — conservative regex approximation."""
+        assert guard.outward("gh pr create --body 'unterminated")
+        assert not guard.outward("grep 'unterminated")
+
 
 class TestLoadPatterns:
     def test_missing_file_empty(

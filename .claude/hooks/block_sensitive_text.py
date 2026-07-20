@@ -37,11 +37,20 @@ PATTERN_FILENAME = ".claude/sensitive-patterns.local"
 # gh gist/release/repo/label/workflow included: all publish text (repo via
 # --description, workflow via dispatch inputs). git push = branch/tag ref
 # names ride command string; commit contents already guarded at git commit.
-# git side tolerate global options (-C path / -c k=v / --flag) before
-# sub-command — `git -C <worktree> commit` common in this repo.
-OUTWARD_RE = re.compile(
+# Detection = token walk, not regex — option-tolerant regex (`git -C x
+# commit`) = exponential backtracking (CodeQL py/redos).
+GH_OUTWARD_SUBCOMMANDS = frozenset(
+    {"pr", "issue", "api", "release", "gist", "repo", "label", "workflow"}
+)
+GIT_OUTWARD_SUBCOMMANDS = frozenset({"commit", "tag", "push"})
+# git global options taking separate value — skip option + value pair.
+GIT_VALUE_OPTIONS = frozenset(
+    {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
+)
+# Unparseable command fallback — literal alternation, linear-safe.
+OUTWARD_FALLBACK_RE = re.compile(
     r"\bgh\s+(?:pr|issue|api|release|gist|repo|label|workflow)\b"
-    r"|\bgit(?:\s+(?:-C\s+\S+|-c\s+\S+|--?\S+))*\s+(?:commit|tag|push)\b"
+    r"|\bgit\s+(?:commit|tag|push)\b"
 )
 # Next argv after these = file shipped as outward text. -F/--field double
 # duty: gh api field flag (field=@file) vs gh pr / git commit file shorthand.
@@ -125,7 +134,38 @@ def main() -> int:
 
 def outward(cmd: str) -> bool:
     """Whether command publish text beyond the local checkout."""
-    return OUTWARD_RE.search(cmd) is not None
+    try:
+        argv = shlex.split(cmd)
+    except ValueError:
+        # Unbalanced quote — conservative regex approximation.
+        return OUTWARD_FALLBACK_RE.search(cmd) is not None
+    for seg in split_segments(argv):
+        for i, arg in enumerate(seg):
+            if (
+                arg == "gh"
+                and i + 1 < len(seg)
+                and seg[i + 1] in GH_OUTWARD_SUBCOMMANDS
+            ):
+                return True
+            if arg == "git" and git_subcommand(seg[i + 1 :]) in GIT_OUTWARD_SUBCOMMANDS:
+                return True
+    return False
+
+
+def git_subcommand(rest: list[str]) -> str | None:
+    """First non-option token after `git` — global options skipped."""
+    skip_value = False
+    for arg in rest:
+        if skip_value:
+            skip_value = False
+            continue
+        if arg in GIT_VALUE_OPTIONS:
+            skip_value = True
+            continue
+        if arg.startswith("-"):
+            continue
+        return arg
+    return None
 
 
 def pattern_path() -> Path:
