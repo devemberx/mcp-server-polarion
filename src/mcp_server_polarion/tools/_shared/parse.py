@@ -609,7 +609,7 @@ def _parse_attachment(
 def parse_attachments_page(
     response: dict[str, object], page_number: int, page_size: int
 ) -> PaginatedResult[Attachment]:
-    """JSON:API document-attachments response → ``PaginatedResult`` page."""
+    """JSON:API document/work-item attachments response → ``PaginatedResult`` page."""
     user_names = parse_included_user_name_map(response)
     raw_data = response.get("data", [])
     attachment_items: list[Attachment] = []
