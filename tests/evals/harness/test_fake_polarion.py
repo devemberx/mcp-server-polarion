@@ -63,6 +63,31 @@ def _mutate(
     return fake._dispatch(request)
 
 
+def _attachment_entry(file_name: str) -> dict[str, Any]:
+    return {
+        "type": "document_attachments",
+        "attributes": {"fileName": file_name},
+    }
+
+
+def _multipart_attachments_request(
+    doc: str,
+    *,
+    resource: dict[str, Any],
+    files: list[tuple[str, bytes]],
+) -> httpx.Request:
+    # Real client wire shape: resource = plain form field, ordered file parts.
+    return httpx.Request(
+        "POST",
+        f"{_BASE}/projects/{PROJECT}/spaces/{SPACE}/documents/{doc}/attachments",
+        data={"resource": json.dumps(resource)},
+        files=[
+            ("files", (name, payload, "application/octet-stream"))
+            for name, payload in files
+        ],
+    )
+
+
 def _json(response: httpx.Response) -> Any:
     return json.loads(response.content)
 
@@ -779,6 +804,107 @@ class TestMutations:
             {"data": []},
         )
         assert _json(response)["data"][0]["type"] == "linkedworkitems"
+
+    def test_post_doc_attachments_echoes_ordered_ids(self) -> None:
+        fake = FakePolarion()
+        response = fake._dispatch(
+            _multipart_attachments_request(
+                DOC,
+                resource={
+                    "data": [
+                        _attachment_entry("new-diagram.png"),
+                        _attachment_entry("new-photo.png"),
+                    ]
+                },
+                files=[("new-diagram.png", b"png-a"), ("new-photo.png", b"png-b")],
+            )
+        )
+        assert response.status_code == 201
+        data = _json(response)["data"]
+        # Live shape 2026-07-20: list, input order, type/id/links only.
+        assert [e["id"] for e in data] == [
+            f"{PROJECT}/{SPACE}/{DOC}/new-diagram.png",
+            f"{PROJECT}/{SPACE}/{DOC}/new-photo.png",
+        ]
+        assert all(e["type"] == "document_attachments" for e in data)
+        assert all("links" in e and "attributes" not in e for e in data)
+
+    def test_post_doc_attachments_unseeded_document_404(self) -> None:
+        fake = FakePolarion()
+        response = fake._dispatch(
+            _multipart_attachments_request(
+                "NoSuchDoc",
+                resource={"data": [_attachment_entry("a.png")]},
+                files=[("a.png", b"x")],
+            )
+        )
+        assert response.status_code == 404
+
+    def test_post_doc_attachments_duplicate_filename_409(self) -> None:
+        # Live-verified 2026-07-20: same fileName = 409, batch atomic.
+        fake = FakePolarion()
+        response = fake._dispatch(
+            _multipart_attachments_request(
+                DOC,
+                resource={
+                    "data": [
+                        _attachment_entry("fresh.png"),
+                        _attachment_entry(DOC_ATTACHMENT_ID),
+                    ]
+                },
+                files=[("fresh.png", b"x"), (DOC_ATTACHMENT_ID, b"y")],
+            )
+        )
+        assert response.status_code == 409
+        assert "already exists" in _json(response)["errors"][0]["detail"]
+
+    def test_post_doc_attachments_json_body_415(self) -> None:
+        # Live #198: JSON body instead of multipart = 415.
+        fake = FakePolarion()
+        response = _mutate(
+            fake,
+            "POST",
+            f"/projects/{PROJECT}/spaces/{SPACE}/documents/{DOC}/attachments",
+            {"data": []},
+        )
+        assert response.status_code == 415
+
+    def test_post_doc_attachments_missing_resource_400(self) -> None:
+        # Live #198 wording: "Resource data not found in request."
+        fake = FakePolarion()
+        request = httpx.Request(
+            "POST",
+            f"{_BASE}/projects/{PROJECT}/spaces/{SPACE}/documents/{DOC}/attachments",
+            files=[("files", ("a.png", b"x", "application/octet-stream"))],
+        )
+        response = fake._dispatch(request)
+        assert response.status_code == 400
+        assert "Resource data" in _json(response)["errors"][0]["detail"]
+
+    def test_post_doc_attachments_unparsable_resource_400(self) -> None:
+        fake = FakePolarion()
+        request = httpx.Request(
+            "POST",
+            f"{_BASE}/projects/{PROJECT}/spaces/{SPACE}/documents/{DOC}/attachments",
+            data={"resource": "{not json"},
+            files=[("files", ("a.png", b"x", "application/octet-stream"))],
+        )
+        response = fake._dispatch(request)
+        assert response.status_code == 400
+
+    def test_post_doc_attachments_file_count_mismatch_400(self) -> None:
+        fake = FakePolarion()
+        response = fake._dispatch(
+            _multipart_attachments_request(
+                DOC,
+                resource={
+                    "data": [_attachment_entry("a.png"), _attachment_entry("b.png")]
+                },
+                files=[("a.png", b"x")],
+            )
+        )
+        assert response.status_code == 400
+        assert "File data" in _json(response)["errors"][0]["detail"]
 
     def test_patch_and_delete_return_204(self) -> None:
         fake = FakePolarion()

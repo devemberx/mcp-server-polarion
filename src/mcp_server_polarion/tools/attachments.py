@@ -1,10 +1,13 @@
 """Attachment tools — list attachments of a document or work item; fetch one
-document attachment's content.
+document attachment's content; upload document attachments.
 """
 
 from __future__ import annotations
 
-from pathlib import PurePosixPath
+import json
+from collections import Counter
+from collections.abc import Sequence
+from pathlib import Path, PurePosixPath
 from typing import Final
 
 from fastmcp import Context
@@ -17,12 +20,28 @@ from mcp_server_polarion.core.exceptions import (
     PolarionNotFoundError,
     PolarionResponseTooLargeError,
 )
-from mcp_server_polarion.models import Attachment, PaginatedResult
+from mcp_server_polarion.models import (
+    Attachment,
+    AttachmentsCreateResult,
+    DocumentAttachmentSpec,
+    JsonValue,
+    PaginatedResult,
+)
 from mcp_server_polarion.server import mcp
 from mcp_server_polarion.tools._shared.fields import ATTACHMENT_LIST_FIELDS
 from mcp_server_polarion.tools._shared.helpers import encode_path_segment, get_client
 from mcp_server_polarion.tools._shared.pagination import DEFAULT_PAGE_SIZE
-from mcp_server_polarion.tools._shared.parse import parse_attachments_page
+from mcp_server_polarion.tools._shared.parse import (
+    extract_created_short_ids,
+    parse_attachments_page,
+)
+
+# Whole batch; fail closed before any request.
+_MAX_TOTAL_UPLOAD_BYTES: Final[int] = 25 * 1024 * 1024
+_MAX_ATTACHMENTS_PER_CALL: Final[int] = 10
+
+_HTTP_CONFLICT: Final[int] = 409
+_HTTP_PAYLOAD_TOO_LARGE: Final[int] = 413
 
 # Extension -> Image format arg; bitmap formats major LLM hosts render.
 # Static, not mimetypes.guess_type: guess_type read system mime files +
@@ -270,3 +289,240 @@ async def list_work_item_attachments(
         ) from exc
 
     return parse_attachments_page(response, page_number, page_size)
+
+
+def _effective_file_name(spec: DocumentAttachmentSpec) -> str:
+    """Effective name become attachment id (fileName) -- batch collision must reject."""
+    return spec.file_name if spec.file_name else Path(spec.file_path).name
+
+
+def _build_document_attachments_payload(
+    specs: Sequence[DocumentAttachmentSpec],
+) -> dict[str, JsonValue]:
+    """POST .../documents/{d}/attachments body; title skip when unset
+    (skip-None rule). Pure -- no disk access.
+    """
+    items: list[JsonValue] = []
+    for spec in specs:
+        attributes: dict[str, JsonValue] = {"fileName": _effective_file_name(spec)}
+        if spec.title:
+            attributes["title"] = spec.title
+        items.append({"type": "document_attachments", "attributes": attributes})
+    return {"data": items}
+
+
+def _reject_separator_file_names(file_names: Sequence[str]) -> None:
+    """fileName become attachment id; '/' or '\\' inside shift id path
+    segments (server behavior unverified) -- fail closed. Windows file_path
+    on POSIX land here too: basename = unsplit whole string.
+    """
+    invalid = sorted({name for name in file_names if "/" in name or "\\" in name})
+    if invalid:
+        raise ValueError(
+            f"file_name(s) {invalid} contain a path separator -- file_name"
+            " becomes the attachment id and must be a bare file name;"
+            " directories belong in file_path (set an explicit file_name"
+            " override for non-POSIX paths)."
+        )
+
+
+def _reject_duplicate_file_names(file_names: Sequence[str]) -> None:
+    """In-call collision has no merge semantics (unlike link-batch dup) -- reject."""
+    duplicates = sorted(
+        name for name, count in Counter(file_names).items() if count > 1
+    )
+    if duplicates:
+        raise ValueError(
+            f"Duplicate file_name(s) {duplicates} in one call -- file_name"
+            " becomes the attachment id and must be unique; rename one of"
+            " the conflicting files (or set an explicit file_name override)."
+        )
+
+
+def _read_attachment_files(
+    specs: Sequence[DocumentAttachmentSpec],
+) -> list[tuple[str, bytes]]:
+    """Read spec files, order preserved; every reject raise ValueError before
+    any Polarion call. Stat cap check pre-read keep oversized file out of memory.
+    """
+    file_names = [_effective_file_name(spec) for spec in specs]
+    _reject_separator_file_names(file_names)
+    _reject_duplicate_file_names(file_names)
+
+    sizes: list[tuple[str, int]] = []
+    for spec, file_name in zip(specs, file_names, strict=True):
+        path = Path(spec.file_path)
+        if path.is_dir():
+            raise ValueError(
+                f"'{spec.file_path}' is a directory -- provide a path to a"
+                " readable file."
+            )
+        if not path.is_file():
+            raise ValueError(
+                f"'{spec.file_path}' does not exist or is not a readable file"
+                " -- provide an absolute path to a readable file."
+            )
+
+        size = path.stat().st_size
+        if size > _MAX_TOTAL_UPLOAD_BYTES:
+            raise ValueError(
+                f"'{spec.file_path}' is {size} bytes, over the"
+                f" {_MAX_TOTAL_UPLOAD_BYTES} byte per-call cap -- compress it"
+                " or upload it via the Polarion portal; a single file cannot"
+                " be split across calls."
+            )
+        sizes.append((file_name, size))
+
+    total = sum(size for _, size in sizes)
+    if total > _MAX_TOTAL_UPLOAD_BYTES:
+        listing = ", ".join(f"{name} ({size} bytes)" for name, size in sizes)
+        raise ValueError(
+            f"Total upload size {total} bytes exceeds the"
+            f" {_MAX_TOTAL_UPLOAD_BYTES} byte per-call cap ({listing}) --"
+            " split the files across multiple calls."
+        )
+
+    results: list[tuple[str, bytes]] = []
+    for spec, file_name in zip(specs, file_names, strict=True):
+        try:
+            content = Path(spec.file_path).read_bytes()
+        except OSError as exc:
+            raise ValueError(f"Cannot read '{spec.file_path}': {exc}.") from exc
+        results.append((file_name, content))
+
+    # Stat-time cap alone = TOCTOU: file can grow between stat + read.
+    total_read = sum(len(content) for _, content in results)
+    if total_read > _MAX_TOTAL_UPLOAD_BYTES:
+        raise ValueError(
+            f"Total bytes read ({total_read}) exceeds the"
+            f" {_MAX_TOTAL_UPLOAD_BYTES} byte per-call cap -- a file grew"
+            " between size check and read; retry, or split the files across"
+            " multiple calls."
+        )
+    return results
+
+
+@mcp.tool(
+    tags={"write"},
+    timeout=60.0,
+    annotations={
+        # Non-idempotent: server reject retry dup. Open world: files from local disk.
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    },
+)
+async def create_document_attachments(  # noqa: PLR0913
+    ctx: Context,
+    project_id: str = Field(min_length=1, description="Polarion project ID."),
+    space_id: str = Field(
+        min_length=1,
+        description="Space ID ('_default' = default space).",
+    ),
+    document_name: str = Field(
+        min_length=1,
+        description="Document name within space_id.",
+    ),
+    attachments: list[DocumentAttachmentSpec] = Field(  # noqa: B008
+        min_length=1,
+        max_length=_MAX_ATTACHMENTS_PER_CALL,
+        description="Files to upload in one request.",
+    ),
+    dry_run: bool = Field(
+        default=False,
+        description="Preview payload without calling Polarion.",
+    ),
+) -> AttachmentsCreateResult:
+    """Upload 1-10 local files as document attachments in one request.
+
+    file_path is read from local disk by the server process -- use absolute
+    paths to readable files. file_name (default: file_path's basename)
+    becomes the attachment id; reference it in a document body as
+    attachment:{id} for update_document. Total upload size per call is
+    capped at 25 MiB: compress or use the Polarion portal for one oversized
+    file, split oversized batches across calls. Pure create -- nothing is
+    replaced. Uploads cannot be deleted through this API, so verify
+    file_path and file_name first. A file_name colliding with another item
+    in the same call, or with an existing attachment on the document,
+    rejects the whole batch -- check list_document_attachments first or
+    pick a new file_name. NOT idempotent -- retrying a success is rejected
+    as a duplicate, not silently merged.
+    """
+    files = _read_attachment_files(attachments)
+    payload = _build_document_attachments_payload(attachments)
+
+    if dry_run:
+        preview: dict[str, JsonValue] = {
+            **payload,
+            "files": [
+                {"file_name": file_name, "size_bytes": len(content)}
+                for file_name, content in files
+            ],
+        }
+        return AttachmentsCreateResult(
+            created=False,
+            dry_run=True,
+            attachment_ids=[],
+            payload_preview=preview,
+        )
+
+    client = get_client(ctx)
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/spaces/{encode_path_segment(space_id)}"
+        f"/documents/{encode_path_segment(document_name)}"
+        "/attachments"
+    )
+    parts = [
+        ("files", (file_name, content, "application/octet-stream"))
+        for file_name, content in files
+    ]
+    try:
+        response = await client.post_multipart(
+            path,
+            data={"resource": json.dumps(payload)},
+            files=parts,
+        )
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot create document attachments -- check your POLARION_TOKEN"
+            " permissions."
+        ) from exc
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Document '{document_name}' (space '{space_id}',"
+            f" project '{project_id}') not found."
+            " Use `list_documents` to discover valid IDs."
+        ) from exc
+    except PolarionError as exc:
+        if exc.status_code == _HTTP_CONFLICT:
+            raise ValueError(
+                "One or more file_name values already exist as attachments"
+                f" on '{document_name}' -- the whole batch was rejected."
+                " Check `list_document_attachments` first or pick new"
+                " file_name values."
+            ) from exc
+        if exc.status_code == _HTTP_PAYLOAD_TOO_LARGE:
+            raise RuntimeError(
+                "Server upload cap is below the 25 MiB client cap --"
+                " reduce file size or split the batch across calls."
+            ) from exc
+        raise RuntimeError(
+            f"Failed to create document attachments: {exc.message}"
+        ) from exc
+
+    attachment_ids = extract_created_short_ids(response)
+    if not attachment_ids:
+        raise RuntimeError(
+            "Polarion returned no attachment IDs after creation."
+            " The POST may have succeeded -- verify with"
+            " `list_document_attachments`."
+        )
+
+    return AttachmentsCreateResult(
+        created=True,
+        dry_run=False,
+        attachment_ids=attachment_ids,
+        payload_preview=None,
+    )

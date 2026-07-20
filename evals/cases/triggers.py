@@ -7,6 +7,8 @@ docstrings (only guard).
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from strands_evals import Case
 
 from evals.cases._shared import make_case
@@ -23,6 +25,9 @@ from evals.harness.fixtures import (
 )
 
 MIN_PASS_RATE = 1.0
+
+# Tool read disk pre-request; missing path = ValueError before tool-routing signal.
+_UPLOAD_ASSET = Path(__file__).resolve().parents[1] / "assets" / "upload.png"
 
 
 def _case(
@@ -109,6 +114,17 @@ CASES: list[Case] = [
         intent="Commenting on a work item must call create_work_item_comments.",
         covers=["create_work_item_comments"],
         expect="create_work_item_comments",
+    ),
+    _case(
+        "TRIG-DOC-ATTACH-CREATE",
+        f"Attach the file at {_UPLOAD_ASSET} to the document '{DOC}' in the "
+        f"'{SPACE}' space.",
+        "triggers_tool",
+        intent="Uploading a local file to a document must call "
+        "create_document_attachments; listing or reading attachments does not.",
+        covers=["create_document_attachments"],
+        expect="create_document_attachments",
+        reject=["list_document_attachments", "get_document_attachment_content"],
     ),
     _case(
         "TRIG-DOC-COMMENT",
