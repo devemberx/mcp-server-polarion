@@ -71,8 +71,10 @@ every rule above applies unchanged. Schemes never cross: `attachment:` never
 resolves in a work item description, `workitemimg:` never resolves in a
 document body — use the scheme matching the body you're editing.
 
-Sizing: inline `style="max-width: ..."` only, matching portal output —
-never `width=`/`height=` attributes.
+Sizing: inline style only — never `width=`/`height=` HTML attributes.
+Default embed: `style="max-width: 650px;"`. To resize, mirror the portal's
+own resize output: `style="width: 600px;height: 399px;"` — both values in
+px, keeping the image's aspect ratio.
 
 ## Links to work items, cross references, wiki pages
 
