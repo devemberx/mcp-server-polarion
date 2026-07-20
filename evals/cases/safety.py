@@ -23,7 +23,7 @@ from evals.harness.fixtures import (
 
 MIN_PASS_RATE = 1.0
 
-# Deliberately unseeded -- no attachment on FLOATING_TASK_ID carries this id.
+# Deliberately unseeded -- no attachment carry this id.
 _GHOST_ATTACHMENT_ID = "diagram-final-v3.png"
 
 

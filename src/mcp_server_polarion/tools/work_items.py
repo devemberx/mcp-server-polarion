@@ -273,8 +273,7 @@ async def create_work_items(
     raw_descriptions_html = [
         markdown_to_html(spec.description) if spec.description else "" for spec in items
     ]
-    # Check raw conversion output -- sanitize_html strip <img> (not in
-    # ALLOWED_TAGS), hide Markdown image refs from guard otherwise.
+    # Guard pre-sanitize -- sanitize_html strip <img>, refs vanish after.
     reject_any_scheme_refs(raw_descriptions_html, "work item")
     descriptions_html = [
         polarionify_html(sanitize_html(raw)) if raw else ""

@@ -70,8 +70,8 @@ class TestExtractSchemeRefs:
         assert extract_scheme_refs(html) == [("attachment", "1-x.png")]
 
     def test_append_ref_ignores_non_str_value(self) -> None:
-        # BeautifulSoup can hand back a non-str attr value (e.g. a
-        # multi-valued attribute parsed as a list) -- must no-op, not crash.
+        # BeautifulSoup may hand back non-str attr value (multi-valued
+        # attribute = list) -- must no-op, not crash.
         refs: list[tuple[str, str]] = []
         _append_ref(["attachment:1-x.png"], refs)
         assert refs == []

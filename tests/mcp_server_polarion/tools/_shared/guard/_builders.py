@@ -33,9 +33,8 @@ def workitems_response(project_id: str, short_ids: list[str]) -> dict[str, objec
 def attachments_response(
     short_ids: list[str], *, meta: bool = True
 ) -> dict[str, object]:
-    """Document/work-item attachments list response (``@basic`` fieldset).
-    Live: ``meta.totalCount`` absent on a normal (non-overshoot) page --
-    ``meta=False`` mirrors that.
+    """Attachments list response (``@basic`` fieldset). Live: totalCount
+    absent on normal page -- ``meta=False`` mirror that.
     """
     response: dict[str, object] = {
         "data": [

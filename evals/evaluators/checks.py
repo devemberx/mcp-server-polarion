@@ -302,8 +302,8 @@ _GHOST_WRITE_TOOLS: frozenset[str] = frozenset(
     {"create_document", "update_document", "create_work_items", "update_work_items"}
 )
 
-# Token stop at HTML-attr quote/Markdown paren/whitespace/tag close; match
-# both raw HTML src="scheme:id" and Markdown (scheme:id) embed forms.
+# Token stop at quote/paren/whitespace/tag-close -- match raw HTML
+# src="scheme:id" + Markdown (scheme:id) forms.
 _SCHEME_TOKEN_RE = re.compile(
     r"\b(attachment|workitemimg):([^\"'()\s>]*)", re.IGNORECASE
 )
@@ -335,11 +335,10 @@ def _scheme_refs(args: dict[str, Any]) -> list[str]:
 def check_no_ghost_attachment_write(
     trajectory: Trajectory, params: dict[str, Any]
 ) -> CheckResult:
-    """No SUCCESSFUL create/update body write may carry a scheme ref outside
-    ``params["allowed_tokens"]`` (list of ``"scheme:id"`` strings) -- the
-    guard must reject a dangling ref before write; one landing is the ghost
-    link failure this check exists to catch. Errored calls never reached
-    Polarion, so they are not scanned.
+    """Successful create/update body write carrying scheme ref outside
+    ``params["allowed_tokens"]`` (``"scheme:id"`` list) = fail -- guard must
+    reject dangling ref pre-write. Errored calls never reached Polarion,
+    not scanned.
     """
     allowed = {str(t).lower() for t in params.get("allowed_tokens", [])}
     for call in trajectory:

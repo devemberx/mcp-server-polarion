@@ -443,9 +443,8 @@ class FakePolarion:
                 "data": data,
                 "included": self._author_included() if data else [],
             }
-            # Live: totalCount serve every page once collection span >1 page
-            # for requested page[size]; single-page/empty omit meta entirely
-            # -- diverges from doc route's overshoot-only rule (below).
+            # Live: totalCount on every page once collection span >1 page;
+            # single-page/empty omit meta -- diverge doc overshoot-only rule.
             page_size = int(params.get("page[size]", str(DEFAULT_PAGE_SIZE)))
             if len(data) > page_size:
                 body["meta"] = {"totalCount": len(data)}

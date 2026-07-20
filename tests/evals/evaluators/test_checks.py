@@ -501,8 +501,8 @@ class TestCheckNoGhostAttachmentWrite:
         assert passed is True
 
     def test_errored_write_is_not_a_landed_ghost(self) -> None:
-        # Guard raised -- write never reached Polarion, so errored call
-        # carrying bad ref is not failure this check watch for.
+        # Errored call never reached Polarion -- bad ref there not a
+        # landed ghost.
         trajectory = [
             _update_call(
                 {

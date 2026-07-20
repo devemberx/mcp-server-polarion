@@ -1139,8 +1139,7 @@ async def create_document(  # noqa: PLR0913
 
     if home_page_content:
         raw_home_page_content_html = markdown_to_html(home_page_content)
-        # Check raw conversion output -- sanitize_html strip <img> (not in
-        # ALLOWED_TAGS), hide Markdown image refs from guard otherwise.
+        # Guard pre-sanitize -- sanitize_html strip <img>, refs vanish after.
         reject_any_scheme_refs([raw_home_page_content_html], "document")
         home_page_content_html = stamp_block_ids(
             polarionify_html(sanitize_html(raw_home_page_content_html))

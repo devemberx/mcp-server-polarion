@@ -308,8 +308,7 @@ class TestReadRouting:
         assert sorted(entry["relationships"]) == ["author"]
 
     def test_workitem_attachments_single_page_omits_meta(self) -> None:
-        # Live rule: totalCount omit on single-page collections -- serve on
-        # every page only when collection span >1 page for requested size.
+        # Live rule: single-page collection omit totalCount.
         response = _get(
             FakePolarion(),
             f"/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}/attachments",
@@ -317,8 +316,8 @@ class TestReadRouting:
         assert "meta" not in _json(response)
 
     def test_workitem_attachments_multi_page_meta_present_every_page(self) -> None:
-        # Live rule: totalCount serve every page once collection span >1 page
-        # for requested page[size] -- unlike doc route's overshoot-only rule.
+        # Live rule: >1-page collection serve totalCount on every page --
+        # unlike doc route overshoot-only rule.
         wi = SEEDS.work_items[FLOATING_TASK_ID]
         attachments = [Attachment(f"{i}-fake-extra.png", "fake", 10) for i in range(3)]
         seeds = replace(

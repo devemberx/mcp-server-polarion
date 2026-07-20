@@ -1,8 +1,7 @@
-"""Attachment-ref guard core: extract ``attachment:``/``workitemimg:`` scheme
-refs from HTML bodies, reject on create (resource can't own attachments
-yet), verify against a live attachment id set on update. No caching --
-attachment sets churn on every UI upload, a stale cache would false-reject
-fresh uploads or false-accept deletions.
+"""Attachment-ref guard core: extract scheme refs from HTML bodies; create =
+reject outright, update = verify vs live attachment id set. No caching --
+attachment set churn on UI upload; stale cache false-reject fresh upload or
+false-accept deletion.
 """
 
 from __future__ import annotations
@@ -16,19 +15,17 @@ from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.tools._shared.guard._http import guarded_pages
 from mcp_server_polarion.tools._shared.helpers import format_option_list
 
-# Single source for body-embedded schemes -- domain wrappers import these,
-# no per-module literals. Prefix match case-insensitive (hand-written HTML
-# may write "Attachment:").
+# Single source for body schemes -- domain wrappers import, no per-module
+# literals. Prefix match case-insensitive (hand-written "Attachment:" real).
 DOCUMENT_ATTACHMENT_SCHEME = "attachment"
 WORK_ITEM_ATTACHMENT_SCHEME = "workitemimg"
 _SCHEMES: tuple[str, ...] = (DOCUMENT_ATTACHMENT_SCHEME, WORK_ITEM_ATTACHMENT_SCHEME)
 
 
 def extract_scheme_refs(html: str) -> list[tuple[str, str]]:
-    """``(scheme_lower, token)`` pairs from ``img[src]`` and ``a[href]``
-    values, in document order. Token = remainder after the colon, may be
-    empty (dangling). No extension filtering -- portal embeds ``.pptx``/
-    ``.txt`` via ``img`` too.
+    """``(scheme_lower, token)`` pairs from ``img[src]``/``a[href]``, document
+    order. Token = rest after colon, may be empty. No extension filter --
+    portal embed ``.pptx``/``.txt`` via ``img`` too.
     """
     if not html or not html.strip():
         return []
@@ -55,10 +52,8 @@ def _append_ref(value: object, refs: list[tuple[str, str]]) -> None:
 
 def reject_any_scheme_refs(htmls: Iterable[str], what: str) -> None:
     """Create path: any ref of either scheme in any *htmls* -> ``ValueError``.
-
-    Resource does not exist yet, so no attachment can exist. Runs on
-    converted (Markdown->HTML) bodies -- catches both Markdown image syntax
-    and hand-written HTML.
+    Resource not exist yet = no attachment can exist. Run on converted
+    Markdown->HTML bodies.
     """
     for html in htmls:
         if extract_scheme_refs(html):
@@ -90,13 +85,10 @@ def check_refs_against_ids(
     list_tool: str,
     what: str,
 ) -> None:
-    """Update path: reject wrong-scheme refs, then dangling tokens.
-
-    Wrong-scheme ref (``scheme != expected_scheme``) never resolves in this
-    body type, checked first so it can't masquerade as a dangling id. Token
-    matches when raw or ``urllib.parse.unquote(token)`` is in *valid_ids* --
-    portal stores URL-encoded tokens for non-ASCII names, the list API
-    serves raw ids.
+    """Update path: wrong-scheme refs first (never resolve in this body type,
+    must not masquerade as dangling id), then dangling tokens. Token match =
+    raw or ``unquote(token)`` in *valid_ids* -- portal store URL-encoded
+    token, list API serve raw id.
     """
     _reject_wrong_scheme(refs, expected_scheme=expected_scheme, what=what)
 
@@ -122,9 +114,8 @@ async def fetch_attachment_ids(
     what: str,
     project_id: str,
 ) -> frozenset[str]:
-    """Live short-id set for one document/work item's attachments, paged via
-    ``guarded_pages`` (fail closed). ``@basic`` fieldset -- id is all the
-    caller needs.
+    """Live short-id set for one resource's attachments via ``guarded_pages``
+    (fail closed); ``@basic`` fieldset.
     """
     base_params: dict[str, str | int] = {f"fields[{resource_type}]": "@basic"}
     ids: set[str] = set()
@@ -154,9 +145,9 @@ async def guard_attachment_refs(  # noqa: PLR0913
     what: str,
     project_id: str,
 ) -> None:
-    """Update path: block *html* refs to attachments that don't exist yet,
-    or that use the other resource's scheme. Document/work-item axis share
-    this -- only path/resource_type/expected_scheme/list_tool differ.
+    """Update path: block *html* refs to nonexistent attachments or other
+    resource's scheme. Both domain axes share this -- only
+    path/resource_type/expected_scheme/list_tool differ.
     """
     refs = extract_scheme_refs(html)
     if not refs:

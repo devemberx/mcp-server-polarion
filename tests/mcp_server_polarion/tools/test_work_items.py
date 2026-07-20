@@ -1668,9 +1668,7 @@ class TestEnumGuardUpdateWorkItems:
 
 
 class TestCreateWorkItemsAttachmentRefGuard:
-    """Greenfield create -- any scheme ref in converted description block
-    write outright, item can't own attachments before it exists.
-    """
+    """Create -- any scheme ref block write; no attachments pre-create."""
 
     async def test_clean_markdown_description_is_unaffected(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1687,17 +1685,15 @@ class TestCreateWorkItemsAttachmentRefGuard:
     async def test_markdown_image_ref_rejected_before_create(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Guard runs on markdown_to_html output PRE-sanitize_html -- same
-        conversion pipeline as create_document, same finding.
-        """
+        """Guard run pre-sanitize -- same pipeline as create_document."""
         with pytest.raises(ValueError, match="attachments cannot exist"):
             await _call_create_wi(mock_ctx, description="![x](workitemimg:ghost.png)")
         mock_client.post.assert_not_called()
 
 
 class TestUpdateWorkItemsAttachmentRefGuard:
-    """``update_work_items`` verify each item's ``description_html``
-    attachment refs against its live attachment list before PATCH.
+    """``update_work_items`` verify each item's body refs vs live attachment
+    list pre-PATCH.
     """
 
     async def test_dangling_ref_in_second_item_names_batch_position(

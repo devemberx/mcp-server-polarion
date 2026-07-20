@@ -4277,9 +4277,7 @@ class TestUpdateDocumentAnchorlessGuard:
 
 
 class TestCreateDocumentAttachmentRefGuard:
-    """Greenfield create -- any scheme ref in converted body block write
-    outright, resource can't own attachments before it exists.
-    """
+    """Create -- any scheme ref block write; no attachments pre-create."""
 
     async def test_clean_markdown_body_is_unaffected(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -4298,9 +4296,8 @@ class TestCreateDocumentAttachmentRefGuard:
     async def test_markdown_image_ref_rejected_before_create(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """Guard runs on markdown_to_html output PRE-sanitize_html -- Markdown
-        image syntax converts to a real <img> tag before the sanitizer would
-        strip it (img not in ALLOWED_TAGS), so the ref is caught.
+        """Guard run pre-sanitize -- Markdown image = real <img> there;
+        sanitize_html would strip it and hide ref.
         """
         with pytest.raises(ValueError, match="attachments cannot exist"):
             await _call_create_doc(
@@ -4311,8 +4308,8 @@ class TestCreateDocumentAttachmentRefGuard:
     async def test_raw_inline_img_tag_is_html_escaped_before_guard_sees_it(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        """markdown_to_html disable html_inline -- raw <img> markup render
-        as literal escaped text, never a real tag, even pre-sanitize.
+        """markdown_to_html disable html_inline -- raw <img> markup =
+        escaped literal text, never real tag.
         """
         mock_client.post.return_value = {
             "data": [{"type": "documents", "id": "MyProj/_default/Doc"}]
@@ -4328,9 +4325,7 @@ class TestCreateDocumentAttachmentRefGuard:
 
 
 class TestUpdateDocumentAttachmentRefGuard:
-    """``update_document`` verify ``home_page_content_html`` attachment refs
-    against live attachment list before PATCH.
-    """
+    """``update_document`` verify body refs vs live attachment list pre-PATCH."""
 
     async def test_dangling_ref_raises_before_patch(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
