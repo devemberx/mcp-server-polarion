@@ -37,6 +37,7 @@ evals/reports/
 !.claude/skills/
 !.claude/hooks/
 !.claude/settings.json
+!.claude/sensitive-patterns.example
 .mcp.json
 
 # dev-pipeline handoff artifacts (spec/plan/review rounds)
