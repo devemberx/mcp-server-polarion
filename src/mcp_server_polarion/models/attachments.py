@@ -40,6 +40,20 @@ class WorkItemAttachmentSpec(BaseModel):
     title: str | None = None
 
 
+class TestRecordAttachmentSpec(BaseModel):
+    """One file to upload as a test record attachment; file_name is not the id."""
+
+    # pytest collect Test*-named classes on import; opt out.
+    __test__ = False
+
+    # LLM input model: reject typo keys, not silent-drop.
+    model_config = ConfigDict(extra="forbid")
+
+    file_path: str
+    file_name: str | None = None
+    title: str | None = None
+
+
 class AttachmentsCreateResult(BaseModel):
     """Attachment-create result, shared by document and work item upload
     tools.
