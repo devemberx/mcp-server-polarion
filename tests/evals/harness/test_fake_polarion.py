@@ -1006,9 +1006,8 @@ class TestMutations:
         assert all("links" in e and "attributes" not in e for e in data)
 
     def test_post_doc_attachments_binary_payload_201(self) -> None:
-        # Non-UTF-8 bytes (PNG magic) in file part must not leak
-        # UnicodeDecodeError from dispatcher body parse; leak = respx
-        # __cause__ cycle = rich traceback infinite loop = frozen eval run.
+        # Non-UTF-8 bytes (PNG magic) must not leak UnicodeDecodeError from
+        # body parse; hang rationale at `_handle_mutation` catch.
         fake = FakePolarion()
         response = fake._dispatch(
             _multipart_attachments_request(

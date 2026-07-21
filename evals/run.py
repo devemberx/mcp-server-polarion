@@ -20,8 +20,9 @@ if __package__ in (None, ""):
 
 # Before fastmcp import (settings read env once): rich traceback render spin
 # forever on cyclic __cause__ chains (respx SideEffectError wrap/unwrap) and
-# freeze event loop mid-eval -- plain logging immune.
-os.environ.setdefault("FASTMCP_ENABLE_RICH_LOGGING", "false")
+# freeze event loop mid-eval -- plain logging immune. Hard set, not setdefault:
+# inherited "true" would revive hang.
+os.environ["FASTMCP_ENABLE_RICH_LOGGING"] = "false"
 
 import argparse
 import json

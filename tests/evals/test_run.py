@@ -4,8 +4,10 @@ fail-closed crashed runs, git-sha resolution, unknown-case exit code.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -33,9 +35,7 @@ def _case(name: str = "GATE-X", min_rate: float = 1.0) -> Case:
 
 class TestPlainLogging:
     def test_import_forces_plain_fastmcp_logging(self) -> None:
-        # Rich traceback render spin forever on cyclic __cause__ chains
-        # (respx SideEffectError wrap/unwrap) and freeze event loop mid
-        # eval -- entrypoint must force plain logging before fastmcp import.
+        # Rich hang rationale live at fix site (evals/run.py env set).
         code = (
             "import evals.run, logging;"
             "handlers = logging.getLogger('fastmcp').handlers;"
@@ -47,6 +47,10 @@ class TestPlainLogging:
             capture_output=True,
             text=True,
             check=True,
+            # cwd pin: `import evals.run` need repo root regardless of pytest cwd.
+            cwd=Path(__file__).resolve().parents[2],
+            # Hostile "true" prove hard set win over inherited env.
+            env={**os.environ, "FASTMCP_ENABLE_RICH_LOGGING": "true"},
         )
         assert "RichHandler" not in result.stdout
 
