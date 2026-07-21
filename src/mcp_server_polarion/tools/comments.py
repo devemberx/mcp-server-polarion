@@ -89,6 +89,11 @@ def _build_comment_create_payload(
     return {"data": items}
 
 
+def _html_texts(specs: Sequence[CommentSpec]) -> list[str]:
+    """text/html spec bodies -- text/plain skipped, refs there render escaped."""
+    return [s.text for s in specs if s.text_format == "text/html"]
+
+
 def _build_document_comments_payload(
     *,
     specs: list[CommentSpec],
@@ -326,7 +331,7 @@ async def create_document_comments(  # noqa: PLR0913
         document_name=document_name,
     )
 
-    html_texts = [s.text for s in comments if s.text_format == "text/html"]
+    html_texts = _html_texts(comments)
     if html_texts:
         await guard_document_comment_attachment_refs(
             client, project_id, space_id, document_name, html_texts
@@ -418,7 +423,7 @@ async def create_work_item_comments(
         work_item_id=work_item_id,
     )
 
-    html_texts = [s.text for s in comments if s.text_format == "text/html"]
+    html_texts = _html_texts(comments)
     if html_texts:
         await guard_work_item_comment_attachment_refs(
             client, project_id, work_item_id, html_texts
