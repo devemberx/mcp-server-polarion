@@ -95,6 +95,12 @@ class FakePolarion:
     # shared module singleton) so uploads don't leak into other tests'
     # default-seeded FakePolarion instances. Keyed by work item short id.
     created_wi_attachments: dict[str, list[Attachment]] = field(default_factory=dict)
+    # Test record attachment dup tracking, keyed by (run, tcProject, tcId,
+    # iteration) -- project omitted, seeds are single-project. No counter:
+    # ids derive from content (tc_id + fileName), unlike WI attachments.
+    created_tr_attachments: dict[tuple[str, str, str, int], set[str]] = field(
+        default_factory=dict
+    )
 
     def _work_item_resource(self, wi: WorkItem) -> dict[str, Any]:
         relationships: dict[str, Any] = {
@@ -767,6 +773,15 @@ class FakePolarion:
         if wi_attachments and request.method == "POST":
             return self._post_work_item_attachments(request, wi_attachments.group(1))
 
+        tr_attachments = re.search(
+            r"/testruns/([^/]+)/testrecords/([^/]+)/([^/]+)/(\d+)/attachments$", path
+        )
+        if tr_attachments and request.method == "POST":
+            run_id, tc_project, tc_id, iteration = tr_attachments.groups()
+            return self._post_test_record_attachments(
+                request, run_id, tc_project, tc_id, int(iteration)
+            )
+
         # Resource-creating POSTs must echo one id per submitted entry (tool
         # layer raise on count mismatch, so bulk cases need N ids); action
         # POSTs + PATCH/DELETE fall through to 204.
@@ -1027,6 +1042,73 @@ class FakePolarion:
                         },
                     }
                     for aid in attachment_ids
+                ]
+            },
+        )
+
+    def _post_test_record_attachments(
+        self,
+        request: httpx.Request,
+        run_id: str,
+        tc_project: str,
+        tc_id: str,
+        iteration: int,
+    ) -> httpx.Response:
+        """Multipart upload route mirroring ``_post_work_item_attachments``.
+        Diverges: id/fileName rewritten to ``{tc_id}_{fileName}`` (content-
+        derived, no counter); dup 409 whole-batch atomic like doc sibling,
+        checked against both this batch and prior calls on the same record
+        (live-verified 2026-07-21). Record 404 conditions mirror the single-
+        record GET route.
+        """
+        parsed = _parse_attachment_multipart(request)
+        if isinstance(parsed, httpx.Response):
+            return parsed
+        entries, file_part_count = parsed
+
+        tr = self.seeds.test_runs.get(run_id)
+        if (
+            tr is None
+            or tr.is_template
+            or tc_project != PROJECT
+            or tc_id != TESTCASE_ID
+            or iteration >= tr.iterations
+        ):
+            return httpx.Response(404, json={"errors": [{"status": "404"}]})
+
+        file_names = [
+            entry.get("attributes", {}).get("fileName", "") for entry in entries
+        ]
+        if not all(file_names) or len(file_names) != file_part_count:
+            return _error_response(400, "File data not found for entry.")
+
+        rewritten_ids = [f"{tc_id}_{name}" for name in file_names]
+        key = (run_id, tc_project, tc_id, iteration)
+        tracked = self.created_tr_attachments.setdefault(key, set())
+        if len(set(rewritten_ids)) != len(rewritten_ids) or tracked & set(
+            rewritten_ids
+        ):
+            return _error_response(409, "A resource with the same ID already exists.")
+        tracked.update(rewritten_ids)
+
+        record_base = f"{tc_project}/{tc_id}/{iteration}"
+        base = (
+            f"{POLARION_HOST}{API_PREFIX}/projects/{PROJECT}"
+            f"/testruns/{run_id}/testrecords/{record_base}"
+        )
+        return httpx.Response(
+            201,
+            json={
+                "data": [
+                    {
+                        "type": "testrecord_attachments",
+                        "id": f"{PROJECT}/{run_id}/{record_base}/{aid}",
+                        "links": {
+                            "self": f"{base}/attachments/{aid}",
+                            "content": f"{base}/attachments/{aid}/content",
+                        },
+                    }
+                    for aid in rewritten_ids
                 ]
             },
         )

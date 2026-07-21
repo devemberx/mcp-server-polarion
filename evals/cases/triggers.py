@@ -139,6 +139,19 @@ CASES: list[Case] = [
         reject=["create_document_attachments", "list_work_item_attachments"],
     ),
     _case(
+        "TRIG-TR-ATTACH-CREATE",
+        f"Attach the file at {_UPLOAD_ASSET} to the test record for test case "
+        f"'{PROJECT}/{TESTCASE_ID}' iteration 0 in test run '{TEST_RUN_ID}' "
+        f"of project '{PROJECT}'.",
+        "triggers_tool",
+        intent="Uploading a local file to a test record must call "
+        "create_test_record_attachments; the test case work item's own "
+        "attachments and record-field updates do not apply.",
+        covers=["create_test_record_attachments"],
+        expect="create_test_record_attachments",
+        reject=["create_work_item_attachments", "update_test_records"],
+    ),
+    _case(
         "TRIG-DOC-COMMENT",
         f"Leave a comment 'Needs review' on the document '{DOC}' in the "
         f"'{SPACE}' space.",

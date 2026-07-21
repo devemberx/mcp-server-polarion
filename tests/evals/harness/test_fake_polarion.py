@@ -1406,6 +1406,240 @@ class TestTestRecordMutations:
         assert "was not found" in _json(response)["errors"][0]["detail"]
 
 
+class TestTestRecordAttachmentMutations:
+    _PATH = (
+        f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}"
+        f"/testrecords/{PROJECT}/{TESTCASE_ID}/0/attachments"
+    )
+
+    def test_post_echoes_ordered_ids_with_test_case_prefix(self) -> None:
+        fake = FakePolarion()
+        response = fake._dispatch(
+            _multipart_attachments_request(
+                self._PATH,
+                resource={
+                    "data": [
+                        _attachment_entry(
+                            "report.txt", resource_type="testrecord_attachments"
+                        ),
+                        _attachment_entry(
+                            "log.txt", resource_type="testrecord_attachments"
+                        ),
+                    ]
+                },
+                files=[("report.txt", b"a"), ("log.txt", b"b")],
+            )
+        )
+        assert response.status_code == 201
+        data = _json(response)["data"]
+        # Live shape 2026-07-21: list, input order, type/id/links only.
+        assert [e["id"] for e in data] == [
+            f"{PROJECT}/{TEST_RUN_ID}/{PROJECT}/{TESTCASE_ID}/0/"
+            f"{TESTCASE_ID}_report.txt",
+            f"{PROJECT}/{TEST_RUN_ID}/{PROJECT}/{TESTCASE_ID}/0/{TESTCASE_ID}_log.txt",
+        ]
+        assert all(e["type"] == "testrecord_attachments" for e in data)
+        assert all("links" in e and "attributes" not in e for e in data)
+
+    def test_post_unseeded_run_is_404(self) -> None:
+        fake = FakePolarion()
+        response = fake._dispatch(
+            _multipart_attachments_request(
+                f"/projects/{PROJECT}/testruns/Nope"
+                f"/testrecords/{PROJECT}/{TESTCASE_ID}/0/attachments",
+                resource={
+                    "data": [
+                        _attachment_entry(
+                            "a.txt", resource_type="testrecord_attachments"
+                        )
+                    ]
+                },
+                files=[("a.txt", b"x")],
+            )
+        )
+        assert response.status_code == 404
+
+    def test_post_iteration_beyond_seeded_count_is_404(self) -> None:
+        # TEST_RUN_ID seed iterations=1 -- only iteration 0 exists.
+        fake = FakePolarion()
+        response = fake._dispatch(
+            _multipart_attachments_request(
+                f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}"
+                f"/testrecords/{PROJECT}/{TESTCASE_ID}/1/attachments",
+                resource={
+                    "data": [
+                        _attachment_entry(
+                            "a.txt", resource_type="testrecord_attachments"
+                        )
+                    ]
+                },
+                files=[("a.txt", b"x")],
+            )
+        )
+        assert response.status_code == 404
+
+    def test_post_wrong_test_case_is_404(self) -> None:
+        fake = FakePolarion()
+        response = fake._dispatch(
+            _multipart_attachments_request(
+                f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}"
+                f"/testrecords/{PROJECT}/MCPT-9999/0/attachments",
+                resource={
+                    "data": [
+                        _attachment_entry(
+                            "a.txt", resource_type="testrecord_attachments"
+                        )
+                    ]
+                },
+                files=[("a.txt", b"x")],
+            )
+        )
+        assert response.status_code == 404
+
+    def test_post_duplicate_filename_in_batch_is_409(self) -> None:
+        fake = FakePolarion()
+        response = fake._dispatch(
+            _multipart_attachments_request(
+                self._PATH,
+                resource={
+                    "data": [
+                        _attachment_entry(
+                            "a.txt", resource_type="testrecord_attachments"
+                        ),
+                        _attachment_entry(
+                            "a.txt", resource_type="testrecord_attachments"
+                        ),
+                    ]
+                },
+                files=[("a.txt", b"x"), ("a.txt", b"y")],
+            )
+        )
+        assert response.status_code == 409
+        assert "already exists" in _json(response)["errors"][0]["detail"]
+
+    def test_post_cross_call_duplicate_is_409(self) -> None:
+        fake = FakePolarion()
+        first = fake._dispatch(
+            _multipart_attachments_request(
+                self._PATH,
+                resource={
+                    "data": [
+                        _attachment_entry(
+                            "a.txt", resource_type="testrecord_attachments"
+                        )
+                    ]
+                },
+                files=[("a.txt", b"x")],
+            )
+        )
+        assert first.status_code == 201
+        second = fake._dispatch(
+            _multipart_attachments_request(
+                self._PATH,
+                resource={
+                    "data": [
+                        _attachment_entry(
+                            "a.txt", resource_type="testrecord_attachments"
+                        )
+                    ]
+                },
+                files=[("a.txt", b"y")],
+            )
+        )
+        assert second.status_code == 409
+
+    def test_post_conflicting_batch_records_nothing_fresh_name_still_succeeds(
+        self,
+    ) -> None:
+        # Atomic: 409 batch (fresh + dup) records nothing -- fresh name alone
+        # must still succeed on retry.
+        fake = FakePolarion()
+        seeded = fake._dispatch(
+            _multipart_attachments_request(
+                self._PATH,
+                resource={
+                    "data": [
+                        _attachment_entry(
+                            "existing.txt", resource_type="testrecord_attachments"
+                        )
+                    ]
+                },
+                files=[("existing.txt", b"x")],
+            )
+        )
+        assert seeded.status_code == 201
+
+        conflicting = fake._dispatch(
+            _multipart_attachments_request(
+                self._PATH,
+                resource={
+                    "data": [
+                        _attachment_entry(
+                            "fresh.txt", resource_type="testrecord_attachments"
+                        ),
+                        _attachment_entry(
+                            "existing.txt", resource_type="testrecord_attachments"
+                        ),
+                    ]
+                },
+                files=[("fresh.txt", b"y"), ("existing.txt", b"z")],
+            )
+        )
+        assert conflicting.status_code == 409
+
+        retry = fake._dispatch(
+            _multipart_attachments_request(
+                self._PATH,
+                resource={
+                    "data": [
+                        _attachment_entry(
+                            "fresh.txt", resource_type="testrecord_attachments"
+                        )
+                    ]
+                },
+                files=[("fresh.txt", b"y")],
+            )
+        )
+        assert retry.status_code == 201
+
+    def test_post_json_body_415(self) -> None:
+        fake = FakePolarion()
+        response = _mutate(fake, "POST", self._PATH, {"data": []})
+        assert response.status_code == 415
+
+    def test_post_missing_resource_400(self) -> None:
+        fake = FakePolarion()
+        request = httpx.Request(
+            "POST",
+            f"{_BASE}{self._PATH}",
+            files=[("files", ("a.txt", b"x", "application/octet-stream"))],
+        )
+        response = fake._dispatch(request)
+        assert response.status_code == 400
+        assert "Resource data" in _json(response)["errors"][0]["detail"]
+
+    def test_post_file_count_mismatch_400(self) -> None:
+        fake = FakePolarion()
+        response = fake._dispatch(
+            _multipart_attachments_request(
+                self._PATH,
+                resource={
+                    "data": [
+                        _attachment_entry(
+                            "a.txt", resource_type="testrecord_attachments"
+                        ),
+                        _attachment_entry(
+                            "b.txt", resource_type="testrecord_attachments"
+                        ),
+                    ]
+                },
+                files=[("a.txt", b"x")],
+            )
+        )
+        assert response.status_code == 400
+        assert "File data" in _json(response)["errors"][0]["detail"]
+
+
 class TestOrchestrationSeeding:
     def test_parent_document_resolves(self) -> None:
         response = _get(

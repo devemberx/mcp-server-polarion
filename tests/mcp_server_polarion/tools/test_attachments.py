@@ -22,14 +22,17 @@ from mcp_server_polarion.models import (
     Attachment,
     DocumentAttachmentSpec,
     PaginatedResult,
+    TestRecordAttachmentSpec,
     WorkItemAttachmentSpec,
 )
 from mcp_server_polarion.tools.attachments import (
     _MAX_TOTAL_UPLOAD_BYTES,
     _build_document_attachments_payload,
+    _build_test_record_attachments_payload,
     _build_work_item_attachments_payload,
     _read_attachment_files,
     create_document_attachments,
+    create_test_record_attachments,
     create_work_item_attachments,
     get_document_attachment_content,
     get_work_item_attachment_content,
@@ -2765,3 +2768,459 @@ class TestCreateWorkItemAttachmentsFieldValidation:
     def test_work_item_id_rejects_empty_string(self) -> None:
         with pytest.raises(ValidationError):
             self._adapter_for("work_item_id").validate_python("")
+
+
+class TestBuildTestRecordAttachmentsPayload:
+    """``_build_test_record_attachments_payload`` -- pure JSON:API body builder."""
+
+    def test_file_name_defaults_to_basename(self) -> None:
+        payload = _build_test_record_attachments_payload(
+            [TestRecordAttachmentSpec(file_path="/data/foo/bar.png")]
+        )
+        attrs = payload["data"][0]["attributes"]  # type: ignore[index]
+        assert attrs["fileName"] == "bar.png"  # type: ignore[index]
+
+    def test_file_name_override_wins(self) -> None:
+        payload = _build_test_record_attachments_payload(
+            [
+                TestRecordAttachmentSpec(
+                    file_path="/data/foo/bar.png", file_name="renamed.png"
+                )
+            ]
+        )
+        attrs = payload["data"][0]["attributes"]  # type: ignore[index]
+        assert attrs["fileName"] == "renamed.png"  # type: ignore[index]
+
+    def test_title_omitted_when_none(self) -> None:
+        payload = _build_test_record_attachments_payload(
+            [TestRecordAttachmentSpec(file_path="/data/bar.png")]
+        )
+        attrs = payload["data"][0]["attributes"]  # type: ignore[index]
+        assert "title" not in attrs  # type: ignore[operator]
+
+    def test_title_included_when_set(self) -> None:
+        payload = _build_test_record_attachments_payload(
+            [TestRecordAttachmentSpec(file_path="/data/bar.png", title="Report")]
+        )
+        attrs = payload["data"][0]["attributes"]  # type: ignore[index]
+        assert attrs["title"] == "Report"  # type: ignore[index]
+
+    def test_type_is_testrecord_attachments(self) -> None:
+        payload = _build_test_record_attachments_payload(
+            [TestRecordAttachmentSpec(file_path="/data/bar.png")]
+        )
+        assert payload["data"][0]["type"] == "testrecord_attachments"  # type: ignore[index]
+
+    def test_multiple_specs_preserve_order(self) -> None:
+        payload = _build_test_record_attachments_payload(
+            [
+                TestRecordAttachmentSpec(file_path="/data/a.png"),
+                TestRecordAttachmentSpec(file_path="/data/b.png"),
+            ]
+        )
+        names = [
+            item["attributes"]["fileName"]  # type: ignore[index]
+            for item in payload["data"]  # type: ignore[union-attr]
+        ]
+        assert names == ["a.png", "b.png"]
+
+
+class TestCreateTestRecordAttachmentsDryRun:
+    """dry_run return preview without calling Polarion; files still validated."""
+
+    async def test_dry_run_no_post_multipart_call(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        file_path = tmp_path / "report.txt"
+        file_path.write_bytes(b"data")
+        mock_client.post_multipart = AsyncMock()
+
+        result = await create_test_record_attachments(
+            mock_ctx,
+            project_id="P",
+            test_run_id="TR-1",
+            test_case_id="P/TC-1",
+            iteration=0,
+            attachments=[TestRecordAttachmentSpec(file_path=str(file_path))],
+            dry_run=True,
+        )
+
+        mock_client.post_multipart.assert_not_called()
+        assert result.created is False
+        assert result.dry_run is True
+        assert result.attachment_ids == []
+
+    async def test_dry_run_payload_preview_shape(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        file_path = tmp_path / "report.txt"
+        file_path.write_bytes(b"data")
+
+        result = await create_test_record_attachments(
+            mock_ctx,
+            project_id="P",
+            test_run_id="TR-1",
+            test_case_id="P/TC-1",
+            iteration=0,
+            attachments=[
+                TestRecordAttachmentSpec(file_path=str(file_path), title="Report")
+            ],
+            dry_run=True,
+        )
+
+        assert result.payload_preview is not None
+        data = result.payload_preview["data"]
+        assert isinstance(data, list)
+        assert data[0]["attributes"]["fileName"] == "report.txt"  # type: ignore[index]
+        assert data[0]["attributes"]["title"] == "Report"  # type: ignore[index]
+        assert result.payload_preview["files"] == [
+            {"file_name": "report.txt", "size_bytes": 4}
+        ]
+
+    async def test_dry_run_still_validates_files(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        missing = tmp_path / "missing.txt"
+
+        with pytest.raises(ValueError, match=str(missing)):
+            await create_test_record_attachments(
+                mock_ctx,
+                project_id="P",
+                test_run_id="TR-1",
+                test_case_id="P/TC-1",
+                iteration=0,
+                attachments=[TestRecordAttachmentSpec(file_path=str(missing))],
+                dry_run=True,
+            )
+
+
+class TestCreateTestRecordAttachmentsHappyPath:
+    """Successful upload extracts ordered server-rewritten attachment ids."""
+
+    async def test_returns_ordered_ids(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        file_path = tmp_path / "report.txt"
+        file_path.write_bytes(b"data")
+        mock_client.post_multipart = AsyncMock(
+            return_value={
+                "data": [
+                    {
+                        "type": "testrecord_attachments",
+                        "id": "P/TR-1/P/TC-1/0/TC-1_report.txt",
+                        "links": {"self": "..."},
+                    }
+                ]
+            }
+        )
+
+        result = await create_test_record_attachments(
+            mock_ctx,
+            project_id="P",
+            test_run_id="TR-1",
+            test_case_id="P/TC-1",
+            iteration=0,
+            attachments=[TestRecordAttachmentSpec(file_path=str(file_path))],
+            dry_run=False,
+        )
+
+        assert result.created is True
+        assert result.dry_run is False
+        assert result.attachment_ids == ["TC-1_report.txt"]
+        assert result.payload_preview is None
+
+    async def test_post_multipart_called_with_exact_path_and_parts(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        file_path = tmp_path / "report.txt"
+        file_path.write_bytes(b"data")
+        mock_client.post_multipart = AsyncMock(
+            return_value={
+                "data": [
+                    {
+                        "type": "testrecord_attachments",
+                        "id": "P/TR-1/P/TC-1/3/TC-1_report.txt",
+                    }
+                ]
+            }
+        )
+
+        await create_test_record_attachments(
+            mock_ctx,
+            project_id="P",
+            test_run_id="TR-1",
+            test_case_id="P/TC-1",
+            iteration=3,
+            attachments=[TestRecordAttachmentSpec(file_path=str(file_path))],
+            dry_run=False,
+        )
+
+        call = mock_client.post_multipart.call_args
+        assert (
+            call[0][0] == "/projects/P/testruns/TR-1/testrecords/P/TC-1/3/attachments"
+        )
+        resource = json.loads(call.kwargs["data"]["resource"])
+        assert resource["data"][0]["type"] == "testrecord_attachments"
+        assert resource["data"][0]["attributes"]["fileName"] == "report.txt"
+        assert call.kwargs["files"] == [
+            ("files", ("report.txt", b"data", "application/octet-stream"))
+        ]
+
+    async def test_no_attachment_ids_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "a.txt"
+        path.write_bytes(b"a")
+        mock_client.post_multipart = AsyncMock(return_value={"data": []})
+
+        with pytest.raises(
+            RuntimeError, match=r"0 ids for 1 submitted.*list_test_records"
+        ):
+            await create_test_record_attachments(
+                mock_ctx,
+                project_id="P",
+                test_run_id="TR-1",
+                test_case_id="P/TC-1",
+                iteration=0,
+                attachments=[TestRecordAttachmentSpec(file_path=str(path))],
+                dry_run=False,
+            )
+
+
+class TestCreateTestRecordAttachmentsValidationBeforeCall:
+    """Local pre-request validation blocks the POST."""
+
+    async def test_test_case_id_without_slash_raises_before_http(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "a.txt"
+        path.write_bytes(b"a")
+        mock_client.post_multipart = AsyncMock()
+
+        with pytest.raises(ValueError, match="project/WI-id"):
+            await create_test_record_attachments(
+                mock_ctx,
+                project_id="P",
+                test_run_id="TR-1",
+                test_case_id="TC-1",
+                iteration=0,
+                attachments=[TestRecordAttachmentSpec(file_path=str(path))],
+                dry_run=False,
+            )
+        mock_client.post_multipart.assert_not_called()
+
+    async def test_missing_file_raises_value_error_no_post(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        missing = tmp_path / "missing.txt"
+        mock_client.post_multipart = AsyncMock()
+
+        with pytest.raises(ValueError, match=str(missing)):
+            await create_test_record_attachments(
+                mock_ctx,
+                project_id="P",
+                test_run_id="TR-1",
+                test_case_id="P/TC-1",
+                iteration=0,
+                attachments=[TestRecordAttachmentSpec(file_path=str(missing))],
+                dry_run=False,
+            )
+        mock_client.post_multipart.assert_not_called()
+
+    async def test_duplicate_file_name_raises_value_error_no_post(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        first = tmp_path / "a.txt"
+        second = tmp_path / "b.txt"
+        first.write_bytes(b"1")
+        second.write_bytes(b"2")
+        mock_client.post_multipart = AsyncMock()
+
+        with pytest.raises(ValueError, match=r"dup\.txt"):
+            await create_test_record_attachments(
+                mock_ctx,
+                project_id="P",
+                test_run_id="TR-1",
+                test_case_id="P/TC-1",
+                iteration=0,
+                attachments=[
+                    TestRecordAttachmentSpec(file_path=str(first), file_name="dup.txt"),
+                    TestRecordAttachmentSpec(
+                        file_path=str(second), file_name="dup.txt"
+                    ),
+                ],
+                dry_run=False,
+            )
+        mock_client.post_multipart.assert_not_called()
+
+    async def test_single_file_over_cap_raises_value_error_no_post(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        big = tmp_path / "big.bin"
+        with big.open("wb") as handle:
+            handle.seek(_MAX_TOTAL_UPLOAD_BYTES)
+            handle.write(b"\0")
+        mock_client.post_multipart = AsyncMock()
+
+        with pytest.raises(ValueError, match=r"big\.bin"):
+            await create_test_record_attachments(
+                mock_ctx,
+                project_id="P",
+                test_run_id="TR-1",
+                test_case_id="P/TC-1",
+                iteration=0,
+                attachments=[TestRecordAttachmentSpec(file_path=str(big))],
+                dry_run=False,
+            )
+        mock_client.post_multipart.assert_not_called()
+
+
+class TestCreateTestRecordAttachmentsErrorMapping:
+    """Error mapping per spec: 404, 409 (in-batch AND vs existing), auth,
+    413, generic.
+    """
+
+    async def test_not_found_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "a.txt"
+        path.write_bytes(b"a")
+        mock_client.post_multipart = AsyncMock(
+            side_effect=PolarionNotFoundError("missing", status_code=404)
+        )
+
+        with pytest.raises(ValueError, match="list_test_records"):
+            await create_test_record_attachments(
+                mock_ctx,
+                project_id="P",
+                test_run_id="TR-1",
+                test_case_id="P/TC-1",
+                iteration=0,
+                attachments=[TestRecordAttachmentSpec(file_path=str(path))],
+                dry_run=False,
+            )
+
+    async def test_conflict_raises_value_error_mentioning_duplicate(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "a.txt"
+        path.write_bytes(b"a")
+        mock_client.post_multipart = AsyncMock(
+            side_effect=PolarionError("dup", status_code=409)
+        )
+
+        with pytest.raises(ValueError, match="file_name"):
+            await create_test_record_attachments(
+                mock_ctx,
+                project_id="P",
+                test_run_id="TR-1",
+                test_case_id="P/TC-1",
+                iteration=0,
+                attachments=[TestRecordAttachmentSpec(file_path=str(path))],
+                dry_run=False,
+            )
+
+    async def test_auth_error_raises_permission_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "a.txt"
+        path.write_bytes(b"a")
+        mock_client.post_multipart = AsyncMock(
+            side_effect=PolarionAuthError("forbidden", status_code=403)
+        )
+
+        with pytest.raises(PermissionError, match="POLARION_TOKEN"):
+            await create_test_record_attachments(
+                mock_ctx,
+                project_id="P",
+                test_run_id="TR-1",
+                test_case_id="P/TC-1",
+                iteration=0,
+                attachments=[TestRecordAttachmentSpec(file_path=str(path))],
+                dry_run=False,
+            )
+
+    async def test_payload_too_large_raises_runtime_error_with_remedy(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "a.txt"
+        path.write_bytes(b"a")
+        mock_client.post_multipart = AsyncMock(
+            side_effect=PolarionError("too large", status_code=413)
+        )
+
+        with pytest.raises(RuntimeError, match=r"reduce.*size|split"):
+            await create_test_record_attachments(
+                mock_ctx,
+                project_id="P",
+                test_run_id="TR-1",
+                test_case_id="P/TC-1",
+                iteration=0,
+                attachments=[TestRecordAttachmentSpec(file_path=str(path))],
+                dry_run=False,
+            )
+
+    async def test_other_polarion_error_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "a.txt"
+        path.write_bytes(b"a")
+        mock_client.post_multipart = AsyncMock(
+            side_effect=PolarionError("boom", status_code=400)
+        )
+
+        with pytest.raises(
+            RuntimeError, match="Failed to create test record attachments"
+        ):
+            await create_test_record_attachments(
+                mock_ctx,
+                project_id="P",
+                test_run_id="TR-1",
+                test_case_id="P/TC-1",
+                iteration=0,
+                attachments=[TestRecordAttachmentSpec(file_path=str(path))],
+                dry_run=False,
+            )
+
+
+class TestCreateTestRecordAttachmentsFieldValidation:
+    """``iteration`` ge=0 and ``attachments`` 1..10 bounds -- ``TypeAdapter``
+    rebuild (Field constraints bypass FastMCP JSON Schema gate on direct
+    call).
+    """
+
+    @staticmethod
+    def _adapter_for(param_name: str) -> TypeAdapter[object]:
+        hints = get_type_hints(create_test_record_attachments)
+        sig = inspect.signature(create_test_record_attachments)
+        field_info = sig.parameters[param_name].default
+        return TypeAdapter(Annotated[hints[param_name], field_info])
+
+    def test_iteration_zero_accepted(self) -> None:
+        adapter = self._adapter_for("iteration")
+        assert adapter.validate_python(0) == 0
+
+    def test_iteration_below_zero_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("iteration").validate_python(-1)
+
+    def test_empty_list_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("attachments").validate_python([])
+
+    def test_over_max_rejected(self) -> None:
+        specs = [{"file_path": f"/data/{i}.txt"} for i in range(11)]
+        with pytest.raises(ValidationError):
+            self._adapter_for("attachments").validate_python(specs)
+
+    def test_at_max_accepted(self) -> None:
+        specs = [{"file_path": f"/data/{i}.txt"} for i in range(10)]
+        validated = self._adapter_for("attachments").validate_python(specs)
+        assert isinstance(validated, list)
+        assert len(validated) == 10
+
+    def test_at_minimum_accepted(self) -> None:
+        validated = self._adapter_for("attachments").validate_python(
+            [{"file_path": "/data/a.txt"}]
+        )
+        assert len(validated) == 1
