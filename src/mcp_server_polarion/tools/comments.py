@@ -31,11 +31,10 @@ from mcp_server_polarion.tools._shared.fields import (
 from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
     get_client,
-    safe_str,
 )
 from mcp_server_polarion.tools._shared.pagination import DEFAULT_PAGE_SIZE
 from mcp_server_polarion.tools._shared.parse import (
-    extract_short_id,
+    extract_created_short_ids,
     parse_comments_page,
 )
 
@@ -113,19 +112,6 @@ def _build_work_item_comments_payload(
         comment_type="workitem_comments",
         parent_prefix=f"{project_id}/{work_item_id}",
     )
-
-
-def _extract_created_comment_ids(response: object) -> list[str]:
-    """Short ids from comment-create POST response (``data`` list)."""
-    raw_data = response.get("data", []) if isinstance(response, dict) else []
-    comment_ids: list[str] = []
-    if isinstance(raw_data, list):
-        for entry in raw_data:
-            if isinstance(entry, dict):
-                full_id = safe_str(entry.get("id", ""))
-                if full_id:
-                    comment_ids.append(extract_short_id(full_id))
-    return comment_ids
 
 
 def _build_comment_update_payload(
@@ -365,12 +351,9 @@ async def create_document_comments(  # noqa: PLR0913
             f"Failed to create document comments: {exc.message}"
         ) from exc
 
-    comment_ids = _extract_created_comment_ids(response)
-    if not comment_ids:
-        raise RuntimeError(
-            "Polarion returned no comment IDs after creation."
-            " The POST may have succeeded — verify with `list_document_comments`."
-        )
+    comment_ids = extract_created_short_ids(
+        response, expected_count=len(comments), list_tool="list_document_comments"
+    )
 
     return CommentsCreateResult(
         created=True,
@@ -450,12 +433,9 @@ async def create_work_item_comments(
             f"Failed to create work item comments: {exc.message}"
         ) from exc
 
-    comment_ids = _extract_created_comment_ids(response)
-    if not comment_ids:
-        raise RuntimeError(
-            "Polarion returned no comment IDs after creation."
-            " The POST may have succeeded — verify with `list_work_item_comments`."
-        )
+    comment_ids = extract_created_short_ids(
+        response, expected_count=len(comments), list_tool="list_work_item_comments"
+    )
 
     return CommentsCreateResult(
         created=True,

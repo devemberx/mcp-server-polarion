@@ -1,5 +1,5 @@
 """Attachment tools — list attachments of a document or work item; fetch one
-document attachment's content; upload document or work item attachments.
+attachment's content for viewing; upload document or work item attachments.
 """
 
 from __future__ import annotations
@@ -90,6 +90,78 @@ def _looks_like_svg(text: str) -> bool:
     return head.startswith(_SVG_PREFIXES)
 
 
+async def _fetch_attachment_content(  # noqa: PLR0913
+    ctx: Context,
+    path: str,
+    attachment_id: str,
+    list_tool: str,
+    not_found_location: str,
+    resource_noun: str,
+) -> Image | str:
+    """Shared gate+fetch+sniff body for both attachment content tools.
+
+    ``not_found_location`` = preposition + address for 404 message;
+    ``list_tool`` = discovery tool named in every guidance error.
+    """
+    extension = PurePosixPath(attachment_id).suffix.lower()
+    is_svg = extension == _SVG_EXTENSION
+    if extension in _BITMAP_EXTENSION_TO_FORMAT:
+        max_bytes = _MAX_BITMAP_BYTES
+    elif is_svg:
+        max_bytes = _MAX_SVG_BYTES
+    else:
+        # Format names double as extensions -- LLM match against file_name.
+        supported = ", ".join(
+            [*sorted(set(_BITMAP_EXTENSION_TO_FORMAT.values())), "svg"]
+        )
+        raise ValueError(
+            f"Attachment '{attachment_id}' has an unsupported or "
+            f"unrecognized extension; supported formats: {supported}. "
+            f"Check file_name via {list_tool}."
+        )
+
+    try:
+        raw = await get_client(ctx).get_bytes(path, max_bytes=max_bytes)
+    except PolarionResponseTooLargeError as exc:
+        raise ValueError(
+            f"Attachment '{attachment_id}' exceeds the {max_bytes} byte "
+            f"fetch cap. Check length via {list_tool} before fetching."
+        ) from exc
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Attachment '{attachment_id}' not found {not_found_location}. "
+            f"Use {list_tool} to discover valid ids."
+        ) from exc
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            f"Cannot access {resource_noun} attachment content -- check your"
+            " POLARION_TOKEN permissions."
+        ) from exc
+    except PolarionError as exc:
+        raise RuntimeError(
+            f"Failed to fetch attachment '{attachment_id}': {exc.message}"
+        ) from exc
+
+    if is_svg:
+        text = raw.decode("utf-8", errors="replace")
+        if not _looks_like_svg(text):
+            raise ValueError(
+                f"Attachment '{attachment_id}' content is not SVG markup \u2014 "
+                "its file_name extension may be wrong. Verify via "
+                f"{list_tool}."
+            )
+        return text
+    sniffed_format = _sniff_bitmap_format(raw)
+    if sniffed_format is None:
+        supported = ", ".join(sorted(set(_BITMAP_EXTENSION_TO_FORMAT.values())))
+        raise ValueError(
+            f"Attachment '{attachment_id}' content matches no supported "
+            f"image format ({supported}) \u2014 its file_name extension may be "
+            f"wrong. Verify via {list_tool}."
+        )
+    return Image(data=raw, format=sniffed_format)
+
+
 @mcp.tool(
     tags={"read"},
     timeout=60.0,
@@ -167,74 +239,25 @@ async def get_document_attachment_content(
 
     PNG, JPEG, GIF, and WebP return as a viewable image; SVG returns its
     source markup as text. Any other extension is rejected before any
-    request. Use list_document_attachments to discover attachment ids,
+    request. Use get_work_item_attachment_content for work item
+    attachments. Use list_document_attachments to discover attachment ids,
     file names, and sizes.
     """
-    extension = PurePosixPath(attachment_id).suffix.lower()
-    is_svg = extension == _SVG_EXTENSION
-    if extension in _BITMAP_EXTENSION_TO_FORMAT:
-        max_bytes = _MAX_BITMAP_BYTES
-    elif is_svg:
-        max_bytes = _MAX_SVG_BYTES
-    else:
-        # Format names double as extensions -- LLM match against file_name.
-        supported = ", ".join(
-            [*sorted(set(_BITMAP_EXTENSION_TO_FORMAT.values())), "svg"]
-        )
-        raise ValueError(
-            f"Attachment '{attachment_id}' has an unsupported or "
-            f"unrecognized extension; supported formats: {supported}. "
-            "Check file_name via list_document_attachments."
-        )
-
-    path = (
-        f"/projects/{encode_path_segment(project_id)}"
-        f"/spaces/{encode_path_segment(space_id)}"
-        f"/documents/{encode_path_segment(document_name)}"
-        f"/attachments/{encode_path_segment(attachment_id)}/content"
+    return await _fetch_attachment_content(
+        ctx,
+        path=(
+            f"/projects/{encode_path_segment(project_id)}"
+            f"/spaces/{encode_path_segment(space_id)}"
+            f"/documents/{encode_path_segment(document_name)}"
+            f"/attachments/{encode_path_segment(attachment_id)}/content"
+        ),
+        attachment_id=attachment_id,
+        list_tool="list_document_attachments",
+        not_found_location=(
+            f"in document '{space_id}/{document_name}' (project '{project_id}')"
+        ),
+        resource_noun="document",
     )
-    try:
-        raw = await get_client(ctx).get_bytes(path, max_bytes=max_bytes)
-    except PolarionResponseTooLargeError as exc:
-        raise ValueError(
-            f"Attachment '{attachment_id}' exceeds the {max_bytes} byte "
-            "fetch cap. Check length via list_document_attachments before "
-            "fetching."
-        ) from exc
-    except PolarionNotFoundError as exc:
-        raise ValueError(
-            f"Attachment '{attachment_id}' not found in document "
-            f"'{space_id}/{document_name}' (project '{project_id}'). Use "
-            "list_document_attachments to discover valid ids."
-        ) from exc
-    except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot access document attachment content -- check your"
-            " POLARION_TOKEN permissions."
-        ) from exc
-    except PolarionError as exc:
-        raise RuntimeError(
-            f"Failed to fetch attachment '{attachment_id}': {exc.message}"
-        ) from exc
-
-    if is_svg:
-        text = raw.decode("utf-8", errors="replace")
-        if not _looks_like_svg(text):
-            raise ValueError(
-                f"Attachment '{attachment_id}' content is not SVG markup — "
-                "its file_name extension may be wrong. Verify via "
-                "list_document_attachments."
-            )
-        return text
-    sniffed_format = _sniff_bitmap_format(raw)
-    if sniffed_format is None:
-        supported = ", ".join(sorted(set(_BITMAP_EXTENSION_TO_FORMAT.values())))
-        raise ValueError(
-            f"Attachment '{attachment_id}' content matches no supported "
-            f"image format ({supported}) — its file_name extension may be "
-            "wrong. Verify via list_document_attachments."
-        )
-    return Image(data=raw, format=sniffed_format)
 
 
 @mcp.tool(
@@ -290,6 +313,42 @@ async def list_work_item_attachments(
         ) from exc
 
     return parse_attachments_page(response, page_number, page_size)
+
+
+@mcp.tool(
+    tags={"read"},
+    timeout=60.0,
+    annotations={"readOnlyHint": True},
+)
+async def get_work_item_attachment_content(
+    ctx: Context,
+    project_id: str = Field(description="Polarion project ID."),
+    work_item_id: str = Field(description="Work item ID within project_id."),
+    attachment_id: str = Field(
+        description="Attachment id (bare filename token) from"
+        " list_work_item_attachments."
+    ),
+) -> Image | str:
+    """Fetch a work item attachment's content for viewing.
+
+    PNG, JPEG, GIF, and WebP return as a viewable image; SVG returns its
+    source markup as text. Any other extension is rejected before any
+    request. Use get_document_attachment_content for document attachments.
+    Use list_work_item_attachments to discover attachment ids, file names,
+    and sizes.
+    """
+    return await _fetch_attachment_content(
+        ctx,
+        path=(
+            f"/projects/{encode_path_segment(project_id)}"
+            f"/workitems/{encode_path_segment(work_item_id)}"
+            f"/attachments/{encode_path_segment(attachment_id)}/content"
+        ),
+        attachment_id=attachment_id,
+        list_tool="list_work_item_attachments",
+        not_found_location=(f"on work item '{work_item_id}' (project '{project_id}')"),
+        resource_noun="work item",
+    )
 
 
 def _effective_file_name(spec: DocumentAttachmentSpec | WorkItemAttachmentSpec) -> str:
@@ -533,13 +592,11 @@ async def create_document_attachments(  # noqa: PLR0913
             f"Failed to create document attachments: {exc.message}"
         ) from exc
 
-    attachment_ids = extract_created_short_ids(response)
-    if not attachment_ids:
-        raise RuntimeError(
-            "Polarion returned no attachment IDs after creation."
-            " The POST may have succeeded -- verify with"
-            " `list_document_attachments`."
-        )
+    attachment_ids = extract_created_short_ids(
+        response,
+        expected_count=len(attachments),
+        list_tool="list_document_attachments",
+    )
 
     return AttachmentsCreateResult(
         created=True,
@@ -648,13 +705,11 @@ async def create_work_item_attachments(
             f"Failed to create work item attachments: {exc.message}"
         ) from exc
 
-    attachment_ids = extract_created_short_ids(response)
-    if not attachment_ids:
-        raise RuntimeError(
-            "Polarion returned no attachment IDs after creation."
-            " The POST may have succeeded -- verify with"
-            " `list_work_item_attachments`."
-        )
+    attachment_ids = extract_created_short_ids(
+        response,
+        expected_count=len(attachments),
+        list_tool="list_work_item_attachments",
+    )
 
     return AttachmentsCreateResult(
         created=True,

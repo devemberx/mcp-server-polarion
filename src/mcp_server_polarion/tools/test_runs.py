@@ -174,13 +174,9 @@ async def create_test_runs(
     except PolarionError as exc:
         raise RuntimeError(f"Failed to create test runs: {exc.message}") from exc
 
-    new_ids = extract_created_short_ids(response)
-    if len(new_ids) != len(items):
-        raise RuntimeError(
-            f"Polarion accepted the bulk create but returned {len(new_ids)} "
-            f"ids for {len(items)} requested runs. The batch may be partially "
-            "created; verify with list_test_runs before retrying."
-        )
+    new_ids = extract_created_short_ids(
+        response, expected_count=len(items), list_tool="list_test_runs"
+    )
 
     return TestRunsCreateResult(
         created=True,

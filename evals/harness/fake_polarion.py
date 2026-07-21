@@ -15,6 +15,8 @@ from typing import Any
 import httpx
 import respx
 
+from mcp_server_polarion.tools._shared.pagination import DEFAULT_PAGE_SIZE
+
 from .fixtures import (
     API_PREFIX,
     AUTHOR,
@@ -28,6 +30,7 @@ from .fixtures import (
     TEST_RUN_ID,
     TESTCASE_ID,
     TS,
+    WORKITEM_ATTACHMENT_CONTENT,
     Attachment,
     Comment,
     Seeds,
@@ -484,15 +487,35 @@ class FakePolarion:
                 f"{PROJECT}/{wi_id}",
                 "workitem_attachments",
             )
+            body: dict[str, Any] = {
+                "data": data,
+                "included": self._author_included() if data else [],
+            }
+            # Live: totalCount on every page once collection span >1 page;
+            # single-page/empty omit meta -- diverge doc overshoot-only rule.
+            page_size = int(params.get("page[size]", str(DEFAULT_PAGE_SIZE)))
+            if len(data) > page_size:
+                body["meta"] = {"totalCount": len(data)}
+            return httpx.Response(200, json=body)
+
+        # WI content mirror doc route: 406 without octet-stream Accept
+        # (live-verified for WI endpoint 2026-07-21), 404 unseeded work item
+        # or attachment id, else raw bytes. No space axis on work items.
+        wi_attachment_content = re.search(
+            r"/workitems/([^/]+)/attachments/([^/]+)/content$", path
+        )
+        if wi_attachment_content:
+            wi_id, attachment_id = wi_attachment_content.groups()
+            if "application/octet-stream" not in request.headers.get("accept", ""):
+                return httpx.Response(406, json={"errors": [{"status": "406"}]})
+            wi = self.seeds.work_items.get(wi_id)
+            known_ids = {a.attachment_id for a in wi.attachments} if wi else set()
+            if wi is None or attachment_id not in known_ids:
+                return httpx.Response(404, json={"errors": [{"status": "404"}]})
             return httpx.Response(
                 200,
-                json={
-                    "data": data,
-                    "included": self._author_included() if data else [],
-                    # Live: totalCount serve every multi-page page; fake
-                    # always emit it -- diverges from doc route's omit.
-                    "meta": {"totalCount": len(data)},
-                },
+                content=WORKITEM_ATTACHMENT_CONTENT,
+                headers={"Content-Type": "application/octet-stream"},
             )
 
         # query=linkedWorkItems:{wi} = back-link fallback (sources -> target).

@@ -37,8 +37,10 @@ from mcp_server_polarion.tools._shared.fields import (
 )
 from mcp_server_polarion.tools._shared.guard import (
     guard_hyperlink_roles,
+    guard_work_item_attachment_refs,
     guard_work_item_custom_fields,
     guard_work_item_enums,
+    reject_any_scheme_refs,
     resolve_work_item_types,
 )
 from mcp_server_polarion.tools._shared.helpers import (
@@ -268,11 +270,14 @@ async def create_work_items(
                 client, project_id, spec.type, spec.custom_fields
             )
 
+    raw_descriptions_html = [
+        markdown_to_html(spec.description) if spec.description else "" for spec in items
+    ]
+    # Guard pre-sanitize -- sanitize_html strip <img>, refs vanish after.
+    reject_any_scheme_refs(raw_descriptions_html, "work item")
     descriptions_html = [
-        polarionify_html(sanitize_html(markdown_to_html(spec.description)))
-        if spec.description
-        else ""
-        for spec in items
+        polarionify_html(sanitize_html(raw)) if raw else ""
+        for raw in raw_descriptions_html
     ]
 
     payload = _build_create_work_items_payload(
@@ -303,13 +308,9 @@ async def create_work_items(
     except PolarionError as exc:
         raise RuntimeError(f"Failed to create work items: {exc.message}") from exc
 
-    new_ids = extract_created_short_ids(response)
-    if len(new_ids) != len(items):
-        raise RuntimeError(
-            f"Polarion accepted the bulk create but returned {len(new_ids)} "
-            f"ids for {len(items)} requested items. The batch may be partially "
-            "created; verify with list_work_items before retrying."
-        )
+    new_ids = extract_created_short_ids(
+        response, expected_count=len(items), list_tool="list_work_items"
+    )
 
     return WorkItemsCreateResult(
         created=True,
@@ -329,7 +330,7 @@ async def create_work_items(
         "openWorldHint": True,
     },
 )
-async def update_work_items(  # noqa: PLR0913
+async def update_work_items(  # noqa: PLR0912, PLR0913
     ctx: Context,
     project_id: str = Field(min_length=1, description="Polarion project ID."),
     items: list[WorkItemUpdateSpec] = Field(  # noqa: B008
@@ -364,9 +365,10 @@ async def update_work_items(  # noqa: PLR0913
     description_html is raw Polarion HTML, sent verbatim — source from
     get_work_item(include_description_html=True); greenfield bodies use
     create_work_items Markdown, formats never mix. To add a table, caption,
-    link, or widget, call get_html_recipes first and adapt its template
-    before writing description_html — hand-written table markup is
-    rejected.
+    image, link, or widget, call get_html_recipes first and adapt its
+    template before writing description_html — hand-written table markup is
+    rejected. workitemimg:{id} image refs must name an existing attachment
+    — confirm via list_work_item_attachments first.
 
     custom_fields is partial; keys outside the type schema are rejected,
     values are not validated — resolve via list_work_item_enum_options
@@ -419,6 +421,10 @@ async def update_work_items(  # noqa: PLR0913
                 # attribute to its batch position like other guards.
                 await guard_hyperlink_roles(
                     client, project_id, [h.role for h in spec.hyperlinks]
+                )
+            if spec.description_html:
+                await guard_work_item_attachment_refs(
+                    client, project_id, spec.work_item_id, spec.description_html
                 )
 
     query_params = _update_query_params(workflow_action, change_type_to)

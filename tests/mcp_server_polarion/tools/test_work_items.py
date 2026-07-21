@@ -38,6 +38,9 @@ from mcp_server_polarion.tools.work_items import (
     read_work_item,
     update_work_items,
 )
+from tests.mcp_server_polarion.tools._shared.guard._builders import (
+    attachments_response,
+)
 
 
 def _project_enum_get_response(enum_name: str, ids: list[str]) -> dict[str, object]:
@@ -559,7 +562,7 @@ class TestCreateWorkItemsHappyPath:
                     title="t",
                     type="task",
                     description=(
-                        "| a | b |\n| --- | --- |\n| 1 | 2 |\n\nTable: 캡션\n"
+                        "| a | b |\n| --- | --- |\n| 1 | 2 |\n\nTable: légende\n"
                     ),
                 )
             ],
@@ -570,7 +573,7 @@ class TestCreateWorkItemsHappyPath:
         desc_html = kwargs["json"]["data"][0]["attributes"]["description"]["value"]
         assert 'class="polarion-Document-table"' in desc_html
         assert 'data-sequence="Table"' in desc_html
-        assert "캡션" in desc_html
+        assert "légende" in desc_html
 
     async def test_rich_text_custom_field_value_not_polarionified(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -1662,6 +1665,100 @@ class TestEnumGuardUpdateWorkItems:
             )
 
         mock_client.patch.assert_not_called()
+
+
+class TestCreateWorkItemsAttachmentRefGuard:
+    """Create -- any scheme ref block write; no attachments pre-create."""
+
+    async def test_clean_markdown_description_is_unaffected(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {
+            "data": [{"type": "workitems", "id": "MyProj/MCPT-1"}]
+        }
+
+        result = await _call_create_wi(mock_ctx, description="Plain paragraph.")
+
+        assert result.created is True  # type: ignore[attr-defined]
+        mock_client.post.assert_awaited_once()
+
+    async def test_markdown_image_ref_rejected_before_create(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Guard run pre-sanitize -- same pipeline as create_document."""
+        with pytest.raises(ValueError, match="attachments cannot exist"):
+            await _call_create_wi(mock_ctx, description="![x](workitemimg:ghost.png)")
+        mock_client.post.assert_not_called()
+
+
+class TestUpdateWorkItemsAttachmentRefGuard:
+    """``update_work_items`` verify each item's body refs vs live attachment
+    list pre-PATCH.
+    """
+
+    async def test_dangling_ref_in_second_item_names_batch_position(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = [
+            _existence_response(("MCPT-1", "task"), ("MCPT-2", "task")),
+            attachments_response(["1-real.png"], meta=False),
+            attachments_response(["1-real.png"], meta=False),
+        ]
+
+        with pytest.raises(ValueError) as exc:
+            await _call_update(
+                mock_ctx,
+                items=[
+                    _spec(
+                        work_item_id="MCPT-1",
+                        description_html='<img src="workitemimg:1-real.png"/>',
+                    ),
+                    _spec(
+                        work_item_id="MCPT-2",
+                        description_html='<img src="workitemimg:ghost.png"/>',
+                    ),
+                ],
+            )
+
+        message = str(exc.value)
+        assert "items[1] ('MCPT-2')" in message
+        assert "list_work_item_attachments" in message
+        mock_client.patch.assert_not_called()
+
+    async def test_valid_ref_item_passes(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = [
+            _existence_response(("MCPT-1", "task")),
+            attachments_response(["1-real.png"], meta=False),
+        ]
+        mock_client.patch.return_value = {}
+
+        result = await _call_update(
+            mock_ctx,
+            items=[_spec(description_html='<img src="workitemimg:1-real.png"/>')],
+        )
+
+        assert result.updated is True
+        mock_client.patch.assert_awaited_once()
+
+    async def test_spec_without_description_html_adds_no_attachments_get(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _existence_response(("MCPT-1", "task"))
+        mock_client.patch.return_value = {}
+
+        await _call_update(mock_ctx, items=[_spec(title="t")])
+
+        assert mock_client.get.await_count == 1
+
+
+class TestUpdateWorkItemsAttachmentRefDocstringClause:
+    """Lock attachment-ref validation clause into public docstring."""
+
+    def test_docstring_names_list_work_item_attachments(self) -> None:
+        document = update_work_items.__doc__ or ""
+        assert "list_work_item_attachments" in document
 
 
 class TestListWorkItems:

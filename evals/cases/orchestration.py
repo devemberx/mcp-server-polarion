@@ -19,7 +19,9 @@ from evals.cases._shared import Step, make_case
 from evals.harness.fixtures import (
     CHILD_REQ_ID,
     DOC,
+    DOC_ATTACHMENT_ID,
     FLOATING_TASK_ID,
+    PROJECT,
     SPACE,
 )
 
@@ -199,6 +201,32 @@ CASES: list[Case] = [
                 "observed_arg": "document_name",
                 "observed_in": "list_documents",
                 "observed_path": "items[].document_name",
+            },
+        ],
+        read_only=True,
+    ),
+    _case(
+        "ORCH-DOC-ATTACHMENT-FETCH",
+        f"Show me the diagram image attached to the document '{DOC}' in "
+        f"space '{SPACE}'.",
+        # Doc body carry no attachment ref -- id only discoverable via
+        # listing, so threaded attachment_id provably observed.
+        intent="Discover the attachment via list_document_attachments -> fetch "
+        "its content with the full address threaded exactly (project/space/"
+        "document/attachment id, observed from the listing); read-only.",
+        steps=[
+            {"tool": "list_document_attachments", "match": {"document_name": DOC}},
+            {
+                "tool": "get_document_attachment_content",
+                "match": {
+                    "project_id": PROJECT,
+                    "space_id": SPACE,
+                    "document_name": DOC,
+                    "attachment_id": DOC_ATTACHMENT_ID,
+                },
+                "observed_arg": "attachment_id",
+                "observed_in": "list_document_attachments",
+                "observed_path": "items[].id",
             },
         ],
         read_only=True,

@@ -5,6 +5,7 @@ hand-built requests (no respx). Pin routing table and mutation log.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import Any
 
 import httpx
@@ -32,7 +33,9 @@ from evals.harness.fixtures import (
     TEST_RUN_ID_2,
     TEST_RUN_TEMPLATE_ID,
     TESTCASE_ID,
+    WORKITEM_ATTACHMENT_CONTENT,
     WORKITEM_ATTACHMENT_ID,
+    Attachment,
 )
 
 _BASE = f"{POLARION_HOST}{API_PREFIX}"
@@ -297,6 +300,7 @@ class TestReadRouting:
         assert response.status_code == 200
         assert _json(response)["data"] == []
         assert _json(response)["included"] == []
+        assert "meta" not in _json(response)
 
     def test_workitem_attachments_relationships_author_only(self) -> None:
         response = _get(
@@ -306,18 +310,75 @@ class TestReadRouting:
         entry = _json(response)["data"][0]
         assert sorted(entry["relationships"]) == ["author"]
 
-    def test_workitem_attachments_meta_total_count_always_present(self) -> None:
-        # Live rule: totalCount serve every multi-page page; fake always emit
-        # it here -- diverges from doc route's overshoot-only omit.
+    def test_workitem_attachments_single_page_omits_meta(self) -> None:
+        # Live rule: single-page collection omit totalCount.
         response = _get(
             FakePolarion(),
             f"/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}/attachments",
         )
-        assert _json(response)["meta"]["totalCount"] == 1
+        assert "meta" not in _json(response)
+
+    def test_workitem_attachments_multi_page_meta_present_every_page(self) -> None:
+        # Live rule: >1-page collection serve totalCount on every page --
+        # unlike doc route overshoot-only rule.
+        wi = SEEDS.work_items[FLOATING_TASK_ID]
+        attachments = [Attachment(f"{i}-fake-extra.png", "fake", 10) for i in range(3)]
+        seeds = replace(
+            SEEDS,
+            work_items={
+                **SEEDS.work_items,
+                FLOATING_TASK_ID: replace(wi, attachments=attachments),
+            },
+        )
+        fake = FakePolarion(seeds=seeds)
+        path = f"/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}/attachments"
+        page1 = _get(fake, path, **{"page[size]": "2"})
+        page2 = _get(fake, path, **{"page[size]": "2", "page[number]": "2"})
+        assert _json(page1)["meta"]["totalCount"] == 3
+        assert _json(page2)["meta"]["totalCount"] == 3
 
     def test_workitem_attachments_unseeded_work_item_404(self) -> None:
         response = _get(
             FakePolarion(), f"/projects/{PROJECT}/workitems/MCPT-9999/attachments"
+        )
+        assert response.status_code == 404
+
+    def test_workitem_attachment_content_serves_seeded_bytes(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}/attachments/"
+            f"{WORKITEM_ATTACHMENT_ID}/content",
+            headers=_BYTES_ACCEPT,
+        )
+        assert response.status_code == 200
+        assert response.content == WORKITEM_ATTACHMENT_CONTENT
+
+    def test_workitem_attachment_content_json_only_accept_is_406(self) -> None:
+        # Live-verified 2026-07-21: same 406 contract as doc route.
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}/attachments/"
+            f"{WORKITEM_ATTACHMENT_ID}/content",
+            headers={"Accept": "application/json"},
+        )
+        assert response.status_code == 406
+        assert _json(response)["errors"]
+
+    def test_workitem_attachment_content_unseeded_attachment_is_404(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}/attachments/"
+            "999-not-real.png/content",
+            headers=_BYTES_ACCEPT,
+        )
+        assert response.status_code == 404
+
+    def test_workitem_attachment_content_unseeded_work_item_is_404(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/workitems/MCPT-9999/attachments/"
+            f"{WORKITEM_ATTACHMENT_ID}/content",
+            headers=_BYTES_ACCEPT,
         )
         assert response.status_code == 404
 

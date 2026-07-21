@@ -32,6 +32,7 @@ from mcp_server_polarion.tools.attachments import (
     create_document_attachments,
     create_work_item_attachments,
     get_document_attachment_content,
+    get_work_item_attachment_content,
     list_document_attachments,
     list_work_item_attachments,
 )
@@ -934,6 +935,340 @@ class TestListWorkItemAttachmentsFieldValidation:
         assert self._adapter_for("page_number").validate_python(1) == 1
 
 
+class TestGetWorkItemAttachmentContent:
+    """``get_work_item_attachment_content`` tool."""
+
+    async def test_bitmap_happy_path_returns_image(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        raw = b"\x89PNG\r\n\x1a\nfakepngbytes"
+        mock_client.get_bytes = AsyncMock(return_value=raw)
+
+        result = await get_work_item_attachment_content(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT-556",
+            attachment_id="1-shot.png",
+        )
+
+        assert isinstance(result, Image)
+        assert result.data == raw
+        assert result.to_image_content().mimeType == "image/png"
+        mock_client.get_bytes.assert_awaited_once_with(
+            "/projects/proj1/workitems/MCPT-556/attachments/1-shot.png/content",
+            max_bytes=5 * 1024 * 1024,
+        )
+
+    async def test_uppercase_extension_still_bitmap(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        raw = b"\x89PNG\r\n\x1a\nfakepngbytes"
+        mock_client.get_bytes = AsyncMock(return_value=raw)
+
+        result = await get_work_item_attachment_content(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT-556",
+            attachment_id="1-shot.PNG",
+        )
+
+        assert isinstance(result, Image)
+        assert result.to_image_content().mimeType == "image/png"
+
+    async def test_svg_returns_decoded_string(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        raw = b"<svg xmlns='http://www.w3.org/2000/svg'></svg>"
+        mock_client.get_bytes = AsyncMock(return_value=raw)
+
+        result = await get_work_item_attachment_content(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT-556",
+            attachment_id="1-diagram.svg",
+        )
+
+        assert isinstance(result, str)
+        assert result == raw.decode("utf-8")
+        mock_client.get_bytes.assert_awaited_once_with(
+            "/projects/proj1/workitems/MCPT-556/attachments/1-diagram.svg/content",
+            max_bytes=64 * 1024,
+        )
+
+    async def test_bitmap_magic_overrides_extension(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Renamed file: .png name, JPEG bytes — magic decides served mime."""
+        mock_client.get_bytes = AsyncMock(return_value=b"\xff\xd8\xffjpegbytes")
+
+        result = await get_work_item_attachment_content(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT-556",
+            attachment_id="1-shot.png",
+        )
+
+        assert isinstance(result, Image)
+        assert result.to_image_content().mimeType == "image/jpeg"
+
+    @pytest.mark.parametrize(
+        "attachment_id",
+        ["1-a.png", "1-a.jpg", "1-a.jpeg", "1-a.jpe", "1-a.gif", "1-a.webp"],
+    )
+    async def test_every_bitmap_extension_routes_pre_request(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, attachment_id: str
+    ) -> None:
+        """Extension map project-owned — dropped key = silent false reject."""
+        mock_client.get_bytes = AsyncMock(return_value=b"\x89PNG\r\n\x1a\npng")
+
+        result = await get_work_item_attachment_content(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT-556",
+            attachment_id=attachment_id,
+        )
+
+        assert isinstance(result, Image)
+        assert mock_client.get_bytes.await_args.kwargs["max_bytes"] == 5 * 1024 * 1024
+
+    @pytest.mark.parametrize("magic", [b"GIF87a", b"GIF89a"])
+    async def test_gif_magic_detected(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, magic: bytes
+    ) -> None:
+        mock_client.get_bytes = AsyncMock(return_value=magic + b"gifbytes")
+
+        result = await get_work_item_attachment_content(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT-556",
+            attachment_id="1-anim.gif",
+        )
+
+        assert isinstance(result, Image)
+        assert result.to_image_content().mimeType == "image/gif"
+
+    async def test_webp_riff_magic_detected(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get_bytes = AsyncMock(
+            return_value=b"RIFF\x24\x00\x00\x00WEBPVP8 webpbytes"
+        )
+
+        result = await get_work_item_attachment_content(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT-556",
+            attachment_id="1-shot.webp",
+        )
+
+        assert isinstance(result, Image)
+        assert result.to_image_content().mimeType == "image/webp"
+
+    async def test_bitmap_magic_mismatch_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Garbage bytes as image = whole-request vision API 400 — reject."""
+        mock_client.get_bytes = AsyncMock(return_value=b"MZ not an image")
+
+        with pytest.raises(
+            ValueError,
+            match=r"\(gif, jpeg, png, webp\).*list_work_item_attachments",
+        ):
+            await get_work_item_attachment_content(
+                mock_ctx,
+                project_id="proj1",
+                work_item_id="MCPT-556",
+                attachment_id="1-shot.png",
+            )
+
+    async def test_svg_bom_and_whitespace_prefix_ok(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        raw = b"\xef\xbb\xbf\n <?xml version='1.0'?><svg></svg>"
+        mock_client.get_bytes = AsyncMock(return_value=raw)
+
+        result = await get_work_item_attachment_content(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT-556",
+            attachment_id="1-diagram.svg",
+        )
+
+        assert isinstance(result, str)
+
+    async def test_svg_binary_content_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Binary mislabeled .svg = up to 16k tokens of mojibake — reject."""
+        mock_client.get_bytes = AsyncMock(return_value=b"\x89PNG\r\n\x1a\npng")
+
+        with pytest.raises(ValueError, match="list_work_item_attachments"):
+            await get_work_item_attachment_content(
+                mock_ctx,
+                project_id="proj1",
+                work_item_id="MCPT-556",
+                attachment_id="1-diagram.svg",
+            )
+
+    async def test_unsupported_extension_raises_value_error_no_client_call(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get_bytes = AsyncMock()
+
+        with pytest.raises(ValueError, match="list_work_item_attachments"):
+            await get_work_item_attachment_content(
+                mock_ctx,
+                project_id="proj1",
+                work_item_id="MCPT-556",
+                attachment_id="1-report.docx",
+            )
+
+        mock_client.get_bytes.assert_not_awaited()
+
+    async def test_extensionless_id_raises_value_error_no_client_call(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get_bytes = AsyncMock()
+
+        with pytest.raises(ValueError, match="list_work_item_attachments"):
+            await get_work_item_attachment_content(
+                mock_ctx,
+                project_id="proj1",
+                work_item_id="MCPT-556",
+                attachment_id="README",
+            )
+
+        mock_client.get_bytes.assert_not_awaited()
+
+    async def test_svgz_rejected_pre_request(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """.svgz = gzipped SVG — bytes never decode as markup, reject early."""
+        mock_client.get_bytes = AsyncMock()
+
+        with pytest.raises(ValueError, match="list_work_item_attachments"):
+            await get_work_item_attachment_content(
+                mock_ctx,
+                project_id="proj1",
+                work_item_id="MCPT-556",
+                attachment_id="1-diagram.svgz",
+            )
+
+        mock_client.get_bytes.assert_not_awaited()
+
+    async def test_gz_double_extension_rejected_pre_request(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """.png.gz = gzip bytes, not PNG — reject on final suffix."""
+        mock_client.get_bytes = AsyncMock()
+
+        with pytest.raises(ValueError, match="list_work_item_attachments"):
+            await get_work_item_attachment_content(
+                mock_ctx,
+                project_id="proj1",
+                work_item_id="MCPT-556",
+                attachment_id="1-shot.png.gz",
+            )
+
+        mock_client.get_bytes.assert_not_awaited()
+
+    async def test_unsupported_extension_message_lists_extensions(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """Rejection lists extensions, not mime types — LLM match file_name."""
+        mock_client.get_bytes = AsyncMock()
+
+        with pytest.raises(
+            ValueError, match=r"supported formats: gif, jpeg, png, webp, svg"
+        ):
+            await get_work_item_attachment_content(
+                mock_ctx,
+                project_id="proj1",
+                work_item_id="MCPT-556",
+                attachment_id="1-report.docx",
+            )
+
+    async def test_response_too_large_raises_value_error_mentioning_cap(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get_bytes = AsyncMock(
+            side_effect=PolarionResponseTooLargeError(
+                "too big",
+                limit=5 * 1024 * 1024,
+            )
+        )
+
+        with pytest.raises(ValueError, match="5242880"):
+            await get_work_item_attachment_content(
+                mock_ctx,
+                project_id="proj1",
+                work_item_id="MCPT-556",
+                attachment_id="1-shot.png",
+            )
+
+    async def test_not_found_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get_bytes = AsyncMock(
+            side_effect=PolarionNotFoundError("Not found", status_code=404)
+        )
+
+        with pytest.raises(ValueError, match="list_work_item_attachments"):
+            await get_work_item_attachment_content(
+                mock_ctx,
+                project_id="proj1",
+                work_item_id="MCPT-556",
+                attachment_id="1-shot.png",
+            )
+
+    async def test_auth_error_raises_permission_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get_bytes = AsyncMock(
+            side_effect=PolarionAuthError("Forbidden", status_code=403)
+        )
+
+        with pytest.raises(PermissionError, match="POLARION_TOKEN"):
+            await get_work_item_attachment_content(
+                mock_ctx,
+                project_id="proj1",
+                work_item_id="MCPT-556",
+                attachment_id="1-shot.png",
+            )
+
+    async def test_polarion_error_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get_bytes = AsyncMock(
+            side_effect=PolarionError("Boom", status_code=500)
+        )
+
+        with pytest.raises(RuntimeError):
+            await get_work_item_attachment_content(
+                mock_ctx,
+                project_id="proj1",
+                work_item_id="MCPT-556",
+                attachment_id="1-shot.png",
+            )
+
+    async def test_url_encodes_path_segments(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get_bytes = AsyncMock(return_value=b"\x89PNG\r\n\x1a\nfakepngbytes")
+
+        await get_work_item_attachment_content(
+            mock_ctx,
+            project_id="proj1",
+            work_item_id="MCPT 556",
+            attachment_id="1 shot.png",
+        )
+
+        path = mock_client.get_bytes.call_args_list[0][0][0]
+        assert path == (
+            "/projects/proj1/workitems/MCPT%20556/attachments/1%20shot.png/content"
+        )
+
+
 class TestBuildDocumentAttachmentsPayload:
     """``_build_document_attachments_payload`` -- pure JSON:API body builder."""
 
@@ -1289,13 +1624,44 @@ class TestCreateDocumentAttachmentsHappyPath:
         path.write_bytes(b"a")
         mock_client.post_multipart = AsyncMock(return_value={"data": []})
 
-        with pytest.raises(RuntimeError, match="list_document_attachments"):
+        with pytest.raises(
+            RuntimeError, match=r"0 ids for 1 submitted.*list_document_attachments"
+        ):
             await create_document_attachments(
                 mock_ctx,
                 project_id="P",
                 space_id="S",
                 document_name="D",
                 attachments=[DocumentAttachmentSpec(file_path=str(path))],
+                dry_run=False,
+            )
+
+    async def test_short_id_echo_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        """201 echoing fewer ids than uploaded must raise, not short list."""
+        first = tmp_path / "a.png"
+        second = tmp_path / "b.png"
+        first.write_bytes(b"aaa")
+        second.write_bytes(b"bbbb")
+        mock_client.post_multipart = AsyncMock(
+            return_value={
+                "data": [{"type": "document_attachments", "id": "P/S/D/a.png"}]
+            }
+        )
+
+        with pytest.raises(
+            RuntimeError, match=r"1 ids for 2 submitted.*list_document_attachments"
+        ):
+            await create_document_attachments(
+                mock_ctx,
+                project_id="P",
+                space_id="S",
+                document_name="D",
+                attachments=[
+                    DocumentAttachmentSpec(file_path=str(first)),
+                    DocumentAttachmentSpec(file_path=str(second)),
+                ],
                 dry_run=False,
             )
 
@@ -1763,7 +2129,9 @@ class TestCreateWorkItemAttachmentsHappyPath:
         path.write_bytes(b"a")
         mock_client.post_multipart = AsyncMock(return_value={"data": []})
 
-        with pytest.raises(RuntimeError, match="list_work_item_attachments"):
+        with pytest.raises(
+            RuntimeError, match=r"0 ids for 1 submitted.*list_work_item_attachments"
+        ):
             await create_work_item_attachments(
                 mock_ctx,
                 project_id="P",
@@ -2006,19 +2374,29 @@ class TestCreateWorkItemAttachmentsErrorMapping:
                 dry_run=False,
             )
 
-    async def test_empty_echo_raises_runtime_error(
+    async def test_partial_echo_raises_runtime_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
     ) -> None:
-        path = tmp_path / "a.png"
-        path.write_bytes(b"a")
-        mock_client.post_multipart = AsyncMock(return_value={"data": []})
+        # Short echo on 2-file batch = possible partial create -- count guard.
+        for name in ("a.png", "b.png"):
+            (tmp_path / name).write_bytes(b"a")
+        mock_client.post_multipart = AsyncMock(
+            return_value={
+                "data": [{"type": "workitem_attachments", "id": "P/WI-1/1-a.png"}]
+            }
+        )
 
-        with pytest.raises(RuntimeError, match="list_work_item_attachments"):
+        with pytest.raises(
+            RuntimeError, match=r"1 ids for 2 submitted.*list_work_item_attachments"
+        ):
             await create_work_item_attachments(
                 mock_ctx,
                 project_id="P",
                 work_item_id="WI-1",
-                attachments=[WorkItemAttachmentSpec(file_path=str(path))],
+                attachments=[
+                    WorkItemAttachmentSpec(file_path=str(tmp_path / "a.png")),
+                    WorkItemAttachmentSpec(file_path=str(tmp_path / "b.png")),
+                ],
                 dry_run=False,
             )
 

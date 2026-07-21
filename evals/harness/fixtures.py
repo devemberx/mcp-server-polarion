@@ -51,6 +51,14 @@ DOC_ATTACHMENT_CONTENT = (
 # Attachment on FLOATING_TASK_ID.
 WORKITEM_ATTACHMENT_ID = "1-fake-screenshot.png"
 
+# 1x1 red PNG, served verbatim for WORKITEM_ATTACHMENT_ID -- bytes distinct
+# from DOC_ATTACHMENT_CONTENT so eval checks prove routing, not luck.
+WORKITEM_ATTACHMENT_CONTENT = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc8!'\x07\x00"
+    b"\x02\xb6\x01\x054\xa6u\xaa\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
 # Second document + requirement traceability seeds (orchestration cases).
 PARENT_DOC = "FakeParentDoc"
 PARENT_MODULE_ID = f"{PROJECT}/{SPACE}/{PARENT_DOC}"

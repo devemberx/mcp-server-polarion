@@ -98,29 +98,8 @@ def extract_short_id(full_id: str) -> str:
     return full_id.rsplit("/", maxsplit=1)[-1]
 
 
-def extract_created_short_ids(response: dict[str, object]) -> list[str]:
-    """Short resource ids from bulk 201 response; rely on Polarion echoing
-    ``data`` in submission order (call-site count check catch missing ids,
-    not reordered).
-    """
-    data = response.get("data")
-    if not isinstance(data, list):
-        return []
-    ids: list[str] = []
-    for item in data:
-        if isinstance(item, dict):
-            full_id = safe_str(item.get("id", ""))
-            if full_id:
-                ids.append(extract_short_id(full_id))
-    return ids
-
-
-def extract_created_full_ids(response: dict[str, object]) -> list[str]:
-    """Verbatim resource ids from bulk 201 response -- testrecord ids are
-    5 segments (project/testRun/testCaseProject/testCaseId/iteration);
-    ``extract_created_short_ids`` would rsplit to the bare iteration index,
-    losing test case + run context. Collect ``data[].id`` as-is, never split.
-    """
+def _collect_created_ids(response: dict[str, object]) -> list[str]:
+    """``data[].id`` verbatim, echo order; malformed entries skipped."""
     data = response.get("data")
     if not isinstance(data, list):
         return []
@@ -130,6 +109,45 @@ def extract_created_full_ids(response: dict[str, object]) -> list[str]:
             full_id = safe_str(item.get("id", ""))
             if full_id:
                 ids.append(full_id)
+    return ids
+
+
+def _guard_created_count(
+    ids: list[str], *, expected_count: int, list_tool: str
+) -> None:
+    """201 echo count != submission count = possible partial create --
+    silently short id list would hide it. Fail loud, name the verify tool.
+    """
+    if len(ids) != expected_count:
+        raise RuntimeError(
+            f"Polarion accepted the bulk create but returned {len(ids)} "
+            f"ids for {expected_count} submitted entries. The batch may be "
+            f"partially created; verify with {list_tool} before retrying."
+        )
+
+
+def extract_created_short_ids(
+    response: dict[str, object], *, expected_count: int, list_tool: str
+) -> list[str]:
+    """Short resource ids from bulk 201 response; rely on Polarion echoing
+    ``data`` in submission order (count guard catch missing ids, not
+    reordered).
+    """
+    ids = [extract_short_id(full_id) for full_id in _collect_created_ids(response)]
+    _guard_created_count(ids, expected_count=expected_count, list_tool=list_tool)
+    return ids
+
+
+def extract_created_full_ids(
+    response: dict[str, object], *, expected_count: int, list_tool: str
+) -> list[str]:
+    """Verbatim resource ids from bulk 201 response -- composite ids
+    (testrecord project/testRun/testCaseProject/testCaseId/iteration,
+    linkedworkitem 5-segment) lose context under
+    ``extract_created_short_ids`` rsplit. Collect as-is, never split.
+    """
+    ids = _collect_created_ids(response)
+    _guard_created_count(ids, expected_count=expected_count, list_tool=list_tool)
     return ids
 
 
