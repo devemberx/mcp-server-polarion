@@ -38,6 +38,7 @@ from mcp_server_polarion.tools._shared.helpers import (
     get_client,
     qualify_work_item_id,
     reraise_with_item_context,
+    test_record_path,
 )
 from mcp_server_polarion.tools._shared.pagination import (
     DEFAULT_PAGE_SIZE,
@@ -48,7 +49,6 @@ from mcp_server_polarion.tools._shared.parse import (
     parse_included_user_name_map,
     parse_test_record_detail,
     parse_test_record_summaries,
-    split_test_case_id,
 )
 
 
@@ -447,15 +447,8 @@ async def get_test_record(
     plain-text comments return as-is. Verify coordinates via
     list_test_records if not found.
     """
-    tc_project, tc_id = split_test_case_id(test_case_id)
-
     client = get_client(ctx)
-    path = (
-        f"/projects/{encode_path_segment(project_id)}"
-        f"/testruns/{encode_path_segment(test_run_id)}"
-        f"/testrecords/{encode_path_segment(tc_project)}/{encode_path_segment(tc_id)}"
-        f"/{encode_path_segment(str(iteration))}"
-    )
+    path = test_record_path(project_id, test_run_id, test_case_id, iteration)
     try:
         response = await client.get(
             path,

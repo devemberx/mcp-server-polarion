@@ -31,12 +31,16 @@ from mcp_server_polarion.models import (
 )
 from mcp_server_polarion.server import mcp
 from mcp_server_polarion.tools._shared.fields import ATTACHMENT_LIST_FIELDS
-from mcp_server_polarion.tools._shared.helpers import encode_path_segment, get_client
+from mcp_server_polarion.tools._shared.helpers import (
+    encode_path_segment,
+    get_client,
+    split_test_case_id,
+    test_record_path,
+)
 from mcp_server_polarion.tools._shared.pagination import DEFAULT_PAGE_SIZE
 from mcp_server_polarion.tools._shared.parse import (
     extract_created_short_ids,
     parse_attachments_page,
-    split_test_case_id,
 )
 
 # Whole batch; fail closed before any request.
@@ -312,6 +316,71 @@ async def list_work_item_attachments(
     except PolarionError as exc:
         raise RuntimeError(
             f"Failed to list attachments for '{work_item_id}': {exc.message}"
+        ) from exc
+
+    return parse_attachments_page(response, page_number, page_size)
+
+
+@mcp.tool(
+    tags={"read"},
+    timeout=60.0,
+    annotations={"readOnlyHint": True},
+)
+async def list_test_record_attachments(  # noqa: PLR0913
+    ctx: Context,
+    project_id: str = Field(description="Polarion project ID."),
+    test_run_id: str = Field(description="Test run ID (e.g. 'TR-2026-01')."),
+    test_case_id: str = Field(
+        description=(
+            "Full test case work item ID 'project/WI-id' as returned by "
+            "list_test_records."
+        )
+    ),
+    iteration: int = Field(
+        default=0, ge=0, description="Record iteration number (0-based)."
+    ),
+    page_size: int = Field(default=DEFAULT_PAGE_SIZE, ge=1, le=100),
+    page_number: int = Field(default=1, ge=1),
+) -> PaginatedResult[Attachment]:
+    """List a test record's attachments as a paginated page.
+
+    Test record attachments only -- use list_work_item_attachments for work
+    item files, list_document_attachments for document files. test_case_id
+    is the full 'project/WI-id' form from list_test_records, not the short
+    work item ID. Order is server-defined and not requestable. An empty
+    result means the record has no attachments; verify the
+    run/test-case/iteration coordinates via list_test_records if unsure.
+    """
+    client = get_client(ctx)
+    path = (
+        test_record_path(project_id, test_run_id, test_case_id, iteration)
+        + "/attachments"
+    )
+    try:
+        response = await client.get(
+            path,
+            params={
+                "fields[testrecord_attachments]": ATTACHMENT_LIST_FIELDS,
+                "include": "author",
+                "fields[users]": "name",
+                "page[size]": page_size,
+                "page[number]": page_number,
+            },
+        )
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Test record for case '{test_case_id}' iteration {iteration} not "
+            f"found in test run '{test_run_id}' (project '{project_id}'). "
+            "Use `list_test_records` to discover valid coordinates."
+        ) from exc
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot access test record attachments -- check your"
+            " POLARION_TOKEN permissions."
+        ) from exc
+    except PolarionError as exc:
+        raise RuntimeError(
+            f"Failed to list attachments for test record: {exc.message}"
         ) from exc
 
     return parse_attachments_page(response, page_number, page_size)
@@ -787,7 +856,8 @@ async def create_test_record_attachments(  # noqa: PLR0913
     pick a new file_name. NOT idempotent -- retrying a success is rejected
     as a duplicate, not silently merged.
     """
-    tc_project, tc_id = split_test_case_id(test_case_id)
+    # Fail fast on short-form test_case_id before file reads + dry_run.
+    split_test_case_id(test_case_id)
 
     _reject_duplicate_file_names([_effective_file_name(spec) for spec in attachments])
     files = _read_attachment_files(attachments)
@@ -810,11 +880,8 @@ async def create_test_record_attachments(  # noqa: PLR0913
 
     client = get_client(ctx)
     path = (
-        f"/projects/{encode_path_segment(project_id)}"
-        f"/testruns/{encode_path_segment(test_run_id)}"
-        f"/testrecords/{encode_path_segment(tc_project)}/{encode_path_segment(tc_id)}"
-        f"/{encode_path_segment(str(iteration))}"
-        "/attachments"
+        test_record_path(project_id, test_run_id, test_case_id, iteration)
+        + "/attachments"
     )
     parts = [
         ("files", (file_name, content, "application/octet-stream"))
