@@ -353,7 +353,7 @@ class TestGuardDocumentAttachmentRefs:
 
 
 class TestGuardDocumentCommentAttachmentRefs:
-    """Update-path guard on document comment ``text`` attachment refs."""
+    """Create-path guard on document comment ``text`` attachment refs."""
 
     async def test_matching_ref_passes_via_attachments_path(
         self, mock_client: AsyncMock
