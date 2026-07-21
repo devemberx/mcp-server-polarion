@@ -134,9 +134,9 @@ async def fetch_attachment_ids(
     return frozenset(ids)
 
 
-async def guard_attachment_refs(  # noqa: PLR0913
+async def guard_attachment_refs_many(  # noqa: PLR0913
     client: PolarionClient,
-    html: str,
+    htmls: Iterable[str],
     *,
     path: str,
     resource_type: str,
@@ -145,11 +145,13 @@ async def guard_attachment_refs(  # noqa: PLR0913
     what: str,
     project_id: str,
 ) -> None:
-    """Update path: block *html* refs to nonexistent attachments or other
-    resource's scheme. Both domain axes share this -- only
+    """Block refs across all *htmls* to nonexistent attachments or other
+    resource's scheme. One GET total, not per html -- single update call
+    pass ``[html]``; comment batch passes the whole set, guarded as one
+    union. Both domain axes share this -- only
     path/resource_type/expected_scheme/list_tool differ.
     """
-    refs = extract_scheme_refs(html)
+    refs = [ref for html in htmls for ref in extract_scheme_refs(html)]
     if not refs:
         return
     # Wrong scheme never resolve regardless of real attachments -- reject

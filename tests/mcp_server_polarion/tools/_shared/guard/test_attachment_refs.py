@@ -14,6 +14,7 @@ from mcp_server_polarion.tools._shared.guard._attachment_refs import (
     check_refs_against_ids,
     extract_scheme_refs,
     fetch_attachment_ids,
+    guard_attachment_refs_many,
     reject_any_scheme_refs,
 )
 from mcp_server_polarion.tools._shared.guard._http import GUARD_PAGE_SIZE
@@ -253,3 +254,101 @@ class TestFetchAttachmentIds:
         )
 
         assert ids == frozenset({"y-real.png"})
+
+
+class TestGuardAttachmentRefsMany:
+    async def test_refs_across_htmls_collapse_to_one_get(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = attachments_response(
+            ["1-x.png", "2-y.png"], meta=False
+        )
+
+        await guard_attachment_refs_many(
+            mock_client,
+            ['<img src="attachment:1-x.png"/>', '<img src="attachment:2-y.png"/>'],
+            path="/p",
+            resource_type="document_attachments",
+            expected_scheme="attachment",
+            list_tool="list_document_attachments",
+            what="Document 'S/D'",
+            project_id="P",
+        )
+
+        mock_client.get.assert_awaited_once()
+
+    async def test_no_refs_in_any_html_skips_get(self, mock_client: AsyncMock) -> None:
+        await guard_attachment_refs_many(
+            mock_client,
+            ["<p>hello</p>", ""],
+            path="/p",
+            resource_type="document_attachments",
+            expected_scheme="attachment",
+            list_tool="list_document_attachments",
+            what="Document 'S/D'",
+            project_id="P",
+        )
+
+        mock_client.get.assert_not_awaited()
+
+    async def test_wrong_scheme_in_any_html_rejects_before_get(
+        self, mock_client: AsyncMock
+    ) -> None:
+        with pytest.raises(ValueError, match="workitemimg"):
+            await guard_attachment_refs_many(
+                mock_client,
+                [
+                    '<img src="attachment:1-x.png"/>',
+                    '<img src="workitemimg:2-y.png"/>',
+                ],
+                path="/p",
+                resource_type="document_attachments",
+                expected_scheme="attachment",
+                list_tool="list_document_attachments",
+                what="Document 'S/D'",
+                project_id="P",
+            )
+
+        mock_client.get.assert_not_awaited()
+
+    async def test_dangling_tokens_unioned_across_htmls_named_in_error(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = attachments_response(["1-real.png"], meta=False)
+
+        with pytest.raises(ValueError) as exc:
+            await guard_attachment_refs_many(
+                mock_client,
+                [
+                    '<img src="attachment:1-ghost.png"/>',
+                    '<img src="attachment:2-ghost.png"/>',
+                ],
+                path="/p",
+                resource_type="document_attachments",
+                expected_scheme="attachment",
+                list_tool="list_document_attachments",
+                what="Document 'S/D'",
+                project_id="P",
+            )
+
+        msg = str(exc.value)
+        assert "1-ghost.png" in msg
+        assert "2-ghost.png" in msg
+
+    async def test_valid_refs_spread_across_htmls_pass(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = attachments_response(
+            ["1-x.png", "2-y.png"], meta=False
+        )
+
+        await guard_attachment_refs_many(
+            mock_client,
+            ['<img src="attachment:1-x.png"/>', '<img src="attachment:2-y.png"/>'],
+            path="/p",
+            resource_type="document_attachments",
+            expected_scheme="attachment",
+            list_tool="list_document_attachments",
+            what="Document 'S/D'",
+            project_id="P",
+        )  # must not raise
