@@ -48,6 +48,7 @@ from mcp_server_polarion.tools._shared.parse import (
     parse_included_user_name_map,
     parse_test_record_detail,
     parse_test_record_summaries,
+    split_test_case_id,
 )
 
 
@@ -446,12 +447,7 @@ async def get_test_record(
     plain-text comments return as-is. Verify coordinates via
     list_test_records if not found.
     """
-    if "/" not in test_case_id:
-        raise ValueError(
-            f"test_case_id '{test_case_id}' must be the full 'project/WI-id' "
-            "form returned by list_test_records, not the short work item ID."
-        )
-    tc_project, tc_id = test_case_id.split("/", 1)
+    tc_project, tc_id = split_test_case_id(test_case_id)
 
     client = get_client(ctx)
     path = (

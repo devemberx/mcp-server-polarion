@@ -9,6 +9,7 @@ from mcp_server_polarion.models.attachments import (
     Attachment,
     AttachmentsCreateResult,
     DocumentAttachmentSpec,
+    TestRecordAttachmentSpec,
     WorkItemAttachmentSpec,
 )
 from mcp_server_polarion.models.comments import (
@@ -96,6 +97,7 @@ __all__: list[str] = [
     "PaginatedResult",
     "ProjectSummary",
     "SqlRecipeGallery",
+    "TestRecordAttachmentSpec",
     "TestRecordCreateSpec",
     "TestRecordDetail",
     "TestRecordSummary",

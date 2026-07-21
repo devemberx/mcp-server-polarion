@@ -26,6 +26,7 @@ from mcp_server_polarion.models import (
     DocumentAttachmentSpec,
     JsonValue,
     PaginatedResult,
+    TestRecordAttachmentSpec,
     WorkItemAttachmentSpec,
 )
 from mcp_server_polarion.server import mcp
@@ -35,6 +36,7 @@ from mcp_server_polarion.tools._shared.pagination import DEFAULT_PAGE_SIZE
 from mcp_server_polarion.tools._shared.parse import (
     extract_created_short_ids,
     parse_attachments_page,
+    split_test_case_id,
 )
 
 # Whole batch; fail closed before any request.
@@ -351,20 +353,25 @@ async def get_work_item_attachment_content(
     )
 
 
-def _effective_file_name(spec: DocumentAttachmentSpec | WorkItemAttachmentSpec) -> str:
+def _effective_file_name(
+    spec: DocumentAttachmentSpec | WorkItemAttachmentSpec | TestRecordAttachmentSpec,
+) -> str:
     """Effective fileName attribute across domains -- doc spec also reuse it
     as the attachment id (dup-checked by caller), work item spec get a
-    server counter prefix instead.
+    server counter prefix, test record spec get {testCaseId}_{fileName}
+    server rewrite instead.
     """
     return spec.file_name if spec.file_name else Path(spec.file_path).name
 
 
 def _build_attachments_payload(
-    specs: Sequence[DocumentAttachmentSpec | WorkItemAttachmentSpec],
+    specs: Sequence[
+        DocumentAttachmentSpec | WorkItemAttachmentSpec | TestRecordAttachmentSpec
+    ],
     resource_type: str,
 ) -> dict[str, JsonValue]:
-    """POST .../attachments body shared by doc/WI resource types; title
-    skip when unset (skip-None rule). Pure -- no disk access.
+    """POST .../attachments body shared by doc/WI/testrecord resource types;
+    title skip when unset (skip-None rule). Pure -- no disk access.
     """
     items: list[JsonValue] = []
     for spec in specs:
@@ -387,6 +394,13 @@ def _build_work_item_attachments_payload(
 ) -> dict[str, JsonValue]:
     """POST .../workitems/{wi}/attachments body."""
     return _build_attachments_payload(specs, "workitem_attachments")
+
+
+def _build_test_record_attachments_payload(
+    specs: Sequence[TestRecordAttachmentSpec],
+) -> dict[str, JsonValue]:
+    """POST .../testruns/{r}/testrecords/{tcProj}/{tcId}/{iter}/attachments body."""
+    return _build_attachments_payload(specs, "testrecord_attachments")
 
 
 def _reject_separator_file_names(file_names: Sequence[str]) -> None:
@@ -418,7 +432,9 @@ def _reject_duplicate_file_names(file_names: Sequence[str]) -> None:
 
 
 def _read_attachment_files(
-    specs: Sequence[DocumentAttachmentSpec | WorkItemAttachmentSpec],
+    specs: Sequence[
+        DocumentAttachmentSpec | WorkItemAttachmentSpec | TestRecordAttachmentSpec
+    ],
 ) -> list[tuple[str, bytes]]:
     """Read spec files, order preserved; every reject raise ValueError before
     any Polarion call. Stat cap check pre-read keep oversized file out of
@@ -709,6 +725,138 @@ async def create_work_item_attachments(
         response,
         expected_count=len(attachments),
         list_tool="list_work_item_attachments",
+    )
+
+    return AttachmentsCreateResult(
+        created=True,
+        dry_run=False,
+        attachment_ids=attachment_ids,
+        payload_preview=None,
+    )
+
+
+@mcp.tool(
+    tags={"write"},
+    timeout=60.0,
+    annotations={
+        # Non-idempotent: server reject retry dup. Open world: files from local disk.
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    },
+)
+async def create_test_record_attachments(  # noqa: PLR0913
+    ctx: Context,
+    project_id: str = Field(min_length=1, description="Polarion project ID."),
+    test_run_id: str = Field(
+        min_length=1, description="Test run ID (e.g. 'TR-2026-01')."
+    ),
+    test_case_id: str = Field(
+        description=(
+            "Full test case work item ID 'project/WI-id' as returned by "
+            "list_test_records."
+        )
+    ),
+    attachments: list[TestRecordAttachmentSpec] = Field(  # noqa: B008
+        min_length=1,
+        max_length=_MAX_ATTACHMENTS_PER_CALL,
+        description="Files to upload in one request.",
+    ),
+    iteration: int = Field(
+        default=0, ge=0, description="Record iteration number (0-based)."
+    ),
+    dry_run: bool = Field(
+        default=False,
+        description="Preview payload without calling Polarion.",
+    ),
+) -> AttachmentsCreateResult:
+    """Upload 1-10 local files as test record attachments in one request.
+
+    For document attachments use create_document_attachments, for work item
+    attachments use create_work_item_attachments instead. Record
+    coordinates (project_id, test_run_id, test_case_id, iteration) match
+    get_test_record -- verify via list_test_records first. file_path is
+    read from local disk by the server process -- use absolute paths to
+    readable files. Total upload size per call is capped at 25 MiB:
+    compress or use the Polarion portal for one oversized file, split
+    oversized batches across calls. attachment_ids in the result are
+    server-assigned ({test_case_id}_{file_name}) and differ from the input
+    file_name. A file_name colliding with another item in the same call, or
+    with an existing attachment on the record, rejects the whole batch --
+    pick a new file_name. NOT idempotent -- retrying a success is rejected
+    as a duplicate, not silently merged.
+    """
+    tc_project, tc_id = split_test_case_id(test_case_id)
+
+    _reject_duplicate_file_names([_effective_file_name(spec) for spec in attachments])
+    files = _read_attachment_files(attachments)
+    payload = _build_test_record_attachments_payload(attachments)
+
+    if dry_run:
+        preview: dict[str, JsonValue] = {
+            **payload,
+            "files": [
+                {"file_name": file_name, "size_bytes": len(content)}
+                for file_name, content in files
+            ],
+        }
+        return AttachmentsCreateResult(
+            created=False,
+            dry_run=True,
+            attachment_ids=[],
+            payload_preview=preview,
+        )
+
+    client = get_client(ctx)
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/testruns/{encode_path_segment(test_run_id)}"
+        f"/testrecords/{encode_path_segment(tc_project)}/{encode_path_segment(tc_id)}"
+        f"/{encode_path_segment(str(iteration))}"
+        "/attachments"
+    )
+    parts = [
+        ("files", (file_name, content, "application/octet-stream"))
+        for file_name, content in files
+    ]
+    try:
+        response = await client.post_multipart(
+            path,
+            data={"resource": json.dumps(payload)},
+            files=parts,
+        )
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot create test record attachments -- check your"
+            " POLARION_TOKEN permissions."
+        ) from exc
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Test record for case '{test_case_id}' iteration {iteration} not "
+            f"found in test run '{test_run_id}' (project '{project_id}'). "
+            "Use `list_test_records` to discover valid coordinates."
+        ) from exc
+    except PolarionError as exc:
+        if exc.status_code == _HTTP_CONFLICT:
+            raise ValueError(
+                "One or more file_name values already exist as attachments"
+                " on this test record (within this call or a prior one) --"
+                " the whole batch was rejected. Pick new file_name values."
+            ) from exc
+        if exc.status_code == _HTTP_PAYLOAD_TOO_LARGE:
+            raise RuntimeError(
+                "Server upload cap is below the 25 MiB client cap --"
+                " reduce file size or split the batch across calls."
+            ) from exc
+        raise RuntimeError(
+            f"Failed to create test record attachments: {exc.message}"
+        ) from exc
+
+    attachment_ids = extract_created_short_ids(
+        response,
+        expected_count=len(attachments),
+        list_tool="list_test_records",
     )
 
     return AttachmentsCreateResult(

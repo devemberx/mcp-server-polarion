@@ -98,6 +98,19 @@ def extract_short_id(full_id: str) -> str:
     return full_id.rsplit("/", maxsplit=1)[-1]
 
 
+def split_test_case_id(test_case_id: str) -> tuple[str, str]:
+    """Split full ``{project}/{WI-id}`` test_case_id (as returned by
+    list_test_records) into ``(tc_project, tc_id)``; raise on short form.
+    """
+    if "/" not in test_case_id:
+        raise ValueError(
+            f"test_case_id '{test_case_id}' must be the full 'project/WI-id' "
+            "form returned by list_test_records, not the short work item ID."
+        )
+    tc_project, tc_id = test_case_id.split("/", 1)
+    return tc_project, tc_id
+
+
 def _collect_created_ids(response: dict[str, object]) -> list[str]:
     """``data[].id`` verbatim, echo order; malformed entries skipped."""
     data = response.get("data")
