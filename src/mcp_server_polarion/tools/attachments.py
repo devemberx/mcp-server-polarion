@@ -1,5 +1,5 @@
 """Attachment tools — list attachments of a document or work item; fetch one
-document attachment's content; upload document attachments.
+document attachment's content; upload document or work item attachments.
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ from mcp_server_polarion.models import (
     DocumentAttachmentSpec,
     JsonValue,
     PaginatedResult,
+    WorkItemAttachmentSpec,
 )
 from mcp_server_polarion.server import mcp
 from mcp_server_polarion.tools._shared.fields import ATTACHMENT_LIST_FIELDS
@@ -291,8 +292,11 @@ async def list_work_item_attachments(
     return parse_attachments_page(response, page_number, page_size)
 
 
-def _effective_file_name(spec: DocumentAttachmentSpec) -> str:
-    """Effective name become attachment id (fileName) -- batch collision must reject."""
+def _effective_file_name(spec: DocumentAttachmentSpec | WorkItemAttachmentSpec) -> str:
+    """Effective fileName attribute across domains -- doc spec also reuse it
+    as the attachment id (dup-checked by caller), work item spec get a
+    server counter prefix instead.
+    """
     return spec.file_name if spec.file_name else Path(spec.file_path).name
 
 
@@ -308,6 +312,21 @@ def _build_document_attachments_payload(
         if spec.title:
             attributes["title"] = spec.title
         items.append({"type": "document_attachments", "attributes": attributes})
+    return {"data": items}
+
+
+def _build_work_item_attachments_payload(
+    specs: Sequence[WorkItemAttachmentSpec],
+) -> dict[str, JsonValue]:
+    """POST .../workitems/{wi}/attachments body; title skip when unset
+    (skip-None rule). Pure -- no disk access.
+    """
+    items: list[JsonValue] = []
+    for spec in specs:
+        attributes: dict[str, JsonValue] = {"fileName": _effective_file_name(spec)}
+        if spec.title:
+            attributes["title"] = spec.title
+        items.append({"type": "workitem_attachments", "attributes": attributes})
     return {"data": items}
 
 
@@ -340,14 +359,15 @@ def _reject_duplicate_file_names(file_names: Sequence[str]) -> None:
 
 
 def _read_attachment_files(
-    specs: Sequence[DocumentAttachmentSpec],
+    specs: Sequence[DocumentAttachmentSpec | WorkItemAttachmentSpec],
 ) -> list[tuple[str, bytes]]:
     """Read spec files, order preserved; every reject raise ValueError before
-    any Polarion call. Stat cap check pre-read keep oversized file out of memory.
+    any Polarion call. Stat cap check pre-read keep oversized file out of
+    memory. Dup-name reject NOT here -- doc-only semantics, caller applies
+    _reject_duplicate_file_names itself before calling this.
     """
     file_names = [_effective_file_name(spec) for spec in specs]
     _reject_separator_file_names(file_names)
-    _reject_duplicate_file_names(file_names)
 
     sizes: list[tuple[str, int]] = []
     for spec, file_name in zip(specs, file_names, strict=True):
@@ -449,6 +469,7 @@ async def create_document_attachments(  # noqa: PLR0913
     pick a new file_name. NOT idempotent -- retrying a success is rejected
     as a duplicate, not silently merged.
     """
+    _reject_duplicate_file_names([_effective_file_name(spec) for spec in attachments])
     files = _read_attachment_files(attachments)
     payload = _build_document_attachments_payload(attachments)
 
@@ -518,6 +539,121 @@ async def create_document_attachments(  # noqa: PLR0913
             "Polarion returned no attachment IDs after creation."
             " The POST may have succeeded -- verify with"
             " `list_document_attachments`."
+        )
+
+    return AttachmentsCreateResult(
+        created=True,
+        dry_run=False,
+        attachment_ids=attachment_ids,
+        payload_preview=None,
+    )
+
+
+@mcp.tool(
+    tags={"write"},
+    timeout=60.0,
+    annotations={
+        # Non-idempotent: retry silently duplicate, server never conflict on
+        # dup fileName (unlike document sibling, which 409s).
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    },
+)
+async def create_work_item_attachments(
+    ctx: Context,
+    project_id: str = Field(min_length=1, description="Polarion project ID."),
+    work_item_id: str = Field(
+        min_length=1,
+        description="Work item ID within project_id.",
+    ),
+    attachments: list[WorkItemAttachmentSpec] = Field(  # noqa: B008
+        min_length=1,
+        max_length=_MAX_ATTACHMENTS_PER_CALL,
+        description="Files to upload in one request.",
+    ),
+    dry_run: bool = Field(
+        default=False,
+        description="Preview payload without calling Polarion.",
+    ),
+) -> AttachmentsCreateResult:
+    """Upload 1-10 local files as work item attachments in one request.
+
+    For document attachments use create_document_attachments instead.
+    file_path is read from local disk by the server process -- use absolute
+    paths to readable files. Total upload size per call is capped at 25 MiB:
+    compress or use the Polarion portal for one oversized file, split
+    oversized batches across calls. attachment_ids in the result are
+    server-assigned counter-prefixed ids (e.g. 3-diagram.png) -- not
+    predictable from file_name -- and double as the workitemimg:{id}
+    reference tokens for the work item description body. Duplicate
+    file_name values are allowed, both within one call and against existing
+    attachments: each upload creates a new attachment, never a conflict.
+    NOT idempotent -- retrying a success silently creates a duplicate;
+    after an ambiguous failure verify with list_work_item_attachments
+    before retrying.
+    """
+    files = _read_attachment_files(attachments)
+    payload = _build_work_item_attachments_payload(attachments)
+
+    if dry_run:
+        preview: dict[str, JsonValue] = {
+            **payload,
+            "files": [
+                {"file_name": file_name, "size_bytes": len(content)}
+                for file_name, content in files
+            ],
+        }
+        return AttachmentsCreateResult(
+            created=False,
+            dry_run=True,
+            attachment_ids=[],
+            payload_preview=preview,
+        )
+
+    client = get_client(ctx)
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/workitems/{encode_path_segment(work_item_id)}"
+        "/attachments"
+    )
+    parts = [
+        ("files", (file_name, content, "application/octet-stream"))
+        for file_name, content in files
+    ]
+    try:
+        response = await client.post_multipart(
+            path,
+            data={"resource": json.dumps(payload)},
+            files=parts,
+        )
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot create work item attachments -- check your POLARION_TOKEN"
+            " permissions."
+        ) from exc
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Work item '{work_item_id}' not found in project '{project_id}'. "
+            "Use `list_work_items` to discover valid IDs."
+        ) from exc
+    except PolarionError as exc:
+        if exc.status_code == _HTTP_PAYLOAD_TOO_LARGE:
+            raise RuntimeError(
+                "Server upload cap is below the 25 MiB client cap --"
+                " reduce file size or split the batch across calls."
+            ) from exc
+        raise RuntimeError(
+            f"Failed to create work item attachments: {exc.message}"
+        ) from exc
+
+    attachment_ids = extract_created_short_ids(response)
+    if not attachment_ids:
+        raise RuntimeError(
+            "Polarion returned no attachment IDs after creation."
+            " The POST may have succeeded -- verify with"
+            " `list_work_item_attachments`."
         )
 
     return AttachmentsCreateResult(

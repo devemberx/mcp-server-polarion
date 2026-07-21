@@ -29,8 +29,21 @@ class DocumentAttachmentSpec(BaseModel):
     title: str | None = None
 
 
+class WorkItemAttachmentSpec(BaseModel):
+    """One file to upload as a work item attachment; file_name is not the id."""
+
+    # LLM input model: reject typo keys, not silent-drop.
+    model_config = ConfigDict(extra="forbid")
+
+    file_path: str
+    file_name: str | None = None
+    title: str | None = None
+
+
 class AttachmentsCreateResult(BaseModel):
-    """Document-attachment-create result."""
+    """Attachment-create result, shared by document and work item upload
+    tools.
+    """
 
     created: bool
     dry_run: bool

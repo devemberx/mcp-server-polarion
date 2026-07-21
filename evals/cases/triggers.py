@@ -127,6 +127,17 @@ CASES: list[Case] = [
         reject=["list_document_attachments", "get_document_attachment_content"],
     ),
     _case(
+        "TRIG-WI-ATTACH-CREATE",
+        f"Attach the file at {_UPLOAD_ASSET} to work item {FLOATING_TASK_ID}.",
+        "triggers_tool",
+        intent="Uploading a local file to a work item must call "
+        "create_work_item_attachments; document attachments and listing "
+        "do not apply.",
+        covers=["create_work_item_attachments"],
+        expect="create_work_item_attachments",
+        reject=["create_document_attachments", "list_work_item_attachments"],
+    ),
+    _case(
         "TRIG-DOC-COMMENT",
         f"Leave a comment 'Needs review' on the document '{DOC}' in the "
         f"'{SPACE}' space.",

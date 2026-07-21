@@ -61,15 +61,17 @@ def _mutate(
     return fake._dispatch(request)
 
 
-def _attachment_entry(file_name: str) -> dict[str, Any]:
+def _attachment_entry(
+    file_name: str, *, resource_type: str = "document_attachments"
+) -> dict[str, Any]:
     return {
-        "type": "document_attachments",
+        "type": resource_type,
         "attributes": {"fileName": file_name},
     }
 
 
 def _multipart_attachments_request(
-    doc: str,
+    path: str,
     *,
     resource: dict[str, Any],
     files: list[tuple[str, bytes]],
@@ -77,7 +79,7 @@ def _multipart_attachments_request(
     # Real client wire shape: resource = plain form field, ordered file parts.
     return httpx.Request(
         "POST",
-        f"{_BASE}/projects/{PROJECT}/spaces/{SPACE}/documents/{doc}/attachments",
+        f"{_BASE}{path}",
         data={"resource": json.dumps(resource)},
         files=[
             ("files", (name, payload, "application/octet-stream"))
@@ -787,7 +789,7 @@ class TestMutations:
         fake = FakePolarion()
         response = fake._dispatch(
             _multipart_attachments_request(
-                DOC,
+                f"/projects/{PROJECT}/spaces/{SPACE}/documents/{DOC}/attachments",
                 resource={
                     "data": [
                         _attachment_entry("new-diagram.png"),
@@ -811,7 +813,7 @@ class TestMutations:
         fake = FakePolarion()
         response = fake._dispatch(
             _multipart_attachments_request(
-                "NoSuchDoc",
+                f"/projects/{PROJECT}/spaces/{SPACE}/documents/NoSuchDoc/attachments",
                 resource={"data": [_attachment_entry("a.png")]},
                 files=[("a.png", b"x")],
             )
@@ -823,7 +825,7 @@ class TestMutations:
         fake = FakePolarion()
         response = fake._dispatch(
             _multipart_attachments_request(
-                DOC,
+                f"/projects/{PROJECT}/spaces/{SPACE}/documents/{DOC}/attachments",
                 resource={
                     "data": [
                         _attachment_entry("fresh.png"),
@@ -874,9 +876,155 @@ class TestMutations:
         fake = FakePolarion()
         response = fake._dispatch(
             _multipart_attachments_request(
-                DOC,
+                f"/projects/{PROJECT}/spaces/{SPACE}/documents/{DOC}/attachments",
                 resource={
                     "data": [_attachment_entry("a.png"), _attachment_entry("b.png")]
+                },
+                files=[("a.png", b"x")],
+            )
+        )
+        assert response.status_code == 400
+        assert "File data" in _json(response)["errors"][0]["detail"]
+
+    def test_post_workitem_attachments_echoes_ordered_counter_ids(self) -> None:
+        # Seed already carries 1-fake-screenshot.png -- counter continues.
+        fake = FakePolarion()
+        response = fake._dispatch(
+            _multipart_attachments_request(
+                f"/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}/attachments",
+                resource={
+                    "data": [
+                        _attachment_entry(
+                            "new-diagram.png", resource_type="workitem_attachments"
+                        ),
+                        _attachment_entry(
+                            "new-photo.png", resource_type="workitem_attachments"
+                        ),
+                    ]
+                },
+                files=[("new-diagram.png", b"png-a"), ("new-photo.png", b"png-b")],
+            )
+        )
+        assert response.status_code == 201
+        data = _json(response)["data"]
+        assert [e["id"] for e in data] == [
+            f"{PROJECT}/{FLOATING_TASK_ID}/2-new-diagram.png",
+            f"{PROJECT}/{FLOATING_TASK_ID}/3-new-photo.png",
+        ]
+        assert all(e["type"] == "workitem_attachments" for e in data)
+        assert all("links" in e and "attributes" not in e for e in data)
+
+    def test_post_workitem_attachments_duplicate_filename_both_succeed(self) -> None:
+        # Divergence from doc sibling: no 409 -- fresh counter id each time.
+        fake = FakePolarion()
+        response = fake._dispatch(
+            _multipart_attachments_request(
+                f"/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}/attachments",
+                resource={
+                    "data": [
+                        _attachment_entry(
+                            WORKITEM_ATTACHMENT_ID,
+                            resource_type="workitem_attachments",
+                        ),
+                        _attachment_entry(
+                            WORKITEM_ATTACHMENT_ID,
+                            resource_type="workitem_attachments",
+                        ),
+                    ]
+                },
+                files=[(WORKITEM_ATTACHMENT_ID, b"x"), (WORKITEM_ATTACHMENT_ID, b"y")],
+            )
+        )
+        assert response.status_code == 201
+        ids = [e["id"] for e in _json(response)["data"]]
+        assert ids == [
+            f"{PROJECT}/{FLOATING_TASK_ID}/2-{WORKITEM_ATTACHMENT_ID}",
+            f"{PROJECT}/{FLOATING_TASK_ID}/3-{WORKITEM_ATTACHMENT_ID}",
+        ]
+        assert len(set(ids)) == 2
+
+    def test_post_workitem_attachments_visible_in_subsequent_list(self) -> None:
+        fake = FakePolarion()
+        fake._dispatch(
+            _multipart_attachments_request(
+                f"/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}/attachments",
+                resource={
+                    "data": [
+                        _attachment_entry(
+                            "new-diagram.png", resource_type="workitem_attachments"
+                        )
+                    ]
+                },
+                files=[("new-diagram.png", b"png-a")],
+            )
+        )
+        response = _get(
+            fake, f"/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}/attachments"
+        )
+        ids = {e["attributes"]["id"] for e in _json(response)["data"]}
+        assert ids == {WORKITEM_ATTACHMENT_ID, "2-new-diagram.png"}
+
+    def test_post_workitem_attachments_unseeded_work_item_404(self) -> None:
+        fake = FakePolarion()
+        response = fake._dispatch(
+            _multipart_attachments_request(
+                f"/projects/{PROJECT}/workitems/MCPT-9999/attachments",
+                resource={
+                    "data": [
+                        _attachment_entry("a.png", resource_type="workitem_attachments")
+                    ]
+                },
+                files=[("a.png", b"x")],
+            )
+        )
+        assert response.status_code == 404
+
+    def test_post_workitem_attachments_json_body_415(self) -> None:
+        fake = FakePolarion()
+        response = _mutate(
+            fake,
+            "POST",
+            f"/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}/attachments",
+            {"data": []},
+        )
+        assert response.status_code == 415
+
+    def test_post_workitem_attachments_missing_resource_400(self) -> None:
+        fake = FakePolarion()
+        request = httpx.Request(
+            "POST",
+            f"{_BASE}/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}/attachments",
+            files=[("files", ("a.png", b"x", "application/octet-stream"))],
+        )
+        response = fake._dispatch(request)
+        assert response.status_code == 400
+        assert "Resource data" in _json(response)["errors"][0]["detail"]
+
+    def test_post_workitem_attachments_unparsable_resource_400(self) -> None:
+        fake = FakePolarion()
+        request = httpx.Request(
+            "POST",
+            f"{_BASE}/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}/attachments",
+            data={"resource": "{not json"},
+            files=[("files", ("a.png", b"x", "application/octet-stream"))],
+        )
+        response = fake._dispatch(request)
+        assert response.status_code == 400
+
+    def test_post_workitem_attachments_file_count_mismatch_400(self) -> None:
+        fake = FakePolarion()
+        response = fake._dispatch(
+            _multipart_attachments_request(
+                f"/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}/attachments",
+                resource={
+                    "data": [
+                        _attachment_entry(
+                            "a.png", resource_type="workitem_attachments"
+                        ),
+                        _attachment_entry(
+                            "b.png", resource_type="workitem_attachments"
+                        ),
+                    ]
                 },
                 files=[("a.png", b"x")],
             )
