@@ -65,11 +65,17 @@ def _mutate(
 
 
 def _attachment_entry(
-    file_name: str, *, resource_type: str = "document_attachments"
+    file_name: str,
+    *,
+    resource_type: str = "document_attachments",
+    title: str | None = None,
 ) -> dict[str, Any]:
+    attributes: dict[str, Any] = {"fileName": file_name}
+    if title is not None:
+        attributes["title"] = title
     return {
         "type": resource_type,
-        "attributes": {"fileName": file_name},
+        "attributes": attributes,
     }
 
 
@@ -1024,6 +1030,58 @@ class TestMutations:
         )
         ids = {e["attributes"]["id"] for e in _json(response)["data"]}
         assert ids == {WORKITEM_ATTACHMENT_ID, "2-new-diagram.png"}
+
+    def test_post_workitem_attachments_title_served_in_list(self) -> None:
+        # Live: title settable at POST, served on explicit fields.
+        fake = FakePolarion()
+        fake._dispatch(
+            _multipart_attachments_request(
+                f"/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}/attachments",
+                resource={
+                    "data": [
+                        _attachment_entry(
+                            "new-diagram.png",
+                            resource_type="workitem_attachments",
+                            title="Wiring Diagram",
+                        )
+                    ]
+                },
+                files=[("new-diagram.png", b"png-a")],
+            )
+        )
+        response = _get(
+            fake, f"/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}/attachments"
+        )
+        titles = {
+            e["attributes"]["id"]: e["attributes"]["title"]
+            for e in _json(response)["data"]
+        }
+        assert titles["2-new-diagram.png"] == "Wiring Diagram"
+
+    def test_post_workitem_attachments_content_served_after_create(self) -> None:
+        # Created attachment must be fetchable on content route, not 404.
+        fake = FakePolarion()
+        fake._dispatch(
+            _multipart_attachments_request(
+                f"/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}/attachments",
+                resource={
+                    "data": [
+                        _attachment_entry(
+                            "new-diagram.png", resource_type="workitem_attachments"
+                        )
+                    ]
+                },
+                files=[("new-diagram.png", b"png-a")],
+            )
+        )
+        response = _get(
+            fake,
+            f"/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}/attachments/"
+            "2-new-diagram.png/content",
+            headers=_BYTES_ACCEPT,
+        )
+        assert response.status_code == 200
+        assert response.content == WORKITEM_ATTACHMENT_CONTENT
 
     def test_post_workitem_attachments_unseeded_work_item_404(self) -> None:
         fake = FakePolarion()

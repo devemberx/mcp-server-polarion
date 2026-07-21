@@ -509,8 +509,17 @@ class FakePolarion:
             if "application/octet-stream" not in request.headers.get("accept", ""):
                 return httpx.Response(406, json={"errors": [{"status": "406"}]})
             wi = self.seeds.work_items.get(wi_id)
-            known_ids = {a.attachment_id for a in wi.attachments} if wi else set()
-            if wi is None or attachment_id not in known_ids:
+            if wi is None:
+                return httpx.Response(404, json={"errors": [{"status": "404"}]})
+            # Created uploads join seeds -- same fixed bytes, no per-file store.
+            known_ids = {
+                a.attachment_id
+                for a in (
+                    *wi.attachments,
+                    *self.created_wi_attachments.get(wi_id, []),
+                )
+            }
+            if attachment_id not in known_ids:
                 return httpx.Response(404, json={"errors": [{"status": "404"}]})
             return httpx.Response(
                 200,
@@ -956,7 +965,12 @@ class FakePolarion:
         attachment_ids = [
             f"{base_count + i + 1}-{name}" for i, name in enumerate(file_names)
         ]
-        created.extend(Attachment(aid, "", 0) for aid in attachment_ids)
+        # Live: title settable at POST, served on explicit fields.
+        titles = [entry.get("attributes", {}).get("title", "") for entry in entries]
+        created.extend(
+            Attachment(aid, title, 0)
+            for aid, title in zip(attachment_ids, titles, strict=True)
+        )
 
         base = f"{POLARION_HOST}{API_PREFIX}/projects/{PROJECT}"
         return httpx.Response(
