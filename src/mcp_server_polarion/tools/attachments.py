@@ -358,7 +358,8 @@ def _effective_file_name(
 ) -> str:
     """Effective fileName attribute across domains -- doc spec also reuse it
     as the attachment id (dup-checked by caller), work item spec get a
-    server counter prefix instead.
+    server counter prefix, test record spec get {testCaseId}_{fileName}
+    server rewrite instead.
     """
     return spec.file_name if spec.file_name else Path(spec.file_path).name
 
@@ -369,8 +370,8 @@ def _build_attachments_payload(
     ],
     resource_type: str,
 ) -> dict[str, JsonValue]:
-    """POST .../attachments body shared by doc/WI resource types; title
-    skip when unset (skip-None rule). Pure -- no disk access.
+    """POST .../attachments body shared by doc/WI/testrecord resource types;
+    title skip when unset (skip-None rule). Pure -- no disk access.
     """
     items: list[JsonValue] = []
     for spec in specs:
