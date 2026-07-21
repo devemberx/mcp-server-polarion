@@ -309,6 +309,20 @@ CASES: list[Case] = [
         reject=["list_test_records", "get_test_run"],
     ),
     _case(
+        "TRIG-TEST-RECORD-ATTACHMENTS",
+        f"What files are attached to the test record for test case "
+        f"'{PROJECT}/{TESTCASE_ID}' iteration 0 in test run '{TEST_RUN_ID}' "
+        f"of project '{PROJECT}'?",
+        "triggers_tool",
+        intent="Listing a test record's attached files must call "
+        "list_test_record_attachments; fetching the record's execution "
+        "detail, paging the run's records, or listing work item attachments "
+        "does not enumerate them.",
+        covers=["list_test_record_attachments"],
+        expect="list_test_record_attachments",
+        reject=["get_test_record", "list_test_records", "list_work_item_attachments"],
+    ),
+    _case(
         "TRIG-CREATE-TEST-RUN",
         f"Create a new manual test run with id 'Fake-TR-Sprint9' in project "
         f"'{PROJECT}'.",

@@ -575,6 +575,42 @@ class FakePolarion:
                 },
             )
 
+        record_attachments = re.search(
+            r"/testruns/([^/]+)/testrecords/([^/]+)/([^/]+)/(\d+)/attachments$", path
+        )
+        if record_attachments:
+            run_id, case_project, case_id, iteration = record_attachments.groups()
+            tr = self.seeds.test_runs.get(run_id)
+            if (
+                tr is None
+                or tr.is_template
+                or case_project != PROJECT
+                or case_id != TESTCASE_ID
+                or int(iteration) >= tr.iterations
+            ):
+                record_ref = f"{PROJECT}/{run_id}/{case_project}/{case_id}/{iteration}"
+                return _error_response(
+                    404, f"Test Record '{record_ref}' was not found."
+                )
+            # Seed only carry iteration-0 attachments -- other iterations empty.
+            attachments = tr.record_attachments if int(iteration) == 0 else []
+            base = f"{PROJECT}/{run_id}/{case_project}/{case_id}/{iteration}"
+            resources = self._attachment_resources(
+                attachments, base, "testrecord_attachments"
+            )
+            page_size = int(params.get("page[size]", str(DEFAULT_PAGE_SIZE)))
+            page_number = int(params.get("page[number]", "1"))
+            start = (page_number - 1) * page_size
+            data = resources[start : start + page_size]
+            body: dict[str, Any] = {
+                "data": data,
+                "included": self._author_included() if data else [],
+            }
+            # WI-rule: totalCount only once collection span >1 page.
+            if len(resources) > page_size:
+                body["meta"] = {"totalCount": len(resources)}
+            return httpx.Response(200, json=body)
+
         # testResultId filter server-side. No meta block -- live endpoint
         # omit totalCount (verified 2026-07-12).
         records = re.search(r"/testruns/([^/]+)/testrecords$", path)

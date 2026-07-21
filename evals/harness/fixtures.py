@@ -82,6 +82,10 @@ TEST_RUN_ID_3 = "Fake-TR-003"
 # Template blueprint; create_test_runs resolve it via template guard.
 TEST_RUN_TEMPLATE_ID = "Fake-TR-Template"
 
+# Attachment on TEST_RUN_ID's iteration-0 record for TESTCASE_ID; server
+# prepends {testCaseId}_ to upload name, so id/fileName both carry it.
+RECORD_ATTACHMENT_ID = f"{TESTCASE_ID}_fake-log.txt"
+
 TS = "2026-01-01T00:00:00.000Z"
 
 
@@ -142,6 +146,8 @@ class TestRun:
     is_template: bool = False
     # TESTCASE_ID re-executions -- one record per iteration 0..n-1.
     iterations: int = 1
+    # Iteration-0 record's attachments only -- other iterations serve empty.
+    record_attachments: list[Attachment] = field(default_factory=list)
 
 
 @dataclass
@@ -262,6 +268,7 @@ SEEDS = Seeds(
             type="manual",
             status="open",
             finished_on=TS,
+            record_attachments=[Attachment(RECORD_ATTACHMENT_ID, "fake-log", 256)],
         ),
         # 3 iterations feed EFF-BULK-UPDATE-RECORDS (one bulk PATCH, 3 items).
         TEST_RUN_ID_2: TestRun(TEST_RUN_ID_2, "Fake Smoke Run", iterations=3),
