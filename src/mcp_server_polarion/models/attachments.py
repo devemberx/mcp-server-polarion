@@ -55,8 +55,8 @@ class TestRecordAttachmentSpec(BaseModel):
 
 
 class AttachmentsCreateResult(BaseModel):
-    """Attachment-create result, shared by document and work item upload
-    tools.
+    """Attachment-create result, shared by document, work item, and test
+    record upload tools.
     """
 
     created: bool
