@@ -9,6 +9,7 @@ from mcp_server_polarion.models.attachments import (
     Attachment,
     AttachmentsCreateResult,
     DocumentAttachmentSpec,
+    WorkItemAttachmentSpec,
 )
 from mcp_server_polarion.models.comments import (
     Comment,
@@ -107,6 +108,7 @@ __all__: list[str] = [
     "TestRunUpdateSpec",
     "TestRunsCreateResult",
     "TestRunsUpdateResult",
+    "WorkItemAttachmentSpec",
     "WorkItemCommentSpec",
     "WorkItemCreateSpec",
     "WorkItemDetail",

@@ -9,6 +9,7 @@ from mcp_server_polarion.models import (
     Attachment,
     AttachmentsCreateResult,
     DocumentAttachmentSpec,
+    WorkItemAttachmentSpec,
 )
 
 
@@ -58,6 +59,29 @@ class TestDocumentAttachmentSpec:
         # Typo key must fail at parse -- silent drop = ghost field in Polarion.
         with pytest.raises(ValidationError) as exc:
             DocumentAttachmentSpec(file_path="/home/user/x.png", ttile="Oops")  # type: ignore[call-arg]
+        assert exc.value.errors()[0]["type"] == "extra_forbidden"
+
+
+class TestWorkItemAttachmentSpec:
+    def test_minimal(self):
+        spec = WorkItemAttachmentSpec(file_path="/home/user/screenshot.png")
+        assert spec.file_path == "/home/user/screenshot.png"
+        assert spec.file_name is None
+        assert spec.title is None
+
+    def test_full(self):
+        spec = WorkItemAttachmentSpec(
+            file_path="/home/user/screenshot.png",
+            file_name="renamed.png",
+            title="Screenshot",
+        )
+        assert spec.file_name == "renamed.png"
+        assert spec.title == "Screenshot"
+
+    def test_typo_key_rejected(self):
+        # Typo key must fail at parse -- silent drop = ghost field in Polarion.
+        with pytest.raises(ValidationError) as exc:
+            WorkItemAttachmentSpec(file_path="/home/user/x.png", ttile="Oops")  # type: ignore[call-arg]
         assert exc.value.errors()[0]["type"] == "extra_forbidden"
 
 

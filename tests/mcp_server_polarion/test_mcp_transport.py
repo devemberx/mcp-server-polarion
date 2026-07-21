@@ -67,6 +67,7 @@ _WRITE_TOOL_NAMES: frozenset[str] = frozenset(
         "update_document",
         "copy_document",
         "create_document_attachments",
+        "create_work_item_attachments",
         "create_document_comments",
         "create_work_item_comments",
         "update_document_comment",

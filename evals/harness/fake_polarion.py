@@ -47,12 +47,54 @@ def _error_response(status: int, detail: str) -> httpx.Response:
     )
 
 
+def _parse_attachment_multipart(
+    request: httpx.Request,
+) -> tuple[list[dict[str, Any]], int] | httpx.Response:
+    """Multipart split shared by doc/WI attachment POST routes: boundary
+    split, extract ``resource`` JSON:API entries + ``files`` part count.
+    Error response in place of the success tuple on content-type/parse
+    failure -- caller still owns the resource-existence (404) and
+    file_names/count (400) checks, since their order vs. lookup diverges.
+    """
+    content_type = request.headers.get("content-type", "")
+    if not content_type.startswith("multipart/form-data"):
+        return _error_response(415, "Unsupported Media Type")
+
+    # Minimal multipart split — no boundary match = zero parts = 400 below.
+    boundary_match = re.search(r'boundary="?([^";]+)"?', content_type)
+    marker = f"--{boundary_match.group(1)}".encode() if boundary_match else b"\x00"
+    resource_raw: bytes | None = None
+    file_part_count = 0
+    for segment in request.content.split(marker):
+        head, separator, payload = segment.partition(b"\r\n\r\n")
+        if not separator:
+            continue  # preamble / closing "--" segment
+        disposition = head.decode("utf-8", errors="replace")
+        if 'name="resource"' in disposition:
+            resource_raw = payload.rstrip(b"\r\n")
+        elif 'name="files"' in disposition:
+            file_part_count += 1
+
+    if resource_raw is None:
+        return _error_response(400, "Resource data not found in request.")
+    try:
+        entries = json.loads(resource_raw).get("data", [])
+    except json.JSONDecodeError:
+        return _error_response(400, "Resource data not found in request.")
+
+    return entries, file_part_count
+
+
 @dataclass
 class FakePolarion:
     """Seeded, structure-faithful fake Polarion served over respx."""
 
     seeds: Seeds = SEEDS
     mutations: list[dict[str, Any]] = field(default_factory=list)
+    # Work item attachments created via POST -- kept off Seeds (frozen,
+    # shared module singleton) so uploads don't leak into other tests'
+    # default-seeded FakePolarion instances. Keyed by work item short id.
+    created_wi_attachments: dict[str, list[Attachment]] = field(default_factory=dict)
 
     def _work_item_resource(self, wi: WorkItem) -> dict[str, Any]:
         relationships: dict[str, Any] = {
@@ -432,12 +474,17 @@ class FakePolarion:
 
         wi_attachments = re.search(r"/workitems/([^/]+)/attachments$", path)
         if wi_attachments:
-            wi = self.seeds.work_items.get(wi_attachments.group(1))
+            wi_id = wi_attachments.group(1)
+            wi = self.seeds.work_items.get(wi_id)
             if wi is None:
                 return httpx.Response(404, json={"errors": [{"status": "404"}]})
+            attachments = [
+                *wi.attachments,
+                *self.created_wi_attachments.get(wi_id, []),
+            ]
             data = self._attachment_resources(
-                wi.attachments,
-                f"{PROJECT}/{wi_attachments.group(1)}",
+                attachments,
+                f"{PROJECT}/{wi_id}",
                 "workitem_attachments",
             )
             body: dict[str, Any] = {
@@ -462,8 +509,17 @@ class FakePolarion:
             if "application/octet-stream" not in request.headers.get("accept", ""):
                 return httpx.Response(406, json={"errors": [{"status": "406"}]})
             wi = self.seeds.work_items.get(wi_id)
-            known_ids = {a.attachment_id for a in wi.attachments} if wi else set()
-            if wi is None or attachment_id not in known_ids:
+            if wi is None:
+                return httpx.Response(404, json={"errors": [{"status": "404"}]})
+            # Created uploads join seeds -- same fixed bytes, no per-file store.
+            known_ids = {
+                a.attachment_id
+                for a in (
+                    *wi.attachments,
+                    *self.created_wi_attachments.get(wi_id, []),
+                )
+            }
+            if attachment_id not in known_ids:
                 return httpx.Response(404, json={"errors": [{"status": "404"}]})
             return httpx.Response(
                 200,
@@ -671,6 +727,10 @@ class FakePolarion:
         if doc_attachments and request.method == "POST":
             return self._post_document_attachments(request, doc_attachments.group(1))
 
+        wi_attachments = re.search(r"/workitems/([^/]+)/attachments$", path)
+        if wi_attachments and request.method == "POST":
+            return self._post_work_item_attachments(request, wi_attachments.group(1))
+
         # Resource-creating POSTs must echo one id per submitted entry (tool
         # layer raise on count mismatch, so bulk cases need N ids); action
         # POSTs + PATCH/DELETE fall through to 204.
@@ -837,31 +897,10 @@ class FakePolarion:
         plain form field, ordered ``files`` parts; 201 = list of
         type/id/links entries in input order; dup fileName 409 atomic.
         """
-        content_type = request.headers.get("content-type", "")
-        if not content_type.startswith("multipart/form-data"):
-            return _error_response(415, "Unsupported Media Type")
-
-        # Minimal multipart split — no boundary match = zero parts = 400 below.
-        boundary_match = re.search(r'boundary="?([^";]+)"?', content_type)
-        marker = f"--{boundary_match.group(1)}".encode() if boundary_match else b"\x00"
-        resource_raw: bytes | None = None
-        file_part_count = 0
-        for segment in request.content.split(marker):
-            head, separator, payload = segment.partition(b"\r\n\r\n")
-            if not separator:
-                continue  # preamble / closing "--" segment
-            disposition = head.decode("utf-8", errors="replace")
-            if 'name="resource"' in disposition:
-                resource_raw = payload.rstrip(b"\r\n")
-            elif 'name="files"' in disposition:
-                file_part_count += 1
-
-        if resource_raw is None:
-            return _error_response(400, "Resource data not found in request.")
-        try:
-            entries = json.loads(resource_raw).get("data", [])
-        except json.JSONDecodeError:
-            return _error_response(400, "Resource data not found in request.")
+        parsed = _parse_attachment_multipart(request)
+        if isinstance(parsed, httpx.Response):
+            return parsed
+        entries, file_part_count = parsed
 
         doc = self.seeds.documents.get(doc_name)
         if doc is None:
@@ -892,6 +931,66 @@ class FakePolarion:
                         },
                     }
                     for name in file_names
+                ]
+            },
+        )
+
+    def _post_work_item_attachments(
+        self, request: httpx.Request, work_item_id: str
+    ) -> httpx.Response:
+        """Multipart upload route mirroring ``_post_document_attachments``,
+        minus dup-409: server never conflicts on fileName here, assigns a
+        fresh counter-prefixed id per file instead (live-verified
+        2026-07-21). Counter continue from seeded + previously created
+        count, tracked in ``created_wi_attachments`` (off Seeds, so uploads
+        stay instance-local).
+        """
+        parsed = _parse_attachment_multipart(request)
+        if isinstance(parsed, httpx.Response):
+            return parsed
+        entries, file_part_count = parsed
+
+        wi = self.seeds.work_items.get(work_item_id)
+        if wi is None:
+            return httpx.Response(404, json={"errors": [{"status": "404"}]})
+
+        file_names = [
+            entry.get("attributes", {}).get("fileName", "") for entry in entries
+        ]
+        if not all(file_names) or len(file_names) != file_part_count:
+            return _error_response(400, "File data not found for entry.")
+
+        created = self.created_wi_attachments.setdefault(work_item_id, [])
+        base_count = len(wi.attachments) + len(created)
+        attachment_ids = [
+            f"{base_count + i + 1}-{name}" for i, name in enumerate(file_names)
+        ]
+        # Live: title settable at POST, served on explicit fields.
+        titles = [entry.get("attributes", {}).get("title", "") for entry in entries]
+        created.extend(
+            Attachment(aid, title, 0)
+            for aid, title in zip(attachment_ids, titles, strict=True)
+        )
+
+        base = f"{POLARION_HOST}{API_PREFIX}/projects/{PROJECT}"
+        return httpx.Response(
+            201,
+            json={
+                "data": [
+                    {
+                        "type": "workitem_attachments",
+                        "id": f"{PROJECT}/{work_item_id}/{aid}",
+                        "links": {
+                            "self": (
+                                f"{base}/workitems/{work_item_id}/attachments/{aid}"
+                            ),
+                            "content": (
+                                f"{base}/workitems/{work_item_id}"
+                                f"/attachments/{aid}/content"
+                            ),
+                        },
+                    }
+                    for aid in attachment_ids
                 ]
             },
         )
