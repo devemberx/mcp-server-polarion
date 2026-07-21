@@ -353,6 +353,126 @@ async def get_work_item_attachment_content(
     )
 
 
+@mcp.tool(
+    tags={"read"},
+    timeout=60.0,
+    annotations={"readOnlyHint": True},
+)
+async def list_test_record_attachments(  # noqa: PLR0913
+    ctx: Context,
+    project_id: str = Field(description="Polarion project ID."),
+    test_run_id: str = Field(description="Test run ID (e.g. 'TR-2026-01')."),
+    test_case_id: str = Field(
+        description="Full test case work item ID 'project/WI-id' as returned"
+        " by list_test_records."
+    ),
+    iteration: int = Field(
+        default=0, ge=0, description="Record iteration number (0-based)."
+    ),
+    page_size: int = Field(default=DEFAULT_PAGE_SIZE, ge=1, le=100),
+    page_number: int = Field(default=1, ge=1),
+) -> PaginatedResult[Attachment]:
+    """List a test record's attachments as a paginated page.
+
+    Test record attachments only -- use list_document_attachments or
+    list_work_item_attachments for the other domains. Record coordinates
+    (project_id, test_run_id, test_case_id, iteration) match get_test_record.
+    Order is server-defined and not requestable. Use list_test_records to
+    discover valid coordinates.
+    """
+    tc_project, tc_id = split_test_case_id(test_case_id)
+
+    client = get_client(ctx)
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/testruns/{encode_path_segment(test_run_id)}"
+        f"/testrecords/{encode_path_segment(tc_project)}/{encode_path_segment(tc_id)}"
+        f"/{encode_path_segment(str(iteration))}"
+        "/attachments"
+    )
+    try:
+        response = await client.get(
+            path,
+            params={
+                "fields[testrecord_attachments]": ATTACHMENT_LIST_FIELDS,
+                "include": "author",
+                "fields[users]": "name",
+                "page[size]": page_size,
+                "page[number]": page_number,
+            },
+        )
+    except PolarionNotFoundError as exc:
+        raise ValueError(
+            f"Test record for case '{test_case_id}' iteration {iteration} not "
+            f"found in test run '{test_run_id}' (project '{project_id}'). "
+            "Use `list_test_records` to discover valid coordinates."
+        ) from exc
+    except PolarionAuthError as exc:
+        raise PermissionError(
+            "Cannot access test record attachments -- check your"
+            " POLARION_TOKEN permissions."
+        ) from exc
+    except PolarionError as exc:
+        raise RuntimeError(
+            f"Failed to list attachments for test record '{test_case_id}'"
+            f" iteration {iteration}: {exc.message}"
+        ) from exc
+
+    return parse_attachments_page(response, page_number, page_size)
+
+
+@mcp.tool(
+    tags={"read"},
+    timeout=60.0,
+    annotations={"readOnlyHint": True},
+)
+async def get_test_record_attachment_content(  # noqa: PLR0913
+    ctx: Context,
+    project_id: str = Field(description="Polarion project ID."),
+    test_run_id: str = Field(description="Test run ID (e.g. 'TR-2026-01')."),
+    test_case_id: str = Field(
+        description="Full test case work item ID 'project/WI-id' as returned"
+        " by list_test_records."
+    ),
+    attachment_id: str = Field(
+        description="Attachment id ({testCaseId}_{fileName} token) from"
+        " list_test_record_attachments."
+    ),
+    iteration: int = Field(
+        default=0, ge=0, description="Record iteration number (0-based)."
+    ),
+) -> Image | str:
+    """Fetch a test record attachment's content for viewing.
+
+    PNG, JPEG, GIF, and WebP return as a viewable image; SVG returns its
+    source markup as text. Any other extension is rejected before any
+    request. Use get_document_attachment_content or
+    get_work_item_attachment_content for the other domains. Use
+    list_test_record_attachments to discover attachment ids, file names,
+    and sizes.
+    """
+    tc_project, tc_id = split_test_case_id(test_case_id)
+
+    return await _fetch_attachment_content(
+        ctx,
+        path=(
+            f"/projects/{encode_path_segment(project_id)}"
+            f"/testruns/{encode_path_segment(test_run_id)}"
+            f"/testrecords/{encode_path_segment(tc_project)}"
+            f"/{encode_path_segment(tc_id)}"
+            f"/{encode_path_segment(str(iteration))}"
+            f"/attachments/{encode_path_segment(attachment_id)}/content"
+        ),
+        attachment_id=attachment_id,
+        list_tool="list_test_record_attachments",
+        not_found_location=(
+            f"on test record for case '{test_case_id}' iteration {iteration}"
+            f" (test run '{test_run_id}', project '{project_id}')"
+        ),
+        resource_noun="test record",
+    )
+
+
 def _effective_file_name(
     spec: DocumentAttachmentSpec | WorkItemAttachmentSpec | TestRecordAttachmentSpec,
 ) -> str:
@@ -784,8 +904,9 @@ async def create_test_record_attachments(  # noqa: PLR0913
     server-assigned ({test_case_id}_{file_name}) and differ from the input
     file_name. A file_name colliding with another item in the same call, or
     with an existing attachment on the record, rejects the whole batch --
-    pick a new file_name. NOT idempotent -- retrying a success is rejected
-    as a duplicate, not silently merged.
+    check list_test_record_attachments first or pick a new file_name. NOT
+    idempotent -- retrying a success is rejected as a duplicate, not
+    silently merged.
     """
     tc_project, tc_id = split_test_case_id(test_case_id)
 

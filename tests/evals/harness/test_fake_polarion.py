@@ -33,6 +33,8 @@ from evals.harness.fixtures import (
     TEST_RUN_ID_2,
     TEST_RUN_TEMPLATE_ID,
     TESTCASE_ID,
+    TESTRECORD_ATTACHMENT_CONTENT,
+    TESTRECORD_ATTACHMENT_ID,
     WORKITEM_ATTACHMENT_CONTENT,
     WORKITEM_ATTACHMENT_ID,
     Attachment,
@@ -1478,6 +1480,27 @@ class TestTestRecordAttachmentMutations:
         )
         assert retry.status_code == 201
 
+    def test_post_duplicate_of_seeded_filename_is_409(self) -> None:
+        # TEST_RUN_ID iteration 0 seed carry TESTRECORD_ATTACHMENT_ID.
+        # Dup check span seed union prior POSTs.
+        fake = FakePolarion()
+        seed_file_name = TESTRECORD_ATTACHMENT_ID.split("_", 1)[1]
+        response = fake._dispatch(
+            _multipart_attachments_request(
+                self._PATH,
+                resource={
+                    "data": [
+                        _attachment_entry(
+                            seed_file_name, resource_type="testrecord_attachments"
+                        )
+                    ]
+                },
+                files=[(seed_file_name, b"x")],
+            )
+        )
+        assert response.status_code == 409
+        assert "already exists" in _json(response)["errors"][0]["detail"]
+
     def test_post_json_body_415(self) -> None:
         fake = FakePolarion()
         response = _mutate(fake, "POST", self._PATH, {"data": []})
@@ -1514,6 +1537,169 @@ class TestTestRecordAttachmentMutations:
         )
         assert response.status_code == 400
         assert "File data" in _json(response)["errors"][0]["detail"]
+
+
+class TestTestRecordAttachmentReads:
+    _COLLECTION_PATH = (
+        f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}"
+        f"/testrecords/{PROJECT}/{TESTCASE_ID}/0/attachments"
+    )
+    _CONTENT_PATH = f"{_COLLECTION_PATH}/{TESTRECORD_ATTACHMENT_ID}/content"
+
+    def test_list_exposes_seeded_attachment(self) -> None:
+        response = _get(FakePolarion(), self._COLLECTION_PATH)
+        data = _json(response)["data"]
+        assert len(data) == 1
+        entry = data[0]
+        assert entry["type"] == "testrecord_attachments"
+        assert entry["id"] == (
+            f"{PROJECT}/{TEST_RUN_ID}/{PROJECT}/{TESTCASE_ID}/0/"
+            f"{TESTRECORD_ATTACHMENT_ID}"
+        )
+        assert entry["attributes"]["id"] == TESTRECORD_ATTACHMENT_ID
+        assert entry["attributes"]["length"] > 0
+        assert entry["relationships"]["author"]["data"]["id"]
+        assert _json(response)["included"]
+
+    def test_list_relationships_author_only(self) -> None:
+        # Sparse fieldset drop project rel -- mock must not ship it.
+        response = _get(FakePolarion(), self._COLLECTION_PATH)
+        entry = _json(response)["data"][0]
+        assert sorted(entry["relationships"]) == ["author"]
+
+    def test_list_single_page_omits_meta(self) -> None:
+        response = _get(FakePolarion(), self._COLLECTION_PATH)
+        assert "meta" not in _json(response)
+
+    def test_list_multi_page_meta_present_every_page(self) -> None:
+        # Live rule mirror WI: >1-page collection serve totalCount every page.
+        tr = SEEDS.test_runs[TEST_RUN_ID]
+        attachments = [
+            Attachment(f"{TESTCASE_ID}_extra-{i}.txt", "fake", 10) for i in range(3)
+        ]
+        seeds = replace(
+            SEEDS,
+            test_runs={
+                **SEEDS.test_runs,
+                TEST_RUN_ID: replace(tr, attachments=attachments),
+            },
+        )
+        fake = FakePolarion(seeds=seeds)
+        page1 = _get(fake, self._COLLECTION_PATH, **{"page[size]": "2"})
+        page2 = _get(
+            fake, self._COLLECTION_PATH, **{"page[size]": "2", "page[number]": "2"}
+        )
+        assert _json(page1)["meta"]["totalCount"] == 3
+        assert _json(page2)["meta"]["totalCount"] == 3
+
+    def test_list_empty_for_iteration_without_seed(self) -> None:
+        # TEST_RUN_ID_2 seed no attachment on any iteration.
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_ID_2}"
+            f"/testrecords/{PROJECT}/{TESTCASE_ID}/1/attachments",
+        )
+        assert response.status_code == 200
+        assert _json(response)["data"] == []
+        assert _json(response)["included"] == []
+        assert "meta" not in _json(response)
+
+    def test_list_unknown_test_case_is_404(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}"
+            f"/testrecords/{PROJECT}/MCPT-9999/0/attachments",
+        )
+        assert response.status_code == 404
+
+    def test_list_iteration_beyond_seeded_count_is_404(self) -> None:
+        # TEST_RUN_ID seed iterations=1 -- only iteration 0 exists.
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}"
+            f"/testrecords/{PROJECT}/{TESTCASE_ID}/1/attachments",
+        )
+        assert response.status_code == 404
+
+    def test_list_unknown_run_is_404(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/testruns/Nope"
+            f"/testrecords/{PROJECT}/{TESTCASE_ID}/0/attachments",
+        )
+        assert response.status_code == 404
+
+    def test_created_upload_appears_in_subsequent_list(self) -> None:
+        fake = FakePolarion()
+        fake._dispatch(
+            _multipart_attachments_request(
+                self._COLLECTION_PATH,
+                resource={
+                    "data": [
+                        _attachment_entry(
+                            "new-log.txt", resource_type="testrecord_attachments"
+                        )
+                    ]
+                },
+                files=[("new-log.txt", b"x")],
+            )
+        )
+        response = _get(fake, self._COLLECTION_PATH)
+        ids = {e["attributes"]["id"] for e in _json(response)["data"]}
+        assert ids == {TESTRECORD_ATTACHMENT_ID, f"{TESTCASE_ID}_new-log.txt"}
+
+    def test_content_serves_seeded_bytes(self) -> None:
+        response = _get(FakePolarion(), self._CONTENT_PATH, headers=_BYTES_ACCEPT)
+        assert response.status_code == 200
+        assert response.content == TESTRECORD_ATTACHMENT_CONTENT
+
+    def test_content_served_after_create(self) -> None:
+        fake = FakePolarion()
+        fake._dispatch(
+            _multipart_attachments_request(
+                self._COLLECTION_PATH,
+                resource={
+                    "data": [
+                        _attachment_entry(
+                            "new-log.txt", resource_type="testrecord_attachments"
+                        )
+                    ]
+                },
+                files=[("new-log.txt", b"x")],
+            )
+        )
+        response = _get(
+            fake,
+            f"{self._COLLECTION_PATH}/{TESTCASE_ID}_new-log.txt/content",
+            headers=_BYTES_ACCEPT,
+        )
+        assert response.status_code == 200
+        assert response.content == TESTRECORD_ATTACHMENT_CONTENT
+
+    def test_content_json_only_accept_is_406(self) -> None:
+        response = _get(
+            FakePolarion(), self._CONTENT_PATH, headers={"Accept": "application/json"}
+        )
+        assert response.status_code == 406
+        assert _json(response)["errors"]
+
+    def test_content_unseeded_attachment_is_404(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"{self._COLLECTION_PATH}/999-not-real.txt/content",
+            headers=_BYTES_ACCEPT,
+        )
+        assert response.status_code == 404
+
+    def test_content_unknown_test_case_is_404(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}"
+            f"/testrecords/{PROJECT}/MCPT-9999/0/attachments/"
+            f"{TESTRECORD_ATTACHMENT_ID}/content",
+            headers=_BYTES_ACCEPT,
+        )
+        assert response.status_code == 404
 
 
 class TestOrchestrationSeeding:

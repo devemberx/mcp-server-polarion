@@ -29,6 +29,7 @@ from .fixtures import (
     SPACE,
     TEST_RUN_ID,
     TESTCASE_ID,
+    TESTRECORD_ATTACHMENT_CONTENT,
     TS,
     WORKITEM_ATTACHMENT_CONTENT,
     Attachment,
@@ -95,10 +96,12 @@ class FakePolarion:
     # shared module singleton) so uploads don't leak into other tests'
     # default-seeded FakePolarion instances. Keyed by work item short id.
     created_wi_attachments: dict[str, list[Attachment]] = field(default_factory=dict)
-    # Test record attachment dup tracking, keyed by (run, tcProject, tcId,
-    # iteration) -- project omitted, seeds are single-project. No counter:
-    # ids derive from content (tc_id + fileName), unlike WI attachments.
-    created_tr_attachments: dict[tuple[str, str, str, int], set[str]] = field(
+    # Test record attachments created via POST, keyed by (run, tcProject,
+    # tcId, iteration) -- project omitted, seeds are single-project. No
+    # counter: ids derive from content (tc_id + fileName), unlike WI
+    # attachments. list[Attachment] (not set[str]) -- carry title/length into
+    # collection GET route, mirror created_wi_attachments.
+    created_tr_attachments: dict[tuple[str, str, str, int], list[Attachment]] = field(
         default_factory=dict
     )
 
@@ -605,6 +608,82 @@ class FakePolarion:
                 },
             )
 
+        # Test record attachments: same coordinate validation as single-record
+        # GET. Iteration 0 carries seed attachments (TestRun.attachments);
+        # other iterations start empty -- created uploads join per iteration key.
+        tr_attachments = re.search(
+            r"/testruns/([^/]+)/testrecords/([^/]+)/([^/]+)/(\d+)/attachments$", path
+        )
+        if tr_attachments:
+            run_id, tc_project, tc_id, iteration = tr_attachments.groups()
+            tr = self.seeds.test_runs.get(run_id)
+            if (
+                tr is None
+                or tr.is_template
+                or tc_project != PROJECT
+                or tc_id != TESTCASE_ID
+                or int(iteration) >= tr.iterations
+            ):
+                return httpx.Response(404, json={"errors": [{"status": "404"}]})
+            key = (run_id, tc_project, tc_id, int(iteration))
+            attachments = [
+                *(tr.attachments if int(iteration) == 0 else []),
+                *self.created_tr_attachments.get(key, []),
+            ]
+            data = self._attachment_resources(
+                attachments,
+                f"{PROJECT}/{run_id}/{tc_project}/{tc_id}/{iteration}",
+                "testrecord_attachments",
+            )
+            body: dict[str, Any] = {
+                "data": data,
+                "included": self._author_included() if data else [],
+            }
+            # Mirror WI route: totalCount on every page once collection >1 page.
+            page_size = int(params.get("page[size]", str(DEFAULT_PAGE_SIZE)))
+            if len(data) > page_size:
+                body["meta"] = {"totalCount": len(data)}
+            return httpx.Response(200, json=body)
+
+        # Content route mirror WI: 406 without octet-stream Accept (checked
+        # first, before coordinate resolution), 404 unresolved coordinates or
+        # unknown attachment id, else raw bytes.
+        tr_attachment_content = re.search(
+            r"/testruns/([^/]+)/testrecords/([^/]+)/([^/]+)/(\d+)"
+            r"/attachments/([^/]+)/content$",
+            path,
+        )
+        if tr_attachment_content:
+            run_id, tc_project, tc_id, iteration, attachment_id = (
+                tr_attachment_content.groups()
+            )
+            if "application/octet-stream" not in request.headers.get("accept", ""):
+                return httpx.Response(406, json={"errors": [{"status": "406"}]})
+            tr = self.seeds.test_runs.get(run_id)
+            if (
+                tr is None
+                or tr.is_template
+                or tc_project != PROJECT
+                or tc_id != TESTCASE_ID
+                or int(iteration) >= tr.iterations
+            ):
+                return httpx.Response(404, json={"errors": [{"status": "404"}]})
+            key = (run_id, tc_project, tc_id, int(iteration))
+            known_ids = {
+                a.attachment_id
+                for a in (
+                    *(tr.attachments if int(iteration) == 0 else []),
+                    *self.created_tr_attachments.get(key, []),
+                )
+            }
+            if attachment_id not in known_ids:
+                return httpx.Response(404, json={"errors": [{"status": "404"}]})
+            return httpx.Response(
+                200,
+                content=TESTRECORD_ATTACHMENT_CONTENT,
+                headers={"Content-Type": "application/octet-stream"},
+            )
+
         # isTemplate served only on templates — mirror live omission on instances.
         single_tr = re.search(r"/testruns/([^/]+)$", path)
         if single_tr:
@@ -1021,9 +1100,9 @@ class FakePolarion:
         """Multipart upload route mirroring ``_post_work_item_attachments``.
         Diverges: id/fileName rewritten to ``{tc_id}_{fileName}`` (content-
         derived, no counter); dup 409 whole-batch atomic like doc sibling,
-        checked against both this batch and prior calls on the same record
-        (live-verified 2026-07-21). Record 404 conditions mirror the single-
-        record GET route.
+        checked against this batch, prior calls, and iteration-0 seed
+        attachments alike (live-verified 2026-07-21). Record 404 conditions
+        mirror the single-record GET route.
         """
         parsed = _parse_attachment_multipart(request)
         if isinstance(parsed, httpx.Response):
@@ -1048,12 +1127,21 @@ class FakePolarion:
 
         rewritten_ids = [f"{tc_id}_{name}" for name in file_names]
         key = (run_id, tc_project, tc_id, iteration)
-        tracked = self.created_tr_attachments.setdefault(key, set())
-        if len(set(rewritten_ids)) != len(rewritten_ids) or tracked & set(
+        created = self.created_tr_attachments.setdefault(key, [])
+        known_ids = {
+            a.attachment_id
+            for a in (*(tr.attachments if iteration == 0 else []), *created)
+        }
+        if len(set(rewritten_ids)) != len(rewritten_ids) or known_ids & set(
             rewritten_ids
         ):
             return _error_response(409, "A resource with the same ID already exists.")
-        tracked.update(rewritten_ids)
+        # Live: title settable at POST, served on explicit fields (mirror WI).
+        titles = [entry.get("attributes", {}).get("title", "") for entry in entries]
+        created.extend(
+            Attachment(aid, title, 0)
+            for aid, title in zip(rewritten_ids, titles, strict=True)
+        )
 
         record_base = f"{tc_project}/{tc_id}/{iteration}"
         base = (

@@ -82,6 +82,19 @@ TEST_RUN_ID_3 = "Fake-TR-003"
 # Template blueprint; create_test_runs resolve it via template guard.
 TEST_RUN_TEMPLATE_ID = "Fake-TR-Template"
 
+# Attachment on TEST_RUN_ID's TESTCASE_ID record (iteration 0); id shape
+# {testCaseId}_{fileName} per live contract -- no numeric prefix like doc/WI.
+TESTRECORD_ATTACHMENT_ID = f"{TESTCASE_ID}_fake-log.png"
+
+# 1x1 blue PNG, served verbatim for TESTRECORD_ATTACHMENT_ID -- bytes distinct
+# from DOC_ATTACHMENT_CONTENT/WORKITEM_ATTACHMENT_CONTENT so eval checks prove
+# routing, not luck.
+TESTRECORD_ATTACHMENT_CONTENT = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\xdac``\xf8\x0f\x00"
+    b"\x01\x03\x01\x006t\x11@\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
 TS = "2026-01-01T00:00:00.000Z"
 
 
@@ -142,6 +155,9 @@ class TestRun:
     is_template: bool = False
     # TESTCASE_ID re-executions -- one record per iteration 0..n-1.
     iterations: int = 1
+    # Attachments on iteration-0's TESTCASE_ID record only -- single-record
+    # scope, mirror WorkItem.attachments' flat list.
+    attachments: list[Attachment] = field(default_factory=list)
 
 
 @dataclass
@@ -262,6 +278,9 @@ SEEDS = Seeds(
             type="manual",
             status="open",
             finished_on=TS,
+            attachments=[
+                Attachment(TESTRECORD_ATTACHMENT_ID, "fake-log", 2048),
+            ],
         ),
         # 3 iterations feed EFF-BULK-UPDATE-RECORDS (one bulk PATCH, 3 items).
         TEST_RUN_ID_2: TestRun(TEST_RUN_ID_2, "Fake Smoke Run", iterations=3),
