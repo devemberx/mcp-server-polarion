@@ -20,6 +20,7 @@ from mcp_server_polarion.tools._shared.fields import WORK_ITEM_DETAIL_FIELDS
 from mcp_server_polarion.tools._shared.guard._attachment_refs import (
     WORK_ITEM_ATTACHMENT_SCHEME,
     guard_attachment_refs,
+    guard_attachment_refs_many,
 )
 from mcp_server_polarion.tools._shared.guard._custom_keys import (
     check_custom_keys,
@@ -232,5 +233,32 @@ async def guard_work_item_attachment_refs(
         expected_scheme=WORK_ITEM_ATTACHMENT_SCHEME,
         list_tool="list_work_item_attachments",
         what=f"Work item '{work_item_id}'",
+        project_id=project_id,
+    )
+
+
+async def guard_work_item_comment_attachment_refs(
+    client: PolarionClient,
+    project_id: str,
+    work_item_id: str,
+    htmls: Iterable[str],
+) -> None:
+    """Create path, batch: block comment ``text`` refs to attachments that
+    don't exist yet, or use the ``attachment:`` scheme (never resolves in a
+    work item comment). One GET over the whole comment batch.
+    """
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/workitems/{encode_path_segment(work_item_id)}"
+        "/attachments"
+    )
+    await guard_attachment_refs_many(
+        client,
+        htmls,
+        path=path,
+        resource_type="workitem_attachments",
+        expected_scheme=WORK_ITEM_ATTACHMENT_SCHEME,
+        list_tool="list_work_item_attachments",
+        what=f"Comment(s) on work item '{work_item_id}'",
         project_id=project_id,
     )

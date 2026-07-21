@@ -33,6 +33,9 @@ from mcp_server_polarion.tools.comments import (
     update_document_comment,
     update_work_item_comment,
 )
+from tests.mcp_server_polarion.tools._shared.guard._builders import (
+    attachments_response,
+)
 
 
 class TestListDocumentComments:
@@ -1029,6 +1032,187 @@ class TestCreateDocumentCommentsErrors:
             )
 
 
+class TestCreateDocumentCommentsAttachmentRefGuard:
+    """``create_document_comments`` verify text/html refs vs live attachment
+    list pre-POST; text/plain specs never guarded.
+    """
+
+    async def test_dangling_ref_raises_before_post(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = attachments_response(["1-real.png"], meta=False)
+
+        with pytest.raises(ValueError, match="list_document_attachments"):
+            await create_document_comments(
+                mock_ctx,
+                project_id="P",
+                space_id="S",
+                document_name="D",
+                comments=[
+                    CommentSpec(
+                        text='<img src="attachment:ghost.png"/>',
+                        text_format="text/html",
+                    )
+                ],
+                dry_run=False,
+            )
+        mock_client.post.assert_not_called()
+
+    async def test_wrong_scheme_ref_raises_before_get(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        with pytest.raises(ValueError, match="workitemimg"):
+            await create_document_comments(
+                mock_ctx,
+                project_id="P",
+                space_id="S",
+                document_name="D",
+                comments=[
+                    CommentSpec(
+                        text='<img src="workitemimg:ghost.png"/>',
+                        text_format="text/html",
+                    )
+                ],
+                dry_run=False,
+            )
+        mock_client.get.assert_not_awaited()
+        mock_client.post.assert_not_called()
+
+    async def test_matching_ref_allows_post(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = attachments_response(["1-real.png"], meta=False)
+        mock_client.post.return_value = {
+            "data": [{"type": "document_comments", "id": "P/S/D/c1"}]
+        }
+
+        result = await create_document_comments(
+            mock_ctx,
+            project_id="P",
+            space_id="S",
+            document_name="D",
+            comments=[
+                CommentSpec(
+                    text='<img src="attachment:1-real.png"/>',
+                    text_format="text/html",
+                )
+            ],
+            dry_run=False,
+        )
+
+        assert result.created is True
+        mock_client.post.assert_awaited_once()
+
+    async def test_plain_text_ref_lookalike_skips_guard(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """text/plain renders escaped -- scheme string never resolves,
+        format filter skip the GET entirely.
+        """
+        mock_client.post.return_value = {
+            "data": [{"type": "document_comments", "id": "P/S/D/c1"}]
+        }
+
+        result = await create_document_comments(
+            mock_ctx,
+            project_id="P",
+            space_id="S",
+            document_name="D",
+            comments=[
+                CommentSpec(text='<img src="attachment:ghost.png"/>'),
+            ],
+            dry_run=False,
+        )
+
+        assert result.created is True
+        mock_client.get.assert_not_awaited()
+        mock_client.post.assert_awaited_once()
+
+    async def test_no_ref_html_spec_skips_get(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {
+            "data": [{"type": "document_comments", "id": "P/S/D/c1"}]
+        }
+
+        result = await create_document_comments(
+            mock_ctx,
+            project_id="P",
+            space_id="S",
+            document_name="D",
+            comments=[
+                CommentSpec(text="<p>No refs here</p>", text_format="text/html"),
+            ],
+            dry_run=False,
+        )
+
+        assert result.created is True
+        mock_client.get.assert_not_awaited()
+        mock_client.post.assert_awaited_once()
+
+    async def test_batch_of_two_html_specs_issues_one_get(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = attachments_response(["1-real.png"], meta=False)
+        mock_client.post.return_value = {
+            "data": [
+                {"type": "document_comments", "id": "P/S/D/c1"},
+                {"type": "document_comments", "id": "P/S/D/c2"},
+            ]
+        }
+
+        await create_document_comments(
+            mock_ctx,
+            project_id="P",
+            space_id="S",
+            document_name="D",
+            comments=[
+                CommentSpec(
+                    text='<img src="attachment:1-real.png"/>',
+                    text_format="text/html",
+                ),
+                CommentSpec(
+                    text='<img src="attachment:1-real.png"/> again',
+                    text_format="text/html",
+                ),
+            ],
+            dry_run=False,
+        )
+
+        mock_client.get.assert_awaited_once()
+
+    async def test_dry_run_still_queries_attachments(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = attachments_response(["1-real.png"], meta=False)
+
+        result = await create_document_comments(
+            mock_ctx,
+            project_id="P",
+            space_id="S",
+            document_name="D",
+            comments=[
+                CommentSpec(
+                    text='<img src="attachment:1-real.png"/>',
+                    text_format="text/html",
+                )
+            ],
+            dry_run=True,
+        )
+
+        assert result.dry_run is True
+        mock_client.get.assert_awaited()
+        mock_client.post.assert_not_called()
+
+
+class TestCreateDocumentCommentsAttachmentRefDocstringClause:
+    """Lock attachment-ref validation clause into public docstring."""
+
+    def test_docstring_names_list_document_attachments(self) -> None:
+        document = create_document_comments.__doc__ or ""
+        assert "list_document_attachments" in document
+
+
 class TestCreateDocumentCommentsFieldValidation:
     """Field constraints on create_document_comments / CommentSpec — direct
     calls bypass FastMCP JSON Schema gate; rebuild ``TypeAdapter`` per
@@ -1393,6 +1577,182 @@ class TestCreateWorkItemCommentsFieldValidation:
         result = self._adapter_for("comments").validate_python([{"text": "hello"}])
         assert isinstance(result, list)
         assert len(result) == 1
+
+
+class TestCreateWorkItemCommentsAttachmentRefGuard:
+    """``create_work_item_comments`` verify text/html refs vs live attachment
+    list pre-POST; text/plain specs never guarded.
+    """
+
+    async def test_dangling_ref_raises_before_post(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = attachments_response(["1-real.png"], meta=False)
+
+        with pytest.raises(ValueError, match="list_work_item_attachments"):
+            await create_work_item_comments(
+                mock_ctx,
+                project_id="P",
+                work_item_id="MCPT-1",
+                comments=[
+                    WorkItemCommentSpec(
+                        text='<img src="workitemimg:ghost.png"/>',
+                        text_format="text/html",
+                    )
+                ],
+                dry_run=False,
+            )
+        mock_client.post.assert_not_called()
+
+    async def test_wrong_scheme_ref_raises_before_get(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        with pytest.raises(ValueError, match="attachment"):
+            await create_work_item_comments(
+                mock_ctx,
+                project_id="P",
+                work_item_id="MCPT-1",
+                comments=[
+                    WorkItemCommentSpec(
+                        text='<img src="attachment:ghost.png"/>',
+                        text_format="text/html",
+                    )
+                ],
+                dry_run=False,
+            )
+        mock_client.get.assert_not_awaited()
+        mock_client.post.assert_not_called()
+
+    async def test_matching_ref_allows_post(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = attachments_response(["1-real.png"], meta=False)
+        mock_client.post.return_value = {
+            "data": [{"type": "workitem_comments", "id": "P/MCPT-1/c1"}]
+        }
+
+        result = await create_work_item_comments(
+            mock_ctx,
+            project_id="P",
+            work_item_id="MCPT-1",
+            comments=[
+                WorkItemCommentSpec(
+                    text='<img src="workitemimg:1-real.png"/>',
+                    text_format="text/html",
+                )
+            ],
+            dry_run=False,
+        )
+
+        assert result.created is True
+        mock_client.post.assert_awaited_once()
+
+    async def test_plain_text_ref_lookalike_skips_guard(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        """text/plain renders escaped -- scheme string never resolves,
+        format filter skip the GET entirely.
+        """
+        mock_client.post.return_value = {
+            "data": [{"type": "workitem_comments", "id": "P/MCPT-1/c1"}]
+        }
+
+        result = await create_work_item_comments(
+            mock_ctx,
+            project_id="P",
+            work_item_id="MCPT-1",
+            comments=[
+                WorkItemCommentSpec(text='<img src="workitemimg:ghost.png"/>'),
+            ],
+            dry_run=False,
+        )
+
+        assert result.created is True
+        mock_client.get.assert_not_awaited()
+        mock_client.post.assert_awaited_once()
+
+    async def test_no_ref_html_spec_skips_get(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {
+            "data": [{"type": "workitem_comments", "id": "P/MCPT-1/c1"}]
+        }
+
+        result = await create_work_item_comments(
+            mock_ctx,
+            project_id="P",
+            work_item_id="MCPT-1",
+            comments=[
+                WorkItemCommentSpec(
+                    text="<p>No refs here</p>", text_format="text/html"
+                ),
+            ],
+            dry_run=False,
+        )
+
+        assert result.created is True
+        mock_client.get.assert_not_awaited()
+        mock_client.post.assert_awaited_once()
+
+    async def test_batch_of_two_html_specs_issues_one_get(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = attachments_response(["1-real.png"], meta=False)
+        mock_client.post.return_value = {
+            "data": [
+                {"type": "workitem_comments", "id": "P/MCPT-1/c1"},
+                {"type": "workitem_comments", "id": "P/MCPT-1/c2"},
+            ]
+        }
+
+        await create_work_item_comments(
+            mock_ctx,
+            project_id="P",
+            work_item_id="MCPT-1",
+            comments=[
+                WorkItemCommentSpec(
+                    text='<img src="workitemimg:1-real.png"/>',
+                    text_format="text/html",
+                ),
+                WorkItemCommentSpec(
+                    text='<img src="workitemimg:1-real.png"/> again',
+                    text_format="text/html",
+                ),
+            ],
+            dry_run=False,
+        )
+
+        mock_client.get.assert_awaited_once()
+
+    async def test_dry_run_still_queries_attachments(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = attachments_response(["1-real.png"], meta=False)
+
+        result = await create_work_item_comments(
+            mock_ctx,
+            project_id="P",
+            work_item_id="MCPT-1",
+            comments=[
+                WorkItemCommentSpec(
+                    text='<img src="workitemimg:1-real.png"/>',
+                    text_format="text/html",
+                )
+            ],
+            dry_run=True,
+        )
+
+        assert result.dry_run is True
+        mock_client.get.assert_awaited()
+        mock_client.post.assert_not_called()
+
+
+class TestCreateWorkItemCommentsAttachmentRefDocstringClause:
+    """Lock attachment-ref validation clause into public docstring."""
+
+    def test_docstring_names_list_work_item_attachments(self) -> None:
+        document = create_work_item_comments.__doc__ or ""
+        assert "list_work_item_attachments" in document
 
 
 class TestBuildDocumentCommentUpdatePayload:

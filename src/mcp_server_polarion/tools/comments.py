@@ -28,6 +28,10 @@ from mcp_server_polarion.tools._shared.fields import (
     DOCUMENT_COMMENT_LIST_FIELDS,
     WORK_ITEM_COMMENT_LIST_FIELDS,
 )
+from mcp_server_polarion.tools._shared.guard import (
+    guard_document_comment_attachment_refs,
+    guard_work_item_comment_attachment_refs,
+)
 from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
     get_client,
@@ -303,7 +307,7 @@ async def create_document_comments(  # noqa: PLR0913
     ),
     dry_run: bool = Field(
         default=False,
-        description="Preview payload without calling Polarion.",
+        description="Preview payload without writing; guards still query Polarion.",
     ),
 ) -> CommentsCreateResult:
     """Create one or more comments on a document in one request.
@@ -311,13 +315,22 @@ async def create_document_comments(  # noqa: PLR0913
     Reply: set parent_comment_id to a short id from list_document_comments
     (None = top-level). 'text/html' text is sent unsanitized. Always
     authored by the token's user. NOT idempotent — a retry duplicates.
+    attachment:{id} image refs in text/html comments must name an existing
+    document attachment — resolve via list_document_attachments first.
     """
+    client = get_client(ctx)
     payload = _build_document_comments_payload(
         specs=comments,
         project_id=project_id,
         space_id=space_id,
         document_name=document_name,
     )
+
+    html_texts = [s.text for s in comments if s.text_format == "text/html"]
+    if html_texts:
+        await guard_document_comment_attachment_refs(
+            client, project_id, space_id, document_name, html_texts
+        )
 
     if dry_run:
         return CommentsCreateResult(
@@ -327,7 +340,6 @@ async def create_document_comments(  # noqa: PLR0913
             payload_preview=payload,
         )
 
-    client = get_client(ctx)
     path = (
         f"/projects/{encode_path_segment(project_id)}"
         f"/spaces/{encode_path_segment(space_id)}"
@@ -387,7 +399,7 @@ async def create_work_item_comments(
     ),
     dry_run: bool = Field(
         default=False,
-        description="Preview payload without calling Polarion.",
+        description="Preview payload without writing; guards still query Polarion.",
     ),
 ) -> CommentsCreateResult:
     """Create one or more comments on a work item in one request.
@@ -395,13 +407,22 @@ async def create_work_item_comments(
     Reply: set parent_comment_id to a short id from list_work_item_comments
     (None = top-level). Optional title sets the comment heading. 'text/html'
     text is sent unsanitized. Always authored by the token's user. NOT
-    idempotent — a retry duplicates.
+    idempotent — a retry duplicates. workitemimg:{id} image refs in
+    text/html comments must name an existing attachment — resolve via
+    list_work_item_attachments first.
     """
+    client = get_client(ctx)
     payload = _build_work_item_comments_payload(
         specs=comments,
         project_id=project_id,
         work_item_id=work_item_id,
     )
+
+    html_texts = [s.text for s in comments if s.text_format == "text/html"]
+    if html_texts:
+        await guard_work_item_comment_attachment_refs(
+            client, project_id, work_item_id, html_texts
+        )
 
     if dry_run:
         return CommentsCreateResult(
@@ -411,7 +432,6 @@ async def create_work_item_comments(
             payload_preview=payload,
         )
 
-    client = get_client(ctx)
     path = (
         f"/projects/{encode_path_segment(project_id)}"
         f"/workitems/{encode_path_segment(work_item_id)}"
