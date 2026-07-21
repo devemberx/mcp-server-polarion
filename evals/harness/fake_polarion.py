@@ -25,11 +25,11 @@ from .fixtures import (
     MODULE_ID,
     POLARION_HOST,
     PROJECT,
+    RECORD_IMAGE_ATTACHMENT_CONTENT,
     SEEDS,
     SPACE,
     TEST_RUN_ID,
     TESTCASE_ID,
-    TESTRECORD_ATTACHMENT_CONTENT,
     TS,
     WORKITEM_ATTACHMENT_CONTENT,
     Attachment,
@@ -189,7 +189,7 @@ class FakePolarion:
         """Seed (iteration 0 only) + created attachments for one test record."""
         key = (run_id, tc_project, tc_id, iteration)
         return [
-            *(tr.attachments if iteration == 0 else []),
+            *(tr.record_attachments if iteration == 0 else []),
             *self.created_tr_attachments.get(key, []),
         ]
 
@@ -349,8 +349,9 @@ class FakePolarion:
         self, attachments: list[Attachment], base: str, resource_type: str
     ) -> list[dict[str, Any]]:
         """``attributes.id`` = bare token body HTML reference; resource id
-        prefix it with base (4-segment document or 3-segment work item).
-        Polarion serve no ``created`` and no mime type here.
+        prefix it with base (4-segment document, 3-segment work item, or
+        5-segment testrecord). Polarion serve no ``created`` and no mime
+        type here.
         """
         return [
             {
@@ -594,6 +595,44 @@ class FakePolarion:
                 },
             )
 
+        record_attachments = re.search(
+            r"/testruns/([^/]+)/testrecords/([^/]+)/([^/]+)/(\d+)/attachments$", path
+        )
+        if record_attachments:
+            run_id, case_project, case_id, iteration = record_attachments.groups()
+            tr = self.seeds.test_runs.get(run_id)
+            if (
+                tr is None
+                or tr.is_template
+                or case_project != PROJECT
+                or case_id != TESTCASE_ID
+                or int(iteration) >= tr.iterations
+            ):
+                record_ref = f"{PROJECT}/{run_id}/{case_project}/{case_id}/{iteration}"
+                return _error_response(
+                    404, f"Test Record '{record_ref}' was not found."
+                )
+            # Seed (iteration 0) plus created uploads -- live list serve both.
+            attachments = self._record_attachments(
+                run_id, case_project, case_id, int(iteration), tr
+            )
+            base = f"{PROJECT}/{run_id}/{case_project}/{case_id}/{iteration}"
+            resources = self._attachment_resources(
+                attachments, base, "testrecord_attachments"
+            )
+            page_size = int(params.get("page[size]", str(DEFAULT_PAGE_SIZE)))
+            page_number = int(params.get("page[number]", "1"))
+            start = (page_number - 1) * page_size
+            data = resources[start : start + page_size]
+            body: dict[str, Any] = {
+                "data": data,
+                "included": self._author_included() if data else [],
+            }
+            # WI-rule: totalCount only once collection span >1 page.
+            if len(resources) > page_size:
+                body["meta"] = {"totalCount": len(resources)}
+            return httpx.Response(200, json=body)
+
         # testResultId filter server-side. No meta block -- live endpoint
         # omit totalCount (verified 2026-07-12).
         records = re.search(r"/testruns/([^/]+)/testrecords$", path)
@@ -617,41 +656,6 @@ class FakePolarion:
                     "included": self._author_included() if data else [],
                 },
             )
-
-        # Test record attachments: same coordinate validation as single-record
-        # GET. Iteration 0 carries seed attachments (TestRun.attachments);
-        # other iterations start empty -- created uploads join per iteration key.
-        tr_attachments = re.search(
-            r"/testruns/([^/]+)/testrecords/([^/]+)/([^/]+)/(\d+)/attachments$", path
-        )
-        if tr_attachments:
-            run_id, tc_project, tc_id, iteration = tr_attachments.groups()
-            tr = self.seeds.test_runs.get(run_id)
-            if (
-                tr is None
-                or tr.is_template
-                or tc_project != PROJECT
-                or tc_id != TESTCASE_ID
-                or int(iteration) >= tr.iterations
-            ):
-                return httpx.Response(404, json={"errors": [{"status": "404"}]})
-            attachments = self._record_attachments(
-                run_id, tc_project, tc_id, int(iteration), tr
-            )
-            data = self._attachment_resources(
-                attachments,
-                f"{PROJECT}/{run_id}/{tc_project}/{tc_id}/{iteration}",
-                "testrecord_attachments",
-            )
-            body: dict[str, Any] = {
-                "data": data,
-                "included": self._author_included() if data else [],
-            }
-            # Mirror WI route: totalCount on every page once collection >1 page.
-            page_size = int(params.get("page[size]", str(DEFAULT_PAGE_SIZE)))
-            if len(data) > page_size:
-                body["meta"] = {"totalCount": len(data)}
-            return httpx.Response(200, json=body)
 
         # Content route mirror WI: 406 without octet-stream Accept (checked
         # first, before coordinate resolution), 404 unresolved coordinates or
@@ -686,7 +690,7 @@ class FakePolarion:
                 return httpx.Response(404, json={"errors": [{"status": "404"}]})
             return httpx.Response(
                 200,
-                content=TESTRECORD_ATTACHMENT_CONTENT,
+                content=RECORD_IMAGE_ATTACHMENT_CONTENT,
                 headers={"Content-Type": "application/octet-stream"},
             )
 

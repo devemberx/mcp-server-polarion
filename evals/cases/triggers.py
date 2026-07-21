@@ -19,10 +19,10 @@ from evals.harness.fixtures import (
     FLOATING_TASK_ID,
     PARENT_REQ_ID,
     PROJECT,
+    RECORD_IMAGE_ATTACHMENT_ID,
     SPACE,
     TEST_RUN_ID,
     TESTCASE_ID,
-    TESTRECORD_ATTACHMENT_ID,
     WORKITEM_ATTACHMENT_ID,
 )
 
@@ -220,21 +220,8 @@ CASES: list[Case] = [
         },
     ),
     _case(
-        "TRIG-TR-ATTACHMENTS",
-        f"What files are attached to the test record for test case "
-        f"'{PROJECT}/{TESTCASE_ID}' iteration 0 in test run '{TEST_RUN_ID}' "
-        f"of project '{PROJECT}'?",
-        "triggers_tool",
-        intent="Listing a test record's attached files must call "
-        "list_test_record_attachments; the record detail and the test case "
-        "work item's own attachments do not enumerate them.",
-        covers=["list_test_record_attachments"],
-        expect="list_test_record_attachments",
-        reject=["get_test_record", "list_work_item_attachments"],
-    ),
-    _case(
         "TRIG-TR-ATTACHMENT-CONTENT",
-        f"Show me the image attachment '{TESTRECORD_ATTACHMENT_ID}' from the "
+        f"Show me the image attachment '{RECORD_IMAGE_ATTACHMENT_ID}' from the "
         f"test record for test case '{PROJECT}/{TESTCASE_ID}' iteration 0 in "
         f"test run '{TEST_RUN_ID}' of project '{PROJECT}'.",
         "triggers_tool",
@@ -248,7 +235,7 @@ CASES: list[Case] = [
             "project_id": PROJECT,
             "test_run_id": TEST_RUN_ID,
             "test_case_id": f"{PROJECT}/{TESTCASE_ID}",
-            "attachment_id": TESTRECORD_ATTACHMENT_ID,
+            "attachment_id": RECORD_IMAGE_ATTACHMENT_ID,
         },
     ),
     _case(
@@ -353,6 +340,20 @@ CASES: list[Case] = [
         covers=["get_test_record"],
         expect="get_test_record",
         reject=["list_test_records", "get_test_run"],
+    ),
+    _case(
+        "TRIG-TEST-RECORD-ATTACHMENTS",
+        f"What files are attached to the test record for test case "
+        f"'{PROJECT}/{TESTCASE_ID}' iteration 0 in test run '{TEST_RUN_ID}' "
+        f"of project '{PROJECT}'?",
+        "triggers_tool",
+        intent="Listing a test record's attached files must call "
+        "list_test_record_attachments; fetching the record's execution "
+        "detail, paging the run's records, or listing work item attachments "
+        "does not enumerate them.",
+        covers=["list_test_record_attachments"],
+        expect="list_test_record_attachments",
+        reject=["get_test_record", "list_test_records", "list_work_item_attachments"],
     ),
     _case(
         "TRIG-CREATE-TEST-RUN",

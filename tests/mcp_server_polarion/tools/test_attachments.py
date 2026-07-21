@@ -940,6 +940,329 @@ class TestListWorkItemAttachmentsFieldValidation:
         assert self._adapter_for("page_number").validate_python(1) == 1
 
 
+class TestListTestRecordAttachments:
+    """``list_test_record_attachments`` tool."""
+
+    async def test_returns_paginated_result(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "type": "testrecord_attachments",
+                    "id": f"proj1/TR-100/proj1/TC-42/0/TC-42_file-{i}.png",
+                    "attributes": {
+                        # Live rule: server prepend {testCaseId}_ to upload
+                        # name -- id and fileName both carry prefix.
+                        "id": f"TC-42_file-{i}.png",
+                        "fileName": f"TC-42_file-{i}.png",
+                        "title": f"file-{i}",
+                        "updated": "2026-07-21T09:00:00Z",
+                        "length": 1024 * (i + 1),
+                    },
+                    "relationships": {
+                        "author": {"data": {"type": "users", "id": "alice"}},
+                    },
+                }
+                for i in range(3)
+            ],
+            "included": [
+                {"type": "users", "id": "alice", "attributes": {"name": "Alice A"}}
+            ],
+            "meta": {"totalCount": 3},
+        }
+
+        result = await list_test_record_attachments(
+            mock_ctx,
+            project_id="proj1",
+            test_run_id="TR-100",
+            test_case_id="proj1/TC-42",
+            iteration=0,
+            page_size=100,
+            page_number=1,
+        )
+
+        assert isinstance(result, PaginatedResult)
+        assert result.total_count == 3
+        assert result.page == 1
+        assert result.page_size == 100
+        assert result.has_more is False
+        assert len(result.items) == 3
+
+        attachment = result.items[0]
+        assert isinstance(attachment, Attachment)
+        assert attachment.id == "TC-42_file-0.png"
+        assert attachment.file_name == "TC-42_file-0.png"
+        assert attachment.title == "file-0"
+        assert attachment.length == 1024
+        assert attachment.updated == "2026-07-21T09:00:00Z"
+        assert attachment.author_name == "Alice A"
+        assert all(item.author_name == "Alice A" for item in result.items)
+
+    async def test_returns_empty_page(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {"data": []}
+
+        result = await list_test_record_attachments(
+            mock_ctx,
+            project_id="proj1",
+            test_run_id="TR-100",
+            test_case_id="proj1/TC-42",
+            iteration=0,
+            page_size=100,
+            page_number=1,
+        )
+
+        assert result.total_count == 0
+        assert result.has_more is False
+        assert result.items == []
+
+    async def test_signals_has_more_when_total_exceeds_page(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "type": "testrecord_attachments",
+                    "id": f"proj1/TR-100/proj1/TC-42/0/TC-42_file-{i}.png",
+                    "attributes": {
+                        "id": f"TC-42_file-{i}.png",
+                        "fileName": f"TC-42_file-{i}.png",
+                        "title": f"file-{i}",
+                        "updated": "2026-07-21T00:00:00Z",
+                        "length": 10,
+                    },
+                    "relationships": {},
+                }
+                for i in range(2)
+            ],
+            # Live rule: testrecord attachments meta.totalCount present page
+            # 1 already (WI rule, diverges document overshoot-only rule);
+            # compute_has_more reuse means tool logic never branch on it.
+            "meta": {"totalCount": 5},
+        }
+
+        result = await list_test_record_attachments(
+            mock_ctx,
+            project_id="proj1",
+            test_run_id="TR-100",
+            test_case_id="proj1/TC-42",
+            iteration=0,
+            page_size=2,
+            page_number=1,
+        )
+
+        assert result.total_count == 5
+        assert result.has_more is True
+        assert len(result.items) == 2
+
+    async def test_passes_pagination_and_fieldset_params(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {"data": []}
+
+        await list_test_record_attachments(
+            mock_ctx,
+            project_id="proj1",
+            test_run_id="TR-100",
+            test_case_id="proj1/TC-42",
+            iteration=0,
+            page_size=25,
+            page_number=3,
+        )
+
+        calls = mock_client.get.call_args_list
+        assert len(calls) == 1
+        assert calls[0][0][0] == (
+            "/projects/proj1/testruns/TR-100/testrecords/proj1/TC-42/0/attachments"
+        )
+        params = calls[0][1]["params"]
+        assert set(params.keys()) == {
+            "fields[testrecord_attachments]",
+            "include",
+            "fields[users]",
+            "page[size]",
+            "page[number]",
+        }
+        assert params["fields[testrecord_attachments]"] == (
+            "id,fileName,title,updated,length,author"
+        )
+        assert params["include"] == "author"
+        assert params["fields[users]"] == "name"
+        assert params["page[size]"] == 25
+        assert params["page[number]"] == 3
+
+    async def test_url_encodes_all_path_segments(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {"data": []}
+
+        await list_test_record_attachments(
+            mock_ctx,
+            project_id="My Proj",
+            test_run_id="TR 100",
+            test_case_id="Other Proj/TC 42",
+            iteration=3,
+            page_size=100,
+            page_number=1,
+        )
+
+        path = mock_client.get.call_args_list[0][0][0]
+        assert path == (
+            "/projects/My%20Proj/testruns/TR%20100/testrecords/"
+            "Other%20Proj/TC%2042/3/attachments"
+        )
+
+    async def test_test_case_id_without_slash_raises_before_http(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        with pytest.raises(ValueError, match="project/WI-id"):
+            await list_test_record_attachments(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="TR-100",
+                test_case_id="TC-42",
+                iteration=0,
+                page_size=100,
+                page_number=1,
+            )
+
+        mock_client.get.assert_not_called()
+
+    async def test_not_found_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionNotFoundError(
+            "Not found",
+            status_code=404,
+        )
+
+        with pytest.raises(ValueError, match="list_test_records"):
+            await list_test_record_attachments(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="TR-100",
+                test_case_id="proj1/TC-42",
+                iteration=0,
+                page_size=100,
+                page_number=1,
+            )
+
+    async def test_auth_error_raises_permission_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError(
+            "Forbidden",
+            status_code=403,
+        )
+
+        with pytest.raises(PermissionError, match="POLARION_TOKEN"):
+            await list_test_record_attachments(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="TR-100",
+                test_case_id="proj1/TC-42",
+                iteration=0,
+                page_size=100,
+                page_number=1,
+            )
+
+    async def test_polarion_error_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionError(
+            "Boom",
+            status_code=500,
+        )
+
+        with pytest.raises(RuntimeError, match="Failed to list attachments"):
+            await list_test_record_attachments(
+                mock_ctx,
+                project_id="proj1",
+                test_run_id="TR-100",
+                test_case_id="proj1/TC-42",
+                iteration=0,
+                page_size=100,
+                page_number=1,
+            )
+
+    async def test_no_attributes_block_parses_to_defaulted_model(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Default GET (no fields) ships type/id/links only -- no attributes
+        # block at all; parser must default rather than raise.
+        mock_client.get.return_value = {
+            "data": [
+                {
+                    "type": "testrecord_attachments",
+                    "id": "proj1/TR-100/proj1/TC-42/0/TC-42_file-0.png",
+                    "links": {"self": "..."},
+                }
+            ],
+        }
+
+        result = await list_test_record_attachments(
+            mock_ctx,
+            project_id="proj1",
+            test_run_id="TR-100",
+            test_case_id="proj1/TC-42",
+            iteration=0,
+            page_size=100,
+            page_number=1,
+        )
+
+        attachment = result.items[0]
+        assert attachment.id == ""
+        assert attachment.file_name == ""
+        assert attachment.title == ""
+        assert attachment.length == 0
+        assert attachment.updated == ""
+        assert attachment.author_name == ""
+
+
+class TestListTestRecordAttachmentsFieldValidation:
+    """``page_size``/``page_number``/``iteration`` bounds -- direct calls
+    bypass FastMCP JSON Schema gate; rebuild ``TypeAdapter`` per parameter to
+    prove the constraint is wired.
+    """
+
+    @staticmethod
+    def _adapter_for(param_name: str) -> TypeAdapter[object]:
+        hints = get_type_hints(list_test_record_attachments)
+        sig = inspect.signature(list_test_record_attachments)
+        field_info = sig.parameters[param_name].default
+        return TypeAdapter(Annotated[hints[param_name], field_info])
+
+    def test_page_size_rejects_zero(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("page_size").validate_python(0)
+
+    def test_page_size_rejects_over_max(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("page_size").validate_python(101)
+
+    def test_page_size_accepts_minimum(self) -> None:
+        assert self._adapter_for("page_size").validate_python(1) == 1
+
+    def test_page_size_accepts_maximum(self) -> None:
+        assert self._adapter_for("page_size").validate_python(100) == 100
+
+    def test_page_number_rejects_zero(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("page_number").validate_python(0)
+
+    def test_page_number_accepts_minimum(self) -> None:
+        assert self._adapter_for("page_number").validate_python(1) == 1
+
+    def test_iteration_zero_accepted(self) -> None:
+        assert self._adapter_for("iteration").validate_python(0) == 0
+
+    def test_iteration_below_zero_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for("iteration").validate_python(-1)
+
+
 class TestGetWorkItemAttachmentContent:
     """``get_work_item_attachment_content`` tool."""
 
@@ -1272,310 +1595,6 @@ class TestGetWorkItemAttachmentContent:
         assert path == (
             "/projects/proj1/workitems/MCPT%20556/attachments/1%20shot.png/content"
         )
-
-
-class TestListTestRecordAttachments:
-    """``list_test_record_attachments`` tool."""
-
-    async def test_returns_paginated_result(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": [
-                {
-                    "type": "testrecord_attachments",
-                    "id": f"P/TR-1/P/TC-1/0/TC-1_file-{i}.png",
-                    "attributes": {
-                        "id": f"TC-1_file-{i}.png",
-                        "fileName": f"file-{i}.png",
-                        "title": f"file-{i}",
-                        "updated": "2026-07-21T14:27:38Z",
-                        "length": 1024 * (i + 1),
-                    },
-                    "relationships": {
-                        "author": {
-                            "data": {"type": "users", "id": "alice"},
-                        },
-                    },
-                }
-                for i in range(3)
-            ],
-            "included": [
-                {"type": "users", "id": "alice", "attributes": {"name": "Alice A"}}
-            ],
-            "meta": {"totalCount": 3},
-        }
-
-        result = await list_test_record_attachments(
-            mock_ctx,
-            project_id="P",
-            test_run_id="TR-1",
-            test_case_id="P/TC-1",
-            iteration=0,
-            page_size=100,
-            page_number=1,
-        )
-
-        assert isinstance(result, PaginatedResult)
-        assert result.total_count == 3
-        assert result.page == 1
-        assert result.page_size == 100
-        assert result.has_more is False
-        assert len(result.items) == 3
-
-        attachment = result.items[0]
-        assert isinstance(attachment, Attachment)
-        assert attachment.id == "TC-1_file-0.png"
-        assert attachment.file_name == "file-0.png"
-        assert attachment.title == "file-0"
-        assert attachment.length == 1024
-        assert attachment.updated == "2026-07-21T14:27:38Z"
-        assert attachment.author_name == "Alice A"
-        assert all(item.author_name == "Alice A" for item in result.items)
-
-    async def test_returns_empty_page(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {"data": []}
-
-        result = await list_test_record_attachments(
-            mock_ctx,
-            project_id="P",
-            test_run_id="TR-1",
-            test_case_id="P/TC-1",
-            iteration=0,
-            page_size=100,
-            page_number=1,
-        )
-
-        assert result.total_count == 0
-        assert result.has_more is False
-        assert result.items == []
-
-    async def test_signals_has_more_when_total_exceeds_page(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {
-            "data": [
-                {
-                    "type": "testrecord_attachments",
-                    "id": f"P/TR-1/P/TC-1/0/TC-1_file-{i}.png",
-                    "attributes": {
-                        "id": f"TC-1_file-{i}.png",
-                        "fileName": f"file-{i}.png",
-                        "title": f"file-{i}",
-                        "updated": "2026-07-21T00:00:00Z",
-                        "length": 10,
-                    },
-                    "relationships": {},
-                }
-                for i in range(2)
-            ],
-            "meta": {"totalCount": 5},
-        }
-
-        result = await list_test_record_attachments(
-            mock_ctx,
-            project_id="P",
-            test_run_id="TR-1",
-            test_case_id="P/TC-1",
-            iteration=0,
-            page_size=2,
-            page_number=1,
-        )
-
-        assert result.total_count == 5
-        assert result.has_more is True
-        assert len(result.items) == 2
-
-    async def test_passes_pagination_and_fieldset_params(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {"data": []}
-
-        await list_test_record_attachments(
-            mock_ctx,
-            project_id="P",
-            test_run_id="TR-1",
-            test_case_id="P/TC-1",
-            iteration=3,
-            page_size=25,
-            page_number=3,
-        )
-
-        calls = mock_client.get.call_args_list
-        assert len(calls) == 1
-        assert (
-            calls[0][0][0]
-            == "/projects/P/testruns/TR-1/testrecords/P/TC-1/3/attachments"
-        )
-        params = calls[0][1]["params"]
-        assert set(params.keys()) == {
-            "fields[testrecord_attachments]",
-            "include",
-            "fields[users]",
-            "page[size]",
-            "page[number]",
-        }
-        assert params["fields[testrecord_attachments]"] == (
-            "id,fileName,title,updated,length,author"
-        )
-        assert params["include"] == "author"
-        assert params["fields[users]"] == "name"
-        assert params["page[size]"] == 25
-        assert params["page[number]"] == 3
-
-    async def test_url_encodes_all_path_segments(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.return_value = {"data": []}
-
-        await list_test_record_attachments(
-            mock_ctx,
-            project_id="My Proj",
-            test_run_id="TR 1",
-            test_case_id="My Proj/TC 1",
-            iteration=0,
-            page_size=100,
-            page_number=1,
-        )
-
-        path = mock_client.get.call_args_list[0][0][0]
-        assert path == (
-            "/projects/My%20Proj/testruns/TR%201/testrecords/My%20Proj/TC%201/0"
-            "/attachments"
-        )
-
-    async def test_test_case_id_without_slash_raises_before_http(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        with pytest.raises(ValueError, match="project/WI-id"):
-            await list_test_record_attachments(
-                mock_ctx,
-                project_id="P",
-                test_run_id="TR-1",
-                test_case_id="TC-1",
-                iteration=0,
-                page_size=100,
-                page_number=1,
-            )
-
-        mock_client.get.assert_not_called()
-
-    async def test_not_found_raises_value_error(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.side_effect = PolarionNotFoundError(
-            "Not found",
-            status_code=404,
-        )
-
-        with pytest.raises(ValueError, match="P/TC-1"):
-            await list_test_record_attachments(
-                mock_ctx,
-                project_id="P",
-                test_run_id="TR-1",
-                test_case_id="P/TC-1",
-                iteration=0,
-                page_size=100,
-                page_number=1,
-            )
-
-    async def test_not_found_points_at_list_test_records(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.side_effect = PolarionNotFoundError(
-            "Not found",
-            status_code=404,
-        )
-
-        with pytest.raises(ValueError, match="list_test_records"):
-            await list_test_record_attachments(
-                mock_ctx,
-                project_id="P",
-                test_run_id="TR-1",
-                test_case_id="P/TC-1",
-                iteration=0,
-                page_size=100,
-                page_number=1,
-            )
-
-    async def test_auth_error_raises_permission_error(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.side_effect = PolarionAuthError(
-            "Forbidden",
-            status_code=403,
-        )
-
-        with pytest.raises(PermissionError, match="POLARION_TOKEN"):
-            await list_test_record_attachments(
-                mock_ctx,
-                project_id="P",
-                test_run_id="TR-1",
-                test_case_id="P/TC-1",
-                iteration=0,
-                page_size=100,
-                page_number=1,
-            )
-
-    async def test_polarion_error_raises_runtime_error(
-        self, mock_ctx: MagicMock, mock_client: AsyncMock
-    ) -> None:
-        mock_client.get.side_effect = PolarionError(
-            "Boom",
-            status_code=500,
-        )
-
-        with pytest.raises(RuntimeError, match="Failed to list attachments"):
-            await list_test_record_attachments(
-                mock_ctx,
-                project_id="P",
-                test_run_id="TR-1",
-                test_case_id="P/TC-1",
-                iteration=0,
-                page_size=100,
-                page_number=1,
-            )
-
-
-class TestListTestRecordAttachmentsFieldValidation:
-    """``page_size``/``page_number``/``iteration`` bounds -- direct calls
-    bypass FastMCP JSON Schema gate; rebuild ``TypeAdapter`` per parameter
-    to prove the constraint is wired.
-    """
-
-    @staticmethod
-    def _adapter_for(param_name: str) -> TypeAdapter[object]:
-        hints = get_type_hints(list_test_record_attachments)
-        sig = inspect.signature(list_test_record_attachments)
-        field_info = sig.parameters[param_name].default
-        return TypeAdapter(Annotated[hints[param_name], field_info])
-
-    def test_page_size_rejects_zero(self) -> None:
-        with pytest.raises(ValidationError):
-            self._adapter_for("page_size").validate_python(0)
-
-    def test_page_size_rejects_over_max(self) -> None:
-        with pytest.raises(ValidationError):
-            self._adapter_for("page_size").validate_python(101)
-
-    def test_page_size_accepts_maximum(self) -> None:
-        assert self._adapter_for("page_size").validate_python(100) == 100
-
-    def test_page_number_rejects_zero(self) -> None:
-        with pytest.raises(ValidationError):
-            self._adapter_for("page_number").validate_python(0)
-
-    def test_page_number_accepts_minimum(self) -> None:
-        assert self._adapter_for("page_number").validate_python(1) == 1
-
-    def test_iteration_zero_accepted(self) -> None:
-        assert self._adapter_for("iteration").validate_python(0) == 0
-
-    def test_iteration_below_zero_rejected(self) -> None:
-        with pytest.raises(ValidationError):
-            self._adapter_for("iteration").validate_python(-1)
 
 
 class TestGetTestRecordAttachmentContent:

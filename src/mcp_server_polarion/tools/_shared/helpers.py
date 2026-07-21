@@ -68,6 +68,34 @@ def encode_path_segment(segment: str) -> str:
     return quote(segment, safe="")
 
 
+def split_test_case_id(test_case_id: str) -> tuple[str, str]:
+    """Split full ``{project}/{WI-id}`` test_case_id (as returned by
+    list_test_records) into ``(tc_project, tc_id)``; raise on short form.
+    """
+    if "/" not in test_case_id:
+        raise ValueError(
+            f"test_case_id '{test_case_id}' must be the full 'project/WI-id' "
+            "form returned by list_test_records, not the short work item ID."
+        )
+    tc_project, tc_id = test_case_id.split("/", 1)
+    return tc_project, tc_id
+
+
+def test_record_path(
+    project_id: str, test_run_id: str, test_case_id: str, iteration: int
+) -> str:
+    """Base ``.../testrecords/{tc_project}/{tc_id}/{iteration}`` path shared
+    by test-record tools; test_case_id = full ``project/WI-id`` form.
+    """
+    tc_project, tc_id = split_test_case_id(test_case_id)
+    return (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/testruns/{encode_path_segment(test_run_id)}"
+        f"/testrecords/{encode_path_segment(tc_project)}/{encode_path_segment(tc_id)}"
+        f"/{encode_path_segment(str(iteration))}"
+    )
+
+
 def qualify_work_item_id(id_: str, project_id: str) -> str:
     """Prefix bare work item id with *project_id*; id already carrying a
     ``/`` (e.g. ``Proj/WI-1``) pass through verbatim.
@@ -129,5 +157,7 @@ __all__: list[str] = [
     "reraise_with_item_context",
     "safe_float",
     "safe_str",
+    "split_test_case_id",
+    "test_record_path",
     "validate_work_item_id_for_lucene",
 ]

@@ -82,14 +82,15 @@ TEST_RUN_ID_3 = "Fake-TR-003"
 # Template blueprint; create_test_runs resolve it via template guard.
 TEST_RUN_TEMPLATE_ID = "Fake-TR-Template"
 
-# Attachment on TEST_RUN_ID's TESTCASE_ID record (iteration 0); id shape
-# {testCaseId}_{fileName} per live contract -- no numeric prefix like doc/WI.
-TESTRECORD_ATTACHMENT_ID = f"{TESTCASE_ID}_fake-log.png"
+# Attachment on TEST_RUN_ID's iteration-0 record for TESTCASE_ID; server
+# prepends {testCaseId}_ to upload name, so id/fileName both carry it.
+RECORD_ATTACHMENT_ID = f"{TESTCASE_ID}_fake-log.txt"
 
-# 1x1 blue PNG, served verbatim for TESTRECORD_ATTACHMENT_ID -- bytes distinct
-# from DOC_ATTACHMENT_CONTENT/WORKITEM_ATTACHMENT_CONTENT so eval checks prove
-# routing, not luck.
-TESTRECORD_ATTACHMENT_CONTENT = (
+# Image sibling on same record; 1x1 blue PNG served verbatim by content
+# route -- bytes distinct from DOC/WORKITEM attachment content so eval
+# checks prove routing, not luck.
+RECORD_IMAGE_ATTACHMENT_ID = f"{TESTCASE_ID}_fake-screenshot.png"
+RECORD_IMAGE_ATTACHMENT_CONTENT = (
     b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
     b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\xdac``\xf8\x0f\x00"
     b"\x01\x03\x01\x006t\x11@\x00\x00\x00\x00IEND\xaeB`\x82"
@@ -155,17 +156,17 @@ class TestRun:
     is_template: bool = False
     # TESTCASE_ID re-executions -- one record per iteration 0..n-1.
     iterations: int = 1
-    # Attachments on iteration-0's TESTCASE_ID record only -- single-record
-    # scope, mirror WorkItem.attachments' flat list.
-    attachments: list[Attachment] = field(default_factory=list)
+    # Iteration-0 record's attachments only -- other iterations serve empty.
+    record_attachments: list[Attachment] = field(default_factory=list)
 
 
 @dataclass
 class Attachment:
-    """Document or work-item attachment. ``attachment_id`` carry server-
-    assigned numeric prefix; doc body token ``attachment:{id}``, work item
-    body token ``workitemimg:{id}``. Polarion serve no mime type and no
-    created timestamp here.
+    """Document, work-item, or test-record attachment. ``attachment_id``
+    shape vary by domain (doc = fileName, WI = counter-prefixed, testrecord
+    = ``{testCaseId}_`` prefixed); doc body token ``attachment:{id}``, work
+    item body token ``workitemimg:{id}``. Polarion serve no mime type and
+    no created timestamp here.
     """
 
     attachment_id: str
@@ -278,8 +279,13 @@ SEEDS = Seeds(
             type="manual",
             status="open",
             finished_on=TS,
-            attachments=[
-                Attachment(TESTRECORD_ATTACHMENT_ID, "fake-log", 2048),
+            record_attachments=[
+                Attachment(RECORD_ATTACHMENT_ID, "fake-log", 256),
+                Attachment(
+                    RECORD_IMAGE_ATTACHMENT_ID,
+                    "fake-screenshot",
+                    len(RECORD_IMAGE_ATTACHMENT_CONTENT),
+                ),
             ],
         ),
         # 3 iterations feed EFF-BULK-UPDATE-RECORDS (one bulk PATCH, 3 items).
