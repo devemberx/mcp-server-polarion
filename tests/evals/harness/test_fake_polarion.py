@@ -1005,6 +1005,20 @@ class TestMutations:
         assert all(e["type"] == "document_attachments" for e in data)
         assert all("links" in e and "attributes" not in e for e in data)
 
+    def test_post_doc_attachments_binary_payload_201(self) -> None:
+        # Non-UTF-8 bytes (PNG magic) in file part must not leak
+        # UnicodeDecodeError from dispatcher body parse; leak = respx
+        # __cause__ cycle = rich traceback infinite loop = frozen eval run.
+        fake = FakePolarion()
+        response = fake._dispatch(
+            _multipart_attachments_request(
+                f"/projects/{PROJECT}/spaces/{SPACE}/documents/{DOC}/attachments",
+                resource={"data": [_attachment_entry("real.png")]},
+                files=[("real.png", b"\x89PNG\r\n\x1a\n\x00\x01\x02")],
+            )
+        )
+        assert response.status_code == 201
+
     def test_post_doc_attachments_unseeded_document_404(self) -> None:
         fake = FakePolarion()
         response = fake._dispatch(

@@ -4,6 +4,8 @@ fail-closed crashed runs, git-sha resolution, unknown-case exit code.
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from typing import Any
 
 import pytest
@@ -27,6 +29,26 @@ def _case(name: str = "GATE-X", min_rate: float = 1.0) -> Case:
         input="do a thing",
         metadata={"check": "readonly", "params": {}, "min_pass_rate": min_rate},
     )
+
+
+class TestPlainLogging:
+    def test_import_forces_plain_fastmcp_logging(self) -> None:
+        # Rich traceback render spin forever on cyclic __cause__ chains
+        # (respx SideEffectError wrap/unwrap) and freeze event loop mid
+        # eval -- entrypoint must force plain logging before fastmcp import.
+        code = (
+            "import evals.run, logging;"
+            "handlers = logging.getLogger('fastmcp').handlers;"
+            "print([type(h).__name__ for h in handlers])"
+        )
+        # Own interpreter + literal code = trusted input.
+        result = subprocess.run(  # noqa: S603
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert "RichHandler" not in result.stdout
 
 
 class TestRunCaseNTimes:

@@ -26,6 +26,8 @@ on:
 jobs:
   evals:
     runs-on: ubuntu-latest
+    # category=all x runs=10 ~ 95 min healthy; hung run die here, not at 360.
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/run-evals

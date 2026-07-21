@@ -812,7 +812,9 @@ class FakePolarion:
         if request.content:
             try:
                 body = json.loads(request.content)
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                # UnicodeDecodeError = binary multipart body; leak froze eval
+                # runs (respx __cause__ cycle -> rich extract infinite loop).
                 body = None
         self.mutations.append({"method": request.method, "path": path, "json": body})
 
