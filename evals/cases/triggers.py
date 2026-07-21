@@ -212,7 +212,9 @@ CASES: list[Case] = [
         "side sibling and metadata listing do not render it.",
         covers=["get_work_item_attachment_content"],
         expect="get_work_item_attachment_content",
-        reject=["get_document_attachment_content", "list_work_item_attachments"],
+        # list_* not rejected: list-then-get is valid; expect still enforce
+        # content call fire (list-only stop fail expect).
+        reject=["get_document_attachment_content"],
         match={
             "project_id": PROJECT,
             "work_item_id": FLOATING_TASK_ID,
@@ -230,7 +232,9 @@ CASES: list[Case] = [
         "side sibling and metadata listing do not render it.",
         covers=["get_test_record_attachment_content"],
         expect="get_test_record_attachment_content",
-        reject=["get_work_item_attachment_content", "list_test_record_attachments"],
+        # list_* not rejected: list-then-get is valid; expect still enforce
+        # content call fire (list-only stop fail expect).
+        reject=["get_work_item_attachment_content"],
         match={
             "project_id": PROJECT,
             "test_run_id": TEST_RUN_ID,
