@@ -44,6 +44,44 @@ def _error_response(status: int, detail: str) -> httpx.Response:
     )
 
 
+def _parse_attachment_multipart(
+    request: httpx.Request,
+) -> tuple[list[dict[str, Any]], int] | httpx.Response:
+    """Multipart split shared by doc/WI attachment POST routes: boundary
+    split, extract ``resource`` JSON:API entries + ``files`` part count.
+    Error response in place of the success tuple on content-type/parse
+    failure -- caller still owns the resource-existence (404) and
+    file_names/count (400) checks, since their order vs. lookup diverges.
+    """
+    content_type = request.headers.get("content-type", "")
+    if not content_type.startswith("multipart/form-data"):
+        return _error_response(415, "Unsupported Media Type")
+
+    # Minimal multipart split — no boundary match = zero parts = 400 below.
+    boundary_match = re.search(r'boundary="?([^";]+)"?', content_type)
+    marker = f"--{boundary_match.group(1)}".encode() if boundary_match else b"\x00"
+    resource_raw: bytes | None = None
+    file_part_count = 0
+    for segment in request.content.split(marker):
+        head, separator, payload = segment.partition(b"\r\n\r\n")
+        if not separator:
+            continue  # preamble / closing "--" segment
+        disposition = head.decode("utf-8", errors="replace")
+        if 'name="resource"' in disposition:
+            resource_raw = payload.rstrip(b"\r\n")
+        elif 'name="files"' in disposition:
+            file_part_count += 1
+
+    if resource_raw is None:
+        return _error_response(400, "Resource data not found in request.")
+    try:
+        entries = json.loads(resource_raw).get("data", [])
+    except json.JSONDecodeError:
+        return _error_response(400, "Resource data not found in request.")
+
+    return entries, file_part_count
+
+
 @dataclass
 class FakePolarion:
     """Seeded, structure-faithful fake Polarion served over respx."""
@@ -827,31 +865,10 @@ class FakePolarion:
         plain form field, ordered ``files`` parts; 201 = list of
         type/id/links entries in input order; dup fileName 409 atomic.
         """
-        content_type = request.headers.get("content-type", "")
-        if not content_type.startswith("multipart/form-data"):
-            return _error_response(415, "Unsupported Media Type")
-
-        # Minimal multipart split — no boundary match = zero parts = 400 below.
-        boundary_match = re.search(r'boundary="?([^";]+)"?', content_type)
-        marker = f"--{boundary_match.group(1)}".encode() if boundary_match else b"\x00"
-        resource_raw: bytes | None = None
-        file_part_count = 0
-        for segment in request.content.split(marker):
-            head, separator, payload = segment.partition(b"\r\n\r\n")
-            if not separator:
-                continue  # preamble / closing "--" segment
-            disposition = head.decode("utf-8", errors="replace")
-            if 'name="resource"' in disposition:
-                resource_raw = payload.rstrip(b"\r\n")
-            elif 'name="files"' in disposition:
-                file_part_count += 1
-
-        if resource_raw is None:
-            return _error_response(400, "Resource data not found in request.")
-        try:
-            entries = json.loads(resource_raw).get("data", [])
-        except json.JSONDecodeError:
-            return _error_response(400, "Resource data not found in request.")
+        parsed = _parse_attachment_multipart(request)
+        if isinstance(parsed, httpx.Response):
+            return parsed
+        entries, file_part_count = parsed
 
         doc = self.seeds.documents.get(doc_name)
         if doc is None:
@@ -896,30 +913,10 @@ class FakePolarion:
         count, tracked in ``created_wi_attachments`` (off Seeds, so uploads
         stay instance-local).
         """
-        content_type = request.headers.get("content-type", "")
-        if not content_type.startswith("multipart/form-data"):
-            return _error_response(415, "Unsupported Media Type")
-
-        boundary_match = re.search(r'boundary="?([^";]+)"?', content_type)
-        marker = f"--{boundary_match.group(1)}".encode() if boundary_match else b"\x00"
-        resource_raw: bytes | None = None
-        file_part_count = 0
-        for segment in request.content.split(marker):
-            head, separator, payload = segment.partition(b"\r\n\r\n")
-            if not separator:
-                continue  # preamble / closing "--" segment
-            disposition = head.decode("utf-8", errors="replace")
-            if 'name="resource"' in disposition:
-                resource_raw = payload.rstrip(b"\r\n")
-            elif 'name="files"' in disposition:
-                file_part_count += 1
-
-        if resource_raw is None:
-            return _error_response(400, "Resource data not found in request.")
-        try:
-            entries = json.loads(resource_raw).get("data", [])
-        except json.JSONDecodeError:
-            return _error_response(400, "Resource data not found in request.")
+        parsed = _parse_attachment_multipart(request)
+        if isinstance(parsed, httpx.Response):
+            return parsed
+        entries, file_part_count = parsed
 
         wi = self.seeds.work_items.get(work_item_id)
         if wi is None:

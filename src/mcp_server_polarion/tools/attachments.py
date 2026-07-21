@@ -300,34 +300,34 @@ def _effective_file_name(spec: DocumentAttachmentSpec | WorkItemAttachmentSpec) 
     return spec.file_name if spec.file_name else Path(spec.file_path).name
 
 
-def _build_document_attachments_payload(
-    specs: Sequence[DocumentAttachmentSpec],
+def _build_attachments_payload(
+    specs: Sequence[DocumentAttachmentSpec | WorkItemAttachmentSpec],
+    resource_type: str,
 ) -> dict[str, JsonValue]:
-    """POST .../documents/{d}/attachments body; title skip when unset
-    (skip-None rule). Pure -- no disk access.
+    """POST .../attachments body shared by doc/WI resource types; title
+    skip when unset (skip-None rule). Pure -- no disk access.
     """
     items: list[JsonValue] = []
     for spec in specs:
         attributes: dict[str, JsonValue] = {"fileName": _effective_file_name(spec)}
         if spec.title:
             attributes["title"] = spec.title
-        items.append({"type": "document_attachments", "attributes": attributes})
+        items.append({"type": resource_type, "attributes": attributes})
     return {"data": items}
+
+
+def _build_document_attachments_payload(
+    specs: Sequence[DocumentAttachmentSpec],
+) -> dict[str, JsonValue]:
+    """POST .../documents/{d}/attachments body."""
+    return _build_attachments_payload(specs, "document_attachments")
 
 
 def _build_work_item_attachments_payload(
     specs: Sequence[WorkItemAttachmentSpec],
 ) -> dict[str, JsonValue]:
-    """POST .../workitems/{wi}/attachments body; title skip when unset
-    (skip-None rule). Pure -- no disk access.
-    """
-    items: list[JsonValue] = []
-    for spec in specs:
-        attributes: dict[str, JsonValue] = {"fileName": _effective_file_name(spec)}
-        if spec.title:
-            attributes["title"] = spec.title
-        items.append({"type": "workitem_attachments", "attributes": attributes})
-    return {"data": items}
+    """POST .../workitems/{wi}/attachments body."""
+    return _build_attachments_payload(specs, "workitem_attachments")
 
 
 def _reject_separator_file_names(file_names: Sequence[str]) -> None:
