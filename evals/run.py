@@ -10,6 +10,7 @@ efficiency/orchestration).
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -17,9 +18,14 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+# Before fastmcp import (settings read env once): rich traceback render spin
+# forever on cyclic __cause__ chains (respx SideEffectError wrap/unwrap) and
+# freeze event loop mid-eval -- plain logging immune. Hard set, not setdefault:
+# inherited "true" would revive hang.
+os.environ["FASTMCP_ENABLE_RICH_LOGGING"] = "false"
+
 import argparse
 import json
-import os
 import re
 import subprocess
 from typing import Any
