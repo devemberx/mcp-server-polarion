@@ -85,8 +85,7 @@ def test_record_path(
     project_id: str, test_run_id: str, test_case_id: str, iteration: int
 ) -> str:
     """Base ``.../testrecords/{tc_project}/{tc_id}/{iteration}`` path shared
-    by get/list test-record tools; test_case_id must be the full
-    ``project/WI-id`` form.
+    by test-record tools; test_case_id = full ``project/WI-id`` form.
     """
     tc_project, tc_id = split_test_case_id(test_case_id)
     return (

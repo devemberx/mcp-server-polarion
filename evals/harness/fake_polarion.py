@@ -336,8 +336,9 @@ class FakePolarion:
         self, attachments: list[Attachment], base: str, resource_type: str
     ) -> list[dict[str, Any]]:
         """``attributes.id`` = bare token body HTML reference; resource id
-        prefix it with base (4-segment document or 3-segment work item).
-        Polarion serve no ``created`` and no mime type here.
+        prefix it with base (4-segment document, 3-segment work item, or
+        5-segment testrecord). Polarion serve no ``created`` and no mime
+        type here.
         """
         return [
             {

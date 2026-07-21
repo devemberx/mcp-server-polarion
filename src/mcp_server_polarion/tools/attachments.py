@@ -856,7 +856,8 @@ async def create_test_record_attachments(  # noqa: PLR0913
     pick a new file_name. NOT idempotent -- retrying a success is rejected
     as a duplicate, not silently merged.
     """
-    tc_project, tc_id = split_test_case_id(test_case_id)
+    # Fail fast on short-form test_case_id before file reads + dry_run.
+    split_test_case_id(test_case_id)
 
     _reject_duplicate_file_names([_effective_file_name(spec) for spec in attachments])
     files = _read_attachment_files(attachments)
@@ -879,11 +880,8 @@ async def create_test_record_attachments(  # noqa: PLR0913
 
     client = get_client(ctx)
     path = (
-        f"/projects/{encode_path_segment(project_id)}"
-        f"/testruns/{encode_path_segment(test_run_id)}"
-        f"/testrecords/{encode_path_segment(tc_project)}/{encode_path_segment(tc_id)}"
-        f"/{encode_path_segment(str(iteration))}"
-        "/attachments"
+        test_record_path(project_id, test_run_id, test_case_id, iteration)
+        + "/attachments"
     )
     parts = [
         ("files", (file_name, content, "application/octet-stream"))
