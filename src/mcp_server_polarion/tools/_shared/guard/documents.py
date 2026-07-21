@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.tools._shared.cache import (
     get_document_type_custom_keys,
@@ -14,7 +16,7 @@ from mcp_server_polarion.tools._shared.custom_fields import (
 from mcp_server_polarion.tools._shared.fields import DOCUMENT_DETAIL_FIELDS
 from mcp_server_polarion.tools._shared.guard._attachment_refs import (
     DOCUMENT_ATTACHMENT_SCHEME,
-    guard_attachment_refs,
+    guard_attachment_refs_many,
 )
 from mcp_server_polarion.tools._shared.guard._custom_keys import check_custom_keys
 from mcp_server_polarion.tools._shared.guard._http import guarded_pages
@@ -138,6 +140,32 @@ async def guard_document_custom_fields(
     )
 
 
+async def _guard_document_attachment_refs(  # noqa: PLR0913
+    client: PolarionClient,
+    project_id: str,
+    space_id: str,
+    document_name: str,
+    htmls: Iterable[str],
+    what: str,
+) -> None:
+    path = (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/spaces/{encode_path_segment(space_id)}"
+        f"/documents/{encode_path_segment(document_name)}"
+        "/attachments"
+    )
+    await guard_attachment_refs_many(
+        client,
+        htmls,
+        path=path,
+        resource_type="document_attachments",
+        expected_scheme=DOCUMENT_ATTACHMENT_SCHEME,
+        list_tool="list_document_attachments",
+        what=what,
+        project_id=project_id,
+    )
+
+
 async def guard_document_attachment_refs(
     client: PolarionClient,
     project_id: str,
@@ -149,19 +177,32 @@ async def guard_document_attachment_refs(
     that don't exist yet, or use the ``workitemimg:`` scheme (never resolves
     in a document body).
     """
-    path = (
-        f"/projects/{encode_path_segment(project_id)}"
-        f"/spaces/{encode_path_segment(space_id)}"
-        f"/documents/{encode_path_segment(document_name)}"
-        "/attachments"
-    )
-    await guard_attachment_refs(
+    await _guard_document_attachment_refs(
         client,
-        html,
-        path=path,
-        resource_type="document_attachments",
-        expected_scheme=DOCUMENT_ATTACHMENT_SCHEME,
-        list_tool="list_document_attachments",
+        project_id,
+        space_id,
+        document_name,
+        [html],
         what=f"Document '{space_id}/{document_name}'",
-        project_id=project_id,
+    )
+
+
+async def guard_document_comment_attachment_refs(
+    client: PolarionClient,
+    project_id: str,
+    space_id: str,
+    document_name: str,
+    htmls: Iterable[str],
+) -> None:
+    """Create path, batch: block comment ``text`` refs to attachments that
+    don't exist yet, or use the ``workitemimg:`` scheme (never resolves in a
+    document comment). One GET over the whole comment batch.
+    """
+    await _guard_document_attachment_refs(
+        client,
+        project_id,
+        space_id,
+        document_name,
+        htmls,
+        what=f"Comment(s) on document '{space_id}/{document_name}'",
     )

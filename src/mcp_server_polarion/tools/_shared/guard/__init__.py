@@ -16,6 +16,7 @@ from mcp_server_polarion.tools._shared.guard._attachment_refs import (
 )
 from mcp_server_polarion.tools._shared.guard.documents import (
     guard_document_attachment_refs,
+    guard_document_comment_attachment_refs,
     guard_document_custom_fields,
     guard_document_enums,
 )
@@ -36,6 +37,7 @@ from mcp_server_polarion.tools._shared.guard.test_runs import (
 )
 from mcp_server_polarion.tools._shared.guard.work_items import (
     guard_work_item_attachment_refs,
+    guard_work_item_comment_attachment_refs,
     guard_work_item_custom_fields,
     guard_work_item_enums,
     resolve_work_item_types,
@@ -43,6 +45,7 @@ from mcp_server_polarion.tools._shared.guard.work_items import (
 
 __all__ = [
     "guard_document_attachment_refs",
+    "guard_document_comment_attachment_refs",
     "guard_document_custom_fields",
     "guard_document_enums",
     "guard_hyperlink_roles",
@@ -52,6 +55,7 @@ __all__ = [
     "guard_test_run_enums",
     "guard_test_run_templates",
     "guard_work_item_attachment_refs",
+    "guard_work_item_comment_attachment_refs",
     "guard_work_item_custom_fields",
     "guard_work_item_enums",
     "guard_work_item_link_roles",
