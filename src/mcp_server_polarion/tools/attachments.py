@@ -353,6 +353,21 @@ async def get_work_item_attachment_content(
     )
 
 
+def _test_record_attachments_path(
+    project_id: str, test_run_id: str, tc_project: str, tc_id: str, iteration: int
+) -> str:
+    """.../testruns/{r}/testrecords/{tcProj}/{tcId}/{iter}/attachments path,
+    shared by list/get/create test record attachment tools.
+    """
+    return (
+        f"/projects/{encode_path_segment(project_id)}"
+        f"/testruns/{encode_path_segment(test_run_id)}"
+        f"/testrecords/{encode_path_segment(tc_project)}/{encode_path_segment(tc_id)}"
+        f"/{encode_path_segment(str(iteration))}"
+        "/attachments"
+    )
+
+
 @mcp.tool(
     tags={"read"},
     timeout=60.0,
@@ -383,12 +398,8 @@ async def list_test_record_attachments(  # noqa: PLR0913
     tc_project, tc_id = split_test_case_id(test_case_id)
 
     client = get_client(ctx)
-    path = (
-        f"/projects/{encode_path_segment(project_id)}"
-        f"/testruns/{encode_path_segment(test_run_id)}"
-        f"/testrecords/{encode_path_segment(tc_project)}/{encode_path_segment(tc_id)}"
-        f"/{encode_path_segment(str(iteration))}"
-        "/attachments"
+    path = _test_record_attachments_path(
+        project_id, test_run_id, tc_project, tc_id, iteration
     )
     try:
         response = await client.get(
@@ -452,17 +463,13 @@ async def get_test_record_attachment_content(  # noqa: PLR0913
     and sizes.
     """
     tc_project, tc_id = split_test_case_id(test_case_id)
+    base = _test_record_attachments_path(
+        project_id, test_run_id, tc_project, tc_id, iteration
+    )
 
     return await _fetch_attachment_content(
         ctx,
-        path=(
-            f"/projects/{encode_path_segment(project_id)}"
-            f"/testruns/{encode_path_segment(test_run_id)}"
-            f"/testrecords/{encode_path_segment(tc_project)}"
-            f"/{encode_path_segment(tc_id)}"
-            f"/{encode_path_segment(str(iteration))}"
-            f"/attachments/{encode_path_segment(attachment_id)}/content"
-        ),
+        path=f"{base}/{encode_path_segment(attachment_id)}/content",
         attachment_id=attachment_id,
         list_tool="list_test_record_attachments",
         not_found_location=(
@@ -930,12 +937,8 @@ async def create_test_record_attachments(  # noqa: PLR0913
         )
 
     client = get_client(ctx)
-    path = (
-        f"/projects/{encode_path_segment(project_id)}"
-        f"/testruns/{encode_path_segment(test_run_id)}"
-        f"/testrecords/{encode_path_segment(tc_project)}/{encode_path_segment(tc_id)}"
-        f"/{encode_path_segment(str(iteration))}"
-        "/attachments"
+    path = _test_record_attachments_path(
+        project_id, test_run_id, tc_project, tc_id, iteration
     )
     parts = [
         ("files", (file_name, content, "application/octet-stream"))

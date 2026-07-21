@@ -183,6 +183,16 @@ class FakePolarion:
         resource["attributes"]["testCaseRevision"] = "3"
         return resource
 
+    def _record_attachments(
+        self, run_id: str, tc_project: str, tc_id: str, iteration: int, tr: TestRun
+    ) -> list[Attachment]:
+        """Seed (iteration 0 only) + created attachments for one test record."""
+        key = (run_id, tc_project, tc_id, iteration)
+        return [
+            *(tr.attachments if iteration == 0 else []),
+            *self.created_tr_attachments.get(key, []),
+        ]
+
     def _document_resource(self, name: str) -> dict[str, Any]:
         # Direct index, not .get: only reached once dispatch confirm name seeded.
         doc = self.seeds.documents[name]
@@ -625,11 +635,9 @@ class FakePolarion:
                 or int(iteration) >= tr.iterations
             ):
                 return httpx.Response(404, json={"errors": [{"status": "404"}]})
-            key = (run_id, tc_project, tc_id, int(iteration))
-            attachments = [
-                *(tr.attachments if int(iteration) == 0 else []),
-                *self.created_tr_attachments.get(key, []),
-            ]
+            attachments = self._record_attachments(
+                run_id, tc_project, tc_id, int(iteration), tr
+            )
             data = self._attachment_resources(
                 attachments,
                 f"{PROJECT}/{run_id}/{tc_project}/{tc_id}/{iteration}",
@@ -668,12 +676,10 @@ class FakePolarion:
                 or int(iteration) >= tr.iterations
             ):
                 return httpx.Response(404, json={"errors": [{"status": "404"}]})
-            key = (run_id, tc_project, tc_id, int(iteration))
             known_ids = {
                 a.attachment_id
-                for a in (
-                    *(tr.attachments if int(iteration) == 0 else []),
-                    *self.created_tr_attachments.get(key, []),
+                for a in self._record_attachments(
+                    run_id, tc_project, tc_id, int(iteration), tr
                 )
             }
             if attachment_id not in known_ids:
@@ -1130,7 +1136,7 @@ class FakePolarion:
         created = self.created_tr_attachments.setdefault(key, [])
         known_ids = {
             a.attachment_id
-            for a in (*(tr.attachments if iteration == 0 else []), *created)
+            for a in self._record_attachments(run_id, tc_project, tc_id, iteration, tr)
         }
         if len(set(rewritten_ids)) != len(rewritten_ids) or known_ids & set(
             rewritten_ids
