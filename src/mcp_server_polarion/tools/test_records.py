@@ -38,6 +38,7 @@ from mcp_server_polarion.tools._shared.helpers import (
     get_client,
     qualify_work_item_id,
     reraise_with_item_context,
+    test_record_path,
 )
 from mcp_server_polarion.tools._shared.pagination import (
     DEFAULT_PAGE_SIZE,
@@ -446,20 +447,8 @@ async def get_test_record(
     plain-text comments return as-is. Verify coordinates via
     list_test_records if not found.
     """
-    if "/" not in test_case_id:
-        raise ValueError(
-            f"test_case_id '{test_case_id}' must be the full 'project/WI-id' "
-            "form returned by list_test_records, not the short work item ID."
-        )
-    tc_project, tc_id = test_case_id.split("/", 1)
-
     client = get_client(ctx)
-    path = (
-        f"/projects/{encode_path_segment(project_id)}"
-        f"/testruns/{encode_path_segment(test_run_id)}"
-        f"/testrecords/{encode_path_segment(tc_project)}/{encode_path_segment(tc_id)}"
-        f"/{encode_path_segment(str(iteration))}"
-    )
+    path = test_record_path(project_id, test_run_id, test_case_id, iteration)
     try:
         response = await client.get(
             path,

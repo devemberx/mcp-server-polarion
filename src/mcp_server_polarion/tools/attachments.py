@@ -30,7 +30,11 @@ from mcp_server_polarion.models import (
 )
 from mcp_server_polarion.server import mcp
 from mcp_server_polarion.tools._shared.fields import ATTACHMENT_LIST_FIELDS
-from mcp_server_polarion.tools._shared.helpers import encode_path_segment, get_client
+from mcp_server_polarion.tools._shared.helpers import (
+    encode_path_segment,
+    get_client,
+    test_record_path,
+)
 from mcp_server_polarion.tools._shared.pagination import DEFAULT_PAGE_SIZE
 from mcp_server_polarion.tools._shared.parse import (
     extract_created_short_ids,
@@ -345,20 +349,10 @@ async def list_test_record_attachments(  # noqa: PLR0913
     result means the record has no attachments; verify the
     run/test-case/iteration coordinates via list_test_records if unsure.
     """
-    if "/" not in test_case_id:
-        raise ValueError(
-            f"test_case_id '{test_case_id}' must be the full 'project/WI-id' "
-            "form returned by list_test_records, not the short work item ID."
-        )
-    tc_project, tc_id = test_case_id.split("/", 1)
-
     client = get_client(ctx)
     path = (
-        f"/projects/{encode_path_segment(project_id)}"
-        f"/testruns/{encode_path_segment(test_run_id)}"
-        f"/testrecords/{encode_path_segment(tc_project)}/{encode_path_segment(tc_id)}"
-        f"/{encode_path_segment(str(iteration))}"
-        "/attachments"
+        test_record_path(project_id, test_run_id, test_case_id, iteration)
+        + "/attachments"
     )
     try:
         response = await client.get(
