@@ -36,6 +36,7 @@ from mcp_server_polarion.tools._shared.pagination import DEFAULT_PAGE_SIZE
 from mcp_server_polarion.tools._shared.parse import (
     extract_created_short_ids,
     parse_attachments_page,
+    split_test_case_id,
 )
 
 # Whole batch; fail closed before any request.
@@ -785,12 +786,7 @@ async def create_test_record_attachments(  # noqa: PLR0913
     pick a new file_name. NOT idempotent -- retrying a success is rejected
     as a duplicate, not silently merged.
     """
-    if "/" not in test_case_id:
-        raise ValueError(
-            f"test_case_id '{test_case_id}' must be the full 'project/WI-id' "
-            "form returned by list_test_records, not the short work item ID."
-        )
-    tc_project, tc_id = test_case_id.split("/", 1)
+    tc_project, tc_id = split_test_case_id(test_case_id)
 
     _reject_duplicate_file_names([_effective_file_name(spec) for spec in attachments])
     files = _read_attachment_files(attachments)
