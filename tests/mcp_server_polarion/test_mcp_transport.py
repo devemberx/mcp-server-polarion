@@ -49,6 +49,7 @@ _READ_TOOL_NAMES: frozenset[str] = frozenset(
         "list_work_item_attachments",
         "get_work_item_attachment_content",
         "list_test_record_attachments",
+        "get_test_record_attachment_content",
     }
 )
 _WRITE_TOOL_NAMES: frozenset[str] = frozenset(

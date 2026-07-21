@@ -86,6 +86,16 @@ TEST_RUN_TEMPLATE_ID = "Fake-TR-Template"
 # prepends {testCaseId}_ to upload name, so id/fileName both carry it.
 RECORD_ATTACHMENT_ID = f"{TESTCASE_ID}_fake-log.txt"
 
+# Image sibling on same record; 1x1 blue PNG served verbatim by content
+# route -- bytes distinct from DOC/WORKITEM attachment content so eval
+# checks prove routing, not luck.
+RECORD_IMAGE_ATTACHMENT_ID = f"{TESTCASE_ID}_fake-screenshot.png"
+RECORD_IMAGE_ATTACHMENT_CONTENT = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\xdac``\xf8\x0f\x00"
+    b"\x01\x03\x01\x006t\x11@\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
 TS = "2026-01-01T00:00:00.000Z"
 
 
@@ -152,10 +162,11 @@ class TestRun:
 
 @dataclass
 class Attachment:
-    """Document or work-item attachment. ``attachment_id`` carry server-
-    assigned numeric prefix; doc body token ``attachment:{id}``, work item
-    body token ``workitemimg:{id}``. Polarion serve no mime type and no
-    created timestamp here.
+    """Document, work-item, or test-record attachment. ``attachment_id``
+    shape vary by domain (doc = fileName, WI = counter-prefixed, testrecord
+    = ``{testCaseId}_`` prefixed); doc body token ``attachment:{id}``, work
+    item body token ``workitemimg:{id}``. Polarion serve no mime type and
+    no created timestamp here.
     """
 
     attachment_id: str
@@ -268,7 +279,14 @@ SEEDS = Seeds(
             type="manual",
             status="open",
             finished_on=TS,
-            record_attachments=[Attachment(RECORD_ATTACHMENT_ID, "fake-log", 256)],
+            record_attachments=[
+                Attachment(RECORD_ATTACHMENT_ID, "fake-log", 256),
+                Attachment(
+                    RECORD_IMAGE_ATTACHMENT_ID,
+                    "fake-screenshot",
+                    len(RECORD_IMAGE_ATTACHMENT_CONTENT),
+                ),
+            ],
         ),
         # 3 iterations feed EFF-BULK-UPDATE-RECORDS (one bulk PATCH, 3 items).
         TEST_RUN_ID_2: TestRun(TEST_RUN_ID_2, "Fake Smoke Run", iterations=3),

@@ -35,6 +35,7 @@ from mcp_server_polarion.tools.attachments import (
     create_test_record_attachments,
     create_work_item_attachments,
     get_document_attachment_content,
+    get_test_record_attachment_content,
     get_work_item_attachment_content,
     list_document_attachments,
     list_test_record_attachments,
@@ -1593,6 +1594,182 @@ class TestGetWorkItemAttachmentContent:
         path = mock_client.get_bytes.call_args_list[0][0][0]
         assert path == (
             "/projects/proj1/workitems/MCPT%20556/attachments/1%20shot.png/content"
+        )
+
+
+class TestGetTestRecordAttachmentContent:
+    """``get_test_record_attachment_content`` tool."""
+
+    async def test_bitmap_happy_path_returns_image(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        raw = b"\x89PNG\r\n\x1a\nfakepngbytes"
+        mock_client.get_bytes = AsyncMock(return_value=raw)
+
+        result = await get_test_record_attachment_content(
+            mock_ctx,
+            project_id="P",
+            test_run_id="TR-1",
+            test_case_id="P/TC-1",
+            attachment_id="TC-1_shot.png",
+            iteration=0,
+        )
+
+        assert isinstance(result, Image)
+        assert result.data == raw
+        assert result.to_image_content().mimeType == "image/png"
+        mock_client.get_bytes.assert_awaited_once_with(
+            "/projects/P/testruns/TR-1/testrecords/P/TC-1/0"
+            "/attachments/TC-1_shot.png/content",
+            max_bytes=5 * 1024 * 1024,
+        )
+
+    async def test_svg_returns_decoded_string(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        raw = b"<svg xmlns='http://www.w3.org/2000/svg'></svg>"
+        mock_client.get_bytes = AsyncMock(return_value=raw)
+
+        result = await get_test_record_attachment_content(
+            mock_ctx,
+            project_id="P",
+            test_run_id="TR-1",
+            test_case_id="P/TC-1",
+            attachment_id="TC-1_diagram.svg",
+            iteration=2,
+        )
+
+        assert isinstance(result, str)
+        assert result == raw.decode("utf-8")
+        mock_client.get_bytes.assert_awaited_once_with(
+            "/projects/P/testruns/TR-1/testrecords/P/TC-1/2"
+            "/attachments/TC-1_diagram.svg/content",
+            max_bytes=64 * 1024,
+        )
+
+    async def test_unsupported_extension_raises_value_error_no_client_call(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get_bytes = AsyncMock()
+
+        with pytest.raises(ValueError, match="list_test_record_attachments"):
+            await get_test_record_attachment_content(
+                mock_ctx,
+                project_id="P",
+                test_run_id="TR-1",
+                test_case_id="P/TC-1",
+                attachment_id="TC-1_report.docx",
+                iteration=0,
+            )
+
+        mock_client.get_bytes.assert_not_awaited()
+
+    async def test_response_too_large_raises_value_error_mentioning_cap(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get_bytes = AsyncMock(
+            side_effect=PolarionResponseTooLargeError(
+                "too big",
+                limit=5 * 1024 * 1024,
+            )
+        )
+
+        with pytest.raises(ValueError, match="5242880"):
+            await get_test_record_attachment_content(
+                mock_ctx,
+                project_id="P",
+                test_run_id="TR-1",
+                test_case_id="P/TC-1",
+                attachment_id="TC-1_shot.png",
+                iteration=0,
+            )
+
+    async def test_test_case_id_without_slash_raises_before_http(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get_bytes = AsyncMock()
+
+        with pytest.raises(ValueError, match="project/WI-id"):
+            await get_test_record_attachment_content(
+                mock_ctx,
+                project_id="P",
+                test_run_id="TR-1",
+                test_case_id="TC-1",
+                attachment_id="TC-1_shot.png",
+                iteration=0,
+            )
+
+        mock_client.get_bytes.assert_not_awaited()
+
+    async def test_not_found_raises_value_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get_bytes = AsyncMock(
+            side_effect=PolarionNotFoundError("Not found", status_code=404)
+        )
+
+        with pytest.raises(ValueError, match="list_test_record_attachments"):
+            await get_test_record_attachment_content(
+                mock_ctx,
+                project_id="P",
+                test_run_id="TR-1",
+                test_case_id="P/TC-1",
+                attachment_id="TC-1_shot.png",
+                iteration=0,
+            )
+
+    async def test_auth_error_raises_permission_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get_bytes = AsyncMock(
+            side_effect=PolarionAuthError("Forbidden", status_code=403)
+        )
+
+        with pytest.raises(PermissionError, match="POLARION_TOKEN"):
+            await get_test_record_attachment_content(
+                mock_ctx,
+                project_id="P",
+                test_run_id="TR-1",
+                test_case_id="P/TC-1",
+                attachment_id="TC-1_shot.png",
+                iteration=0,
+            )
+
+    async def test_polarion_error_raises_runtime_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get_bytes = AsyncMock(
+            side_effect=PolarionError("Boom", status_code=500)
+        )
+
+        with pytest.raises(RuntimeError):
+            await get_test_record_attachment_content(
+                mock_ctx,
+                project_id="P",
+                test_run_id="TR-1",
+                test_case_id="P/TC-1",
+                attachment_id="TC-1_shot.png",
+                iteration=0,
+            )
+
+    async def test_url_encodes_path_segments(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get_bytes = AsyncMock(return_value=b"\x89PNG\r\n\x1a\nfakepngbytes")
+
+        await get_test_record_attachment_content(
+            mock_ctx,
+            project_id="My Proj",
+            test_run_id="TR 1",
+            test_case_id="My Proj/TC 1",
+            attachment_id="TC 1_shot.png",
+            iteration=0,
+        )
+
+        path = mock_client.get_bytes.call_args_list[0][0][0]
+        assert path == (
+            "/projects/My%20Proj/testruns/TR%201/testrecords/My%20Proj/TC%201/0"
+            "/attachments/TC%201_shot.png/content"
         )
 
 

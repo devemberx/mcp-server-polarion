@@ -19,6 +19,7 @@ from evals.harness.fixtures import (
     FLOATING_TASK_ID,
     PARENT_REQ_ID,
     PROJECT,
+    RECORD_IMAGE_ATTACHMENT_ID,
     SPACE,
     TEST_RUN_ID,
     TESTCASE_ID,
@@ -216,6 +217,25 @@ CASES: list[Case] = [
             "project_id": PROJECT,
             "work_item_id": FLOATING_TASK_ID,
             "attachment_id": WORKITEM_ATTACHMENT_ID,
+        },
+    ),
+    _case(
+        "TRIG-TR-ATTACHMENT-CONTENT",
+        f"Show me the image attachment '{RECORD_IMAGE_ATTACHMENT_ID}' from the "
+        f"test record for test case '{PROJECT}/{TESTCASE_ID}' iteration 0 in "
+        f"test run '{TEST_RUN_ID}' of project '{PROJECT}'.",
+        "triggers_tool",
+        intent="Viewing a test record attachment's image content must call "
+        "get_test_record_attachment_content with the exact ids; the work-item-"
+        "side sibling and metadata listing do not render it.",
+        covers=["get_test_record_attachment_content"],
+        expect="get_test_record_attachment_content",
+        reject=["get_work_item_attachment_content", "list_test_record_attachments"],
+        match={
+            "project_id": PROJECT,
+            "test_run_id": TEST_RUN_ID,
+            "test_case_id": f"{PROJECT}/{TESTCASE_ID}",
+            "attachment_id": RECORD_IMAGE_ATTACHMENT_ID,
         },
     ),
     _case(
