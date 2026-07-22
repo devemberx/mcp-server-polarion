@@ -147,6 +147,54 @@ class TestReadRouting:
         assert all(i["attributes"]["type"] == "heading" for i in items)
         assert len(items) == 2
 
+    def test_work_item_list_title_query_no_match_is_empty(self) -> None:
+        # Dedup search for title no seed carries -- real Polarion return
+        # empty, so agent cannot mine anchor id from result.
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/workitems",
+            query='title:"Cache eviction policy"',
+        )
+        assert _json(response)["meta"]["totalCount"] == 0
+        assert _json(response)["data"] == []
+
+    def test_work_item_list_title_query_matches_seed(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/workitems",
+            query='title:"Section A"',
+        )
+        items = _json(response)["data"]
+        assert [i["id"] for i in items] == [f"{PROJECT}/{DOC_HEADING_ID}"]
+
+    def test_work_item_list_title_or_query_no_match_is_empty(self) -> None:
+        # Bulk-create dedup: OR of three unseeded titles -> empty, so agent
+        # must create, not mistake seeds for pre-existing items.
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/workitems",
+            query="title:(Throughput target OR Error budget OR Retry policy)",
+        )
+        assert _json(response)["meta"]["totalCount"] == 0
+
+    def test_work_item_list_non_title_query_returns_all(self) -> None:
+        # Unparsed query (SQL scope) keep return-all fallback -- efficiency
+        # cases lean on it.
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/workitems",
+            query="SQL:(module.id = 'x')",
+        )
+        assert _json(response)["meta"]["totalCount"] == len(SEEDS.work_items)
+
+    def test_work_item_list_empty_title_query_returns_all(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/workitems",
+            query="title:()",
+        )
+        assert _json(response)["meta"]["totalCount"] == len(SEEDS.work_items)
+
     def test_linked_work_items_empty_when_unlinked(self) -> None:
         response = _get(
             FakePolarion(),
