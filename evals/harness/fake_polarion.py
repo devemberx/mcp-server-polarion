@@ -48,6 +48,18 @@ def _error_response(status: int, detail: str) -> httpx.Response:
     )
 
 
+def _title_query_terms(query: str) -> list[str]:
+    """Lowercased title phrases from a ``title:`` Lucene clause, ``OR``-split.
+
+    Handles ``title:"phrase"`` and ``title:(a OR b OR c)``. Return ``[]`` when
+    nothing extractable, so the caller keep its return-all fallback.
+    """
+    _, _, tail = query.partition("title:")
+    tail = tail.strip().strip('()"')
+    terms = (term.strip('"').strip().lower() for term in re.split(r"\s+OR\s+", tail))
+    return [t for t in terms if t]
+
+
 def _parse_attachment_multipart(
     request: httpx.Request,
 ) -> tuple[list[dict[str, Any]], int] | httpx.Response:
@@ -563,6 +575,15 @@ class FakePolarion:
                     w
                     for w in self.seeds.work_items.values()
                     if any(t == target for _, t in self.seeds.links.get(w.short_id, []))
+                ]
+            elif "title:" in query and (terms := _title_query_terms(query)):
+                # Live server filter title -- unseeded title (dedup/bulk probe)
+                # return empty, so agent cannot mine anchor id nor mistake seed
+                # for pre-existing item.
+                items = [
+                    w
+                    for w in self.seeds.work_items.values()
+                    if any(t in w.title.lower() for t in terms)
                 ]
             else:
                 items = list(self.seeds.work_items.values())
