@@ -178,3 +178,44 @@ class TestAllCases:
     def test_all_case_names_unique(self) -> None:
         names = [c.name for c in run.ALL_CASES]
         assert len(names) == len(set(names))
+```
+
+```python
+# In evals/run.py
+import subprocess
+
+def _run_case_n_times(case: Case, runs: int, evaluator: Any) -> dict[str, Any]:
+    # ...
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=Path(__file__).resolve().parents[2],
+        env={**os.environ, "FASTMCP_ENABLE_RICH_LOGGING": "true"},
+    )
+    # ...
+```
+
+```python
+# In evals/run.py
+def main() -> int:
+    if sys.argv[1] == "--list":
+        # ...
+        return 0
+    # ...
+```
+
+```python
+# In evals/run.py
+def _evaluate_once(case: Case, evaluator: Any) -> tuple[bool, str]:
+    # ...
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=Path(__file__).resolve().parents[2],
+        env={**os.environ, "FASTMCP_ENABLE_RICH_LOGGING": "true"},
+    )
+    # ...
