@@ -2947,6 +2947,22 @@ class TestCreateWorkItemAttachmentsFieldValidation:
             self._adapter_for("work_item_id").validate_python("")
 
 
+class TestCreateWorkItemAttachmentsDocstringContract:
+    """Lock heading-visibility sentence into public docstring.
+
+    Exact wording eval-verified 2026-07-29: compressed variant dropped
+    EFF-TABLE-RECIPE-SOURCED 4/5 to 0/5 (gpt-4o-mini); this phrasing 5/5.
+    """
+
+    def test_docstring_keeps_heading_visibility_sentence(self) -> None:
+        document = " ".join((create_work_item_attachments.__doc__ or "").split())
+        assert (
+            "Heading-type work items accept uploads, but the portal hides"
+            " the Attachments section on heading items -- attachments there"
+            " are reachable only through the API." in document
+        )
+
+
 class TestBuildTestRecordAttachmentsPayload:
     """``_build_test_record_attachments_payload`` -- pure JSON:API body builder."""
 
