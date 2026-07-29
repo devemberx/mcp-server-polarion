@@ -70,10 +70,14 @@ include = [
 target-version = "py313"
 line-length = 88
 # eval fixtures: un-annotated verbose samples (skill input corpus).
-extend-exclude = [".claude/skills/*/evals/files"]
+# references: teaching docs — example code blocks deliberately unformatted
+# (ruff 0.16 formats markdown code blocks by default).
+extend-exclude = [".claude/skills/*/evals/files", ".claude/skills/*/references"]
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "UP", "B", "SIM", "ANN", "PL", "C4", "PTH", "RUF", "S"]
+# PLR0917 stable in ruff 0.16: MCP tool signature = many positional params by design.
+ignore = ["PLR0917"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["ANN", "PLR", "S101", "S105", "S106"]
