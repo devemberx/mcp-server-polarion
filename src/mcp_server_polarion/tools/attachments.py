@@ -777,9 +777,9 @@ async def create_work_item_attachments(
     reference tokens for the work item description body. Duplicate
     file_name values are allowed, both within one call and against existing
     attachments: each upload creates a new attachment, never a conflict.
-    Heading-type work items accept uploads, but the portal hides the
-    Attachments section on heading items -- attachments there are
-    reachable only through the API. NOT idempotent -- retrying a success
+    Heading-type work items accept uploads, but the portal hides their
+    Attachments section -- reachable only through the API.
+    NOT idempotent -- retrying a success
     silently creates a duplicate; after an ambiguous failure verify with
     list_work_item_attachments before retrying.
     """
