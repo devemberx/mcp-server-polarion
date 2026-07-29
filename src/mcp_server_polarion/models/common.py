@@ -10,7 +10,7 @@ from pydantic import BaseModel
 # `Mapping[str, object]`: recursive self-reference break FastMCP
 # `json_schema_to_type` (unresolved `ForwardRef('Root')`).
 type JsonValue = (
-    str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
+    str | int | float | bool | list[JsonValue] | dict[str, JsonValue] | None
 )
 
 # Per-item cap against prompt-injected multi-MB bodies; real bodies ~30 KB.
