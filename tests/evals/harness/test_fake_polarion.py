@@ -394,6 +394,49 @@ class TestReadRouting:
         assert _json(page1)["meta"]["totalCount"] == 3
         assert _json(page2)["meta"]["totalCount"] == 3
 
+    def test_workitem_attachments_page_slicing_returns_distinct_pages(self) -> None:
+        wi = SEEDS.work_items[FLOATING_TASK_ID]
+        attachments = [Attachment(f"{i}-fake-extra.png", "fake", 10) for i in range(3)]
+        seeds = replace(
+            SEEDS,
+            work_items={
+                **SEEDS.work_items,
+                FLOATING_TASK_ID: replace(wi, attachments=attachments),
+            },
+        )
+        fake = FakePolarion(seeds=seeds)
+        path = f"/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}/attachments"
+        page1 = _get(fake, path, **{"page[size]": "2", "page[number]": "1"})
+        page2 = _get(fake, path, **{"page[size]": "2", "page[number]": "2"})
+        ids1 = [e["attributes"]["id"] for e in _json(page1)["data"]]
+        ids2 = [e["attributes"]["id"] for e in _json(page2)["data"]]
+        assert ids1 == ["0-fake-extra.png", "1-fake-extra.png"]
+        assert ids2 == ["2-fake-extra.png"]
+
+    def test_workitem_attachments_overshoot_serves_meta(self) -> None:
+        # Live rule: overshoot past non-empty collection = empty data plus
+        # totalCount, even when collection fit one page.
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}/attachments",
+            **{"page[number]": "2"},
+        )
+        payload = _json(response)
+        assert payload["data"] == []
+        assert payload["included"] == []
+        assert payload["meta"]["totalCount"] == 1
+
+    def test_workitem_attachments_overshoot_empty_collection_omits_meta(self) -> None:
+        # Live rule: overshoot past empty collection still omit meta.
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/workitems/{DOC_HEADING_ID}/attachments",
+            **{"page[number]": "2"},
+        )
+        payload = _json(response)
+        assert payload["data"] == []
+        assert "meta" not in payload
+
     def test_workitem_attachments_unseeded_work_item_404(self) -> None:
         response = _get(
             FakePolarion(), f"/projects/{PROJECT}/workitems/MCPT-9999/attachments"
@@ -850,6 +893,34 @@ class TestTestRecordAttachmentsRouting:
         ids2 = [e["attributes"]["id"] for e in _json(page2)["data"]]
         assert ids1 == [f"{TESTCASE_ID}_extra-0.txt", f"{TESTCASE_ID}_extra-1.txt"]
         assert ids2 == [f"{TESTCASE_ID}_extra-2.txt"]
+
+    def test_overshoot_serves_meta(self) -> None:
+        # Live WI rule: overshoot past non-empty collection = empty data
+        # plus totalCount, even when collection fit one page. Seed = 2
+        # iteration-0 attachments.
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}"
+            f"/testrecords/{PROJECT}/{TESTCASE_ID}/0/attachments",
+            **{"page[number]": "2"},
+        )
+        payload = _json(response)
+        assert payload["data"] == []
+        assert payload["included"] == []
+        assert payload["meta"]["totalCount"] == 2
+
+    def test_overshoot_empty_collection_omits_meta(self) -> None:
+        # TEST_RUN_ID_2 seed no record_attachments -- overshoot past empty
+        # collection still omit meta.
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/testruns/{TEST_RUN_ID_2}"
+            f"/testrecords/{PROJECT}/{TESTCASE_ID}/0/attachments",
+            **{"page[number]": "2"},
+        )
+        payload = _json(response)
+        assert payload["data"] == []
+        assert "meta" not in payload
 
 
 class TestWorkItemResource:
