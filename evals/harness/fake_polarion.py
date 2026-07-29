@@ -514,20 +514,26 @@ class FakePolarion:
                 *wi.attachments,
                 *self.created_wi_attachments.get(wi_id, []),
             ]
-            data = self._attachment_resources(
+            resources = self._attachment_resources(
                 attachments,
                 f"{PROJECT}/{wi_id}",
                 "workitem_attachments",
             )
+            page_size = int(params.get("page[size]", str(DEFAULT_PAGE_SIZE)))
+            page_number = int(params.get("page[number]", "1"))
+            start = (page_number - 1) * page_size
+            data = resources[start : start + page_size]
             body: dict[str, Any] = {
                 "data": data,
                 "included": self._author_included() if data else [],
             }
-            # Live: totalCount on every page once collection span >1 page;
-            # single-page/empty omit meta -- diverge doc overshoot-only rule.
-            page_size = int(params.get("page[size]", str(DEFAULT_PAGE_SIZE)))
-            if len(data) > page_size:
-                body["meta"] = {"totalCount": len(data)}
+            # Live: totalCount every page once collection span >1 page, plus
+            # overshoot past non-empty collection; single-page/empty omit
+            # meta -- diverge doc overshoot-only rule.
+            if len(resources) > page_size or (
+                page_number > 1 and not data and resources
+            ):
+                body["meta"] = {"totalCount": len(resources)}
             return httpx.Response(200, json=body)
 
         # WI content mirror doc route: 406 without octet-stream Accept
@@ -649,8 +655,11 @@ class FakePolarion:
                 "data": data,
                 "included": self._author_included() if data else [],
             }
-            # WI-rule: totalCount only once collection span >1 page.
-            if len(resources) > page_size:
+            # WI-rule: totalCount once collection span >1 page, plus
+            # overshoot past non-empty collection.
+            if len(resources) > page_size or (
+                page_number > 1 and not data and resources
+            ):
                 body["meta"] = {"totalCount": len(resources)}
             return httpx.Response(200, json=body)
 
