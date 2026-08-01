@@ -37,6 +37,7 @@ CI: same order + `ruff format --check` + `pytest --cov-fail-under=90`; diff-cove
 - Every list tool: `page_size` (max 100) + `page_number` → `PaginatedResult[T]` with `has_more`.
 - Timestamps (where Polarion serve both): `list_*` summary = `updated` only; metadata-bearing `get_*`/`read_*` detail add `created` (read_document body-only synthesis — exempt). Domain without `get_*` tool: list expose what API serve (comments `created`-only). API without timestamps: omit.
 - Every write tool: `dry_run: bool = False` — return payload, no hit Polarion.
+- NEVER ship delete tool for unrecoverable data (attachment, work item, document) even where REST allow it (test record attachment DELETE = 204) — removal = human via portal. `dry_run` + `destructiveHint` = advisory, model still call with `dry_run=False`; withhold capability = only hard guarantee. Reversible relationship delete allowed (`delete_work_item_links` — recreate from context, zero data loss). Deliberate posture, not gap (#224 closed) — no re-litigate per review round.
 - Error mapping: `PolarionNotFoundError`→`ValueError`, `PolarionAuthError`→`PermissionError`, `PolarionError`→`RuntimeError`; user-fixable status allowed narrower map (attachment 409 dup fileName→`ValueError`).
 - Guards fail closed: validation GET error block write; only successful empty option set defer to Polarion.
 - Docstrings = LLM manual, Google-style; only prose above `Args:` ship — keep tight; return-field bullets sync with model. Field descriptions one line, skip when name + type say all.
