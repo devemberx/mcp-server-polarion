@@ -60,6 +60,8 @@ def _set_polarion_env() -> None:
     # (respx match by host) to live instance.
     os.environ["POLARION_URL"] = POLARION_HOST
     os.environ["POLARION_TOKEN"] = "fake-token"
+    # Mock backend throttle-free; inherited cap would pace every eval tool call.
+    os.environ["POLARION_MAX_REQUESTS_PER_SECOND"] = "0"
 
 
 class _CycleGuard:

@@ -31,6 +31,14 @@ class PolarionConfig(BaseSettings):
             "Verify TLS certs; False only for trusted self-signed internal instances."
         ),
     )
+    polarion_max_requests_per_second: float = Field(
+        default=1.0,
+        ge=0,
+        description=(
+            "Client-side request rate cap in requests per second; match your "
+            "instance's server-side throttle. 0 disables client-side pacing."
+        ),
+    )
 
     @property
     def base_api_url(self) -> str:

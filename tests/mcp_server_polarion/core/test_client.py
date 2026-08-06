@@ -535,6 +535,53 @@ class TestRetry:
             assert route.call_count == 3
 
 
+class TestMinIntervalWiring:
+    """Pacing interval derive from config rate cap unless explicitly overridden."""
+
+    async def test_min_interval_derived_from_config(self) -> None:
+        config = PolarionConfig(
+            polarion_url="https://polarion.example.com",
+            polarion_token="t",
+            polarion_max_requests_per_second=5.0,
+        )
+        async with PolarionClient(config, write_delay=0) as client:
+            assert client._min_interval == pytest.approx(0.2)
+
+    async def test_min_interval_defaults_to_one_second(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Config default 1 req/s pace 1 s apart."""
+        # Cap leak two ways: shell export (delenv) + repo-root .env
+        # (_env_file=None) — both must die for default-path assert.
+        monkeypatch.delenv("POLARION_MAX_REQUESTS_PER_SECOND", raising=False)
+        config = PolarionConfig(
+            polarion_url="https://polarion.example.com",
+            polarion_token="test-token",
+            _env_file=None,  # type: ignore[call-arg]
+        )
+        async with PolarionClient(config, write_delay=0) as client:
+            assert client._min_interval == pytest.approx(1.0)
+
+    async def test_zero_rate_disables_pacing(self) -> None:
+        """Rate 0 = no cap — reciprocal would ZeroDivisionError."""
+        config = PolarionConfig(
+            polarion_url="https://polarion.example.com",
+            polarion_token="t",
+            polarion_max_requests_per_second=0,
+        )
+        async with PolarionClient(config, write_delay=0) as client:
+            assert client._min_interval == 0.0
+
+    async def test_explicit_min_interval_wins_over_config(self) -> None:
+        config = PolarionConfig(
+            polarion_url="https://polarion.example.com",
+            polarion_token="t",
+            polarion_max_requests_per_second=1.0,
+        )
+        async with PolarionClient(config, write_delay=0, min_interval=0) as client:
+            assert client._min_interval == 0
+
+
 class TestSerialization:
     """Concurrent callers serialise through PolarionClient lock."""
 

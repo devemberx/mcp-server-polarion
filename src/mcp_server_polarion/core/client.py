@@ -34,8 +34,6 @@ _RETRYABLE_STATUS_CODES: Final[frozenset[int]] = frozenset({429, 500, 502, 503, 
 
 # Pause after each mutation (Polarion forbid concurrent writes).
 _WRITE_DELAY_SECONDS: Final[float] = 1.5
-# Start-based min gap → ≤3 req/s; slow request add no extra wait.
-_MIN_REQUEST_INTERVAL_SECONDS: Final[float] = 1.0 / 3.0
 _DEFAULT_TIMEOUT_SECONDS: Final[float] = 30.0
 
 _HTTP_NO_CONTENT: Final[int] = 204
@@ -83,11 +81,16 @@ class PolarionClient:
         config: PolarionConfig,
         *,
         write_delay: float = _WRITE_DELAY_SECONDS,
-        min_interval: float = _MIN_REQUEST_INTERVAL_SECONDS,
+        min_interval: float | None = None,
     ) -> None:
         self.base_url: str = config.base_api_url
         self._write_delay = write_delay
-        self._min_interval = min_interval
+        rate = config.polarion_max_requests_per_second
+        # None = derive start-based min gap from config rate cap; explicit
+        # value = test seam. rate 0 = no cap. Slow request add no extra wait.
+        self._min_interval = (
+            min_interval if min_interval is not None else (1.0 / rate if rate else 0.0)
+        )
         # -inf: first request never wait, any clock epoch.
         self._last_request_monotonic: float = float("-inf")
         self._client = httpx.AsyncClient(

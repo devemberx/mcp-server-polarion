@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Final
 
-# Bulk-write cap: Polarion throttles ~3 req/s, no concurrency.
+# Bulk-write cap: Polarion throttle deployment-configured, no concurrency.
 MAX_BULK_ITEMS: Final[int] = 50
 
 # Detail fetches need ``@all`` — explicit field lists drop inline customs.

@@ -208,6 +208,7 @@ No other installation is needed — `uvx mcp-server-polarion` downloads and runs
 |---|---|---|
 | `POLARION_URL` | Base URL of your Polarion instance | `https://polarion.example.com` |
 | `POLARION_TOKEN` | Personal Access Token for authentication | `your-personal-access-token` |
+| `POLARION_MAX_REQUESTS_PER_SECOND` | Optional. Client-side request rate cap. Throttling is configured per Polarion deployment, so the default is a conservative floor — raise it if your instance allows more, or set `0` to disable client-side pacing (default: `1`) | `3` |
 
 To generate a Personal Access Token, open Polarion, click your user name, and go to **My Account → Personal Access Tokens**.
 

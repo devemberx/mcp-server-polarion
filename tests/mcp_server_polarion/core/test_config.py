@@ -71,6 +71,47 @@ class TestPolarionConfigLoading:
         assert config.polarion_verify_ssl is False
 
 
+class TestMaxRequestsPerSecond:
+    """``polarion_max_requests_per_second`` — default, env override, validation."""
+
+    def test_defaults_to_1(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("POLARION_MAX_REQUESTS_PER_SECOND", raising=False)
+        config = PolarionConfig(
+            polarion_url="https://example.com",
+            polarion_token="t",
+            _env_file=None,  # type: ignore[call-arg]
+        )
+        assert config.polarion_max_requests_per_second == 1.0
+
+    def test_reads_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("POLARION_URL", "https://example.com")
+        monkeypatch.setenv("POLARION_TOKEN", "t")
+        # Differ from default — else env-read indistinguishable from fallback.
+        monkeypatch.setenv("POLARION_MAX_REQUESTS_PER_SECOND", "5")
+
+        config = PolarionConfig()  # type: ignore[call-arg]
+        assert config.polarion_max_requests_per_second == 5.0
+
+    def test_zero_allowed_as_unlimited(self) -> None:
+        """0 = no cap sentinel, not a validation error."""
+        config = PolarionConfig(
+            polarion_url="https://example.com",
+            polarion_token="t",
+            polarion_max_requests_per_second=0,
+            _env_file=None,  # type: ignore[call-arg]
+        )
+        assert config.polarion_max_requests_per_second == 0.0
+
+    def test_rejects_negative(self) -> None:
+        with pytest.raises(ValidationError):
+            PolarionConfig(
+                polarion_url="https://example.com",
+                polarion_token="t",
+                polarion_max_requests_per_second=-1,
+                _env_file=None,  # type: ignore[call-arg]
+            )
+
+
 class TestBaseApiUrl:
     """``base_api_url`` property construction."""
 

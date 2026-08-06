@@ -67,12 +67,15 @@ class TestCycleGuard:
 
 
 class TestSetPolarionEnv:
-    def test_hard_sets_both_vars(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_hard_sets_all_vars(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("POLARION_URL", "https://real.example.com")
         monkeypatch.delenv("POLARION_TOKEN", raising=False)
+        # Inherited cap would pace every eval tool call — must lose to "0".
+        monkeypatch.setenv("POLARION_MAX_REQUESTS_PER_SECOND", "3")
         _set_polarion_env()
         assert os.environ["POLARION_URL"] == POLARION_HOST
         assert os.environ["POLARION_TOKEN"] == "fake-token"
+        assert os.environ["POLARION_MAX_REQUESTS_PER_SECOND"] == "0"
 
 
 def test_agent_error_prefix_is_a_sentinel() -> None:
