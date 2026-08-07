@@ -1,6 +1,6 @@
 """In-process TTL caches for near-static project facts — spare server's
-tight budget (client pace default 1 req/s, no concurrency). Own ALL cache
-state; tool logic reach it only via typed get / store wrappers.
+tight budget (throttle deployment-configured, no concurrency). Own ALL
+cache state; tool logic reach it only via typed get / store wrappers.
 """
 
 from __future__ import annotations

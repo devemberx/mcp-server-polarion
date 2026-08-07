@@ -736,7 +736,7 @@ class TestSerialization:
         )
 
     async def test_read_requests_paced_to_min_interval(self) -> None:
-        """Reads obey the ≤3 req/s cap: two GETs spaced by ``min_interval``."""
+        """Reads obey the configured cap: two GETs spaced by ``min_interval``."""
         get_start: list[float] = []
 
         async def _on_get(request: httpx.Request) -> httpx.Response:
