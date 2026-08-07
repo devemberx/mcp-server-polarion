@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Annotated, cast, get_type_hints
 from unittest.mock import AsyncMock, MagicMock
 
@@ -100,6 +100,18 @@ def _enum_get_response(ids: list[str]) -> dict[str, object]:
     }
 
 
+def _enum_get_by_resource(
+    document_types: list[str], work_item_types: list[str]
+) -> Callable[..., dict[str, object]]:
+    """``getAvailableOptions`` stub answering per resource in path."""
+
+    def _get(path: str, **_kwargs: object) -> dict[str, object]:
+        in_work_items = "/workitems/" in path
+        return _enum_get_response(work_item_types if in_work_items else document_types)
+
+    return _get
+
+
 async def _call_create_doc(mock_ctx: MagicMock, **overrides: object) -> object:
     """Invoke ``create_document``, explicit defaults for every Field."""
     defaults: dict[str, object] = {
@@ -110,6 +122,7 @@ async def _call_create_doc(mock_ctx: MagicMock, **overrides: object) -> object:
         "type": "systemRequirementSpecification",
         "status": None,
         "home_page_content": None,
+        "rendering_layout_types": None,
         "custom_fields": None,
         "dry_run": False,
     }
@@ -127,6 +140,7 @@ async def _call_update_doc(mock_ctx: MagicMock, **overrides: object) -> object:
         "status": None,
         "type": None,
         "home_page_content_html": None,
+        "rendering_layout_types": None,
         "custom_fields": None,
         "workflow_action": None,
         "dry_run": False,
@@ -2309,6 +2323,7 @@ class TestUpdateDocumentValidation:
                 custom_fields=None,
                 workflow_action=None,
                 dry_run=True,
+                rendering_layout_types=None,
             )
         mock_client.patch.assert_not_called()
 
@@ -2330,6 +2345,7 @@ class TestUpdateDocumentValidation:
                 custom_fields=None,
                 workflow_action="approve",
                 dry_run=True,
+                rendering_layout_types=None,
             )
         mock_client.patch.assert_not_called()
 
@@ -2352,6 +2368,7 @@ class TestUpdateDocumentValidation:
                 custom_fields={"documentVersion": "0.2"},
                 workflow_action=None,
                 dry_run=True,
+                rendering_layout_types=None,
             )
         mock_client.patch.assert_not_called()
 
@@ -2371,6 +2388,7 @@ class TestUpdateDocumentValidation:
             custom_fields=None,
             workflow_action="approve",
             dry_run=True,
+            rendering_layout_types=None,
         )
         assert result.dry_run is True
 
@@ -2396,6 +2414,7 @@ class TestUpdateDocumentValidation:
             custom_fields={"documentVersion": "0.2"},
             workflow_action=None,
             dry_run=True,
+            rendering_layout_types=None,
         )
         assert result.dry_run is True
 
@@ -2421,6 +2440,7 @@ class TestUpdateDocumentValidation:
             custom_fields={"documentVersion": "0.2"},
             workflow_action="approve",
             dry_run=True,
+            rendering_layout_types=None,
         )
         assert result.dry_run is True
 
@@ -2444,6 +2464,7 @@ class TestUpdateDocumentValidation:
             custom_fields=None,
             workflow_action="approve",
             dry_run=True,
+            rendering_layout_types=None,
         )
         assert result.dry_run is True
         # Payload carry both body and workflow query param.
@@ -2471,6 +2492,7 @@ class TestUpdateDocumentValidation:
                 custom_fields={"title": "y"},
                 workflow_action=None,
                 dry_run=True,
+                rendering_layout_types=None,
             )
         mock_client.patch.assert_not_called()
 
@@ -2498,6 +2520,7 @@ class TestUpdateDocumentValidation:
                 },
                 workflow_action=None,
                 dry_run=True,
+                rendering_layout_types=None,
             )
         mock_client.patch.assert_not_called()
 
@@ -2522,6 +2545,7 @@ class TestUpdateDocumentDryRun:
             custom_fields=None,
             workflow_action=None,
             dry_run=True,
+            rendering_layout_types=None,
         )
 
         mock_client.patch.assert_not_called()
@@ -2555,6 +2579,7 @@ class TestUpdateDocumentHappyPath:
             custom_fields=None,
             workflow_action=None,
             dry_run=False,
+            rendering_layout_types=None,
         )
 
         assert isinstance(result, DocumentUpdateResult)
@@ -2581,6 +2606,7 @@ class TestUpdateDocumentHappyPath:
             custom_fields=None,
             workflow_action=None,
             dry_run=False,
+            rendering_layout_types=None,
         )
 
         args, kwargs = mock_client.patch.call_args
@@ -2608,6 +2634,7 @@ class TestUpdateDocumentHappyPath:
             custom_fields=None,
             workflow_action="approve",
             dry_run=False,
+            rendering_layout_types=None,
         )
 
         args, _ = mock_client.patch.call_args
@@ -2639,6 +2666,7 @@ class TestUpdateDocumentHappyPath:
             custom_fields=None,
             workflow_action=None,
             dry_run=False,
+            rendering_layout_types=None,
         )
 
         _, kwargs = mock_client.patch.call_args
@@ -2665,6 +2693,7 @@ class TestUpdateDocumentHappyPath:
             custom_fields=None,
             workflow_action=None,
             dry_run=False,
+            rendering_layout_types=None,
         )
 
         _, kwargs = mock_client.patch.call_args
@@ -2688,6 +2717,7 @@ class TestUpdateDocumentHappyPath:
                 custom_fields=None,
                 workflow_action=None,
                 dry_run=False,
+                rendering_layout_types=None,
             )
         mock_client.patch.assert_not_called()
 
@@ -2712,6 +2742,7 @@ class TestUpdateDocumentHappyPath:
                 custom_fields=None,
                 workflow_action=None,
                 dry_run=False,
+                rendering_layout_types=None,
             )
         mock_client.patch.assert_not_called()
 
@@ -2731,6 +2762,7 @@ class TestUpdateDocumentHappyPath:
             custom_fields=None,
             workflow_action=None,
             dry_run=True,
+            rendering_layout_types=None,
         )
         assert result.dry_run is True
 
@@ -2752,6 +2784,7 @@ class TestUpdateDocumentHappyPath:
             custom_fields=None,
             workflow_action=None,
             dry_run=True,
+            rendering_layout_types=None,
         )
         assert result.dry_run is True
         data = cast(dict[str, object], result.payload_preview["data"])  # type: ignore[index]
@@ -2778,6 +2811,7 @@ class TestUpdateDocumentHappyPath:
             custom_fields=None,
             workflow_action=None,
             dry_run=False,
+            rendering_layout_types=None,
         )
 
         _, kwargs = mock_client.patch.call_args
@@ -2801,6 +2835,7 @@ class TestUpdateDocumentHappyPath:
             custom_fields=None,
             workflow_action=None,
             dry_run=False,
+            rendering_layout_types=None,
         )
 
         args, _ = mock_client.patch.call_args
@@ -2824,6 +2859,7 @@ class TestUpdateDocumentHappyPath:
             custom_fields=None,
             workflow_action="needs review",
             dry_run=False,
+            rendering_layout_types=None,
         )
 
         args, _ = mock_client.patch.call_args
@@ -2855,6 +2891,7 @@ class TestUpdateDocumentErrorMapping:
                 custom_fields=None,
                 workflow_action=None,
                 dry_run=False,
+                rendering_layout_types=None,
             )
 
     async def test_404_raises_value_error_with_doc_in_message(
@@ -2877,6 +2914,7 @@ class TestUpdateDocumentErrorMapping:
                 custom_fields=None,
                 workflow_action=None,
                 dry_run=False,
+                rendering_layout_types=None,
             )
         assert "ghost-space" in str(exc_info.value)
 
@@ -2898,6 +2936,7 @@ class TestUpdateDocumentErrorMapping:
                 custom_fields=None,
                 workflow_action=None,
                 dry_run=False,
+                rendering_layout_types=None,
             )
 
 
@@ -3122,6 +3161,7 @@ class TestCreateDocumentDryRun:
             uses_outline_numbering=None,
             custom_fields=None,
             dry_run=True,
+            rendering_layout_types=None,
         )
 
         mock_client.post.assert_not_called()
@@ -3167,6 +3207,7 @@ class TestCreateDocumentHappyPath:
             home_page_content=None,
             custom_fields=None,
             dry_run=False,
+            rendering_layout_types=None,
         )
 
         assert isinstance(result, DocumentCreateResult)
@@ -3193,6 +3234,7 @@ class TestCreateDocumentHappyPath:
             home_page_content=None,
             custom_fields=None,
             dry_run=False,
+            rendering_layout_types=None,
         )
 
         args, kwargs = mock_client.post.call_args
@@ -3223,6 +3265,7 @@ class TestCreateDocumentHappyPath:
             home_page_content=None,
             custom_fields=None,
             dry_run=False,
+            rendering_layout_types=None,
         )
 
         args, _ = mock_client.post.call_args
@@ -3246,6 +3289,7 @@ class TestCreateDocumentHappyPath:
             home_page_content="**bold** [link](https://example.com)",
             custom_fields=None,
             dry_run=False,
+            rendering_layout_types=None,
         )
 
         _, kwargs = mock_client.post.call_args
@@ -3272,6 +3316,7 @@ class TestCreateDocumentHappyPath:
             home_page_content="| a |\n| --- |\n| 1 |\n\nTable: légende\n",
             custom_fields=None,
             dry_run=False,
+            rendering_layout_types=None,
         )
 
         _, kwargs = mock_client.post.call_args
@@ -3309,6 +3354,7 @@ class TestCreateDocumentHappyPath:
             home_page_content="# H\n\npara1\n\n* item\n\npara2",
             custom_fields=None,
             dry_run=False,
+            rendering_layout_types=None,
         )
 
         _, kwargs = mock_client.post.call_args
@@ -3341,6 +3387,7 @@ class TestCreateDocumentHappyPath:
                 home_page_content="plain para",
                 custom_fields=None,
                 dry_run=False,
+                rendering_layout_types=None,
             )
         mock_client.post.assert_not_called()
 
@@ -3362,6 +3409,7 @@ class TestCreateDocumentHappyPath:
             home_page_content="[click](javascript:alert(1))",
             custom_fields=None,
             dry_run=False,
+            rendering_layout_types=None,
         )
 
         _, kwargs = mock_client.post.call_args
@@ -3388,6 +3436,7 @@ class TestCreateDocumentHappyPath:
             home_page_content=None,
             custom_fields=None,
             dry_run=False,
+            rendering_layout_types=None,
         )
 
         assert result.document_name == "Folder/Sub/Doc"
@@ -3412,6 +3461,7 @@ class TestCreateDocumentHappyPath:
             home_page_content=None,
             custom_fields=None,
             dry_run=False,
+            rendering_layout_types=None,
         )
 
         assert _cache_mod.get_cached_documents("MyProj") is None
@@ -3435,6 +3485,7 @@ class TestCreateDocumentHappyPath:
                 home_page_content=None,
                 custom_fields=None,
                 dry_run=False,
+                rendering_layout_types=None,
             )
 
         cached = _cache_mod.get_cached_documents("MyProj")
@@ -3462,6 +3513,7 @@ class TestCreateDocumentErrorMapping:
                 home_page_content=None,
                 custom_fields=None,
                 dry_run=False,
+                rendering_layout_types=None,
             )
 
     async def test_404_raises_value_error_mentioning_project_and_space(
@@ -3483,6 +3535,7 @@ class TestCreateDocumentErrorMapping:
                 home_page_content=None,
                 custom_fields=None,
                 dry_run=False,
+                rendering_layout_types=None,
             )
         assert "ghost" in str(exc_info.value)
         assert "ghost_space" in str(exc_info.value)
@@ -3504,6 +3557,7 @@ class TestCreateDocumentErrorMapping:
                 home_page_content=None,
                 custom_fields=None,
                 dry_run=False,
+                rendering_layout_types=None,
             )
 
 
@@ -3527,6 +3581,7 @@ class TestCreateDocumentResponseParsing:
                 home_page_content=None,
                 custom_fields=None,
                 dry_run=False,
+                rendering_layout_types=None,
             )
 
     async def test_data_not_a_list_raises_runtime_error(
@@ -3546,6 +3601,7 @@ class TestCreateDocumentResponseParsing:
                 home_page_content=None,
                 custom_fields=None,
                 dry_run=False,
+                rendering_layout_types=None,
             )
 
     async def test_two_segment_id_raises_runtime_error(
@@ -3568,6 +3624,7 @@ class TestCreateDocumentResponseParsing:
                 home_page_content=None,
                 custom_fields=None,
                 dry_run=False,
+                rendering_layout_types=None,
             )
 
 
@@ -4392,3 +4449,312 @@ class TestUpdateDocumentAttachmentRefDocstringClause:
     def test_docstring_names_list_document_attachments(self) -> None:
         document = update_document.__doc__ or ""
         assert "list_document_attachments" in document
+
+
+class TestBuildDocumentPayloadRenderingLayouts:
+    """``renderingLayouts`` serialization in both payload builders."""
+
+    def test_create_wraps_each_type_with_fixed_section_layouter(self) -> None:
+        payload = _build_create_document_payload(
+            document_name="D",
+            title="T",
+            type="softwareReqSpecification",
+            home_page_content_html="",
+            status=None,
+            rendering_layout_types=["softwarerequirement", "softwaretestcase"],
+        )
+
+        item = cast(list[dict[str, object]], payload["data"])[0]
+        attributes = cast(dict[str, object], item["attributes"])
+        assert attributes["renderingLayouts"] == [
+            {"type": "softwarerequirement", "layouter": "section"},
+            {"type": "softwaretestcase", "layouter": "section"},
+        ]
+
+    def test_update_wraps_each_type_with_fixed_section_layouter(self) -> None:
+        payload = _build_update_document_payload(
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title=None,
+            status=None,
+            type=None,
+            rendering_layout_types=["task"],
+        )
+
+        data = cast(dict[str, object], payload["data"])
+        attributes = cast(dict[str, object], data["attributes"])
+        assert attributes == {
+            "renderingLayouts": [{"type": "task", "layouter": "section"}]
+        }
+
+    @pytest.mark.parametrize("types", [None, []])
+    def test_create_omits_attribute_when_unset(self, types: list[str] | None) -> None:
+        payload = _build_create_document_payload(
+            document_name="D",
+            title="T",
+            type="generic",
+            home_page_content_html="",
+            status=None,
+            rendering_layout_types=types,
+        )
+
+        item = cast(list[dict[str, object]], payload["data"])[0]
+        attributes = cast(dict[str, object], item["attributes"])
+        assert "renderingLayouts" not in attributes
+
+    @pytest.mark.parametrize("types", [None, []])
+    def test_update_omits_attribute_when_unset(self, types: list[str] | None) -> None:
+        payload = _build_update_document_payload(
+            project_id="MyProj",
+            space_id="S",
+            document_name="D",
+            title="T",
+            status=None,
+            type=None,
+            rendering_layout_types=types,
+        )
+
+        data = cast(dict[str, object], payload["data"])
+        attributes = cast(dict[str, object], data["attributes"])
+        assert attributes == {"title": "T"}
+
+
+class TestCreateDocumentRenderingLayouts:
+    """``rendering_layout_types`` on the create path."""
+
+    async def test_dry_run_previews_section_entries(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        result = cast(
+            DocumentCreateResult,
+            await _call_create_doc(
+                mock_ctx,
+                rendering_layout_types=["softwarerequirement"],
+                dry_run=True,
+            ),
+        )
+
+        mock_client.post.assert_not_called()
+        preview = cast(dict[str, object], result.payload_preview)
+        item = cast(list[dict[str, object]], preview["data"])[0]
+        attributes = cast(dict[str, object], item["attributes"])
+        assert attributes["renderingLayouts"] == [
+            {"type": "softwarerequirement", "layouter": "section"}
+        ]
+
+    async def test_unknown_type_blocks_post(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = _enum_get_by_resource(
+            ["systemRequirementSpecification"], ["softwarerequirement"]
+        )
+
+        with pytest.raises(ValueError, match="list_work_item_enum_options"):
+            await _call_create_doc(mock_ctx, rendering_layout_types=["nosuchtype_zz"])
+
+        mock_client.post.assert_not_called()
+
+    async def test_duplicate_types_block_post(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        with pytest.raises(ValueError, match="repeats"):
+            await _call_create_doc(mock_ctx, rendering_layout_types=["task", "task"])
+
+        mock_client.post.assert_not_called()
+
+    async def test_guard_runs_on_dry_run(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # dry_run preview must not smuggle ghost type past validation.
+        mock_client.get.side_effect = _enum_get_by_resource(
+            ["systemRequirementSpecification"], ["softwarerequirement"]
+        )
+
+        with pytest.raises(ValueError, match="nosuchtype_zz"):
+            await _call_create_doc(
+                mock_ctx, rendering_layout_types=["nosuchtype_zz"], dry_run=True
+            )
+
+    async def test_post_body_carries_layouts(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.return_value = {
+            "data": [{"type": "documents", "id": "MyProj/_default/Doc"}]
+        }
+
+        await _call_create_doc(mock_ctx, rendering_layout_types=["softwarerequirement"])
+
+        body = mock_client.post.call_args.kwargs["json"]
+        attributes = body["data"][0]["attributes"]
+        assert attributes["renderingLayouts"] == [
+            {"type": "softwarerequirement", "layouter": "section"}
+        ]
+
+
+class TestUpdateDocumentRenderingLayouts:
+    """``rendering_layout_types`` on the update path."""
+
+    async def test_alone_satisfies_at_least_one_check(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        result = cast(
+            DocumentUpdateResult,
+            await _call_update_doc(
+                mock_ctx, rendering_layout_types=["task"], dry_run=True
+            ),
+        )
+
+        assert result.dry_run is True
+        preview = cast(dict[str, object], result.payload_preview)
+        data = cast(dict[str, object], preview["data"])
+        attributes = cast(dict[str, object], data["attributes"])
+        assert attributes["renderingLayouts"] == [
+            {"type": "task", "layouter": "section"}
+        ]
+
+    async def test_listed_in_missing_field_error(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Direct call: helper leave auto_suspect unset, which pass has_attrs.
+        with pytest.raises(ValueError, match="rendering_layout_types"):
+            await update_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="_default",
+                document_name="Doc",
+                title=None,
+                status=None,
+                type=None,
+                home_page_content_html=None,
+                auto_suspect=None,
+                uses_outline_numbering=None,
+                rendering_layout_types=None,
+                custom_fields=None,
+                workflow_action=None,
+                dry_run=True,
+            )
+
+    async def test_unknown_type_blocks_patch(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = _enum_get_response(["task"])
+
+        with pytest.raises(ValueError, match="list_work_item_enum_options"):
+            await _call_update_doc(mock_ctx, rendering_layout_types=["nosuchtype_zz"])
+
+        mock_client.patch.assert_not_called()
+
+    async def test_patch_body_carries_layouts(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        await _call_update_doc(
+            mock_ctx,
+            rendering_layout_types=["softwarerequirement", "softwaretestcase"],
+        )
+
+        body = mock_client.patch.call_args.kwargs["json"]
+        assert body["data"]["attributes"]["renderingLayouts"] == [
+            {"type": "softwarerequirement", "layouter": "section"},
+            {"type": "softwaretestcase", "layouter": "section"},
+        ]
+
+
+class TestRenderingLayoutTypesFieldValidation:
+    """``min_length=1`` on the new parameter — no silent clear."""
+
+    @staticmethod
+    def _adapter_for(tool: Callable[..., object]) -> TypeAdapter[object]:
+        param_name = "rendering_layout_types"
+        hints = get_type_hints(tool)
+        sig = inspect.signature(tool)
+        field_info = sig.parameters[param_name].default
+        return TypeAdapter(Annotated[hints[param_name], field_info])
+
+    @pytest.mark.parametrize("tool", [create_document, update_document])
+    def test_rejects_empty_list(self, tool: Callable[..., object]) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter_for(tool).validate_python([])
+
+    @pytest.mark.parametrize("tool", [create_document, update_document])
+    def test_accepts_none_and_non_empty_list(self, tool: Callable[..., object]) -> None:
+        adapter = self._adapter_for(tool)
+        assert adapter.validate_python(None) is None
+        assert adapter.validate_python(["task"]) == ["task"]
+
+
+class TestGetDocumentRenderingLayoutTypes:
+    """``renderingLayouts`` parsed into ``DocumentDetail``."""
+
+    async def test_types_surfaced_in_order(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": {
+                "attributes": {
+                    "title": "D",
+                    "renderingLayouts": [
+                        {"type": "softwarerequirement", "layouter": "section"},
+                        {"type": "task", "layouter": "paragraph"},
+                    ],
+                }
+            }
+        }
+
+        detail = await get_document(
+            mock_ctx, project_id="MyProj", space_id="Design", document_name="D"
+        )
+
+        assert detail.rendering_layout_types == ["softwarerequirement", "task"]
+
+    async def test_absent_attribute_yields_empty_list(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {"data": {"attributes": {"title": "D"}}}
+
+        detail = await get_document(
+            mock_ctx, project_id="MyProj", space_id="Design", document_name="D"
+        )
+
+        assert detail.rendering_layout_types == []
+
+    @pytest.mark.parametrize(
+        "layouts",
+        [
+            "not-a-list",
+            ["not-a-dict"],
+            [{"layouter": "section"}],
+            [{"type": ""}],
+            [{"type": 7}],
+        ],
+    )
+    async def test_malformed_entries_skipped(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, layouts: object
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": {"attributes": {"title": "D", "renderingLayouts": layouts}}
+        }
+
+        detail = await get_document(
+            mock_ctx, project_id="MyProj", space_id="Design", document_name="D"
+        )
+
+        assert detail.rendering_layout_types == []
+
+    async def test_layout_types_stay_out_of_custom_fields(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {
+            "data": {
+                "attributes": {
+                    "title": "D",
+                    "renderingLayouts": [{"type": "task", "layouter": "section"}],
+                }
+            }
+        }
+
+        detail = await get_document(
+            mock_ctx, project_id="MyProj", space_id="Design", document_name="D"
+        )
+
+        assert detail.custom_fields == {}

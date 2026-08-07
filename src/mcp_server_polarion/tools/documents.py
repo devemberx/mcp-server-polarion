@@ -49,6 +49,7 @@ from mcp_server_polarion.tools._shared.guard import (
     guard_document_attachment_refs,
     guard_document_custom_fields,
     guard_document_enums,
+    guard_document_rendering_layout_types,
     guard_work_item_link_roles,
     reject_any_scheme_refs,
 )
@@ -94,6 +95,11 @@ _POLARION_PART_TYPES: Final[frozenset[str]] = frozenset(
 
 
 _MAX_HEADING_LEVEL: Final[int] = 6
+
+
+# Polarion reject layout entry without layouter (400). Pinned to value
+# UI-created documents use — type stay only knob on tool surface.
+_RENDERING_LAYOUTER: Final[str] = "section"
 
 
 @dataclass(frozen=True, slots=True)
@@ -438,6 +444,50 @@ def _extract_copied_module_id(response: dict[str, object]) -> str | None:
     return safe_str(data.get("id", "")) or None
 
 
+_UPDATE_DOCUMENT_ATTR_PARAMS: Final[str] = (
+    "title, status, type, home_page_content_html, auto_suspect, "
+    "uses_outline_numbering, rendering_layout_types, custom_fields"
+)
+
+
+def _require_update_document_attrs(
+    attrs: list[object], *, workflow_action: str | None
+) -> None:
+    """Reject PATCH carrying no attribute — Polarion 400 on empty body."""
+    if any(attr is not None for attr in attrs):
+        return
+    if workflow_action:
+        raise ValueError(
+            f"workflow_action alone is not supported -- Polarion rejects "
+            f"PATCH bodies with no attributes. Pair workflow_action with "
+            f"at least one of {_UPDATE_DOCUMENT_ATTR_PARAMS}."
+        )
+    raise ValueError(
+        f"update_document requires at least one of: "
+        f"{_UPDATE_DOCUMENT_ATTR_PARAMS}, or workflow_action."
+    )
+
+
+def _rendering_layouts_attribute(types: list[str]) -> JsonValue:
+    """``renderingLayouts`` value: one section-layouter entry per type."""
+    return [{"type": t, "layouter": _RENDERING_LAYOUTER} for t in types]
+
+
+def _parse_rendering_layout_types(attributes: dict[str, object]) -> list[str]:
+    """Work item type ids out of served ``renderingLayouts``, order kept."""
+    layouts = attributes.get("renderingLayouts")
+    if not isinstance(layouts, list):
+        return []
+    types: list[str] = []
+    for entry in layouts:
+        if not isinstance(entry, dict):
+            continue
+        type_id = entry.get("type")
+        if isinstance(type_id, str) and type_id:
+            types.append(type_id)
+    return types
+
+
 def _build_update_document_payload(  # noqa: PLR0913
     *,
     project_id: str,
@@ -449,6 +499,7 @@ def _build_update_document_payload(  # noqa: PLR0913
     home_page_content_html: str | None = None,
     auto_suspect: bool | None = None,
     uses_outline_numbering: bool | None = None,
+    rendering_layout_types: list[str] | None = None,
     custom_fields: dict[str, object] | None = None,
 ) -> dict[str, JsonValue]:
     """JSON:API PATCH body for ``.../documents/{d}``; skip unset.
@@ -470,6 +521,10 @@ def _build_update_document_payload(  # noqa: PLR0913
         attributes["autoSuspect"] = auto_suspect
     if uses_outline_numbering is not None:
         attributes["usesOutlineNumbering"] = uses_outline_numbering
+    if rendering_layout_types:
+        attributes["renderingLayouts"] = _rendering_layouts_attribute(
+            rendering_layout_types
+        )
     merge_custom_fields(attributes, custom_fields, STANDARD_DOCUMENT_ATTRIBUTES)
 
     item: dict[str, JsonValue] = {
@@ -491,6 +546,7 @@ def _build_create_document_payload(  # noqa: PLR0913
     status: str | None,
     auto_suspect: bool | None = None,
     uses_outline_numbering: bool | None = None,
+    rendering_layout_types: list[str] | None = None,
     custom_fields: dict[str, object] | None = None,
 ) -> dict[str, JsonValue]:
     """JSON:API POST body for ``.../spaces/{s}/documents``; skip unset."""
@@ -510,6 +566,10 @@ def _build_create_document_payload(  # noqa: PLR0913
         attributes["autoSuspect"] = auto_suspect
     if uses_outline_numbering is not None:
         attributes["usesOutlineNumbering"] = uses_outline_numbering
+    if rendering_layout_types:
+        attributes["renderingLayouts"] = _rendering_layouts_attribute(
+            rendering_layout_types
+        )
     merge_custom_fields(attributes, custom_fields, STANDARD_DOCUMENT_ATTRIBUTES)
 
     item: dict[str, JsonValue] = {
@@ -698,6 +758,7 @@ async def get_document(
         content_html=content_html,
         auto_suspect=bool(attributes.get("autoSuspect", False)),
         uses_outline_numbering=bool(attributes.get("usesOutlineNumbering", False)),
+        rendering_layout_types=_parse_rendering_layout_types(attributes),
         custom_fields=extract_custom_fields(attributes, STANDARD_DOCUMENT_ATTRIBUTES),
     )
     return detail
@@ -897,6 +958,14 @@ async def update_document(  # noqa: PLR0913
         default=None,
         description="Enable auto outline numbers (1, 1.1, ...).",
     ),
+    rendering_layout_types: list[str] | None = Field(  # noqa: B008
+        default=None,
+        min_length=1,
+        description=(
+            "Work item type IDs that render their fields in this document; "
+            "REPLACES the current set, so pass every type to keep."
+        ),
+    ),
     custom_fields: dict[str, object] | None = Field(  # noqa: B008
         default=None,
         description="Partial; rich-text values as {'type':'text/html','value':...}.",
@@ -930,6 +999,9 @@ async def update_document(  # noqa: PLR0913
       templates, never hand-written. attachment:{id} image refs must name
       an existing attachment — confirm via list_document_attachments first.
 
+    rendering_layout_types REPLACES the layout set get_document returns —
+    pass every type to keep; dropped ones stop rendering their fields.
+
     workflow_action must pair with at least one attribute. Unknown
     status/type ids and custom_fields keys outside the type schema are
     rejected, values are not validated — resolve via
@@ -950,28 +1022,19 @@ async def update_document(  # noqa: PLR0913
                 "(next read_document_parts would return HTTP 500)."
             )
 
-    has_attrs = (
-        title is not None
-        or status is not None
-        or type is not None
-        or home_page_content_html is not None
-        or auto_suspect is not None
-        or uses_outline_numbering is not None
-        or bool(custom_fields)
+    _require_update_document_attrs(
+        [
+            title,
+            status,
+            type,
+            home_page_content_html,
+            auto_suspect,
+            uses_outline_numbering,
+            rendering_layout_types or None,
+            custom_fields or None,
+        ],
+        workflow_action=workflow_action,
     )
-    if not has_attrs and not workflow_action:
-        raise ValueError(
-            "update_document requires at least one of: title, status, "
-            "type, home_page_content_html, auto_suspect, "
-            "uses_outline_numbering, custom_fields, or workflow_action."
-        )
-    if not has_attrs and workflow_action:
-        raise ValueError(
-            "workflow_action alone is not supported -- Polarion rejects "
-            "PATCH bodies with no attributes. Pair workflow_action with "
-            "at least one of title, status, type, home_page_content_html, "
-            "auto_suspect, uses_outline_numbering, or custom_fields."
-        )
 
     client = get_client(ctx)
     # Type-agnostic enum guard: avoid extra GET, still catch ghost ids.
@@ -982,6 +1045,10 @@ async def update_document(  # noqa: PLR0913
         type=type,
         status=status,
     )
+    if rendering_layout_types:
+        await guard_document_rendering_layout_types(
+            client, project_id, rendering_layout_types
+        )
 
     # Build first: merge_custom_fields collision check cheaper than guard GET.
     payload = _build_update_document_payload(
@@ -994,6 +1061,7 @@ async def update_document(  # noqa: PLR0913
         home_page_content_html=home_page_content_html,
         auto_suspect=auto_suspect,
         uses_outline_numbering=uses_outline_numbering,
+        rendering_layout_types=rendering_layout_types,
         custom_fields=custom_fields,
     )
     # Type change key custom-field schema on new type, else current.
@@ -1099,6 +1167,14 @@ async def create_document(  # noqa: PLR0913
         default=None,
         description="Enable auto outline numbers (1, 1.1, ...).",
     ),
+    rendering_layout_types: list[str] | None = Field(  # noqa: B008
+        default=None,
+        min_length=1,
+        description=(
+            "Work item type IDs the document will hold (e.g. "
+            "['softwarerequirement']); each gets a section layout."
+        ),
+    ),
     custom_fields: dict[str, object] | None = Field(  # noqa: B008
         default=None,
         description=(
@@ -1117,6 +1193,10 @@ async def create_document(  # noqa: PLR0913
     check list_documents first. type/status and custom_fields keys are
     validated on write — resolve ids via list_document_enum_options first.
 
+    Set rendering_layout_types to every work item type the document will
+    hold — without a layout their fields do not render in the Polarion UI,
+    and the ids cannot be added by a later update without REPLACING the set.
+
     home_page_content is Markdown (greenfield only), converted to sanitized
     HTML. Markdown tables get native Polarion styling; a paragraph starting
     'Table:' directly after a table becomes a numbered caption widget.
@@ -1132,6 +1212,10 @@ async def create_document(  # noqa: PLR0913
         type=type,
         status=status,
     )
+    if rendering_layout_types:
+        await guard_document_rendering_layout_types(
+            client, project_id, rendering_layout_types
+        )
     if custom_fields:
         await guard_document_custom_fields(client, project_id, type, custom_fields)
 
@@ -1157,6 +1241,7 @@ async def create_document(  # noqa: PLR0913
         status=status,
         auto_suspect=auto_suspect,
         uses_outline_numbering=uses_outline_numbering,
+        rendering_layout_types=rendering_layout_types,
         custom_fields=custom_fields,
     )
 

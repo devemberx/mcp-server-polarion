@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 
 from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.tools._shared.cache import (
@@ -46,6 +46,31 @@ async def guard_document_enums(
         await check_enum(
             client, project_id, "documents", "status", document_type, status
         )
+
+
+async def guard_document_rendering_layout_types(
+    client: PolarionClient,
+    project_id: str,
+    types: Sequence[str],
+) -> None:
+    """Validate ``renderingLayouts`` work item type ids against the
+    type-agnostic work item ``type`` enum.
+
+    Polarion store unknown layout type verbatim (204, no error) — ghost entry
+    render nothing. Duplicate type also accepted server-side but UI precedence
+    undefined, so refuse instead of dedupe silently.
+    """
+    if not types:
+        return
+    duplicates = sorted({t for t in types if types.count(t) > 1})
+    if duplicates:
+        raise ValueError(
+            f"rendering_layout_types repeats {format_option_list(duplicates)}. "
+            f"Each work item type may appear once -- Polarion accepts duplicate "
+            f"entries but which one wins in the UI is undefined."
+        )
+    for type_id in types:
+        await check_enum(client, project_id, "workitems", "type", "~", type_id)
 
 
 async def _fetch_document_type_custom_keys(

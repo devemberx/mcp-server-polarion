@@ -20,6 +20,7 @@ from mcp_server_polarion.tools._shared.guard import (
     guard_document_comment_attachment_refs,
     guard_document_custom_fields,
     guard_document_enums,
+    guard_document_rendering_layout_types,
 )
 from mcp_server_polarion.tools._shared.guard.documents import (
     _check_document_custom_keys,
@@ -381,3 +382,77 @@ class TestGuardDocumentCommentAttachmentRefs:
 
         assert "1-ghost.png" in str(exc.value)
         assert "Comment(s) on" in str(exc.value)
+
+
+class TestGuardDocumentRenderingLayoutTypes:
+    """Validation of the work item type ids behind ``renderingLayouts``."""
+
+    async def test_listed_types_pass(self, mock_client: AsyncMock) -> None:
+        mock_client.get.return_value = enum_response(
+            ["softwarerequirement", "softwaretestcase"]
+        )
+
+        await guard_document_rendering_layout_types(
+            mock_client, "P", ["softwarerequirement", "softwaretestcase"]
+        )
+
+    async def test_unknown_type_rejects_naming_discovery_tool(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = enum_response(["softwarerequirement"])
+
+        with pytest.raises(ValueError, match="list_work_item_enum_options") as exc:
+            await guard_document_rendering_layout_types(
+                mock_client, "P", ["nosuchtype_zz"]
+            )
+
+        assert "nosuchtype_zz" in str(exc.value)
+
+    async def test_validates_against_type_agnostic_work_item_enum(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = enum_response(["softwarerequirement"])
+
+        await guard_document_rendering_layout_types(
+            mock_client, "P", ["softwarerequirement"]
+        )
+
+        path = mock_client.get.call_args.args[0]
+        params = mock_client.get.call_args.kwargs["params"]
+        assert path == "/projects/P/workitems/fields/type/actions/getAvailableOptions"
+        assert params["type"] == "~"
+
+    async def test_duplicate_types_reject_without_http(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # Server store both, UI precedence undefined -- refuse rather than dedupe.
+        with pytest.raises(ValueError, match="duplicate") as exc:
+            await guard_document_rendering_layout_types(
+                mock_client, "P", ["task", "task"]
+            )
+
+        assert "task" in str(exc.value)
+        mock_client.get.assert_not_called()
+
+    async def test_empty_list_skips_probe(self, mock_client: AsyncMock) -> None:
+        await guard_document_rendering_layout_types(mock_client, "P", [])
+
+        mock_client.get.assert_not_called()
+
+    async def test_missing_enum_endpoint_defers(self, mock_client: AsyncMock) -> None:
+        # 404 = endpoint absent; defer to Polarion rather than block.
+        mock_client.get.side_effect = PolarionNotFoundError("no options")
+
+        await guard_document_rendering_layout_types(mock_client, "P", ["task"])
+
+    async def test_probe_error_blocks_write(self, mock_client: AsyncMock) -> None:
+        mock_client.get.side_effect = PolarionError("boom")
+
+        with pytest.raises(RuntimeError):
+            await guard_document_rendering_layout_types(mock_client, "P", ["task"])
+
+    async def test_auth_error_blocks_write(self, mock_client: AsyncMock) -> None:
+        mock_client.get.side_effect = PolarionAuthError("denied")
+
+        with pytest.raises(PermissionError):
+            await guard_document_rendering_layout_types(mock_client, "P", ["task"])
