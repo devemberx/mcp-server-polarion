@@ -208,11 +208,9 @@ No other installation is needed — `uvx mcp-server-polarion` downloads and runs
 |---|---|---|
 | `POLARION_URL` | Base URL of your Polarion instance | `https://polarion.example.com` |
 | `POLARION_TOKEN` | Personal Access Token for authentication | `your-personal-access-token` |
-| `POLARION_MAX_REQUESTS_PER_SECOND` | Optional. Client-side request rate cap. Throttling is configured per Polarion deployment, so the default is a conservative floor — raise it to match what your instance allows, or set `0` to disable client-side pacing. Writes additionally keep a fixed post-write pause that this cap does not lift (default: `1`) | `1` |
+| `POLARION_MAX_REQUESTS_PER_SECOND` | Optional. Client-side request rate cap — raise it to match your deployment's throttle, or set `0` to disable pacing. Writes keep a fixed extra pause regardless (default: `1`) | `1` |
 
 To generate a Personal Access Token, open Polarion, click your user name, and go to **My Account → Personal Access Tokens**.
-
-The server reads these from the process environment. A `.env` file is picked up only when it sits in the working directory the server process is launched from, so pass real environment variables when your MCP client starts `uvx mcp-server-polarion` for you. The effective rate cap is written to the startup log.
 
 ### Client Configuration
 
