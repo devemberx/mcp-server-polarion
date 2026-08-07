@@ -80,11 +80,15 @@ class PolarionClient:
         self,
         config: PolarionConfig,
         *,
-        write_delay: float = _WRITE_DELAY_SECONDS,
+        write_delay: float | None = None,
         min_interval: float | None = None,
     ) -> None:
         self.base_url: str = config.base_api_url
-        self._write_delay = write_delay
+        # Read module constant at call time — def-time default freeze it, so
+        # harness monkeypatch never reach lifespan-built client.
+        self._write_delay = (
+            write_delay if write_delay is not None else _WRITE_DELAY_SECONDS
+        )
         rate = config.polarion_max_requests_per_second
         # None = derive start-based min gap from config rate cap; explicit
         # value = test seam. rate 0 = no cap. Slow request add no extra wait.

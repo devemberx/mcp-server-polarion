@@ -17,6 +17,7 @@ from evals.harness.runner import (
     POLARION_HOST,
     _CycleGuard,
     _extract_text,
+    _patched_polarion_env,
     _set_polarion_env,
 )
 
@@ -76,6 +77,44 @@ class TestSetPolarionEnv:
         assert os.environ["POLARION_URL"] == POLARION_HOST
         assert os.environ["POLARION_TOKEN"] == "fake-token"
         assert os.environ["POLARION_MAX_REQUESTS_PER_SECOND"] == "0"
+
+
+class TestPatchedPolarionEnv:
+    """Fake env scoped to the case, never leaked to later clients."""
+
+    def test_restores_previous_values(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("POLARION_URL", "https://real.example.com")
+        monkeypatch.setenv("POLARION_TOKEN", "real-token")
+        monkeypatch.setenv("POLARION_MAX_REQUESTS_PER_SECOND", "2")
+
+        with _patched_polarion_env():
+            assert os.environ["POLARION_MAX_REQUESTS_PER_SECOND"] == "0"
+
+        assert os.environ["POLARION_URL"] == "https://real.example.com"
+        assert os.environ["POLARION_TOKEN"] == "real-token"
+        assert os.environ["POLARION_MAX_REQUESTS_PER_SECOND"] == "2"
+
+    def test_unsets_vars_absent_before(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for name in (
+            "POLARION_URL",
+            "POLARION_TOKEN",
+            "POLARION_MAX_REQUESTS_PER_SECOND",
+        ):
+            monkeypatch.delenv(name, raising=False)
+
+        with _patched_polarion_env():
+            assert os.environ["POLARION_URL"] == POLARION_HOST
+
+        assert "POLARION_URL" not in os.environ
+        assert "POLARION_MAX_REQUESTS_PER_SECOND" not in os.environ
+
+    def test_restores_on_exception(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("POLARION_MAX_REQUESTS_PER_SECOND", "2")
+
+        with pytest.raises(RuntimeError), _patched_polarion_env():
+            raise RuntimeError("case blew up")
+
+        assert os.environ["POLARION_MAX_REQUESTS_PER_SECOND"] == "2"
 
 
 def test_agent_error_prefix_is_a_sentinel() -> None:

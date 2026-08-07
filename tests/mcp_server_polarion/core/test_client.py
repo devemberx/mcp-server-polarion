@@ -12,6 +12,7 @@ import respx
 
 from mcp_server_polarion.core.client import (
     _MAX_ERROR_DETAIL_LEN,
+    _WRITE_DELAY_SECONDS,
     PolarionClient,
 )
 from mcp_server_polarion.core.config import PolarionConfig
@@ -580,6 +581,27 @@ class TestMinIntervalWiring:
         )
         async with PolarionClient(config, write_delay=0, min_interval=0) as client:
             assert client._min_interval == 0
+
+
+class TestWriteDelayWiring:
+    """Write delay read at construction so harness patches take effect."""
+
+    async def test_write_delay_defaults_to_module_constant(self) -> None:
+        async with PolarionClient(_config(), min_interval=0) as client:
+            assert client._write_delay == _WRITE_DELAY_SECONDS
+
+    async def test_write_delay_follows_patched_module_constant(self) -> None:
+        """Eval harness zero the global; def-time default would ignore it."""
+        with patch("mcp_server_polarion.core.client._WRITE_DELAY_SECONDS", 0.0):
+            async with PolarionClient(_config(), min_interval=0) as client:
+                assert client._write_delay == 0.0
+
+    async def test_explicit_write_delay_wins_over_module_constant(self) -> None:
+        with patch("mcp_server_polarion.core.client._WRITE_DELAY_SECONDS", 9.0):
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
+                assert client._write_delay == 0
 
 
 class TestRetryPacing:
