@@ -5,6 +5,8 @@ from __future__ import annotations
 from unittest.mock import patch
 from urllib.parse import urlparse
 
+import pytest
+
 from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.server import LifespanContext, _lifespan, mcp
 
@@ -84,3 +86,37 @@ class TestLifespan:
                 parsed = urlparse(str(client.base_url))
                 assert parsed.netloc == "polarion.example.com"
                 assert parsed.path == "/polarion/rest/v1"
+
+
+class TestLifespanRateCap:
+    """Env rate cap reach the lifespan-built client and get logged."""
+
+    async def test_env_rate_cap_reaches_client_pacing(self) -> None:
+        """End-to-end: env var → ``PolarionConfig`` → client interval."""
+        env = {**_FAKE_ENV, "POLARION_MAX_REQUESTS_PER_SECOND": "2"}
+        with patch.dict("os.environ", env, clear=False):
+            async with _lifespan(mcp) as ctx:
+                client = ctx["polarion_client"]
+                assert client._min_interval == pytest.approx(0.5)
+
+    async def test_lifespan_logs_effective_rate(self) -> None:
+        env = {**_FAKE_ENV, "POLARION_MAX_REQUESTS_PER_SECOND": "2"}
+        with patch.dict("os.environ", env, clear=False):
+            with patch("mcp_server_polarion.server.logger") as mock_logger:
+                async with _lifespan(mcp) as _ctx:
+                    pass
+
+            mock_logger.info.assert_any_call("Request rate cap: %g req/s", 2.0)
+
+    async def test_lifespan_warns_when_pacing_disabled(self) -> None:
+        env = {**_FAKE_ENV, "POLARION_MAX_REQUESTS_PER_SECOND": "0"}
+        with patch.dict("os.environ", env, clear=False):
+            async with _lifespan(mcp) as ctx:
+                assert ctx["polarion_client"]._min_interval == 0.0
+
+            with patch("mcp_server_polarion.server.logger") as mock_logger:
+                async with _lifespan(mcp) as _ctx:
+                    pass
+
+            warning = mock_logger.warning.call_args[0][0]
+            assert "pacing is DISABLED" in warning

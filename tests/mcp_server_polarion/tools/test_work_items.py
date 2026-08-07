@@ -1084,7 +1084,7 @@ class TestUpdateWorkItemsHappyPath:
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         # ids-only result: per-item re-GET gone (50 items = 50 extra
-        # requests at 3 req/s cap).
+        # requests, each paced by client cap).
         mock_client.get.return_value = _existence_response(("MCPT-1", "task"))
         mock_client.patch.return_value = {}
 

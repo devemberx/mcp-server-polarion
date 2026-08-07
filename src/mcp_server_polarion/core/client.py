@@ -34,8 +34,6 @@ _RETRYABLE_STATUS_CODES: Final[frozenset[int]] = frozenset({429, 500, 502, 503, 
 
 # Pause after each mutation (Polarion forbid concurrent writes).
 _WRITE_DELAY_SECONDS: Final[float] = 1.5
-# Start-based min gap → ≤3 req/s; slow request add no extra wait.
-_MIN_REQUEST_INTERVAL_SECONDS: Final[float] = 1.0 / 3.0
 _DEFAULT_TIMEOUT_SECONDS: Final[float] = 30.0
 
 _HTTP_NO_CONTENT: Final[int] = 204
@@ -82,12 +80,21 @@ class PolarionClient:
         self,
         config: PolarionConfig,
         *,
-        write_delay: float = _WRITE_DELAY_SECONDS,
-        min_interval: float = _MIN_REQUEST_INTERVAL_SECONDS,
+        write_delay: float | None = None,
+        min_interval: float | None = None,
     ) -> None:
         self.base_url: str = config.base_api_url
-        self._write_delay = write_delay
-        self._min_interval = min_interval
+        # Read module constant at call time — def-time default freeze it, so
+        # harness monkeypatch never reach lifespan-built client.
+        self._write_delay = (
+            write_delay if write_delay is not None else _WRITE_DELAY_SECONDS
+        )
+        rate = config.polarion_max_requests_per_second
+        # None = derive start-based min gap from config rate cap; explicit
+        # value = test seam. rate 0 = no cap. Slow request add no extra wait.
+        self._min_interval = (
+            min_interval if min_interval is not None else (1.0 / rate if rate else 0.0)
+        )
         # -inf: first request never wait, any clock epoch.
         self._last_request_monotonic: float = float("-inf")
         self._client = httpx.AsyncClient(
@@ -226,8 +233,6 @@ class PolarionClient:
         set → multipart body, ``data`` = its plain form fields.
         """
         # Lock held across retries — release mid-backoff = other caller hit same 429.
-        # Pace before first attempt; backoffs widen gap.
-        await self._pace()
         last_exception: PolarionError | None = None
         backoff = _INITIAL_BACKOFF_SECONDS
         loop = asyncio.get_running_loop()
@@ -242,6 +247,8 @@ class PolarionClient:
             }
 
         for attempt in range(_MAX_RETRIES + 1):
+            # Pace every attempt: fixed backoff alone undershoot cap below 1 req/s.
+            await self._pace()
             # Stamp per attempt — next request pace from last sent, not stale first.
             self._last_request_monotonic = loop.time()
             try:
@@ -301,12 +308,12 @@ class PolarionClient:
         :meth:`_request`.
         """
         # _request duplicate: body arrive streamed, cap check mid-accumulation.
-        await self._pace()
         last_exception: PolarionError | None = None
         backoff = _INITIAL_BACKOFF_SECONDS
         loop = asyncio.get_running_loop()
 
         for attempt in range(_MAX_RETRIES + 1):
+            await self._pace()
             self._last_request_monotonic = loop.time()
             try:
                 async with self._client.stream(

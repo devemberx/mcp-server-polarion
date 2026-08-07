@@ -43,6 +43,16 @@ async def _lifespan(
             "Connections to %s are vulnerable to MITM. Use only on trusted networks.",
             config.polarion_url,
         )
+    # Effective cap only observable here — misread env silently pace wrong.
+    rate = config.polarion_max_requests_per_second
+    if rate:
+        logger.info("Request rate cap: %g req/s", rate)
+    else:
+        logger.warning(
+            "Client-side request pacing is DISABLED "
+            "(POLARION_MAX_REQUESTS_PER_SECOND=0). Requests are sent as fast as "
+            "tools issue them; a throttling instance may reject them.",
+        )
 
     async with PolarionClient(config) as client:
         logger.info("Polarion client ready")

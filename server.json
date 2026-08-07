@@ -33,6 +33,11 @@
           "description": "Polarion personal access token",
           "isRequired": true,
           "isSecret": true
+        },
+        {
+          "name": "POLARION_MAX_REQUESTS_PER_SECOND",
+          "description": "Client-side request rate cap in requests per second; match your deployment's throttle. 0 disables pacing (default: 1)",
+          "isRequired": false
         }
       ]
     }
