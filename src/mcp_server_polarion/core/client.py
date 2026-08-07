@@ -229,8 +229,6 @@ class PolarionClient:
         set → multipart body, ``data`` = its plain form fields.
         """
         # Lock held across retries — release mid-backoff = other caller hit same 429.
-        # Pace before first attempt; backoffs widen gap.
-        await self._pace()
         last_exception: PolarionError | None = None
         backoff = _INITIAL_BACKOFF_SECONDS
         loop = asyncio.get_running_loop()
@@ -245,6 +243,8 @@ class PolarionClient:
             }
 
         for attempt in range(_MAX_RETRIES + 1):
+            # Pace every attempt: fixed backoff alone undershoot cap below 1 req/s.
+            await self._pace()
             # Stamp per attempt — next request pace from last sent, not stale first.
             self._last_request_monotonic = loop.time()
             try:
@@ -304,12 +304,12 @@ class PolarionClient:
         :meth:`_request`.
         """
         # _request duplicate: body arrive streamed, cap check mid-accumulation.
-        await self._pace()
         last_exception: PolarionError | None = None
         backoff = _INITIAL_BACKOFF_SECONDS
         loop = asyncio.get_running_loop()
 
         for attempt in range(_MAX_RETRIES + 1):
+            await self._pace()
             self._last_request_monotonic = loop.time()
             try:
                 async with self._client.stream(

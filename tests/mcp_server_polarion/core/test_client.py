@@ -582,6 +582,70 @@ class TestMinIntervalWiring:
             assert client._min_interval == 0
 
 
+class TestRetryPacing:
+    """Retry attempts obey the configured cap, not just the fixed backoff."""
+
+    async def test_retry_attempt_paced_to_min_interval(self) -> None:
+        """Backoff shorter than cap must not let the retry burst past it."""
+        attempt_start: list[float] = []
+
+        async def _on_get(request: httpx.Request) -> httpx.Response:
+            attempt_start.append(asyncio.get_running_loop().time())
+            if len(attempt_start) == 1:
+                return httpx.Response(429, json={"errors": [{"detail": "slow down"}]})
+            return httpx.Response(200, json={"data": []})
+
+        min_interval = 0.2
+
+        with respx.mock(base_url=BASE) as mock:
+            mock.get("/projects").mock(side_effect=_on_get)
+
+            # Backoff 0 isolate pacing: any gap left come from _pace alone.
+            with patch(
+                "mcp_server_polarion.core.client._INITIAL_BACKOFF_SECONDS",
+                0.0,
+            ):
+                async with PolarionClient(
+                    _config(), write_delay=0, min_interval=min_interval
+                ) as client:
+                    result = await client.get("/projects")
+
+        assert result == {"data": []}
+        assert len(attempt_start) == 2
+        # 0.9 slack absorb scheduler jitter (sleep may wake slightly early).
+        assert attempt_start[1] - attempt_start[0] >= min_interval * 0.9, (
+            f"retry started {attempt_start[1] - attempt_start[0]:.3f}s after "
+            f"first attempt; expected ≥ {min_interval * 0.9:.3f}s (retry pacing)."
+        )
+
+    async def test_retry_bytes_attempt_paced_to_min_interval(self) -> None:
+        attempt_start: list[float] = []
+
+        async def _on_get(request: httpx.Request) -> httpx.Response:
+            attempt_start.append(asyncio.get_running_loop().time())
+            if len(attempt_start) == 1:
+                return httpx.Response(503, json={"errors": [{"detail": "down"}]})
+            return httpx.Response(200, content=b"payload")
+
+        min_interval = 0.2
+
+        with respx.mock(base_url=BASE) as mock:
+            mock.get("/attachment").mock(side_effect=_on_get)
+
+            with patch(
+                "mcp_server_polarion.core.client._INITIAL_BACKOFF_SECONDS",
+                0.0,
+            ):
+                async with PolarionClient(
+                    _config(), write_delay=0, min_interval=min_interval
+                ) as client:
+                    result = await client.get_bytes("/attachment", max_bytes=1024)
+
+        assert result == b"payload"
+        assert len(attempt_start) == 2
+        assert attempt_start[1] - attempt_start[0] >= min_interval * 0.9
+
+
 class TestSerialization:
     """Concurrent callers serialise through PolarionClient lock."""
 
