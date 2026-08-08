@@ -23,6 +23,7 @@ from mcp_server_polarion.models import (
     DocumentPart,
     DocumentReadResult,
     DocumentUpdateResult,
+    JsonValue,
     PaginatedResult,
 )
 from mcp_server_polarion.server import mcp
@@ -32,6 +33,7 @@ from mcp_server_polarion.tools.documents import (
     _build_copy_document_payload,
     _build_create_document_payload,
     _build_update_document_payload,
+    _merge_rendering_layouts,
     copy_document,
     create_document,
     get_document,
@@ -140,6 +142,10 @@ async def _call_update_doc(mock_ctx: MagicMock, **overrides: object) -> object:
         "status": None,
         "type": None,
         "home_page_content_html": None,
+        # Omitting either bool leak FieldInfo (non-None), satisfying
+        # at-least-one-attribute check alone -- every such test vacuous.
+        "auto_suspect": None,
+        "uses_outline_numbering": None,
         "rendering_layout_types": None,
         "custom_fields": None,
         "workflow_action": None,
@@ -4471,7 +4477,7 @@ class TestBuildDocumentPayloadRenderingLayouts:
             {"type": "softwaretestcase", "layouter": "section"},
         ]
 
-    def test_update_wraps_each_type_with_fixed_section_layouter(self) -> None:
+    def test_update_serializes_merged_layouts_verbatim(self) -> None:
         payload = _build_update_document_payload(
             project_id="MyProj",
             space_id="S",
@@ -4479,13 +4485,17 @@ class TestBuildDocumentPayloadRenderingLayouts:
             title=None,
             status=None,
             type=None,
-            rendering_layout_types=["task"],
+            rendering_layouts=[
+                {"type": "task", "layouter": "paragraph", "label": "Tasks"}
+            ],
         )
 
         data = cast(dict[str, object], payload["data"])
         attributes = cast(dict[str, object], data["attributes"])
         assert attributes == {
-            "renderingLayouts": [{"type": "task", "layouter": "section"}]
+            "renderingLayouts": [
+                {"type": "task", "layouter": "paragraph", "label": "Tasks"}
+            ]
         }
 
     @pytest.mark.parametrize("types", [None, []])
@@ -4503,8 +4513,10 @@ class TestBuildDocumentPayloadRenderingLayouts:
         attributes = cast(dict[str, object], item["attributes"])
         assert "renderingLayouts" not in attributes
 
-    @pytest.mark.parametrize("types", [None, []])
-    def test_update_omits_attribute_when_unset(self, types: list[str] | None) -> None:
+    @pytest.mark.parametrize("layouts", [None, []])
+    def test_update_omits_attribute_when_unset(
+        self, layouts: list[JsonValue] | None
+    ) -> None:
         payload = _build_update_document_payload(
             project_id="MyProj",
             space_id="S",
@@ -4512,7 +4524,7 @@ class TestBuildDocumentPayloadRenderingLayouts:
             title="T",
             status=None,
             type=None,
-            rendering_layout_types=types,
+            rendering_layouts=layouts,
         )
 
         data = cast(dict[str, object], payload["data"])
@@ -4616,7 +4628,6 @@ class TestUpdateDocumentRenderingLayouts:
     async def test_listed_in_missing_field_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # Direct call: helper leave auto_suspect unset, which pass has_attrs.
         with pytest.raises(ValueError, match="rendering_layout_types"):
             await update_document(
                 mock_ctx,
@@ -4657,6 +4668,148 @@ class TestUpdateDocumentRenderingLayouts:
         assert body["data"]["attributes"]["renderingLayouts"] == [
             {"type": "softwarerequirement", "layouter": "section"},
             {"type": "softwaretestcase", "layouter": "section"},
+        ]
+
+    async def test_served_layout_settings_survive_echo(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # UI entry carry layouter/label/properties get_document never surface;
+        # PATCH replace whole array, so rebuild-from-types would wipe them.
+        served = {
+            "type": "requirement",
+            "layouter": "paragraph",
+            "label": "Requirement",
+            "properties": [{"key": "fieldsAtStart", "value": "id"}],
+        }
+        mock_client.get.side_effect = [
+            _enum_get_response(["requirement", "task"]),
+            {"data": {"attributes": {"renderingLayouts": [served]}}},
+        ]
+
+        await _call_update_doc(mock_ctx, rendering_layout_types=["requirement", "task"])
+
+        body = mock_client.patch.call_args.kwargs["json"]
+        assert body["data"]["attributes"]["renderingLayouts"] == [
+            served,
+            {"type": "task", "layouter": "section"},
+        ]
+
+    async def test_unlisted_type_dropped_from_array(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = [
+            _enum_get_response(["requirement", "task"]),
+            {
+                "data": {
+                    "attributes": {
+                        "renderingLayouts": [
+                            {"type": "requirement", "layouter": "paragraph"},
+                            {"type": "task", "layouter": "section"},
+                        ]
+                    }
+                }
+            },
+        ]
+
+        await _call_update_doc(mock_ctx, rendering_layout_types=["requirement"])
+
+        body = mock_client.patch.call_args.kwargs["json"]
+        assert body["data"]["attributes"]["renderingLayouts"] == [
+            {"type": "requirement", "layouter": "paragraph"}
+        ]
+
+    async def test_dry_run_preview_reflects_served_layouts(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Preview must show bytes real write send, so read run on dry_run too.
+        mock_client.get.side_effect = [
+            _enum_get_response(["task"]),
+            {
+                "data": {
+                    "attributes": {
+                        "renderingLayouts": [
+                            {"type": "task", "layouter": "title", "label": "Tasks"}
+                        ]
+                    }
+                }
+            },
+        ]
+
+        result = cast(
+            DocumentUpdateResult,
+            await _call_update_doc(
+                mock_ctx, rendering_layout_types=["task"], dry_run=True
+            ),
+        )
+
+        preview = cast(dict[str, object], result.payload_preview)
+        data = cast(dict[str, object], preview["data"])
+        attributes = cast(dict[str, object], data["attributes"])
+        assert attributes["renderingLayouts"] == [
+            {"type": "task", "layouter": "title", "label": "Tasks"}
+        ]
+        mock_client.patch.assert_not_called()
+
+    async def test_read_failure_blocks_patch(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = [
+            _enum_get_response(["task"]),
+            PolarionNotFoundError("gone"),
+        ]
+
+        with pytest.raises(ValueError, match="list_documents"):
+            await _call_update_doc(mock_ctx, rendering_layout_types=["task"])
+
+        mock_client.patch.assert_not_called()
+
+    async def test_read_error_blocks_patch(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = [
+            _enum_get_response(["task"]),
+            PolarionError("boom", status_code=500),
+        ]
+
+        with pytest.raises(RuntimeError):
+            await _call_update_doc(mock_ctx, rendering_layout_types=["task"])
+
+        mock_client.patch.assert_not_called()
+
+
+class TestMergeRenderingLayouts:
+    """``_merge_rendering_layouts`` — served entries reused, order requested."""
+
+    def test_repeated_served_entries_all_kept(self) -> None:
+        # Server accept duplicate type; dropping one delete document data
+        # type-set surface never asked about.
+        current = [
+            {"type": "task", "layouter": "section"},
+            {"type": "task", "layouter": "paragraph", "label": "Tasks"},
+        ]
+
+        assert _merge_rendering_layouts(current, ["task"]) == current
+
+    def test_order_follows_requested_types(self) -> None:
+        current = [
+            {"type": "task", "layouter": "paragraph"},
+            {"type": "defect", "layouter": "title"},
+        ]
+
+        assert _merge_rendering_layouts(current, ["defect", "task"]) == [
+            {"type": "defect", "layouter": "title"},
+            {"type": "task", "layouter": "paragraph"},
+        ]
+
+    @pytest.mark.parametrize(
+        "current",
+        [None, "notalist", [], ["notadict"], [{"layouter": "section"}], [{"type": 7}]],
+    )
+    def test_unusable_served_entries_fall_back_to_section(
+        self, current: object
+    ) -> None:
+        assert _merge_rendering_layouts(current, ["task"]) == [
+            {"type": "task", "layouter": "section"}
         ]
 
 
@@ -4717,6 +4870,28 @@ class TestGetDocumentRenderingLayoutTypes:
         )
 
         assert detail.rendering_layout_types == []
+
+    async def test_repeated_type_surfaced_once(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Server accept duplicate; write guard refuse it, so undeduped read
+        # hand back value update_document reject.
+        mock_client.get.return_value = {
+            "data": {
+                "attributes": {
+                    "renderingLayouts": [
+                        {"type": "task", "layouter": "section"},
+                        {"type": "task", "layouter": "paragraph"},
+                    ]
+                }
+            }
+        }
+
+        detail = await get_document(
+            mock_ctx, project_id="MyProj", space_id="Design", document_name="D"
+        )
+
+        assert detail.rendering_layout_types == ["task"]
 
     @pytest.mark.parametrize(
         "layouts",

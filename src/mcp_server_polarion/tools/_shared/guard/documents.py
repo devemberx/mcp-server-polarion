@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Iterable, Sequence
 
 from mcp_server_polarion.core.client import PolarionClient
@@ -23,6 +24,7 @@ from mcp_server_polarion.tools._shared.guard._http import guarded_pages
 from mcp_server_polarion.tools._shared.guard.enums import (
     check_custom_field_enum_values,
     check_enum,
+    fetch_enum_option_ids,
 )
 from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
@@ -57,20 +59,48 @@ async def guard_document_rendering_layout_types(
     type-agnostic work item ``type`` enum.
 
     Polarion store unknown layout type verbatim (204, no error) — ghost entry
-    render nothing. Duplicate type also accepted server-side but UI precedence
-    undefined, so refuse instead of dedupe silently.
+    render nothing. Blank id ghost same way. Duplicate type also accepted
+    server-side but UI precedence undefined, so refuse instead of dedupe
+    silently.
+
+    Every message name ``rendering_layout_types``, never bare ``type`` —
+    both write tools carry own ``type`` parameter, so ``check_enum`` wording
+    would send the model to fix the wrong argument. One batched option fetch
+    report every bad id at once; per-id loop cost one failed write each.
     """
     if not types:
         return
-    duplicates = sorted({t for t in types if types.count(t) > 1})
+    blank = sum(1 for type_id in types if not type_id.strip())
+    if blank:
+        raise ValueError(
+            f"rendering_layout_types contains {blank} blank id(s). "
+            "Polarion stores a blank entry verbatim and it renders nothing -- "
+            "pass a work item type ID or drop the entry."
+        )
+    duplicates = sorted(
+        type_id for type_id, count in Counter(types).items() if count > 1
+    )
     if duplicates:
         raise ValueError(
             f"rendering_layout_types repeats {format_option_list(duplicates)}. "
             f"Each work item type may appear once -- Polarion accepts duplicate "
             f"entries but which one wins in the UI is undefined."
         )
-    for type_id in types:
-        await check_enum(client, project_id, "workitems", "type", "~", type_id)
+    option_ids = await fetch_enum_option_ids(
+        client, project_id, "workitems", "type", "~"
+    )
+    # Empty set = successful no-options fetch; defer rather than false-positive.
+    if not option_ids:
+        return
+    unknown = sorted(set(types) - option_ids)
+    if unknown:
+        raise ValueError(
+            f"rendering_layout_types has unknown work item type ID(s) "
+            f"{format_option_list(unknown)} in project '{project_id}'. "
+            f"Valid options: {format_option_list(option_ids)}. "
+            f"Unknown ids ghost silently (their fields never render) -- call "
+            f"list_work_item_enum_options first."
+        )
 
 
 async def _fetch_document_type_custom_keys(

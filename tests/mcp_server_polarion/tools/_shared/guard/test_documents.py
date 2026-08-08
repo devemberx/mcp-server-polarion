@@ -408,6 +408,47 @@ class TestGuardDocumentRenderingLayoutTypes:
 
         assert "nosuchtype_zz" in str(exc.value)
 
+    async def test_message_names_the_parameter_not_bare_type(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # Both write tools carry own ``type`` parameter (document type), so
+        # ``type='...'`` message send model to fix wrong argument.
+        mock_client.get.return_value = enum_response(["task"])
+
+        with pytest.raises(ValueError) as exc:
+            await guard_document_rendering_layout_types(mock_client, "P", ["Task"])
+
+        assert "rendering_layout_types" in str(exc.value)
+        assert "type='Task'" not in str(exc.value)
+
+    async def test_every_unknown_id_reported_in_one_error(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # Per-id loop cost one failed write per bad id at 3 req/s.
+        mock_client.get.return_value = enum_response(["task"])
+
+        with pytest.raises(ValueError) as exc:
+            await guard_document_rendering_layout_types(
+                mock_client, "P", ["task", "ghost_a", "ghost_b"]
+            )
+
+        assert "ghost_a" in str(exc.value)
+        assert "ghost_b" in str(exc.value)
+
+    @pytest.mark.parametrize("blank", ["", "   "])
+    async def test_blank_type_rejected_without_http(
+        self, mock_client: AsyncMock, blank: str
+    ) -> None:
+        # Blank entry persist verbatim and render nothing; read path then
+        # filter it out, so ghost stay invisible to every later round trip.
+        with pytest.raises(ValueError, match="blank") as exc:
+            await guard_document_rendering_layout_types(
+                mock_client, "P", [blank, "task"]
+            )
+
+        assert "rendering_layout_types" in str(exc.value)
+        mock_client.get.assert_not_called()
+
     async def test_validates_against_type_agnostic_work_item_enum(
         self, mock_client: AsyncMock
     ) -> None:
