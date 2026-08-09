@@ -19,6 +19,7 @@ from mcp_server_polarion.tools._shared.guard.documents import (
     guard_document_comment_attachment_refs,
     guard_document_custom_fields,
     guard_document_enums,
+    guard_document_rendering_layout_types,
 )
 from mcp_server_polarion.tools._shared.guard.links import (
     guard_hyperlink_roles,
@@ -48,6 +49,7 @@ __all__ = [
     "guard_document_comment_attachment_refs",
     "guard_document_custom_fields",
     "guard_document_enums",
+    "guard_document_rendering_layout_types",
     "guard_hyperlink_roles",
     "guard_test_record_defect_targets",
     "guard_test_record_results",

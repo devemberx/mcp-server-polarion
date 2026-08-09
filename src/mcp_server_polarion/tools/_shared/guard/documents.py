@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections import Counter
+from collections.abc import Iterable, Sequence
 
 from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.tools._shared.cache import (
@@ -23,6 +24,7 @@ from mcp_server_polarion.tools._shared.guard._http import guarded_pages
 from mcp_server_polarion.tools._shared.guard.enums import (
     check_custom_field_enum_values,
     check_enum,
+    fetch_enum_option_ids,
 )
 from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
@@ -45,6 +47,58 @@ async def guard_document_enums(
     if status is not None and status != "":
         await check_enum(
             client, project_id, "documents", "status", document_type, status
+        )
+
+
+async def guard_document_rendering_layout_types(
+    client: PolarionClient,
+    project_id: str,
+    types: Sequence[str],
+) -> None:
+    """Validate ``renderingLayouts`` work item type ids against the
+    type-agnostic work item ``type`` enum.
+
+    Polarion store unknown or blank layout type verbatim (204, no error) —
+    ghost entry render nothing. Duplicate type also accepted server-side but
+    UI precedence undefined, so refuse instead of dedupe silently.
+
+    Message name ``rendering_layout_types``, never bare ``type`` — both write
+    tools carry own ``type`` parameter, so ``check_enum`` wording send model
+    to wrong argument. Batched fetch report every bad id at once; per-id loop
+    cost one failed write each.
+    """
+    if not types:
+        return
+    blank = sum(1 for type_id in types if not type_id.strip())
+    if blank:
+        raise ValueError(
+            f"rendering_layout_types contains {blank} blank id(s). "
+            "Polarion stores a blank entry verbatim and it renders nothing -- "
+            "pass a work item type ID or drop the entry."
+        )
+    duplicates = sorted(
+        type_id for type_id, count in Counter(types).items() if count > 1
+    )
+    if duplicates:
+        raise ValueError(
+            f"rendering_layout_types repeats {format_option_list(duplicates)}. "
+            f"Each work item type may appear once -- Polarion accepts duplicate "
+            f"entries but which one wins in the UI is undefined."
+        )
+    option_ids = await fetch_enum_option_ids(
+        client, project_id, "workitems", "type", "~"
+    )
+    # Empty set = successful no-options fetch; defer rather than false-positive.
+    if not option_ids:
+        return
+    unknown = sorted(set(types) - option_ids)
+    if unknown:
+        raise ValueError(
+            f"rendering_layout_types has unknown work item type ID(s) "
+            f"{format_option_list(unknown)} in project '{project_id}'. "
+            f"Valid options: {format_option_list(option_ids)}. "
+            f"Unknown ids ghost silently (their fields never render) -- call "
+            f"list_work_item_enum_options first."
         )
 
 
