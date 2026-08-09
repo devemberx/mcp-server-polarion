@@ -142,8 +142,8 @@ async def _call_update_doc(mock_ctx: MagicMock, **overrides: object) -> object:
         "status": None,
         "type": None,
         "home_page_content_html": None,
-        # Omitting either bool leak FieldInfo (non-None), satisfying
-        # at-least-one-attribute check alone -- every such test vacuous.
+        # Omitted bool leak FieldInfo (non-None) = at-least-one check pass
+        # alone, every such test vacuous.
         "auto_suspect": None,
         "uses_outline_numbering": None,
         "rendering_layout_types": None,
@@ -4673,8 +4673,6 @@ class TestUpdateDocumentRenderingLayouts:
     async def test_served_layout_settings_survive_echo(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # UI entry carry layouter/label/properties get_document never surface;
-        # PATCH replace whole array, so rebuild-from-types would wipe them.
         served = {
             "type": "requirement",
             "layouter": "paragraph",
@@ -4781,8 +4779,7 @@ class TestMergeRenderingLayouts:
     """``_merge_rendering_layouts`` — served entries reused, order requested."""
 
     def test_repeated_served_entries_all_kept(self) -> None:
-        # Server accept duplicate type; dropping one delete document data
-        # type-set surface never asked about.
+        # Dropping one delete document data type-set surface never asked about.
         current = [
             {"type": "task", "layouter": "section"},
             {"type": "task", "layouter": "paragraph", "label": "Tasks"},
@@ -4874,8 +4871,7 @@ class TestGetDocumentRenderingLayoutTypes:
     async def test_repeated_type_surfaced_once(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # Server accept duplicate; write guard refuse it, so undeduped read
-        # hand back value update_document reject.
+        # Undeduped read hand back value write guard refuse.
         mock_client.get.return_value = {
             "data": {
                 "attributes": {

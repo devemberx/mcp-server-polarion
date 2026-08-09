@@ -411,8 +411,8 @@ class TestGuardDocumentRenderingLayoutTypes:
     async def test_message_names_the_parameter_not_bare_type(
         self, mock_client: AsyncMock
     ) -> None:
-        # Both write tools carry own ``type`` parameter (document type), so
-        # ``type='...'`` message send model to fix wrong argument.
+        # Both write tools carry own ``type`` parameter — colliding name
+        # misroute model to wrong argument.
         mock_client.get.return_value = enum_response(["task"])
 
         with pytest.raises(ValueError) as exc:
@@ -439,8 +439,8 @@ class TestGuardDocumentRenderingLayoutTypes:
     async def test_blank_type_rejected_without_http(
         self, mock_client: AsyncMock, blank: str
     ) -> None:
-        # Blank entry persist verbatim and render nothing; read path then
-        # filter it out, so ghost stay invisible to every later round trip.
+        # Blank entry persist verbatim + read path filter it out = ghost
+        # invisible to every later round trip.
         with pytest.raises(ValueError, match="blank") as exc:
             await guard_document_rendering_layout_types(
                 mock_client, "P", [blank, "task"]

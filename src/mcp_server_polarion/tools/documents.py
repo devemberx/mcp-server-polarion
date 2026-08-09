@@ -475,9 +475,7 @@ def _rendering_layouts_attribute(types: list[str]) -> JsonValue:
 
 def _parse_rendering_layout_types(attributes: dict[str, object]) -> list[str]:
     """Work item type ids out of served ``renderingLayouts``, order kept.
-
-    Deduped: Polarion accept repeated type, tool surface = type set, and the
-    write guard reject repeats — undeduped read would emit value its own
+    Deduped — write guard reject repeat, so undeduped read emit value own
     write path refuse.
     """
     types: list[str] = []
@@ -496,14 +494,10 @@ def _rendering_layout_entries(layouts: object) -> list[dict[str, object]]:
 
 
 def _merge_rendering_layouts(current: object, types: list[str]) -> list[JsonValue]:
-    """``renderingLayouts`` for *types*, reusing each type's served entry.
-
-    PATCH replace whole array, so a rebuilt-from-types array would drop the
-    `layouter`/`label`/`properties` a UI-created entry carry — only `type`
-    survive `_parse_rendering_layout_types`, so caller cannot resend them.
-    Entry kept verbatim; type without served entry get the section default.
-    Repeated served entries all kept — dedupe would delete document data the
-    type-set surface never asked about.
+    """``renderingLayouts`` for *types*; served entry reused verbatim.
+    Rebuild-from-types wipe UI ``layouter``/``label``/``properties`` — PATCH
+    replace whole array, read surface only ``type``. Unserved type = section
+    default; repeated served entries all kept.
     """
     by_type: dict[str, list[JsonValue]] = {}
     for entry in _rendering_layout_entries(current):
@@ -534,7 +528,7 @@ def _build_update_document_payload(  # noqa: PLR0913
 ) -> dict[str, JsonValue]:
     """JSON:API PATCH body for ``.../documents/{d}``; skip unset.
     ``home_page_content_html`` wrapped verbatim (empty guard in tool layer).
-    ``rendering_layouts`` already merged with served entries (tool layer).
+    ``rendering_layouts`` pre-merged in tool layer.
     """
     attributes: dict[str, JsonValue] = {}
     if title is not None:
@@ -910,7 +904,7 @@ async def _fetch_document_attributes(  # noqa: PLR0913
 ) -> dict[str, object]:
     """Sparse-fieldset ``attributes`` of one document, for pre-write guards.
     Run on dry_run too, so preview raise same not-found / auth errors as real
-    write. Attribute block absent when every requested attr unset — empty dict.
+    write.
     """
     path = (
         f"/projects/{encode_path_segment(project_id)}"

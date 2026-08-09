@@ -58,15 +58,14 @@ async def guard_document_rendering_layout_types(
     """Validate ``renderingLayouts`` work item type ids against the
     type-agnostic work item ``type`` enum.
 
-    Polarion store unknown layout type verbatim (204, no error) — ghost entry
-    render nothing. Blank id ghost same way. Duplicate type also accepted
-    server-side but UI precedence undefined, so refuse instead of dedupe
-    silently.
+    Polarion store unknown or blank layout type verbatim (204, no error) —
+    ghost entry render nothing. Duplicate type also accepted server-side but
+    UI precedence undefined, so refuse instead of dedupe silently.
 
-    Every message name ``rendering_layout_types``, never bare ``type`` —
-    both write tools carry own ``type`` parameter, so ``check_enum`` wording
-    would send the model to fix the wrong argument. One batched option fetch
-    report every bad id at once; per-id loop cost one failed write each.
+    Message name ``rendering_layout_types``, never bare ``type`` — both write
+    tools carry own ``type`` parameter, so ``check_enum`` wording send model
+    to wrong argument. Batched fetch report every bad id at once; per-id loop
+    cost one failed write each.
     """
     if not types:
         return
