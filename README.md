@@ -18,7 +18,7 @@
 
 </div>
 
-A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for **Polarion ALM**, built for real-world instances: every write supports `dry_run`, guards validate fields and enum values before anything is committed, and requests are automatically paced to Polarion's rate limits — so an AI assistant can work on production data without surprises.
+A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for **Polarion ALM**, built for real-world instances: every write supports `dry_run`, guards validate fields and enum values before anything is committed, and requests are paced to a rate cap you configure for your instance — so an AI assistant can work on production data without surprises.
 
 ![mcp-server-polarion demo](https://raw.githubusercontent.com/devemberx/mcp-server-polarion/main/.github/assets/demo.gif)
 
@@ -28,7 +28,7 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for **P
 - **Read** — render documents as Markdown, search with Lucene or SQL, walk incoming/outgoing links, resolve enum options.
 - **Write** — create and update work items, documents, and test runs, manage links, reorganize document structure, post comments.
 - **Safe writes** — every write tool supports `dry_run`, and pre-write guards validate fields, enum values, and link targets before hitting Polarion.
-- **Plays nice with your server** — requests are paced to Polarion's rate limits, with automatic retries on 429/5xx responses.
+- **Plays nice with your server** — requests are serialized and paced to a configurable rate cap, with automatic retries on 429/5xx responses.
 - **Built for LLMs** — strict async, fully typed, pagination on every list tool, docstrings written as the assistant's manual.
 
 ## Quickstart
@@ -208,6 +208,7 @@ No other installation is needed — `uvx mcp-server-polarion` downloads and runs
 |---|---|---|
 | `POLARION_URL` | Base URL of your Polarion instance | `https://polarion.example.com` |
 | `POLARION_TOKEN` | Personal Access Token for authentication | `your-personal-access-token` |
+| `POLARION_MAX_REQUESTS_PER_SECOND` | Optional. Client-side request rate cap — raise it to match your deployment's throttle, or set `0` to disable pacing. Writes keep a fixed extra pause regardless (default: `1`) | `1` |
 
 To generate a Personal Access Token, open Polarion, click your user name, and go to **My Account → Personal Access Tokens**.
 

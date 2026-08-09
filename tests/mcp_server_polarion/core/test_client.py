@@ -12,6 +12,7 @@ import respx
 
 from mcp_server_polarion.core.client import (
     _MAX_ERROR_DETAIL_LEN,
+    _WRITE_DELAY_SECONDS,
     PolarionClient,
 )
 from mcp_server_polarion.core.config import PolarionConfig
@@ -535,6 +536,138 @@ class TestRetry:
             assert route.call_count == 3
 
 
+class TestMinIntervalWiring:
+    """Pacing interval derive from config rate cap unless explicitly overridden."""
+
+    async def test_min_interval_derived_from_config(self) -> None:
+        config = PolarionConfig(
+            polarion_url="https://polarion.example.com",
+            polarion_token="t",
+            polarion_max_requests_per_second=5.0,
+        )
+        async with PolarionClient(config, write_delay=0) as client:
+            assert client._min_interval == pytest.approx(0.2)
+
+    async def test_min_interval_defaults_to_one_second(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Config default 1 req/s pace 1 s apart."""
+        # Cap leak two ways: shell export (delenv) + repo-root .env
+        # (_env_file=None) — both must die for default-path assert.
+        monkeypatch.delenv("POLARION_MAX_REQUESTS_PER_SECOND", raising=False)
+        config = PolarionConfig(
+            polarion_url="https://polarion.example.com",
+            polarion_token="test-token",
+            _env_file=None,  # type: ignore[call-arg]
+        )
+        async with PolarionClient(config, write_delay=0) as client:
+            assert client._min_interval == pytest.approx(1.0)
+
+    async def test_zero_rate_disables_pacing(self) -> None:
+        """Rate 0 = no cap — reciprocal would ZeroDivisionError."""
+        config = PolarionConfig(
+            polarion_url="https://polarion.example.com",
+            polarion_token="t",
+            polarion_max_requests_per_second=0,
+        )
+        async with PolarionClient(config, write_delay=0) as client:
+            assert client._min_interval == 0.0
+
+    async def test_explicit_min_interval_wins_over_config(self) -> None:
+        config = PolarionConfig(
+            polarion_url="https://polarion.example.com",
+            polarion_token="t",
+            polarion_max_requests_per_second=1.0,
+        )
+        async with PolarionClient(config, write_delay=0, min_interval=0) as client:
+            assert client._min_interval == 0
+
+
+class TestWriteDelayWiring:
+    """Write delay read at construction so harness patches take effect."""
+
+    async def test_write_delay_defaults_to_module_constant(self) -> None:
+        async with PolarionClient(_config(), min_interval=0) as client:
+            assert client._write_delay == _WRITE_DELAY_SECONDS
+
+    async def test_write_delay_follows_patched_module_constant(self) -> None:
+        """Eval harness zero the global; def-time default would ignore it."""
+        with patch("mcp_server_polarion.core.client._WRITE_DELAY_SECONDS", 0.0):
+            async with PolarionClient(_config(), min_interval=0) as client:
+                assert client._write_delay == 0.0
+
+    async def test_explicit_write_delay_wins_over_module_constant(self) -> None:
+        with patch("mcp_server_polarion.core.client._WRITE_DELAY_SECONDS", 9.0):
+            async with PolarionClient(
+                _config(), write_delay=0, min_interval=0
+            ) as client:
+                assert client._write_delay == 0
+
+
+class TestRetryPacing:
+    """Retry attempts obey the configured cap, not just the fixed backoff."""
+
+    async def test_retry_attempt_paced_to_min_interval(self) -> None:
+        """Backoff shorter than cap must not let the retry burst past it."""
+        attempt_start: list[float] = []
+
+        async def _on_get(request: httpx.Request) -> httpx.Response:
+            attempt_start.append(asyncio.get_running_loop().time())
+            if len(attempt_start) == 1:
+                return httpx.Response(429, json={"errors": [{"detail": "slow down"}]})
+            return httpx.Response(200, json={"data": []})
+
+        min_interval = 0.2
+
+        with respx.mock(base_url=BASE) as mock:
+            mock.get("/projects").mock(side_effect=_on_get)
+
+            # Backoff 0 isolate pacing: any gap left come from _pace alone.
+            with patch(
+                "mcp_server_polarion.core.client._INITIAL_BACKOFF_SECONDS",
+                0.0,
+            ):
+                async with PolarionClient(
+                    _config(), write_delay=0, min_interval=min_interval
+                ) as client:
+                    result = await client.get("/projects")
+
+        assert result == {"data": []}
+        assert len(attempt_start) == 2
+        # 0.9 slack absorb scheduler jitter (sleep may wake slightly early).
+        assert attempt_start[1] - attempt_start[0] >= min_interval * 0.9, (
+            f"retry started {attempt_start[1] - attempt_start[0]:.3f}s after "
+            f"first attempt; expected ≥ {min_interval * 0.9:.3f}s (retry pacing)."
+        )
+
+    async def test_retry_bytes_attempt_paced_to_min_interval(self) -> None:
+        attempt_start: list[float] = []
+
+        async def _on_get(request: httpx.Request) -> httpx.Response:
+            attempt_start.append(asyncio.get_running_loop().time())
+            if len(attempt_start) == 1:
+                return httpx.Response(503, json={"errors": [{"detail": "down"}]})
+            return httpx.Response(200, content=b"payload")
+
+        min_interval = 0.2
+
+        with respx.mock(base_url=BASE) as mock:
+            mock.get("/attachment").mock(side_effect=_on_get)
+
+            with patch(
+                "mcp_server_polarion.core.client._INITIAL_BACKOFF_SECONDS",
+                0.0,
+            ):
+                async with PolarionClient(
+                    _config(), write_delay=0, min_interval=min_interval
+                ) as client:
+                    result = await client.get_bytes("/attachment", max_bytes=1024)
+
+        assert result == b"payload"
+        assert len(attempt_start) == 2
+        assert attempt_start[1] - attempt_start[0] >= min_interval * 0.9
+
+
 class TestSerialization:
     """Concurrent callers serialise through PolarionClient lock."""
 
@@ -603,7 +736,7 @@ class TestSerialization:
         )
 
     async def test_read_requests_paced_to_min_interval(self) -> None:
-        """Reads obey the ≤3 req/s cap: two GETs spaced by ``min_interval``."""
+        """Reads obey the configured cap: two GETs spaced by ``min_interval``."""
         get_start: list[float] = []
 
         async def _on_get(request: httpx.Request) -> httpx.Response:

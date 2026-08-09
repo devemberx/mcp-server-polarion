@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import Any
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import Any, Final
 
 import respx
 from fastmcp import Client
@@ -55,11 +57,35 @@ def _extract_text(result: Any) -> str:
     return str(result)
 
 
+_PATCHED_ENV_VARS: Final[tuple[str, ...]] = (
+    "POLARION_URL",
+    "POLARION_TOKEN",
+    "POLARION_MAX_REQUESTS_PER_SECOND",
+)
+
+
 def _set_polarion_env() -> None:
     # Hard-set, not setdefault: inherited real POLARION_URL would route writes
     # (respx match by host) to live instance.
     os.environ["POLARION_URL"] = POLARION_HOST
     os.environ["POLARION_TOKEN"] = "fake-token"
+    # Mock backend throttle-free; inherited cap would pace every eval tool call.
+    os.environ["POLARION_MAX_REQUESTS_PER_SECOND"] = "0"
+
+
+@contextmanager
+def _patched_polarion_env() -> Iterator[None]:
+    """Scope fake env to one case — leaked cap 0 unpace later live clients."""
+    saved = {name: os.environ.get(name) for name in _PATCHED_ENV_VARS}
+    _set_polarion_env()
+    try:
+        yield
+    finally:
+        for name, value in saved.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
 
 
 class _CycleGuard:
@@ -115,14 +141,16 @@ async def _run_case_async(case: Case, recorder: TrajectoryRecorder) -> str:
 
 def run_case(case: Case) -> TaskOutput:
     """Drive one case, return tool-call trajectory as ``TaskOutput``."""
-    _set_polarion_env()
     recorder = TrajectoryRecorder()
     fake = FakePolarion()
 
     old_delay = _client_mod._WRITE_DELAY_SECONDS
     _client_mod._WRITE_DELAY_SECONDS = 0.0
     try:
-        with respx.mock(assert_all_mocked=False, assert_all_called=False) as router:
+        with (
+            _patched_polarion_env(),
+            respx.mock(assert_all_mocked=False, assert_all_called=False) as router,
+        ):
             fake.install(router)
             output = asyncio.run(_run_case_async(case, recorder))
     finally:
