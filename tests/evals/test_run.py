@@ -4,6 +4,7 @@ fail-closed crashed runs, git-sha resolution, unknown-case exit code.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -146,6 +147,40 @@ class TestMain:
 
         assert run.main() == 0
         assert seen == [c.name for c in EFFICIENCY_CASES]
+
+    def test_report_records_model_and_effort(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        monkeypatch.setattr(
+            run,
+            "_run_case_n_times",
+            lambda case, runs, evaluator: {
+                "name": case.name,
+                "runs": runs,
+                "pass_count": runs,
+                "pass_rate": 1.0,
+                "min_pass_rate": 1.0,
+                "passed": True,
+                "failures": [],
+            },
+        )
+        monkeypatch.setattr(run, "resolve_model_id", lambda: "openai/gpt-5.6-luna")
+        monkeypatch.setattr(run, "resolve_reasoning_effort", lambda: "high")
+        monkeypatch.setattr(run, "_git_sha", lambda: "abc123")
+        monkeypatch.setattr(run, "_REPORT_DIR", tmp_path)
+        monkeypatch.setattr(
+            "sys.argv", ["run", "--case", "SAFE-READONLY", "--runs", "1"]
+        )
+
+        assert run.main() == 0
+        # Effort in filename: same sha + model at other effort must not clobber.
+        report = json.loads(
+            (tmp_path / "gate-abc123-openai-gpt-5-6-luna-high.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert report["model"] == "openai/gpt-5.6-luna"
+        assert report["reasoning_effort"] == "high"
 
     def test_list_flag_prints_catalog_without_running(
         self, monkeypatch: pytest.MonkeyPatch
