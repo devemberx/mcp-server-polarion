@@ -4460,7 +4460,7 @@ class TestUpdateDocumentAttachmentRefDocstringClause:
 class TestBuildDocumentPayloadRenderingLayouts:
     """``renderingLayouts`` serialization in both payload builders."""
 
-    def test_create_wraps_each_type_with_fixed_section_layouter(self) -> None:
+    def test_create_wraps_each_type_with_fixed_paragraph_layouter(self) -> None:
         payload = _build_create_document_payload(
             document_name="D",
             title="T",
@@ -4473,8 +4473,8 @@ class TestBuildDocumentPayloadRenderingLayouts:
         item = cast(list[dict[str, object]], payload["data"])[0]
         attributes = cast(dict[str, object], item["attributes"])
         assert attributes["renderingLayouts"] == [
-            {"type": "softwarerequirement", "layouter": "section"},
-            {"type": "softwaretestcase", "layouter": "section"},
+            {"type": "softwarerequirement", "layouter": "paragraph"},
+            {"type": "softwaretestcase", "layouter": "paragraph"},
         ]
 
     def test_update_serializes_merged_layouts_verbatim(self) -> None:
@@ -4535,7 +4535,7 @@ class TestBuildDocumentPayloadRenderingLayouts:
 class TestCreateDocumentRenderingLayouts:
     """``rendering_layout_types`` on the create path."""
 
-    async def test_dry_run_previews_section_entries(
+    async def test_dry_run_previews_paragraph_entries(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         result = cast(
@@ -4552,7 +4552,7 @@ class TestCreateDocumentRenderingLayouts:
         item = cast(list[dict[str, object]], preview["data"])[0]
         attributes = cast(dict[str, object], item["attributes"])
         assert attributes["renderingLayouts"] == [
-            {"type": "softwarerequirement", "layouter": "section"}
+            {"type": "softwarerequirement", "layouter": "paragraph"}
         ]
 
     async def test_unknown_type_blocks_post(
@@ -4600,7 +4600,7 @@ class TestCreateDocumentRenderingLayouts:
         body = mock_client.post.call_args.kwargs["json"]
         attributes = body["data"][0]["attributes"]
         assert attributes["renderingLayouts"] == [
-            {"type": "softwarerequirement", "layouter": "section"}
+            {"type": "softwarerequirement", "layouter": "paragraph"}
         ]
 
 
@@ -4622,7 +4622,7 @@ class TestUpdateDocumentRenderingLayouts:
         data = cast(dict[str, object], preview["data"])
         attributes = cast(dict[str, object], data["attributes"])
         assert attributes["renderingLayouts"] == [
-            {"type": "task", "layouter": "section"}
+            {"type": "task", "layouter": "paragraph"}
         ]
 
     async def test_listed_in_missing_field_error(
@@ -4666,8 +4666,8 @@ class TestUpdateDocumentRenderingLayouts:
 
         body = mock_client.patch.call_args.kwargs["json"]
         assert body["data"]["attributes"]["renderingLayouts"] == [
-            {"type": "softwarerequirement", "layouter": "section"},
-            {"type": "softwaretestcase", "layouter": "section"},
+            {"type": "softwarerequirement", "layouter": "paragraph"},
+            {"type": "softwaretestcase", "layouter": "paragraph"},
         ]
 
     async def test_served_layout_settings_survive_echo(
@@ -4689,7 +4689,7 @@ class TestUpdateDocumentRenderingLayouts:
         body = mock_client.patch.call_args.kwargs["json"]
         assert body["data"]["attributes"]["renderingLayouts"] == [
             served,
-            {"type": "task", "layouter": "section"},
+            {"type": "task", "layouter": "paragraph"},
         ]
 
     async def test_unlisted_type_dropped_from_array(
@@ -4701,7 +4701,7 @@ class TestUpdateDocumentRenderingLayouts:
                 "data": {
                     "attributes": {
                         "renderingLayouts": [
-                            {"type": "requirement", "layouter": "paragraph"},
+                            {"type": "requirement", "layouter": "title"},
                             {"type": "task", "layouter": "section"},
                         ]
                     }
@@ -4713,7 +4713,7 @@ class TestUpdateDocumentRenderingLayouts:
 
         body = mock_client.patch.call_args.kwargs["json"]
         assert body["data"]["attributes"]["renderingLayouts"] == [
-            {"type": "requirement", "layouter": "paragraph"}
+            {"type": "requirement", "layouter": "title"}
         ]
 
     async def test_dry_run_preview_reflects_served_layouts(
@@ -4788,25 +4788,27 @@ class TestMergeRenderingLayouts:
         assert _merge_rendering_layouts(current, ["task"]) == current
 
     def test_order_follows_requested_types(self) -> None:
+        # Served layouters differ from fallback — order assertion then also
+        # prove entries reused, not rebuilt.
         current = [
-            {"type": "task", "layouter": "paragraph"},
+            {"type": "task", "layouter": "section"},
             {"type": "defect", "layouter": "title"},
         ]
 
         assert _merge_rendering_layouts(current, ["defect", "task"]) == [
             {"type": "defect", "layouter": "title"},
-            {"type": "task", "layouter": "paragraph"},
+            {"type": "task", "layouter": "section"},
         ]
 
     @pytest.mark.parametrize(
         "current",
         [None, "notalist", [], ["notadict"], [{"layouter": "section"}], [{"type": 7}]],
     )
-    def test_unusable_served_entries_fall_back_to_section(
+    def test_unusable_served_entries_fall_back_to_paragraph(
         self, current: object
     ) -> None:
         assert _merge_rendering_layouts(current, ["task"]) == [
-            {"type": "task", "layouter": "section"}
+            {"type": "task", "layouter": "paragraph"}
         ]
 
 

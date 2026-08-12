@@ -97,9 +97,10 @@ _POLARION_PART_TYPES: Final[frozenset[str]] = frozenset(
 _MAX_HEADING_LEVEL: Final[int] = 6
 
 
-# Polarion reject layout entry without layouter (400). Pinned to value
-# UI-created documents use — type stay only knob on tool surface.
-_RENDERING_LAYOUTER: Final[str] = "section"
+# Polarion reject layout entry without layouter (400). Pinned to value fresh
+# UI document get for every work item type — type stay only knob on tool
+# surface. Template-seeded doc carry other layouter, source not API-readable.
+_RENDERING_LAYOUTER: Final[str] = "paragraph"
 
 
 @dataclass(frozen=True, slots=True)
@@ -469,7 +470,7 @@ def _require_update_document_attrs(
 
 
 def _rendering_layouts_attribute(types: list[str]) -> JsonValue:
-    """``renderingLayouts`` value: one section-layouter entry per type."""
+    """``renderingLayouts`` value: one paragraph-layouter entry per type."""
     return [{"type": t, "layouter": _RENDERING_LAYOUTER} for t in types]
 
 
@@ -496,8 +497,8 @@ def _rendering_layout_entries(layouts: object) -> list[dict[str, object]]:
 def _merge_rendering_layouts(current: object, types: list[str]) -> list[JsonValue]:
     """``renderingLayouts`` for *types*; served entry reused verbatim.
     Rebuild-from-types wipe UI ``layouter``/``label``/``properties`` — PATCH
-    replace whole array, read surface only ``type``. Unserved type = section
-    default; repeated served entries all kept.
+    replace whole array, read surface only ``type``. Unserved type = paragraph
+    layouter; repeated served entries all kept.
     """
     by_type: dict[str, list[JsonValue]] = {}
     for entry in _rendering_layout_entries(current):
@@ -1238,7 +1239,7 @@ async def create_document(  # noqa: PLR0913
         min_length=1,
         description=(
             "Work item type IDs the document will hold (e.g. "
-            "['softwarerequirement']); each gets a section layout."
+            "['softwarerequirement']); each gets a paragraph layout."
         ),
     ),
     custom_fields: dict[str, object] | None = Field(  # noqa: B008
