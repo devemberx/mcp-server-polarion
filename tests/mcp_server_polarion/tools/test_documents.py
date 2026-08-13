@@ -4673,9 +4673,11 @@ class TestUpdateDocumentRenderingLayouts:
     async def test_served_layout_settings_survive_echo(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
+        # Served layouter differ from fallback — echo assertion then also
+        # prove entry reused, not rebuilt.
         served = {
             "type": "requirement",
-            "layouter": "paragraph",
+            "layouter": "title",
             "label": "Requirement",
             "properties": [{"key": "fieldsAtStart", "value": "id"}],
         }

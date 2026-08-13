@@ -100,6 +100,7 @@ _MAX_HEADING_LEVEL: Final[int] = 6
 # Polarion reject layout entry without layouter (400). Pinned to value fresh
 # UI document get for every work item type — type stay only knob on tool
 # surface. Template-seeded doc carry other layouter, source not API-readable.
+# UI `label`/`properties` on same entry omitted — gap tracked #253.
 _RENDERING_LAYOUTER: Final[str] = "paragraph"
 
 
@@ -470,7 +471,7 @@ def _require_update_document_attrs(
 
 
 def _rendering_layouts_attribute(types: list[str]) -> JsonValue:
-    """``renderingLayouts`` value: one paragraph-layouter entry per type."""
+    """``renderingLayouts`` value: one ``_RENDERING_LAYOUTER`` entry per type."""
     return [{"type": t, "layouter": _RENDERING_LAYOUTER} for t in types]
 
 
@@ -497,8 +498,8 @@ def _rendering_layout_entries(layouts: object) -> list[dict[str, object]]:
 def _merge_rendering_layouts(current: object, types: list[str]) -> list[JsonValue]:
     """``renderingLayouts`` for *types*; served entry reused verbatim.
     Rebuild-from-types wipe UI ``layouter``/``label``/``properties`` — PATCH
-    replace whole array, read surface only ``type``. Unserved type = paragraph
-    layouter; repeated served entries all kept.
+    replace whole array, read surface only ``type``. Unserved type =
+    ``_RENDERING_LAYOUTER``; repeated served entries all kept.
     """
     by_type: dict[str, list[JsonValue]] = {}
     for entry in _rendering_layout_entries(current):
@@ -1238,8 +1239,8 @@ async def create_document(  # noqa: PLR0913
         default=None,
         min_length=1,
         description=(
-            "Work item type IDs the document will hold (e.g. "
-            "['softwarerequirement']); each gets a paragraph layout."
+            "Work item type IDs the document will hold "
+            "(e.g. ['softwarerequirement'])."
         ),
     ),
     custom_fields: dict[str, object] | None = Field(  # noqa: B008
