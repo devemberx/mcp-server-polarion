@@ -5,7 +5,7 @@ documents) and project-level enumerations (roles, testrun enums).
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.core.exceptions import PolarionNotFoundError
@@ -44,6 +44,24 @@ async def fetch_enum_option_ids(
     """Valid option ids for ``(project, resource, field, type)``; cached,
     fail-closed, 404 defer (empty set).
     """
+    return frozenset(
+        await fetch_enum_options(client, project_id, resource, field_id, type_id)
+    )
+
+
+async def fetch_enum_options(
+    client: PolarionClient,
+    project_id: str,
+    resource: Resource,
+    field_id: str,
+    type_id: str,
+) -> Mapping[str, str]:
+    """Option id → display name for ``(project, resource, field, type)``;
+    cached, fail-closed, 404 defer (empty mapping).
+
+    Name = what the portal show for the option (work item type ``testcase``
+    → ``Test Case``). Option served without one map to ``""``.
+    """
     cached = get_cached_enum_options(project_id, resource, field_id, type_id)
     if cached is not None:
         return cached
@@ -75,23 +93,23 @@ async def fetch_enum_option_ids(
             project_id,
         )
         store_cached_enum_options(
-            project_id, resource, field_id, type_id, frozenset(), not_found=True
+            project_id, resource, field_id, type_id, {}, not_found=True
         )
-        return frozenset()
+        return {}
 
     data = response.get("data", [])
-    ids: set[str] = set()
+    options: dict[str, str] = {}
     if isinstance(data, list):
         for entry in data:
             if not isinstance(entry, dict):
                 continue
             opt_id = entry.get("id")
             if isinstance(opt_id, str) and opt_id:
-                ids.add(opt_id)
+                name = entry.get("name")
+                options[opt_id] = name if isinstance(name, str) else ""
 
-    option_ids = frozenset(ids)
-    store_cached_enum_options(project_id, resource, field_id, type_id, option_ids)
-    return option_ids
+    store_cached_enum_options(project_id, resource, field_id, type_id, options)
+    return options
 
 
 async def check_enum(  # noqa: PLR0913

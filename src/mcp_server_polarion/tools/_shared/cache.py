@@ -6,6 +6,7 @@ cache state; tool logic reach it only via typed get / store wrappers.
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final, Literal, NamedTuple
 
@@ -100,9 +101,11 @@ def invalidate_documents_cache(project_id: str) -> None:
     _document_list_cache.invalidate(project_id)
 
 
-# (project, resource, field, type) -> valid option ids.
-_enum_option_cache: TTLCache[tuple[str, Resource, str, str], frozenset[str]] = TTLCache(
-    _GUARD_TTL_SECONDS
+# (project, resource, field, type) -> option id -> display name. Name kept
+# beside id so display-name reader (rendering layout `label`) reuse guard's
+# fetch instead of spending second request; unnamed option = "".
+_enum_option_cache: TTLCache[tuple[str, Resource, str, str], Mapping[str, str]] = (
+    TTLCache(_GUARD_TTL_SECONDS)
 )
 
 
@@ -111,8 +114,8 @@ def get_cached_enum_options(
     resource: Resource,
     field_id: str,
     type_id: str,
-) -> frozenset[str] | None:
-    """Cached valid option ids for field/type, or ``None`` on miss."""
+) -> Mapping[str, str] | None:
+    """Cached option id → display name for field/type, or ``None`` on miss."""
     return _enum_option_cache.get((project_id, resource, field_id, type_id))
 
 
@@ -121,16 +124,16 @@ def store_cached_enum_options(  # noqa: PLR0913
     resource: Resource,
     field_id: str,
     type_id: str,
-    option_ids: frozenset[str],
+    options: Mapping[str, str],
     *,
     not_found: bool = False,
 ) -> None:
-    """Cache option ids for field/type; ``not_found=True`` (404 result)
+    """Cache option id → name for field/type; ``not_found=True`` (404 result)
     use longer ``_ENUM_NOT_FOUND_TTL_SECONDS``.
     """
     _enum_option_cache.set(
         (project_id, resource, field_id, type_id),
-        option_ids,
+        dict(options),
         ttl_seconds=_ENUM_NOT_FOUND_TTL_SECONDS if not_found else None,
     )
 
