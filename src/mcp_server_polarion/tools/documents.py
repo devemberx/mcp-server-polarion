@@ -1239,8 +1239,7 @@ async def create_document(  # noqa: PLR0913
         default=None,
         min_length=1,
         description=(
-            "Work item type IDs the document will hold "
-            "(e.g. ['softwarerequirement'])."
+            "Work item type IDs the document will hold (e.g. ['softwarerequirement'])."
         ),
     ),
     custom_fields: dict[str, object] | None = Field(  # noqa: B008
