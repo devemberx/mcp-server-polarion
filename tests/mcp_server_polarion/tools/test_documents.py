@@ -102,6 +102,29 @@ def _enum_get_response(ids: list[str]) -> dict[str, object]:
     }
 
 
+def _doc_type_get_response(document_type: str) -> dict[str, object]:
+    """Sparse ``fields[documents]=type`` reply the status guard key on."""
+    return {"data": {"attributes": {"type": document_type}}}
+
+
+def _enum_probe_types(mock_client: AsyncMock) -> list[str]:
+    """``type`` axis of each ``getAvailableOptions`` GET, call order kept."""
+    return [
+        str(kwargs["params"]["type"])
+        for (_args, kwargs) in mock_client.get.call_args_list
+        if "getAvailableOptions" in _args[0]
+    ]
+
+
+def _type_resolution_get_count(mock_client: AsyncMock) -> int:
+    """GETs spent resolving the document's own type."""
+    return sum(
+        1
+        for (_args, kwargs) in mock_client.get.call_args_list
+        if kwargs.get("params", {}).get("fields[documents]") == "type"
+    )
+
+
 def _enum_get_by_resource(
     document_types: list[str], work_item_types: list[str]
 ) -> Callable[..., dict[str, object]]:
@@ -2382,6 +2405,8 @@ class TestUpdateDocumentValidation:
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         # workflow_action paired with at least one attribute = OK.
+        # status guard resolve doc type first; enum probe then defer (no ids).
+        mock_client.get.return_value = _doc_type_get_response("generic")
         result = await update_document(
             mock_ctx,
             project_id="MyProj",
@@ -2627,6 +2652,7 @@ class TestUpdateDocumentHappyPath:
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         mock_client.patch.return_value = {}
+        mock_client.get.return_value = _doc_type_get_response("generic")
 
         await update_document(
             mock_ctx,
@@ -2852,6 +2878,7 @@ class TestUpdateDocumentHappyPath:
     ) -> None:
         # Action IDs with reserved chars must be URL-encoded.
         mock_client.patch.return_value = {}
+        mock_client.get.return_value = _doc_type_get_response("generic")
 
         await update_document(
             mock_ctx,
@@ -4194,10 +4221,91 @@ class TestEnumGuardUpdateDocument:
         mock_client: AsyncMock,
         reset_enum_guard_caches: None,
     ) -> None:
-        mock_client.get.return_value = _enum_get_response(["draft", "approved"])
+        # GETs: resolve doc type, then that type's status options.
+        mock_client.get.side_effect = [
+            _doc_type_get_response("softwareReqSpecification"),
+            _enum_get_response(["draft", "approved"]),
+        ]
 
-        with pytest.raises(ValueError, match="status='ghost'"):
+        with pytest.raises(ValueError, match="status='ghost'") as exc:
             await _call_update_doc(mock_ctx, status="ghost")
+
+        # Message name resolved type, so model know which type to pass to
+        # list_document_enum_options.
+        assert "softwareReqSpecification" in str(exc.value)
+        mock_client.patch.assert_not_called()
+
+    async def test_status_checked_against_resolved_type_not_generic(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        """Type-specific status pass — '~' options would false-reject it."""
+        mock_client.get.side_effect = [
+            _doc_type_get_response("softwareReqSpecification"),
+            _enum_get_response(["draft", "inreview", "reviewed"]),
+        ]
+
+        result = await _call_update_doc(mock_ctx, status="reviewed", dry_run=True)
+
+        assert result.dry_run is True  # type: ignore[attr-defined]
+        assert _enum_probe_types(mock_client) == ["softwareReqSpecification"]
+
+    async def test_explicit_type_skips_resolution_get(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        """Retype PATCH set both attrs — new type is the status axis."""
+        mock_client.get.side_effect = [
+            _enum_get_response(["generic", "softwareReqSpecification"]),
+            _enum_get_response(["draft", "reviewed"]),
+        ]
+
+        await _call_update_doc(
+            mock_ctx, status="reviewed", type="softwareReqSpecification", dry_run=True
+        )
+
+        # type probe on '~' axis, status probe on supplied type; no
+        # resolution GET between.
+        assert _enum_probe_types(mock_client) == ["~", "softwareReqSpecification"]
+
+    async def test_status_and_custom_fields_resolve_type_once(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        # GETs: resolve doc type, status options, custom-field enum probe
+        # (404 = not enum field, defer). Key schema primed, so no sample GET.
+        mock_client.get.side_effect = [
+            _doc_type_get_response("generic"),
+            _enum_get_response(["draft", "published"]),
+            PolarionNotFoundError("not an Enumeration field", status_code=404),
+        ]
+        _cache_mod.store_document_type_custom_keys(
+            "MyProj", "generic", frozenset({"doc_risk"})
+        )
+
+        await _call_update_doc(
+            mock_ctx, status="draft", custom_fields={"doc_risk": 9}, dry_run=True
+        )
+
+        assert _type_resolution_get_count(mock_client) == 1
+
+    async def test_unresolvable_type_blocks_status_write(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        """Fail closed: no type axis, no silent '~' fallback."""
+        mock_client.get.return_value = {"data": {"attributes": {}}}
+
+        with pytest.raises(RuntimeError, match="status"):
+            await _call_update_doc(mock_ctx, status="reviewed")
         mock_client.patch.assert_not_called()
 
     async def test_unknown_custom_field_key_raises_via_priming_get(
