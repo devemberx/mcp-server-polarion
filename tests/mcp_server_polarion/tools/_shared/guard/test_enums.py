@@ -95,7 +95,7 @@ class TestFetchEnumOptionIds:
     ) -> None:
         mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
 
-        with pytest.raises(PermissionError, match="lacks permission"):
+        with pytest.raises(PermissionError, match="Refusing the write"):
             await fetch_enum_option_ids(
                 mock_client, "P", "workitems", "severity", "task"
             )
@@ -224,7 +224,7 @@ class TestFetchProjectEnumOptionIds:
     ) -> None:
         mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
 
-        with pytest.raises(PermissionError, match="lacks permission"):
+        with pytest.raises(PermissionError, match="Refusing the write"):
             await fetch_project_enum_option_ids(mock_client, "P", "workitem-link-role")
 
     async def test_not_found_defers_with_empty_set(

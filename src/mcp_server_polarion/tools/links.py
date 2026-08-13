@@ -26,6 +26,7 @@ from mcp_server_polarion.models import (
     WorkItemLinkUpdateSpec,
 )
 from mcp_server_polarion.server import mcp
+from mcp_server_polarion.tools._shared.errors import auth_error
 from mcp_server_polarion.tools._shared.fields import (
     MAX_BULK_ITEMS,
     WORK_ITEM_LIST_FIELDS,
@@ -259,9 +260,7 @@ async def _get_forward_link_page(
             "Use `list_work_items` to discover valid IDs."
         ) from exc
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot access linked work items -- check your POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error("access linked work items", exc) from exc
     except PolarionError as exc:
         raise RuntimeError(
             f"Failed to get linked work items for '{work_item_id}': {exc.message}"
@@ -299,9 +298,7 @@ async def _get_back_link_page(
             "Use `list_work_items` to discover valid IDs."
         ) from exc
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot access linked work items -- check your POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error("access linked work items", exc) from exc
     except PolarionError as exc:
         raise RuntimeError(
             f"Backlink query failed for work item '{work_item_id}': {exc.message}"
@@ -415,9 +412,7 @@ async def create_work_item_links(
     try:
         response = await client.post(path, json=cast(dict[str, object], payload))
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot create work item links -- check your POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error("create work item links", exc) from exc
     except PolarionNotFoundError as exc:
         raise ValueError(
             f"Work item '{work_item_id}' not found in project '{project_id}'. "
@@ -504,9 +499,7 @@ async def delete_work_item_links(
     try:
         await client.delete(path, json=cast(dict[str, object], payload))
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot delete work item links -- check your POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error("delete work item links", exc) from exc
     except PolarionNotFoundError as exc:
         raise ValueError(
             f"Source work item '{work_item_id}' not found in project "
@@ -605,9 +598,7 @@ async def update_work_item_link(  # noqa: PLR0913
     try:
         await client.patch(path, json=cast(dict[str, object], payload))
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot update work item link -- check your POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error("update work item link", exc) from exc
     except PolarionNotFoundError as exc:
         raise ValueError(
             f"Link '{link_id}' not found -- check role/target via "

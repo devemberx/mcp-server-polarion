@@ -276,7 +276,7 @@ class TestGuardWorkItemCustomFieldKeys:
     ) -> None:
         mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
 
-        with pytest.raises(PermissionError, match="lacks permission"):
+        with pytest.raises(PermissionError, match="Refusing the write"):
             await _check_work_item_custom_keys(
                 mock_client, "P", "task", {"release_train_id": "RT-42"}
             )
@@ -442,7 +442,7 @@ class TestGuardWorkItemCustomFieldEnums:
     ) -> None:
         mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
 
-        with pytest.raises(PermissionError, match="lacks permission"):
+        with pytest.raises(PermissionError, match="Refusing the write"):
             await guard_work_item_custom_fields(mock_client, "P", "task", {"asil": "1"})
 
 
@@ -550,7 +550,7 @@ class TestResolveWorkItemTypes:
     ) -> None:
         mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
 
-        with pytest.raises(PermissionError, match="lacks permission"):
+        with pytest.raises(PermissionError, match="Refusing the write"):
             await resolve_work_item_types(mock_client, "P", ["A"])
 
 
@@ -621,7 +621,7 @@ class TestGuardWorkItemAttachmentRefs:
     ) -> None:
         mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
 
-        with pytest.raises(PermissionError, match="lacks permission"):
+        with pytest.raises(PermissionError, match="Refusing the write"):
             await guard_work_item_attachment_refs(
                 mock_client, "P", "WI-1", '<img src="workitemimg:1-x.png"/>'
             )

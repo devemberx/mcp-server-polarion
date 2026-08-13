@@ -28,7 +28,7 @@ def _translate_error(
     else ``RuntimeError``); 404 policy stay at each call site.
     """
     if isinstance(exc, PolarionAuthError):
-        return unauthorized_write_block(what, project_id)
+        return unauthorized_write_block(what, project_id, exc)
     return unreachable_write_block(what, project_id, exc)
 
 

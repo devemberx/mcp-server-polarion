@@ -18,6 +18,7 @@ from mcp_server_polarion.models import (
     WorkItemMoveResult,
 )
 from mcp_server_polarion.server import mcp
+from mcp_server_polarion.tools._shared.errors import auth_error, document_status_hint
 from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
     get_client,
@@ -139,9 +140,10 @@ async def move_work_item_to_document(  # noqa: PLR0913
     try:
         await client.post(path, json=cast(dict[str, object], payload))
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot move work item -- check your POLARION_TOKEN permissions."
-        ) from exc
+        hint = await document_status_hint(
+            client, project_id, target_space_id, target_document_name
+        )
+        raise auth_error("move work item", exc, document_hint=hint) from exc
     except PolarionNotFoundError as exc:
         raise ValueError(
             f"Work item '{work_item_id}' (project '{project_id}') or "
@@ -207,9 +209,7 @@ async def move_work_item_from_document(
         # moveFromDocument take no body.
         await client.post(path)
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot detach work item -- check your POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error("detach work item", exc) from exc
     except PolarionNotFoundError as exc:
         raise ValueError(
             f"Work item '{work_item_id}' in project '{project_id}' not found. "

@@ -16,6 +16,7 @@ from mcp_server_polarion.models import (
     ProjectSummary,
 )
 from mcp_server_polarion.server import mcp
+from mcp_server_polarion.tools._shared.errors import auth_error
 from mcp_server_polarion.tools._shared.helpers import (
     get_client,
     safe_str,
@@ -60,9 +61,7 @@ async def list_projects(
     try:
         response = await client.get("/projects", params=params)
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot list projects -- check your POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error("list projects", exc) from exc
     except PolarionError as exc:
         raise RuntimeError(f"Failed to list projects: {exc.message}") from exc
 

@@ -140,7 +140,7 @@ class TestGuardWorkItemLinkTargets:
     ) -> None:
         mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
 
-        with pytest.raises(PermissionError, match="lacks permission"):
+        with pytest.raises(PermissionError, match="Refusing the write"):
             await guard_work_item_link_targets(mock_client, "P", [_link("A")])
 
     async def test_missing_target_project_raises_value_error(
@@ -208,7 +208,7 @@ class TestGuardWorkItemLinkRoles:
     ) -> None:
         mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
 
-        with pytest.raises(PermissionError, match="lacks permission"):
+        with pytest.raises(PermissionError, match="Refusing the write"):
             await guard_work_item_link_roles(mock_client, "P", ["relates_to"])
 
 

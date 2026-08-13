@@ -283,6 +283,53 @@ class TestMoveWorkItemToDocumentErrorMapping:
                 dry_run=False,
             )
 
+    async def test_403_names_target_document_status(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Live-verified: reviewed target document 403 move; server detail blame
+        # permissions, so status must reach model too.
+        mock_client.post.side_effect = PolarionAuthError(
+            "Cannot move Work Item(s) to a Document due to limited permissions.",
+            status_code=403,
+        )
+        mock_client.get.return_value = {"data": {"attributes": {"status": "reviewed"}}}
+
+        with pytest.raises(PermissionError) as excinfo:
+            await move_work_item_to_document(
+                mock_ctx,
+                project_id="MyProj",
+                work_item_id="MCPT-1",
+                target_space_id="S",
+                target_document_name="D",
+                previous_part_id=None,
+                next_part_id=None,
+                dry_run=False,
+            )
+
+        message = str(excinfo.value)
+        assert "due to limited permissions." in message
+        assert "'S/D' status is 'reviewed'" in message
+
+    async def test_403_survives_status_lookup_failure(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.side_effect = PolarionAuthError("denied", status_code=403)
+        mock_client.get.side_effect = PolarionError("lookup down", status_code=500)
+
+        with pytest.raises(PermissionError, match="denied") as excinfo:
+            await move_work_item_to_document(
+                mock_ctx,
+                project_id="MyProj",
+                work_item_id="MCPT-1",
+                target_space_id="S",
+                target_document_name="D",
+                previous_part_id=None,
+                next_part_id=None,
+                dry_run=False,
+            )
+
+        assert "lookup down" not in str(excinfo.value)
+
     async def test_404_raises_value_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:

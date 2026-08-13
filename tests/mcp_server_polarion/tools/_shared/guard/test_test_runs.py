@@ -165,7 +165,7 @@ class TestGuardTestRunTemplates:
     ) -> None:
         mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
 
-        with pytest.raises(PermissionError, match="lacks permission"):
+        with pytest.raises(PermissionError, match="Refusing the write"):
             await guard_test_run_templates(mock_client, "P", ["Empty"])
 
     async def test_polarion_error_blocks_write(self, mock_client: AsyncMock) -> None:
@@ -284,7 +284,7 @@ class TestGuardTestRunCustomFieldKeys:
     ) -> None:
         mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
 
-        with pytest.raises(PermissionError, match="lacks permission"):
+        with pytest.raises(PermissionError, match="Refusing the write"):
             await guard_test_run_custom_fields(mock_client, "P", {"goal": "x"})
 
     async def test_polarion_error_blocks_write(self, mock_client: AsyncMock) -> None:

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 
-from mcp_server_polarion.core.exceptions import PolarionError
+from mcp_server_polarion.core.exceptions import PolarionAuthError, PolarionError
 
 logger = logging.getLogger("mcp_server_polarion.tools._shared.guard._errors")
 
@@ -28,9 +28,12 @@ def unreachable_write_block(
     )
 
 
-def unauthorized_write_block(what: str, project_id: str) -> PermissionError:
+def unauthorized_write_block(
+    what: str, project_id: str, exc: PolarionAuthError
+) -> PermissionError:
     """Mirror tool layer ``PolarionAuthError -> PermissionError``
-    (fixable token scope, not backend to retry).
+    (fixable token scope, not backend to retry). Carry Polarion detail —
+    403 also mean workflow lock, which no token fix.
     """
     logger.warning(
         "guard blocking write: not authorized to validate %s for project=%s",
@@ -38,7 +41,7 @@ def unauthorized_write_block(what: str, project_id: str) -> PermissionError:
         project_id,
     )
     return PermissionError(
-        f"Cannot validate {what} for project '{project_id}': POLARION_TOKEN lacks "
-        f"permission for the validation request. Refusing the write -- check the "
-        f"token's permissions."
+        f"Cannot validate {what} for project '{project_id}': the validation "
+        f"request was refused ({exc.message}). Refusing the write -- check "
+        f"POLARION_TOKEN permissions."
     )

@@ -134,5 +134,5 @@ class TestMissingWorkItemTargets:
     ) -> None:
         mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
 
-        with pytest.raises(PermissionError, match="lacks permission"):
+        with pytest.raises(PermissionError, match="Refusing the write"):
             await missing_work_item_targets(mock_client, {"P": {"A"}})

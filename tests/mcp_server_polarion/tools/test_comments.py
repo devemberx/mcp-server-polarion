@@ -965,6 +965,24 @@ class TestCreateDocumentCommentsErrors:
                 dry_run=False,
             )
 
+    async def test_403_names_document_status(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.side_effect = PolarionAuthError("denied", status_code=403)
+        mock_client.get.return_value = {"data": {"attributes": {"status": "reviewed"}}}
+
+        with pytest.raises(PermissionError) as excinfo:
+            await create_document_comments(
+                mock_ctx,
+                project_id="P",
+                space_id="S",
+                document_name="D",
+                comments=[CommentSpec(text="hi")],
+                dry_run=False,
+            )
+
+        assert "'S/D' status is 'reviewed'" in str(excinfo.value)
+
     async def test_not_found_raises_value_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
@@ -2008,6 +2026,25 @@ class TestUpdateDocumentCommentErrors:
                 resolved=True,
                 dry_run=False,
             )
+
+    async def test_403_names_document_status(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.side_effect = PolarionAuthError("denied", status_code=403)
+        mock_client.get.return_value = {"data": {"attributes": {"status": "reviewed"}}}
+
+        with pytest.raises(PermissionError) as excinfo:
+            await update_document_comment(
+                mock_ctx,
+                project_id="Proj",
+                space_id="Space",
+                document_name="Doc",
+                comment_id="c42",
+                resolved=True,
+                dry_run=False,
+            )
+
+        assert "'Space/Doc' status is 'reviewed'" in str(excinfo.value)
 
     async def test_not_found_raises_value_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock

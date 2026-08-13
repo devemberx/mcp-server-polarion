@@ -18,6 +18,7 @@ from mcp_server_polarion.core.exceptions import (
 )
 from mcp_server_polarion.models import EnumOption, PaginatedResult
 from mcp_server_polarion.server import mcp
+from mcp_server_polarion.tools._shared.errors import auth_error
 from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
     get_client,
@@ -60,10 +61,7 @@ async def _list_enum_options(  # noqa: PLR0913
             f"enum-typed."
         ) from exc
     except PolarionAuthError as exc:
-        raise PermissionError(
-            f"Cannot list {type_label} enum options"
-            " -- check your POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error(f"list {type_label} enum options", exc) from exc
     except PolarionError as exc:
         raise RuntimeError(
             f"Failed to list enum options for field '{field_id}': {exc.message}"
