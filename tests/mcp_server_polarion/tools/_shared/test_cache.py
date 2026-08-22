@@ -158,43 +158,47 @@ class TestDocumentListCache:
 
 
 class TestEnumOptionCache:
-    """Enum-option id wrappers keyed by (project, resource, field, type)."""
+    """Enum-option wrappers keyed by (project, resource, field, type)."""
 
     def test_store_then_get_hits(self) -> None:
         store_cached_enum_options(
-            "P", "workitems", "severity", "task", frozenset({"high", "low"})
+            "P", "workitems", "severity", "task", {"high": "High", "low": "Low"}
         )
 
         assert get_cached_enum_options("P", "workitems", "severity", "task") == (
-            frozenset({"high", "low"})
+            {"high": "High", "low": "Low"}
+        )
+
+    def test_stored_mapping_copied(self) -> None:
+        # Caller mutating own dict after store must not rewrite cached entry.
+        options = {"high": "High"}
+        store_cached_enum_options("P", "workitems", "severity", "task", options)
+        options["low"] = "Low"
+
+        assert get_cached_enum_options("P", "workitems", "severity", "task") == (
+            {"high": "High"}
         )
 
     def test_keys_are_distinct_per_axis(self) -> None:
-        store_cached_enum_options(
-            "P", "workitems", "severity", "task", frozenset({"high"})
-        )
+        store_cached_enum_options("P", "workitems", "severity", "task", {"high": ""})
 
         assert get_cached_enum_options("P", "workitems", "severity", "bug") is None
         assert get_cached_enum_options("P", "documents", "severity", "task") is None
         assert get_cached_enum_options("P", "workitems", "status", "task") is None
 
     def test_expiry_uses_guard_ttl(self, clock: list[float]) -> None:
-        store_cached_enum_options(
-            "P", "workitems", "severity", "task", frozenset({"high"})
-        )
+        store_cached_enum_options("P", "workitems", "severity", "task", {"high": ""})
 
         clock[0] += cache_mod._GUARD_TTL_SECONDS + 1.0
         assert get_cached_enum_options("P", "workitems", "severity", "task") is None
 
     def test_not_found_entries_use_long_ttl(self, clock: list[float]) -> None:
         store_cached_enum_options(
-            "P", "workitems", "freeText", "task", frozenset(), not_found=True
+            "P", "workitems", "freeText", "task", {}, not_found=True
         )
 
         clock[0] += cache_mod._GUARD_TTL_SECONDS + 1.0
-        assert get_cached_enum_options("P", "workitems", "freeText", "task") == (
-            frozenset()
-        )
+        assert get_cached_enum_options("P", "workitems", "freeText", "task") == {}
 
         clock[0] += cache_mod._ENUM_NOT_FOUND_TTL_SECONDS
         assert get_cached_enum_options("P", "workitems", "freeText", "task") is None

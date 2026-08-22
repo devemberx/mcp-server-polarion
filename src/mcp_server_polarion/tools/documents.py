@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final, Literal, cast
 from urllib.parse import urlencode
@@ -46,6 +47,7 @@ from mcp_server_polarion.tools._shared.fields import (
     WORK_ITEM_PART_FIELDS,
 )
 from mcp_server_polarion.tools._shared.guard import (
+    fetch_enum_options,
     guard_document_attachment_refs,
     guard_document_custom_fields,
     guard_document_enums,
@@ -100,8 +102,16 @@ _MAX_HEADING_LEVEL: Final[int] = 6
 # Polarion reject layout entry without layouter (400). Pinned to value fresh
 # UI document get for every work item type — type stay only knob on tool
 # surface. Template-seeded doc carry other layouter, source not API-readable.
-# UI `label`/`properties` on same entry omitted — gap tracked #253.
 _RENDERING_LAYOUTER: Final[str] = "paragraph"
+
+
+# UI put these two on every entry of fresh document: ID at block start,
+# status at end. Source not API-readable either — value observed on UI-made
+# documents. Key names unvalidated by Polarion, so typo persist silently.
+_RENDERING_LAYOUT_PROPERTIES: Final[tuple[tuple[str, str], ...]] = (
+    ("fieldsAtStart", "id"),
+    ("fieldsAtEnd", "status"),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -470,9 +480,42 @@ def _require_update_document_attrs(
     )
 
 
-def _rendering_layouts_attribute(types: list[str]) -> JsonValue:
-    """``renderingLayouts`` value: one ``_RENDERING_LAYOUTER`` entry per type."""
-    return [{"type": t, "layouter": _RENDERING_LAYOUTER} for t in types]
+def _rendering_layout_entry(type_id: str, label: str) -> JsonValue:
+    """One ``renderingLayouts`` entry shaped like the UI write it.
+
+    *label* empty (type name unresolvable) drop the member — layouter alone
+    still render, and deriving name from id would show wrong text in UI.
+    """
+    entry: dict[str, JsonValue] = {"type": type_id}
+    if label:
+        entry["label"] = label
+    entry["layouter"] = _RENDERING_LAYOUTER
+    entry["properties"] = [
+        {"key": key, "value": value} for key, value in _RENDERING_LAYOUT_PROPERTIES
+    ]
+    return entry
+
+
+def _rendering_layouts_attribute(
+    types: list[str],
+    labels: Mapping[str, str],
+) -> JsonValue:
+    """``renderingLayouts`` value: one UI-shaped entry per type."""
+    return [_rendering_layout_entry(t, labels.get(t, "")) for t in types]
+
+
+async def _fetch_work_item_type_labels(
+    client: PolarionClient,
+    project_id: str,
+) -> Mapping[str, str]:
+    """Work item type id → UI display name (``testcase`` → ``Test Case``).
+
+    Same ``getAvailableOptions`` fetch layout-type guard already run, so cache
+    answer it — label cost no extra request, and guard raise first on fetch
+    failure. Endpoint absent (404) or option served nameless = empty mapping,
+    which drop `label` rather than block write.
+    """
+    return await fetch_enum_options(client, project_id, "workitems", "type", "~")
 
 
 def _parse_rendering_layout_types(attributes: dict[str, object]) -> list[str]:
@@ -495,11 +538,15 @@ def _rendering_layout_entries(layouts: object) -> list[dict[str, object]]:
     return [entry for entry in layouts if isinstance(entry, dict)]
 
 
-def _merge_rendering_layouts(current: object, types: list[str]) -> list[JsonValue]:
+def _merge_rendering_layouts(
+    current: object,
+    types: list[str],
+    labels: Mapping[str, str],
+) -> list[JsonValue]:
     """``renderingLayouts`` for *types*; served entry reused verbatim.
-    Rebuild-from-types wipe UI ``layouter``/``label``/``properties`` — PATCH
-    replace whole array, read surface only ``type``. Unserved type =
-    ``_RENDERING_LAYOUTER``; repeated served entries all kept.
+    Rebuild-from-types wipe UI-tuned ``layouter``/``label``/``properties`` —
+    PATCH replace whole array, read surface only ``type``. Unserved type =
+    fresh UI-shaped entry; repeated served entries all kept.
     """
     by_type: dict[str, list[JsonValue]] = {}
     for entry in _rendering_layout_entries(current):
@@ -509,7 +556,8 @@ def _merge_rendering_layouts(current: object, types: list[str]) -> list[JsonValu
     merged: list[JsonValue] = []
     for type_id in types:
         merged.extend(
-            by_type.get(type_id) or [{"type": type_id, "layouter": _RENDERING_LAYOUTER}]
+            by_type.get(type_id)
+            or [_rendering_layout_entry(type_id, labels.get(type_id, ""))]
         )
     return merged
 
@@ -572,6 +620,7 @@ def _build_create_document_payload(  # noqa: PLR0913
     auto_suspect: bool | None = None,
     uses_outline_numbering: bool | None = None,
     rendering_layout_types: list[str] | None = None,
+    rendering_layout_labels: Mapping[str, str] | None = None,
     custom_fields: dict[str, object] | None = None,
 ) -> dict[str, JsonValue]:
     """JSON:API POST body for ``.../spaces/{s}/documents``; skip unset."""
@@ -593,7 +642,7 @@ def _build_create_document_payload(  # noqa: PLR0913
         attributes["usesOutlineNumbering"] = uses_outline_numbering
     if rendering_layout_types:
         attributes["renderingLayouts"] = _rendering_layouts_attribute(
-            rendering_layout_types
+            rendering_layout_types, rendering_layout_labels or {}
         )
     merge_custom_fields(attributes, custom_fields, STANDARD_DOCUMENT_ATTRIBUTES)
 
@@ -971,7 +1020,8 @@ async def _resolve_rendering_layouts(
         fields="renderingLayouts",
         what="rendering layouts",
     )
-    return _merge_rendering_layouts(attrs.get("renderingLayouts"), types)
+    labels = await _fetch_work_item_type_labels(client, project_id)
+    return _merge_rendering_layouts(attrs.get("renderingLayouts"), types, labels)
 
 
 @mcp.tool(
@@ -1280,10 +1330,12 @@ async def create_document(  # noqa: PLR0913
         type=type,
         status=status,
     )
+    rendering_layout_labels: Mapping[str, str] = {}
     if rendering_layout_types:
         await guard_document_rendering_layout_types(
             client, project_id, rendering_layout_types
         )
+        rendering_layout_labels = await _fetch_work_item_type_labels(client, project_id)
     if custom_fields:
         await guard_document_custom_fields(client, project_id, type, custom_fields)
 
@@ -1310,6 +1362,7 @@ async def create_document(  # noqa: PLR0913
         auto_suspect=auto_suspect,
         uses_outline_numbering=uses_outline_numbering,
         rendering_layout_types=rendering_layout_types,
+        rendering_layout_labels=rendering_layout_labels,
         custom_fields=custom_fields,
     )
 

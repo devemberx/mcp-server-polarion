@@ -21,6 +21,7 @@ from mcp_server_polarion.tools._shared.guard.documents import (
     guard_document_enums,
     guard_document_rendering_layout_types,
 )
+from mcp_server_polarion.tools._shared.guard.enums import fetch_enum_options
 from mcp_server_polarion.tools._shared.guard.links import (
     guard_hyperlink_roles,
     guard_work_item_link_roles,
@@ -45,6 +46,7 @@ from mcp_server_polarion.tools._shared.guard.work_items import (
 )
 
 __all__ = [
+    "fetch_enum_options",
     "guard_document_attachment_refs",
     "guard_document_comment_attachment_refs",
     "guard_document_custom_fields",
