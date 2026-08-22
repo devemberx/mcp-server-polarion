@@ -626,3 +626,27 @@ class TestGuardCacheWriteThrough:
             )
             == {}
         )
+
+    async def test_later_page_not_found_leaves_cache_untouched(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Overshoot 404 != guard's page-1 probe fact; storing deferral here
+        # would disable enum validation for whole TTL.
+        mock_client.get.side_effect = PolarionNotFoundError(
+            "Not found", status_code=404
+        )
+
+        with pytest.raises(ValueError, match="No enum options"):
+            await list_work_item_enum_options(
+                mock_ctx,
+                project_id="MCP_Test_Project",
+                field_id="status",
+                work_item_type="task",
+                page_size=100,
+                page_number=7,
+            )
+
+        assert (
+            get_cached_field_options("MCP_Test_Project", "workitems", "status", "task")
+            is None
+        )

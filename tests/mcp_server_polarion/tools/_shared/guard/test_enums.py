@@ -412,3 +412,24 @@ class TestStaleCacheRefetch:
 
         assert "stale" not in str(exc_info.value)
         assert mock_client.get.await_count == 1
+
+    async def test_refetch_error_blocks_write(self, mock_client: AsyncMock) -> None:
+        # Fail-closed hold through refetch: stale set never serve as fallback.
+        store_cached_field_options("P", "workitems", "status", "task", {"stale": ""})
+        mock_client.get.side_effect = PolarionError("backend down")
+
+        with pytest.raises(RuntimeError, match="Refusing the write"):
+            await check_field_value(
+                mock_client, "P", "workitems", "status", "task", "ghost"
+            )
+
+    async def test_refetch_not_found_defers_instead_of_rejecting(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # Refetch 404 = field no longer enum-typed; defer, not reject on stale.
+        store_cached_field_options("P", "workitems", "status", "task", {"stale": ""})
+        mock_client.get.side_effect = PolarionNotFoundError("nope", status_code=404)
+
+        await check_field_value(
+            mock_client, "P", "workitems", "status", "task", "ghost"
+        )

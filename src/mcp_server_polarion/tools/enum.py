@@ -55,11 +55,13 @@ async def _list_enum_options(  # noqa: PLR0913
     try:
         response = await client.get(path, params=params)
     except PolarionNotFoundError as exc:
-        # Same fact write guards cache on own 404 probe -- store so later
-        # writes skip one request.
-        store_cached_field_options(
-            project_id, resource, field_id, type_id, {}, not_found=True
-        )
+        # Page 1 only: same fact write guards cache on own 404 probe, so store
+        # it and later writes skip one request. Overshoot 404 = different fact
+        # -- storing it would defer enum validation for whole TTL.
+        if page_number == 1:
+            store_cached_field_options(
+                project_id, resource, field_id, type_id, {}, not_found=True
+            )
         raise ValueError(
             f"No enum options for field '{field_id}' on {type_label} type "
             f"'{type_id}' in project '{project_id}' -- field unknown or not "
