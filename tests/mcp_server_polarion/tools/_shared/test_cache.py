@@ -11,16 +11,16 @@ from mcp_server_polarion.tools._shared.cache import (
     DiscoveredDocument,
     TTLCache,
     get_cached_documents,
-    get_cached_enum_options,
-    get_cached_project_enum,
+    get_cached_enum_option_ids,
+    get_cached_field_options,
     get_document_type_custom_keys,
     get_work_item_custom_keys,
     invalidate_document_type_custom_keys,
     invalidate_documents_cache,
     invalidate_work_item_custom_keys,
     store_cached_documents,
-    store_cached_enum_options,
-    store_cached_project_enum,
+    store_cached_enum_option_ids,
+    store_cached_field_options,
     store_document_type_custom_keys,
     store_work_item_custom_keys,
 )
@@ -30,8 +30,8 @@ from mcp_server_polarion.tools._shared.cache import (
 def _reset_caches() -> None:
     """Start each test with every module-level cache cold."""
     cache_mod._document_list_cache.clear()
-    cache_mod._enum_option_cache.clear()
-    cache_mod._project_enum_cache.clear()
+    cache_mod._field_option_cache.clear()
+    cache_mod._enum_option_id_cache.clear()
     cache_mod._work_item_custom_key_cache.clear()
     cache_mod._document_type_custom_key_cache.clear()
 
@@ -157,76 +157,86 @@ class TestDocumentListCache:
         assert get_cached_documents("P") is None
 
 
-class TestEnumOptionCache:
-    """Enum-option wrappers keyed by (project, resource, field, type)."""
+class TestFieldOptionCache:
+    """Field-option wrappers keyed by (project, resource, field, type)."""
 
     def test_store_then_get_hits(self) -> None:
-        store_cached_enum_options(
+        store_cached_field_options(
             "P", "workitems", "severity", "task", {"high": "High", "low": "Low"}
         )
 
-        assert get_cached_enum_options("P", "workitems", "severity", "task") == (
+        assert get_cached_field_options("P", "workitems", "severity", "task") == (
             {"high": "High", "low": "Low"}
         )
 
     def test_stored_mapping_copied(self) -> None:
         # Caller mutating own dict after store must not rewrite cached entry.
         options = {"high": "High"}
-        store_cached_enum_options("P", "workitems", "severity", "task", options)
+        store_cached_field_options("P", "workitems", "severity", "task", options)
         options["low"] = "Low"
 
-        assert get_cached_enum_options("P", "workitems", "severity", "task") == (
+        assert get_cached_field_options("P", "workitems", "severity", "task") == (
             {"high": "High"}
         )
 
-    def test_keys_are_distinct_per_axis(self) -> None:
-        store_cached_enum_options("P", "workitems", "severity", "task", {"high": ""})
+    def test_returned_mapping_is_read_only(self) -> None:
+        # ``TTLCache.get`` hand back stored object -- writable mapping would
+        # let one caller poison every later guard within the TTL.
+        store_cached_field_options("P", "workitems", "severity", "task", {"high": ""})
+        cached = get_cached_field_options("P", "workitems", "severity", "task")
 
-        assert get_cached_enum_options("P", "workitems", "severity", "bug") is None
-        assert get_cached_enum_options("P", "documents", "severity", "task") is None
-        assert get_cached_enum_options("P", "workitems", "status", "task") is None
+        assert cached is not None
+        with pytest.raises(TypeError):
+            cached["low"] = "Low"  # type: ignore[index]
+
+    def test_keys_are_distinct_per_axis(self) -> None:
+        store_cached_field_options("P", "workitems", "severity", "task", {"high": ""})
+
+        assert get_cached_field_options("P", "workitems", "severity", "bug") is None
+        assert get_cached_field_options("P", "documents", "severity", "task") is None
+        assert get_cached_field_options("P", "workitems", "status", "task") is None
 
     def test_expiry_uses_guard_ttl(self, clock: list[float]) -> None:
-        store_cached_enum_options("P", "workitems", "severity", "task", {"high": ""})
+        store_cached_field_options("P", "workitems", "severity", "task", {"high": ""})
 
         clock[0] += cache_mod._GUARD_TTL_SECONDS + 1.0
-        assert get_cached_enum_options("P", "workitems", "severity", "task") is None
+        assert get_cached_field_options("P", "workitems", "severity", "task") is None
 
     def test_not_found_entries_use_long_ttl(self, clock: list[float]) -> None:
-        store_cached_enum_options(
+        store_cached_field_options(
             "P", "workitems", "freeText", "task", {}, not_found=True
         )
 
         clock[0] += cache_mod._GUARD_TTL_SECONDS + 1.0
-        assert get_cached_enum_options("P", "workitems", "freeText", "task") == {}
+        assert get_cached_field_options("P", "workitems", "freeText", "task") == {}
 
-        clock[0] += cache_mod._ENUM_NOT_FOUND_TTL_SECONDS
-        assert get_cached_enum_options("P", "workitems", "freeText", "task") is None
+        clock[0] += cache_mod._FIELD_OPTIONS_NOT_FOUND_TTL_SECONDS
+        assert get_cached_field_options("P", "workitems", "freeText", "task") is None
 
 
-class TestProjectEnumCache:
+class TestEnumOptionIdCache:
     """Project-level enum wrappers keyed by (project, enum_name)."""
 
     def test_store_then_get_hits(self) -> None:
-        store_cached_project_enum(
+        store_cached_enum_option_ids(
             "P", "workitem-link-role", frozenset({"parent", "relates_to"})
         )
 
-        assert get_cached_project_enum("P", "workitem-link-role") == frozenset(
+        assert get_cached_enum_option_ids("P", "workitem-link-role") == frozenset(
             {"parent", "relates_to"}
         )
 
     def test_keys_are_distinct_per_enum_and_project(self) -> None:
-        store_cached_project_enum("P", "workitem-link-role", frozenset({"parent"}))
+        store_cached_enum_option_ids("P", "workitem-link-role", frozenset({"parent"}))
 
-        assert get_cached_project_enum("P", "hyperlink-role") is None
-        assert get_cached_project_enum("Q", "workitem-link-role") is None
+        assert get_cached_enum_option_ids("P", "hyperlink-role") is None
+        assert get_cached_enum_option_ids("Q", "workitem-link-role") is None
 
     def test_expiry_uses_guard_ttl(self, clock: list[float]) -> None:
-        store_cached_project_enum("P", "hyperlink-role", frozenset({"ref_ext"}))
+        store_cached_enum_option_ids("P", "hyperlink-role", frozenset({"ref_ext"}))
 
         clock[0] += cache_mod._GUARD_TTL_SECONDS + 1.0
-        assert get_cached_project_enum("P", "hyperlink-role") is None
+        assert get_cached_enum_option_ids("P", "hyperlink-role") is None
 
 
 class TestWorkItemCustomKeys:

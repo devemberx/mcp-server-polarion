@@ -47,7 +47,7 @@ from mcp_server_polarion.tools._shared.fields import (
     WORK_ITEM_PART_FIELDS,
 )
 from mcp_server_polarion.tools._shared.guard import (
-    fetch_enum_options,
+    fetch_field_options,
     guard_document_attachment_refs,
     guard_document_custom_fields,
     guard_document_enums,
@@ -515,7 +515,7 @@ async def _fetch_work_item_type_labels(
     failure. Endpoint absent (404) or option served nameless = empty mapping,
     which drop `label` rather than block write.
     """
-    return await fetch_enum_options(client, project_id, "workitems", "type", "~")
+    return await fetch_field_options(client, project_id, "workitems", "type", "~")
 
 
 def _parse_rendering_layout_types(attributes: dict[str, object]) -> list[str]:
