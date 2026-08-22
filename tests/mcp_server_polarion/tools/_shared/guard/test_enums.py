@@ -48,6 +48,20 @@ class TestFetchFieldOptions:
         assert kwargs["params"]["type"] == "task"
         assert kwargs["params"]["page[size]"] == 100
 
+    async def test_display_name_kept_when_it_differs_from_id(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # Rendering-layout `label` read the name, so id -> name must not
+        # collapse; shared builder always set name == id, hide the mapping.
+        mock_client.get.return_value = {
+            "data": [{"id": "testcase", "name": "Test Case"}],
+            "meta": {"totalCount": 1},
+        }
+
+        options = await fetch_field_options(mock_client, "P", "workitems", "type", "~")
+
+        assert options == {"testcase": "Test Case"}
+
     async def test_second_call_uses_cache(self, mock_client: AsyncMock) -> None:
         mock_client.get.return_value = enum_response(["a", "b"])
 

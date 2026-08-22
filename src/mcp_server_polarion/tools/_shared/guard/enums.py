@@ -14,10 +14,10 @@ from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.core.exceptions import PolarionNotFoundError
 from mcp_server_polarion.tools._shared.cache import (
     Resource,
-    get_cached_enum_options,
-    get_cached_project_enum,
-    store_cached_enum_options,
-    store_cached_project_enum,
+    get_cached_enum_option_ids,
+    get_cached_field_options,
+    store_cached_enum_option_ids,
+    store_cached_field_options,
 )
 from mcp_server_polarion.tools._shared.guard._http import (
     GUARD_PAGE_SIZE,
@@ -31,7 +31,7 @@ from mcp_server_polarion.tools._shared.helpers import (
 logger = logging.getLogger("mcp_server_polarion.tools._shared.guard.enums")
 
 
-_ENUM_DISCOVERY_TOOL: dict[Resource, str] = {
+_FIELD_DISCOVERY_TOOL: dict[Resource, str] = {
     "workitems": "list_work_item_enum_options",
     "documents": "list_document_enum_options",
 }
@@ -50,7 +50,7 @@ async def fetch_field_options(
     Name = what the portal show for the option (work item type ``testcase``
     → ``Test Case``). Option served without one map to ``""``.
     """
-    cached = get_cached_enum_options(project_id, resource, field_id, type_id)
+    cached = get_cached_field_options(project_id, resource, field_id, type_id)
     if cached is not None:
         return cached
 
@@ -80,7 +80,7 @@ async def fetch_field_options(
             resource,
             project_id,
         )
-        store_cached_enum_options(
+        store_cached_field_options(
             project_id, resource, field_id, type_id, {}, not_found=True
         )
         return {}
@@ -96,7 +96,7 @@ async def fetch_field_options(
                 name = entry.get("name")
                 options[opt_id] = name if isinstance(name, str) else ""
 
-    store_cached_enum_options(project_id, resource, field_id, type_id, options)
+    store_cached_field_options(project_id, resource, field_id, type_id, options)
     return options
 
 
@@ -117,7 +117,7 @@ async def check_field_value(  # noqa: PLR0913
         f"project '{project_id}' for {resource} type '{type_id}'. "
         f"Valid options: {format_option_list(options.keys())}. "
         f"Unknown ids ghost silently (never match Lucene) -- call "
-        f"{_ENUM_DISCOVERY_TOOL[resource]} first."
+        f"{_FIELD_DISCOVERY_TOOL[resource]} first."
     )
 
 
@@ -131,11 +131,11 @@ async def fetch_enum_option_ids(
     (link/hyperlink role, testrun type/status). ``context`` = enumeration
     context path segment (``testing`` for testrun enums; ``~`` does NOT
     resolve them). Response ``data`` = dict (not list), options at
-    ``data.attributes.options[].id``. Cached; fail-closed like
-    :func:`fetch_field_options`.
+    ``data.attributes.options[].id``. Cached for the default guard TTL
+    (404 included); fail-closed.
     """
     cache_key = f"{context}/{enum_name}"
-    cached = get_cached_project_enum(project_id, cache_key)
+    cached = get_cached_enum_option_ids(project_id, cache_key)
     if cached is not None:
         return cached
 
@@ -154,13 +154,13 @@ async def fetch_enum_option_ids(
         )
     except PolarionNotFoundError:
         logger.warning(
-            "enumeration '%s' returned 404 for project=%s; skipping role "
-            "validation -- the enumeration is unsupported here, so there is "
-            "nothing to validate against.",
+            "enumeration '%s' returned 404 for project=%s; skipping "
+            "validation against it -- the enumeration is unsupported here, so "
+            "there is nothing to validate against.",
             enum_name,
             project_id,
         )
-        store_cached_project_enum(project_id, cache_key, frozenset())
+        store_cached_enum_option_ids(project_id, cache_key, frozenset())
         return frozenset()
 
     ids: set[str] = set()
@@ -177,7 +177,7 @@ async def fetch_enum_option_ids(
                     ids.add(opt_id)
 
     option_ids = frozenset(ids)
-    store_cached_project_enum(project_id, cache_key, option_ids)
+    store_cached_enum_option_ids(project_id, cache_key, option_ids)
     return option_ids
 
 
@@ -203,8 +203,9 @@ async def check_enum_values(  # noqa: PLR0913
     unknown = sorted(requested - option_ids)
     if unknown:
         raise ValueError(
-            f"{field_label} id(s) {unknown} are not valid in project "
-            f"'{project_id}'. Valid options: {format_option_list(option_ids)}. "
+            f"{field_label} id(s) {format_option_list(unknown)} are not valid "
+            f"in project '{project_id}'. "
+            f"Valid options: {format_option_list(option_ids)}. "
             f"An unknown {field_label} ghosts silently (never matches Lucene) "
             f"-- {discovery_hint}"
         )
@@ -231,7 +232,7 @@ def _bad_custom_enum_value(  # noqa: PLR0913
         f"{problem} in project '{project_id}' for {resource} type '{type_id}'. "
         f"Valid options: {format_option_list(options.keys())}. "
         f"Unknown enum values ghost silently (invisible to UI/Lucene) -- call "
-        f"{_ENUM_DISCOVERY_TOOL[resource]} first."
+        f"{_FIELD_DISCOVERY_TOOL[resource]} first."
     )
 
 

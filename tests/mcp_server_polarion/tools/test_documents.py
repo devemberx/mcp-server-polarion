@@ -202,8 +202,8 @@ def _project_enum_get_response(enum_name: str, ids: list[str]) -> dict[str, obje
 @pytest.fixture
 def reset_enum_guard_caches() -> None:
     """Drop guard caches between tests — each scenario start cold."""
-    _cache_mod._enum_option_cache.clear()
-    _cache_mod._project_enum_cache.clear()
+    _cache_mod._field_option_cache.clear()
+    _cache_mod._enum_option_id_cache.clear()
     _cache_mod._work_item_custom_key_cache.clear()
     _cache_mod._document_type_custom_key_cache.clear()
 

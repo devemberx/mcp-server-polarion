@@ -135,8 +135,8 @@ async def _call_create_wi(mock_ctx: MagicMock, **overrides: object) -> object:
 @pytest.fixture
 def reset_enum_guard_caches() -> None:
     """Drop guard caches between tests — each scenario start cold."""
-    _cache_mod._enum_option_cache.clear()
-    _cache_mod._project_enum_cache.clear()
+    _cache_mod._field_option_cache.clear()
+    _cache_mod._enum_option_id_cache.clear()
     _cache_mod._work_item_custom_key_cache.clear()
     _cache_mod._document_type_custom_key_cache.clear()
 
