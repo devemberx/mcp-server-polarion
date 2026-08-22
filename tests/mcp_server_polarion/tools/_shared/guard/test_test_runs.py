@@ -22,7 +22,7 @@ from mcp_server_polarion.tools._shared.guard import (
 )
 from mcp_server_polarion.tools._shared.guard._http import GUARD_PAGE_SIZE
 from mcp_server_polarion.tools._shared.guard.enums import (
-    fetch_project_enum_option_ids,
+    fetch_enum_option_ids,
 )
 from tests.mcp_server_polarion.tools._shared.guard._builders import (
     project_enum_response,
@@ -89,7 +89,7 @@ class TestGuardTestRunEnums:
             project_enum_response("testrun-type", ["stale"]),
             project_enum_response("testrun-type", ["manual"]),
         ]
-        await fetch_project_enum_option_ids(mock_client, "P", "testrun-type")
+        await fetch_enum_option_ids(mock_client, "P", "testrun-type")
 
         await guard_test_run_enums(mock_client, "P", type="manual")
 

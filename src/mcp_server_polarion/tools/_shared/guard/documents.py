@@ -23,8 +23,8 @@ from mcp_server_polarion.tools._shared.guard._custom_keys import check_custom_ke
 from mcp_server_polarion.tools._shared.guard._http import guarded_pages
 from mcp_server_polarion.tools._shared.guard.enums import (
     check_custom_field_enum_values,
-    check_enum,
-    fetch_enum_option_ids,
+    check_field_value,
+    fetch_field_options,
 )
 from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
@@ -43,9 +43,9 @@ async def guard_document_enums(
 ) -> None:
     """Validate every supplied document enum arg against ``getAvailableOptions``."""
     if type is not None and type != "":
-        await check_enum(client, project_id, "documents", "type", "~", type)
+        await check_field_value(client, project_id, "documents", "type", "~", type)
     if status is not None and status != "":
-        await check_enum(
+        await check_field_value(
             client, project_id, "documents", "status", document_type, status
         )
 
@@ -63,7 +63,7 @@ async def guard_document_rendering_layout_types(
     UI precedence undefined, so refuse instead of dedupe silently.
 
     Message name ``rendering_layout_types``, never bare ``type`` — both write
-    tools carry own ``type`` parameter, so ``check_enum`` wording send model
+    tools carry own ``type`` parameter, so ``check_field_value`` wording send model
     to wrong argument. Batched fetch report every bad id at once; per-id loop
     cost one failed write each.
     """
@@ -85,18 +85,16 @@ async def guard_document_rendering_layout_types(
             f"Each work item type may appear once -- Polarion accepts duplicate "
             f"entries but which one wins in the UI is undefined."
         )
-    option_ids = await fetch_enum_option_ids(
-        client, project_id, "workitems", "type", "~"
-    )
-    # Empty set = successful no-options fetch; defer rather than false-positive.
-    if not option_ids:
+    options = await fetch_field_options(client, project_id, "workitems", "type", "~")
+    # Empty mapping = successful no-options fetch; defer rather than false-positive.
+    if not options:
         return
-    unknown = sorted(set(types) - option_ids)
+    unknown = sorted(set(types) - options.keys())
     if unknown:
         raise ValueError(
             f"rendering_layout_types has unknown work item type ID(s) "
             f"{format_option_list(unknown)} in project '{project_id}'. "
-            f"Valid options: {format_option_list(option_ids)}. "
+            f"Valid options: {format_option_list(options.keys())}. "
             f"Unknown ids ghost silently (their fields never render) -- call "
             f"list_work_item_enum_options first."
         )
