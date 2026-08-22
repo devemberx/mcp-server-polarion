@@ -4,8 +4,9 @@ Thanks for taking the time to contribute. Every bug report, doc fix, and pull re
 
 This guide walks you through the contributor's path: **find something to work on → set up your
 environment → make the change → open a pull request.** For the codebase architecture, tool-design
-conventions, and Polarion API gotchas, see [CLAUDE.md](../CLAUDE.md) — read it before touching
-`tools/` or `core/`.
+conventions, and cross-cutting Polarion API gotchas, see [CLAUDE.md](../CLAUDE.md) — read it before
+touching `tools/` or `core/`. Per-domain API contracts live in
+[docs/polarion-api/](../docs/polarion-api/); read the one for the domain you are changing.
 
 > **The best first step is often an issue.** A clear bug report or a short design proposal lets us
 > agree on the approach before anyone writes code — that saves you from reworking a PR later.

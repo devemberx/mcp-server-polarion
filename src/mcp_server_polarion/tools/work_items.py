@@ -1,4 +1,7 @@
-"""Work item tools — query, create, and update."""
+"""Work item tools — query, create, and update.
+
+API contract quirks: docs/polarion-api/work-items.md
+"""
 
 from __future__ import annotations
 
