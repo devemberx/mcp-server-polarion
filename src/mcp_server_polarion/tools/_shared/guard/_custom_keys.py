@@ -15,7 +15,6 @@ async def check_custom_keys(  # noqa: PLR0913
     custom_fields: dict[str, object],
     *,
     get_cached: Callable[[], frozenset[str] | None],
-    invalidate: Callable[[], None],
     fetch: Callable[[], Awaitable[frozenset[str]]],
     scope: str,
     discovery_tool: str,
@@ -33,7 +32,6 @@ async def check_custom_keys(  # noqa: PLR0913
 
     schema = await resolve_with_refetch(
         get_cached=get_cached,
-        invalidate=invalidate,
         fetch=fetch,
         accepts=known_keys,
     )

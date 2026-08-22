@@ -17,8 +17,6 @@ from mcp_server_polarion.tools._shared.cache import (
     Resource,
     get_cached_enum_option_ids,
     get_cached_field_options,
-    invalidate_enum_option_ids,
-    invalidate_field_options,
     store_cached_enum_option_ids,
     store_cached_field_options,
 )
@@ -31,6 +29,7 @@ from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
     format_option_list,
 )
+from mcp_server_polarion.tools._shared.parse import parse_option_map
 
 logger = logging.getLogger("mcp_server_polarion.tools._shared.guard.enums")
 
@@ -77,6 +76,9 @@ async def _fetch_field_options_uncached(
         f"/{resource}/fields/{encode_path_segment(field_id)}"
         "/actions/getAvailableOptions"
     )
+    # Page 1 only: field with over GUARD_PAGE_SIZE options cache truncated and
+    # reject the rest, refetch cannot heal that. Accepted -- paging every probe
+    # cost one request per page at the client's pace.
     params: dict[str, str | int] = {
         "type": type_id,
         "page[size]": GUARD_PAGE_SIZE,
@@ -103,17 +105,7 @@ async def _fetch_field_options_uncached(
         )
         return {}
 
-    data = response.get("data", [])
-    options: dict[str, str] = {}
-    if isinstance(data, list):
-        for entry in data:
-            if not isinstance(entry, dict):
-                continue
-            opt_id = entry.get("id")
-            if isinstance(opt_id, str) and opt_id:
-                name = entry.get("name")
-                options[opt_id] = name if isinstance(name, str) else ""
-
+    options = parse_option_map(response.get("data", []))
     store_cached_field_options(project_id, resource, field_id, type_id, options)
     return options
 
@@ -133,9 +125,6 @@ async def _options_for_check(  # noqa: PLR0913
         get_cached=lambda: get_cached_field_options(
             project_id, resource, field_id, type_id
         ),
-        invalidate=lambda: invalidate_field_options(
-            project_id, resource, field_id, type_id
-        ),
         fetch=lambda: _fetch_field_options_uncached(
             client, project_id, resource, field_id, type_id
         ),
@@ -151,16 +140,15 @@ async def check_field_value(  # noqa: PLR0913
     type_id: str,
     value: str,
 ) -> None:
-    # Empty mapping = successful no-options fetch; defer rather than false-positive.
+    def accepts(known: Mapping[str, str]) -> bool:
+        # Empty mapping = successful no-options fetch; defer rather than
+        # false-positive.
+        return not known or value in known
+
     options = await _options_for_check(
-        client,
-        project_id,
-        resource,
-        field_id,
-        type_id,
-        lambda known: not known or value in known,
+        client, project_id, resource, field_id, type_id, accepts
     )
-    if not options or value in options:
+    if accepts(options):
         return
     raise ValueError(
         f"{field_id}='{value}' is not a valid {field_id} option in "
@@ -181,7 +169,7 @@ async def fetch_enum_option_ids(
     (link/hyperlink role, testrun type/status). ``context`` = enumeration
     context path segment (``testing`` for testrun enums; ``~`` does NOT
     resolve them). Response ``data`` = dict (not list), options at
-    ``data.attributes.options[].id``. Cached for the default guard TTL
+    ``data.attributes.options[].id``. Cached for ``_ENUM_TTL_SECONDS``
     (404 included); fail-closed.
     """
     cached = get_cached_enum_option_ids(project_id, _enum_cache_key(context, enum_name))
@@ -263,28 +251,29 @@ async def check_enum_values(  # noqa: PLR0913
     if not requested:
         return
 
+    def accepts(known: frozenset[str]) -> bool:
+        # Empty set = no options / enum unsupported; defer.
+        return not known or requested <= known
+
     cache_key = _enum_cache_key(context, enum_name)
     option_ids = await resolve_with_refetch(
         get_cached=lambda: get_cached_enum_option_ids(project_id, cache_key),
-        invalidate=lambda: invalidate_enum_option_ids(project_id, cache_key),
         fetch=lambda: _fetch_enum_option_ids_uncached(
             client, project_id, enum_name, context
         ),
-        accepts=lambda known: not known or requested <= known,
+        accepts=accepts,
     )
-    # Empty set = no options / enum unsupported; defer.
-    if not option_ids:
+    if accepts(option_ids):
         return
 
     unknown = sorted(requested - option_ids)
-    if unknown:
-        raise ValueError(
-            f"{field_label} id(s) {format_option_list(unknown)} are not valid "
-            f"in project '{project_id}'. "
-            f"Valid options: {format_option_list(option_ids)}. "
-            f"An unknown {field_label} ghosts silently (never matches Lucene) "
-            f"-- {discovery_hint}"
-        )
+    raise ValueError(
+        f"{field_label} id(s) {format_option_list(unknown)} are not valid "
+        f"in project '{project_id}'. "
+        f"Valid options: {format_option_list(option_ids)}. "
+        f"An unknown {field_label} ghosts silently (never matches Lucene) "
+        f"-- {discovery_hint}"
+    )
 
 
 def _bad_custom_enum_value(  # noqa: PLR0913

@@ -15,11 +15,7 @@ from mcp_server_polarion.tools._shared.cache import (
     get_cached_field_options,
     get_document_type_custom_keys,
     get_work_item_custom_keys,
-    invalidate_document_type_custom_keys,
     invalidate_documents_cache,
-    invalidate_enum_option_ids,
-    invalidate_field_options,
-    invalidate_work_item_custom_keys,
     store_cached_documents,
     store_cached_enum_option_ids,
     store_cached_field_options,
@@ -198,17 +194,6 @@ class TestFieldOptionCache:
         assert get_cached_field_options("P", "documents", "severity", "task") is None
         assert get_cached_field_options("P", "workitems", "status", "task") is None
 
-    def test_invalidate_drops_only_its_axis(self) -> None:
-        store_cached_field_options("P", "workitems", "severity", "task", {"high": ""})
-        store_cached_field_options("P", "workitems", "severity", "bug", {"high": ""})
-
-        invalidate_field_options("P", "workitems", "severity", "task")
-
-        assert get_cached_field_options("P", "workitems", "severity", "task") is None
-        assert get_cached_field_options("P", "workitems", "severity", "bug") == (
-            {"high": ""}
-        )
-
     def test_expiry_uses_enum_ttl(self, clock: list[float]) -> None:
         store_cached_field_options("P", "workitems", "severity", "task", {"high": ""})
 
@@ -245,17 +230,6 @@ class TestEnumOptionIdCache:
         assert get_cached_enum_option_ids("P", "hyperlink-role") is None
         assert get_cached_enum_option_ids("Q", "workitem-link-role") is None
 
-    def test_invalidate_drops_only_its_enum(self) -> None:
-        store_cached_enum_option_ids("P", "workitem-link-role", frozenset({"parent"}))
-        store_cached_enum_option_ids("P", "hyperlink-role", frozenset({"ref_ext"}))
-
-        invalidate_enum_option_ids("P", "workitem-link-role")
-
-        assert get_cached_enum_option_ids("P", "workitem-link-role") is None
-        assert get_cached_enum_option_ids("P", "hyperlink-role") == frozenset(
-            {"ref_ext"}
-        )
-
     def test_expiry_uses_enum_ttl(self, clock: list[float]) -> None:
         store_cached_enum_option_ids("P", "hyperlink-role", frozenset({"ref_ext"}))
 
@@ -264,7 +238,7 @@ class TestEnumOptionIdCache:
 
 
 class TestWorkItemCustomKeys:
-    """``store/get/invalidate_work_item_custom_keys`` — type key schema."""
+    """``store/get_work_item_custom_keys`` — type key schema."""
 
     def test_store_then_get(self) -> None:
         store_work_item_custom_keys("P", "task", frozenset({"a", "b"}))
@@ -286,12 +260,6 @@ class TestWorkItemCustomKeys:
     def test_miss_returns_none(self) -> None:
         assert get_work_item_custom_keys("P", "never_sampled") is None
 
-    def test_invalidate(self) -> None:
-        store_work_item_custom_keys("P", "task", frozenset({"a"}))
-        invalidate_work_item_custom_keys("P", "task")
-
-        assert get_work_item_custom_keys("P", "task") is None
-
     def test_expiry(self, clock: list[float]) -> None:
         store_work_item_custom_keys("P", "task", frozenset({"a"}))
 
@@ -300,7 +268,7 @@ class TestWorkItemCustomKeys:
 
 
 class TestDocumentTypeCustomKeys:
-    """``store/get/invalidate_document_type_custom_keys`` keyed by (project, type)."""
+    """``store/get_document_type_custom_keys`` keyed by (project, type)."""
 
     def test_store_then_get(self) -> None:
         store_document_type_custom_keys(
@@ -322,12 +290,6 @@ class TestDocumentTypeCustomKeys:
 
         assert get_document_type_custom_keys("P", "systemReqSpecification") is None
         assert get_document_type_custom_keys("Q", "generic") is None
-
-    def test_invalidate(self) -> None:
-        store_document_type_custom_keys("P", "generic", frozenset({"a"}))
-        invalidate_document_type_custom_keys("P", "generic")
-
-        assert get_document_type_custom_keys("P", "generic") is None
 
     def test_expiry(self, clock: list[float]) -> None:
         store_document_type_custom_keys("P", "generic", frozenset({"a"}))

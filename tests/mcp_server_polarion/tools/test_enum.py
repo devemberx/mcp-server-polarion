@@ -650,3 +650,26 @@ class TestGuardCacheWriteThrough:
             get_cached_field_options("MCP_Test_Project", "workitems", "status", "task")
             is None
         )
+
+    async def test_prime_skips_ids_the_guard_parser_drops(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Guard populate same entry from raw ids -- coerced key would accept a
+        # value the guard's own fetch reject.
+        mock_client.get.return_value = {
+            "data": [{"id": 5, "name": "Five"}, {"id": "open", "name": "Open"}],
+            "meta": {"totalCount": 2},
+        }
+
+        await list_work_item_enum_options(
+            mock_ctx,
+            project_id="MCP_Test_Project",
+            field_id="status",
+            work_item_type="task",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert get_cached_field_options(
+            "MCP_Test_Project", "workitems", "status", "task"
+        ) == {"open": "Open"}

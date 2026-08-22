@@ -27,7 +27,10 @@ from mcp_server_polarion.tools._shared.pagination import (
     DEFAULT_PAGE_SIZE,
     make_page,
 )
-from mcp_server_polarion.tools._shared.parse import parse_enum_option
+from mcp_server_polarion.tools._shared.parse import (
+    parse_enum_option,
+    parse_option_map,
+)
 
 
 async def _list_enum_options(  # noqa: PLR0913
@@ -94,7 +97,7 @@ async def _list_enum_options(  # noqa: PLR0913
             resource,
             field_id,
             type_id,
-            {option.id: option.name for option in items},
+            parse_option_map(data),
         )
     return page
 

@@ -76,6 +76,8 @@ class DiscoveredDocument(NamedTuple):
 
 # Custom-field key schema: sampling scan = priciest guard fetch, and only
 # admin field edit change it. Stale window trade against that scan.
+# Accepted risk both here and below: refetch-once heal missing entry only, so
+# admin-REMOVED key/option stay accepted till expiry -- ghost write unrecoverable.
 _SCHEMA_TTL_SECONDS: Final[float] = 900.0
 
 # Enum options: admin-configured too, but guard reject against them, so
@@ -158,16 +160,6 @@ def store_cached_field_options(  # noqa: PLR0913
     )
 
 
-def invalidate_field_options(
-    project_id: str,
-    resource: Resource,
-    field_id: str,
-    type_id: str,
-) -> None:
-    """Drop cached options for field/type (refetch-once before reject)."""
-    _field_option_cache.invalidate((project_id, resource, field_id, type_id))
-
-
 # (project, enum_name) -> project-level enum option ids (no type axis).
 _enum_option_id_cache: TTLCache[tuple[str, str], frozenset[str]] = TTLCache(
     _ENUM_TTL_SECONDS
@@ -189,11 +181,6 @@ def store_cached_enum_option_ids(
 ) -> None:
     """Cache valid option ids for project enum for ``_ENUM_TTL_SECONDS``."""
     _enum_option_id_cache.set((project_id, enum_name), option_ids)
-
-
-def invalidate_enum_option_ids(project_id: str, enum_name: str) -> None:
-    """Drop cached option ids for project enum (refetch-once before reject)."""
-    _enum_option_id_cache.invalidate((project_id, enum_name))
 
 
 # (project, work_item_id) -> True once confirmed existing. Positives only --
@@ -244,11 +231,6 @@ def store_work_item_custom_keys(
     _work_item_custom_key_cache.set((project_id, work_item_type), keys)
 
 
-def invalidate_work_item_custom_keys(project_id: str, work_item_type: str) -> None:
-    """Drop cached schema for ``(project, type)`` (bypass-retry)."""
-    _work_item_custom_key_cache.invalidate((project_id, work_item_type))
-
-
 # (project, document_type) -> custom-field key schema; document-side mirror.
 _document_type_custom_key_cache: TTLCache[tuple[str, str], frozenset[str]] = TTLCache(
     _SCHEMA_TTL_SECONDS
@@ -274,11 +256,6 @@ def store_document_type_custom_keys(
     _document_type_custom_key_cache.set((project_id, document_type), keys)
 
 
-def invalidate_document_type_custom_keys(project_id: str, document_type: str) -> None:
-    """Drop cached schema for ``(project, document_type)`` (bypass-retry)."""
-    _document_type_custom_key_cache.invalidate((project_id, document_type))
-
-
 # project -> testrun custom-field key schema (project config, no type axis).
 _test_run_custom_key_cache: TTLCache[str, frozenset[str]] = TTLCache(
     _SCHEMA_TTL_SECONDS
@@ -297,11 +274,6 @@ def store_test_run_custom_keys(project_id: str, keys: frozenset[str]) -> None:
     _test_run_custom_key_cache.set(project_id, keys)
 
 
-def invalidate_test_run_custom_keys(project_id: str) -> None:
-    """Drop cached testrun schema for *project_id* (bypass-retry)."""
-    _test_run_custom_key_cache.invalidate(project_id)
-
-
 __all__ = [
     "DiscoveredDocument",
     "Resource",
@@ -313,12 +285,7 @@ __all__ = [
     "get_document_type_custom_keys",
     "get_test_run_custom_keys",
     "get_work_item_custom_keys",
-    "invalidate_document_type_custom_keys",
     "invalidate_documents_cache",
-    "invalidate_enum_option_ids",
-    "invalidate_field_options",
-    "invalidate_test_run_custom_keys",
-    "invalidate_work_item_custom_keys",
     "store_cached_confirmed_work_item",
     "store_cached_documents",
     "store_cached_enum_option_ids",

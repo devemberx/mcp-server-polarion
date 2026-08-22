@@ -15,6 +15,7 @@ from mcp_server_polarion.core.exceptions import (
 )
 from mcp_server_polarion.tools._shared import cache as cache_mod
 from mcp_server_polarion.tools._shared.cache import (
+    get_cached_field_options,
     store_cached_enum_option_ids,
     store_cached_field_options,
 )
@@ -433,3 +434,19 @@ class TestStaleCacheRefetch:
         await check_field_value(
             mock_client, "P", "workitems", "status", "task", "ghost"
         )
+
+    async def test_failed_refetch_keeps_cached_options(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # Entry still usable by next caller -- dropping it buys a cold fetch.
+        store_cached_field_options("P", "workitems", "status", "task", {"open": "Open"})
+        mock_client.get.side_effect = PolarionError("backend down")
+
+        with pytest.raises(RuntimeError, match="Refusing the write"):
+            await check_field_value(
+                mock_client, "P", "workitems", "status", "task", "ghost"
+            )
+
+        assert get_cached_field_options("P", "workitems", "status", "task") == {
+            "open": "Open"
+        }
