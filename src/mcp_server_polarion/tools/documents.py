@@ -935,7 +935,7 @@ async def _resolve_document_type(
     space_id: str,
     document_name: str,
 ) -> str:
-    """Resolve the ``type`` axis the custom-field guard key on."""
+    """Resolve the ``type`` axis status + custom-field guards key on."""
     attrs = await _fetch_document_attributes(
         client,
         project_id,
@@ -948,7 +948,8 @@ async def _resolve_document_type(
     if not doc_type:
         raise RuntimeError(
             f"Document '{space_id}/{document_name}' in project '{project_id}' has no "
-            f"resolvable type; cannot validate custom_fields. Pass `type` explicitly."
+            f"resolvable type; cannot validate status or custom_fields. "
+            f"Pass `type` explicitly."
         )
     return doc_type
 
@@ -1099,11 +1100,19 @@ async def update_document(  # noqa: PLR0913
     )
 
     client = get_client(ctx)
-    # Type-agnostic enum guard: avoid extra GET, still catch ghost ids.
+    # Status options key on document own type; '~' serve generic workflow
+    # only, so typed doc status false-reject there. Retype PATCH set both
+    # attributes, so new type = axis. Resolved once, custom-field guard
+    # reuse it.
+    effective_type = type or (
+        await _resolve_document_type(client, project_id, space_id, document_name)
+        if status
+        else ""
+    )
     await guard_document_enums(
         client,
         project_id,
-        document_type="~",
+        document_type=effective_type or "~",
         type=type,
         status=status,
     )
@@ -1130,11 +1139,11 @@ async def update_document(  # noqa: PLR0913
         rendering_layouts=rendering_layouts,
         custom_fields=custom_fields,
     )
-    # Type change key custom-field schema on new type, else current.
     if custom_fields:
-        effective_type = type or await _resolve_document_type(
-            client, project_id, space_id, document_name
-        )
+        if not effective_type:
+            effective_type = await _resolve_document_type(
+                client, project_id, space_id, document_name
+            )
         await guard_document_custom_fields(
             client, project_id, effective_type, custom_fields
         )
