@@ -6,7 +6,9 @@ option set and 404 defer to Polarion. Caching in :mod:`...tools._shared.cache`.
 
 Naming: ``guard_*`` = pure validators (return ``None``, raise on invalid);
 ``resolve_*``/``partition_*`` = fail-closed helpers whose validation result
-caller also need as data.
+caller also need as data; ``fetch_*`` = raw option fetch behind them, split by
+endpoint (``field_*`` = ``getAvailableOptions``, ``enum_*`` =
+``/projects/{p}/enumerations/``).
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ from mcp_server_polarion.tools._shared.guard.documents import (
     guard_document_enums,
     guard_document_rendering_layout_types,
 )
-from mcp_server_polarion.tools._shared.guard.enums import fetch_enum_options
+from mcp_server_polarion.tools._shared.guard.enums import fetch_field_options
 from mcp_server_polarion.tools._shared.guard.links import (
     guard_hyperlink_roles,
     guard_work_item_link_roles,
@@ -46,7 +48,7 @@ from mcp_server_polarion.tools._shared.guard.work_items import (
 )
 
 __all__ = [
-    "fetch_enum_options",
+    "fetch_field_options",
     "guard_document_attachment_refs",
     "guard_document_comment_attachment_refs",
     "guard_document_custom_fields",

@@ -1,6 +1,9 @@
 """In-process TTL caches for near-static project facts — spare server's
 tight budget (throttle deployment-configured, no concurrency). Own ALL
 cache state; tool logic reach it only via typed get / store wrappers.
+
+Naming mirror :mod:`...tools._shared.guard.enums`: ``field_*`` = per-field
+``getAvailableOptions``, ``enum_*`` = per-project ``/enumerations/``.
 """
 
 from __future__ import annotations
@@ -8,6 +11,7 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Final, Literal, NamedTuple
 
 
@@ -23,7 +27,12 @@ class _Entry[V]:
 
 
 class TTLCache[K, V]:
-    """Single-threaded TTL cache; lazy expiry — bounded key space stay bounded."""
+    """Single-threaded TTL cache; lazy expiry — bounded key space stay bounded.
+
+    ``get`` hand back stored object itself — wrapper must close that path,
+    by storing immutable value or copying on get. Mutable value reaching
+    caller = one edit poison every later read until TTL expire.
+    """
 
     def __init__(self, ttl_seconds: float) -> None:
         self._ttl = ttl_seconds
@@ -70,7 +79,7 @@ _GUARD_TTL_SECONDS: Final[float] = 60.0
 
 # 404 "not an Enumeration field" = stable schema fact; stale worst case
 # just defer to Polarion — safe to outlive positive option sets.
-_ENUM_NOT_FOUND_TTL_SECONDS: Final[float] = 600.0
+_FIELD_OPTIONS_NOT_FOUND_TTL_SECONDS: Final[float] = 600.0
 
 # New documents surface within ~1 min (create also invalidate on write).
 _DOCUMENT_LIST_TTL_SECONDS: Final[float] = 60.0
@@ -104,22 +113,22 @@ def invalidate_documents_cache(project_id: str) -> None:
 # (project, resource, field, type) -> option id -> display name. Name kept
 # beside id so display-name reader (rendering layout `label`) reuse guard's
 # fetch instead of spending second request; unnamed option = "".
-_enum_option_cache: TTLCache[tuple[str, Resource, str, str], Mapping[str, str]] = (
+_field_option_cache: TTLCache[tuple[str, Resource, str, str], Mapping[str, str]] = (
     TTLCache(_GUARD_TTL_SECONDS)
 )
 
 
-def get_cached_enum_options(
+def get_cached_field_options(
     project_id: str,
     resource: Resource,
     field_id: str,
     type_id: str,
 ) -> Mapping[str, str] | None:
     """Cached option id → display name for field/type, or ``None`` on miss."""
-    return _enum_option_cache.get((project_id, resource, field_id, type_id))
+    return _field_option_cache.get((project_id, resource, field_id, type_id))
 
 
-def store_cached_enum_options(  # noqa: PLR0913
+def store_cached_field_options(  # noqa: PLR0913
     project_id: str,
     resource: Resource,
     field_id: str,
@@ -129,36 +138,38 @@ def store_cached_enum_options(  # noqa: PLR0913
     not_found: bool = False,
 ) -> None:
     """Cache option id → name for field/type; ``not_found=True`` (404 result)
-    use longer ``_ENUM_NOT_FOUND_TTL_SECONDS``.
+    use longer ``_FIELD_OPTIONS_NOT_FOUND_TTL_SECONDS``.
     """
-    _enum_option_cache.set(
+    # Store read-only view: ``TTLCache.get`` hand back stored object itself,
+    # so plain dict would let one caller's mutation poison every later guard.
+    _field_option_cache.set(
         (project_id, resource, field_id, type_id),
-        dict(options),
-        ttl_seconds=_ENUM_NOT_FOUND_TTL_SECONDS if not_found else None,
+        MappingProxyType(dict(options)),
+        ttl_seconds=_FIELD_OPTIONS_NOT_FOUND_TTL_SECONDS if not_found else None,
     )
 
 
 # (project, enum_name) -> project-level enum option ids (no type axis).
-_project_enum_cache: TTLCache[tuple[str, str], frozenset[str]] = TTLCache(
+_enum_option_id_cache: TTLCache[tuple[str, str], frozenset[str]] = TTLCache(
     _GUARD_TTL_SECONDS
 )
 
 
-def get_cached_project_enum(
+def get_cached_enum_option_ids(
     project_id: str,
     enum_name: str,
 ) -> frozenset[str] | None:
     """Cached valid option ids for project enum, or ``None`` on miss."""
-    return _project_enum_cache.get((project_id, enum_name))
+    return _enum_option_id_cache.get((project_id, enum_name))
 
 
-def store_cached_project_enum(
+def store_cached_enum_option_ids(
     project_id: str,
     enum_name: str,
     option_ids: frozenset[str],
 ) -> None:
     """Cache valid option ids for project enum for ``_GUARD_TTL_SECONDS``."""
-    _project_enum_cache.set((project_id, enum_name), option_ids)
+    _enum_option_id_cache.set((project_id, enum_name), option_ids)
 
 
 # (project, work_item_id) -> True once confirmed existing. Positives only --
@@ -271,8 +282,8 @@ __all__ = [
     "TTLCache",
     "get_cached_confirmed_work_item",
     "get_cached_documents",
-    "get_cached_enum_options",
-    "get_cached_project_enum",
+    "get_cached_enum_option_ids",
+    "get_cached_field_options",
     "get_document_type_custom_keys",
     "get_test_run_custom_keys",
     "get_work_item_custom_keys",
@@ -282,8 +293,8 @@ __all__ = [
     "invalidate_work_item_custom_keys",
     "store_cached_confirmed_work_item",
     "store_cached_documents",
-    "store_cached_enum_options",
-    "store_cached_project_enum",
+    "store_cached_enum_option_ids",
+    "store_cached_field_options",
     "store_document_type_custom_keys",
     "store_test_run_custom_keys",
     "store_work_item_custom_keys",
