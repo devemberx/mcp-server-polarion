@@ -1,4 +1,7 @@
-"""Work item document-membership tools — move into / out of documents."""
+"""Work item document-membership tools — move into / out of documents.
+
+API contract quirks: docs/polarion-api/work-items.md
+"""
 
 from __future__ import annotations
 

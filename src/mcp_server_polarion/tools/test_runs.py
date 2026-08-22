@@ -1,4 +1,7 @@
-"""Test run tools — list, search, get, create, and update test runs in a project."""
+"""Test run tools — list, search, get, create, and update test runs in a project.
+
+API contract quirks: docs/polarion-api/test-runs.md
+"""
 
 from __future__ import annotations
 
