@@ -213,7 +213,7 @@ class TestGuardDocumentCustomFieldKeys:
     ) -> None:
         mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
 
-        with pytest.raises(PermissionError, match="lacks permission"):
+        with pytest.raises(PermissionError, match="Refusing the write"):
             await _check_document_custom_keys(
                 mock_client, "P", "generic", {"ghost_key": 1}
             )
@@ -333,7 +333,7 @@ class TestGuardDocumentAttachmentRefs:
     ) -> None:
         mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
 
-        with pytest.raises(PermissionError, match="lacks permission"):
+        with pytest.raises(PermissionError, match="Refusing the write"):
             await guard_document_attachment_refs(
                 mock_client, "P", "S", "D", '<img src="attachment:1-x.png"/>'
             )

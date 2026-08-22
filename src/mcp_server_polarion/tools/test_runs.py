@@ -27,6 +27,7 @@ from mcp_server_polarion.tools._shared.custom_fields import (
     STANDARD_TEST_RUN_ATTRIBUTES,
     merge_custom_fields,
 )
+from mcp_server_polarion.tools._shared.errors import auth_error
 from mcp_server_polarion.tools._shared.fields import (
     MAX_BULK_ITEMS,
     TEST_RUN_DETAIL_FIELDS,
@@ -163,9 +164,7 @@ async def create_test_runs(
     try:
         response = await client.post(path, json=cast(dict[str, object], payload))
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot create test runs -- check your POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error("create test runs", exc) from exc
     except PolarionNotFoundError as exc:
         raise ValueError(
             f"Project '{project_id}' not found. "
@@ -284,9 +283,7 @@ async def update_test_runs(
     try:
         await client.patch(path, json=cast(dict[str, object], payload))
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot update test runs -- check your POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error("update test runs", exc) from exc
     except PolarionNotFoundError as exc:
         raise ValueError(
             f"A test run in the batch was not found in project '{project_id}': "
@@ -356,9 +353,7 @@ async def list_test_runs(  # noqa: PLR0913
             "Use `list_projects` to discover valid project IDs."
         ) from exc
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot list test runs -- check your POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error("list test runs", exc) from exc
     except PolarionError as exc:
         raise RuntimeError(f"Failed to list test runs: {exc.message}") from exc
 
@@ -409,9 +404,7 @@ async def get_test_run(
             "Use `list_test_runs` to discover valid IDs."
         ) from exc
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot access test run -- check your POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error("access test run", exc) from exc
     except PolarionError as exc:
         raise RuntimeError(
             f"Failed to get test run '{test_run_id}': {exc.message}"

@@ -715,6 +715,21 @@ class TestGetDocument:
         )
         assert result.custom_fields == {}
 
+    async def test_403_carries_server_detail(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError(
+            "read blocked by policy", status_code=403
+        )
+
+        with pytest.raises(PermissionError, match="read blocked by policy"):
+            await get_document(
+                mock_ctx,
+                project_id="proj1",
+                space_id="_default",
+                document_name="SRS",
+            )
+
     async def test_editor_fields_default_empty(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
@@ -1052,6 +1067,23 @@ class TestGetDocument:
 
 class TestReadDocumentParts:
     """``read_document_parts`` tool."""
+
+    async def test_403_carries_server_detail(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError(
+            "parts blocked by policy", status_code=403
+        )
+
+        with pytest.raises(PermissionError, match="parts blocked by policy"):
+            await read_document_parts(
+                mock_ctx,
+                project_id="proj1",
+                space_id="_default",
+                document_name="SRS",
+                page_size=100,
+                page_number=1,
+            )
 
     async def test_returns_document_parts(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -2900,6 +2932,58 @@ class TestUpdateDocumentErrorMapping:
                 rendering_layout_types=None,
             )
 
+    async def test_403_on_type_lookup_carries_server_detail(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # custom_fields path resolve document type first -- that GET own 403.
+        mock_client.get.side_effect = PolarionAuthError(
+            "type lookup blocked", status_code=403
+        )
+
+        with pytest.raises(PermissionError, match="type lookup blocked"):
+            await update_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="S",
+                document_name="D",
+                title=None,
+                status=None,
+                type=None,
+                home_page_content_html=None,
+                custom_fields={"version": "1.0"},
+                workflow_action=None,
+                dry_run=False,
+                rendering_layout_types=None,
+            )
+
+    async def test_403_names_document_status(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.patch.side_effect = PolarionAuthError(
+            "no permission to modify Document", status_code=403
+        )
+        mock_client.get.return_value = {"data": {"attributes": {"status": "reviewed"}}}
+
+        with pytest.raises(PermissionError) as excinfo:
+            await update_document(
+                mock_ctx,
+                project_id="MyProj",
+                space_id="S",
+                document_name="D",
+                title="t",
+                status=None,
+                type=None,
+                home_page_content_html=None,
+                custom_fields=None,
+                workflow_action=None,
+                dry_run=False,
+                rendering_layout_types=None,
+            )
+
+        message = str(excinfo.value)
+        assert "no permission to modify Document" in message
+        assert "'S/D' status is 'reviewed'" in message
+
     async def test_404_raises_value_error_with_doc_in_message(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
@@ -3998,6 +4082,17 @@ class TestCopyDocumentErrorMapping:
 
         with pytest.raises(PermissionError):
             await _call_copy_doc(mock_ctx)
+
+    async def test_403_names_source_document_status(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.post.side_effect = PolarionAuthError("denied", status_code=403)
+        mock_client.get.return_value = {"data": {"attributes": {"status": "approved"}}}
+
+        with pytest.raises(PermissionError) as excinfo:
+            await _call_copy_doc(mock_ctx)
+
+        assert "'_default/Doc' status is 'approved'" in str(excinfo.value)
 
     async def test_404_raises_value_error_naming_source(
         self, mock_ctx: MagicMock, mock_client: AsyncMock

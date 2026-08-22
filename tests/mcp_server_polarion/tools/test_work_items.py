@@ -1764,6 +1764,22 @@ class TestUpdateWorkItemsAttachmentRefDocstringClause:
 class TestListWorkItems:
     """``list_work_items`` tool."""
 
+    async def test_403_carries_server_detail(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError(
+            "query blocked by policy", status_code=403
+        )
+
+        with pytest.raises(PermissionError, match="query blocked by policy"):
+            await list_work_items(
+                mock_ctx,
+                project_id="proj1",
+                query=None,
+                page_size=100,
+                page_number=1,
+            )
+
     async def test_returns_work_items(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:

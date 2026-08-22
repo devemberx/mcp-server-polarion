@@ -30,6 +30,7 @@ from mcp_server_polarion.models import (
     WorkItemAttachmentSpec,
 )
 from mcp_server_polarion.server import mcp
+from mcp_server_polarion.tools._shared.errors import auth_error, document_status_hint
 from mcp_server_polarion.tools._shared.fields import ATTACHMENT_LIST_FIELDS
 from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
@@ -139,10 +140,7 @@ async def _fetch_attachment_content(  # noqa: PLR0913
             f"Use {list_tool} to discover valid ids."
         ) from exc
     except PolarionAuthError as exc:
-        raise PermissionError(
-            f"Cannot access {resource_noun} attachment content -- check your"
-            " POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error(f"access {resource_noun} attachment content", exc) from exc
     except PolarionError as exc:
         raise RuntimeError(
             f"Failed to fetch attachment '{attachment_id}': {exc.message}"
@@ -213,10 +211,7 @@ async def list_document_attachments(  # noqa: PLR0913
             f"'{project_id}'. Use `list_documents` to discover valid IDs."
         ) from exc
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot access document attachments -- check your POLARION_TOKEN"
-            " permissions."
-        ) from exc
+        raise auth_error("access document attachments", exc) from exc
     except PolarionError as exc:
         raise RuntimeError(
             f"Failed to list attachments for '{space_id}/{document_name}': "
@@ -309,10 +304,7 @@ async def list_work_item_attachments(
             "Use `list_work_items` to discover valid IDs."
         ) from exc
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot access work item attachments -- check your POLARION_TOKEN"
-            " permissions."
-        ) from exc
+        raise auth_error("access work item attachments", exc) from exc
     except PolarionError as exc:
         raise RuntimeError(
             f"Failed to list attachments for '{work_item_id}': {exc.message}"
@@ -374,10 +366,7 @@ async def list_test_record_attachments(  # noqa: PLR0913
             "Use `list_test_records` to discover valid coordinates."
         ) from exc
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot access test record attachments -- check your"
-            " POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error("access test record attachments", exc) from exc
     except PolarionError as exc:
         raise RuntimeError(
             f"Failed to list attachments for test record: {exc.message}"
@@ -695,9 +684,9 @@ async def create_document_attachments(  # noqa: PLR0913
             files=parts,
         )
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot create document attachments -- check your POLARION_TOKEN"
-            " permissions."
+        hint = await document_status_hint(client, project_id, space_id, document_name)
+        raise auth_error(
+            "create document attachments", exc, document_hint=hint
         ) from exc
     except PolarionNotFoundError as exc:
         raise ValueError(
@@ -818,10 +807,7 @@ async def create_work_item_attachments(
             files=parts,
         )
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot create work item attachments -- check your POLARION_TOKEN"
-            " permissions."
-        ) from exc
+        raise auth_error("create work item attachments", exc) from exc
     except PolarionNotFoundError as exc:
         raise ValueError(
             f"Work item '{work_item_id}' not found in project '{project_id}'. "
@@ -942,10 +928,7 @@ async def create_test_record_attachments(  # noqa: PLR0913
             files=parts,
         )
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot create test record attachments -- check your"
-            " POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error("create test record attachments", exc) from exc
     except PolarionNotFoundError as exc:
         raise ValueError(
             f"Test record for case '{test_case_id}' iteration {iteration} not "

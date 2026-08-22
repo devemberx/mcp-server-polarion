@@ -23,6 +23,7 @@ from mcp_server_polarion.models import (
     TestRecordUpdateSpec,
 )
 from mcp_server_polarion.server import mcp
+from mcp_server_polarion.tools._shared.errors import auth_error
 from mcp_server_polarion.tools._shared.fields import (
     MAX_BULK_ITEMS,
     TEST_RECORD_DETAIL_FIELDS,
@@ -180,9 +181,7 @@ async def create_test_records(
     try:
         response = await client.post(path, json=cast(dict[str, object], payload))
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot create test records -- check your POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error("create test records", exc) from exc
     except PolarionNotFoundError as exc:
         raise ValueError(
             f"Test run '{test_run_id}' or project '{project_id}' not found. "
@@ -344,9 +343,7 @@ async def update_test_records(
     try:
         await client.patch(path, json=cast(dict[str, object], payload))
     except PolarionAuthError as exc:
-        # Surface Polarion detail whole: e-signature-configured run types 403
-        # record writes with portal-only remedy — token hint alone mislead.
-        raise PermissionError(f"Cannot update test records -- {exc.message}") from exc
+        raise auth_error("update test records", exc) from exc
     except PolarionNotFoundError as exc:
         raise ValueError(
             f"Test run '{test_run_id}' not found in project '{project_id}'. "
@@ -409,9 +406,7 @@ async def list_test_records(  # noqa: PLR0913
             "Use `list_test_runs` to discover valid IDs."
         ) from exc
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot list test records -- check your POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error("list test records", exc) from exc
     except PolarionError as exc:
         raise RuntimeError(f"Failed to list test records: {exc.message}") from exc
 
@@ -465,9 +460,7 @@ async def get_test_record(
             "Use `list_test_records` to discover valid coordinates."
         ) from exc
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot access test record -- check your POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error("access test record", exc) from exc
     except PolarionError as exc:
         raise RuntimeError(f"Failed to get test record: {exc.message}") from exc
 

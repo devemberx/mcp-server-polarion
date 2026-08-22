@@ -30,6 +30,7 @@ from mcp_server_polarion.tools._shared.custom_fields import (
     STANDARD_WORK_ITEM_ATTRIBUTES,
     merge_custom_fields,
 )
+from mcp_server_polarion.tools._shared.errors import auth_error
 from mcp_server_polarion.tools._shared.fields import (
     MAX_BULK_ITEMS,
     WORK_ITEM_DETAIL_FIELDS,
@@ -297,9 +298,7 @@ async def create_work_items(
     try:
         response = await client.post(path, json=cast(dict[str, object], payload))
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot create work items -- check your POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error("create work items", exc) from exc
     except PolarionNotFoundError as exc:
         raise ValueError(
             f"Project '{project_id}' not found. "
@@ -447,9 +446,7 @@ async def update_work_items(  # noqa: PLR0912, PLR0913
     try:
         await client.patch(path, json=cast(dict[str, object], payload))
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot update work items -- check your POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error("update work items", exc) from exc
     except PolarionNotFoundError as exc:
         # Race fallback: existence verified above — PATCH 404 = batch changed
         # under us.
@@ -516,9 +513,7 @@ async def list_work_items(
             "Use `list_projects` to discover valid project IDs."
         ) from exc
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot list work items -- check your POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error("list work items", exc) from exc
     except PolarionError as exc:
         raise RuntimeError(f"Failed to list work items: {exc.message}") from exc
 
@@ -569,9 +564,7 @@ async def get_work_item(
             "Use `list_work_items` to discover valid IDs."
         ) from exc
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot access work item -- check your POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error("access work item", exc) from exc
     except PolarionError as exc:
         raise RuntimeError(
             f"Failed to get work item '{work_item_id}': {exc.message}"

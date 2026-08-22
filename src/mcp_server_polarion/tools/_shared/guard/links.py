@@ -12,6 +12,7 @@ from mcp_server_polarion.core.exceptions import (
     PolarionNotFoundError,
 )
 from mcp_server_polarion.models import WorkItemLinkSpec
+from mcp_server_polarion.tools._shared.errors import auth_error
 from mcp_server_polarion.tools._shared.guard._http import paged_responses
 from mcp_server_polarion.tools._shared.guard._targets import missing_work_item_targets
 from mcp_server_polarion.tools._shared.guard.enums import check_project_enum_roles
@@ -133,10 +134,7 @@ async def partition_delete_links(
             f"'{project_id}'. Use `list_work_items` to discover valid IDs."
         ) from exc
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot read existing work item links -- check your POLARION_TOKEN "
-            "permissions."
-        ) from exc
+        raise auth_error("read existing work item links", exc) from exc
     except PolarionError as exc:
         logger.warning(
             "guard blocking delete: could not read existing links for "

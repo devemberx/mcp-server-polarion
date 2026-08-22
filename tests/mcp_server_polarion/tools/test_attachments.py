@@ -2338,6 +2338,28 @@ class TestCreateDocumentAttachmentsErrorMapping:
                 dry_run=False,
             )
 
+    async def test_403_names_document_status(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "a.png"
+        path.write_bytes(b"a")
+        mock_client.post_multipart = AsyncMock(
+            side_effect=PolarionAuthError("denied", status_code=403)
+        )
+        mock_client.get.return_value = {"data": {"attributes": {"status": "reviewed"}}}
+
+        with pytest.raises(PermissionError) as excinfo:
+            await create_document_attachments(
+                mock_ctx,
+                project_id="P",
+                space_id="S",
+                document_name="D",
+                attachments=[DocumentAttachmentSpec(file_path=str(path))],
+                dry_run=False,
+            )
+
+        assert "'S/D' status is 'reviewed'" in str(excinfo.value)
+
     async def test_payload_too_large_raises_runtime_error_with_remedy(
         self, mock_ctx: MagicMock, mock_client: AsyncMock, tmp_path: Path
     ) -> None:

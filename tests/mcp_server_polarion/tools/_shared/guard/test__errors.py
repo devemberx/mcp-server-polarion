@@ -8,7 +8,7 @@ import logging
 
 import pytest
 
-from mcp_server_polarion.core.exceptions import PolarionError
+from mcp_server_polarion.core.exceptions import PolarionAuthError, PolarionError
 from mcp_server_polarion.tools._shared.guard._errors import (
     unauthorized_write_block,
     unreachable_write_block,
@@ -47,11 +47,14 @@ class TestUnauthorizedWriteBlock:
     ) -> None:
         caplog.set_level("WARNING", logger="mcp_server_polarion.tools._shared.guard")
 
-        exc = unauthorized_write_block("link roles", "P")
+        exc = unauthorized_write_block(
+            "link roles", "P", PolarionAuthError("denied by policy", status_code=403)
+        )
 
         assert isinstance(exc, PermissionError)
         message = str(exc)
         assert "link roles" in message
         assert "project 'P'" in message
         assert "POLARION_TOKEN" in message
+        assert "denied by policy" in message
         assert any("blocking write" in r.message for r in caplog.records)

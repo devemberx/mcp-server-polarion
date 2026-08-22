@@ -24,6 +24,7 @@ from mcp_server_polarion.models import (
     WorkItemCommentSpec,
 )
 from mcp_server_polarion.server import mcp
+from mcp_server_polarion.tools._shared.errors import auth_error, document_status_hint
 from mcp_server_polarion.tools._shared.fields import (
     DOCUMENT_COMMENT_LIST_FIELDS,
     WORK_ITEM_COMMENT_LIST_FIELDS,
@@ -220,9 +221,7 @@ async def list_document_comments(  # noqa: PLR0913
             f"'{project_id}'. Use `list_documents` to discover valid IDs."
         ) from exc
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot access document comments -- check your POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error("access document comments", exc) from exc
     except PolarionError as exc:
         raise RuntimeError(
             f"Failed to list comments for '{space_id}/{document_name}': {exc.message}"
@@ -273,9 +272,7 @@ async def list_work_item_comments(
             "Use `list_work_items` to discover valid IDs."
         ) from exc
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot access work item comments -- check your POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error("access work item comments", exc) from exc
     except PolarionError as exc:
         raise RuntimeError(
             f"Failed to list comments for '{work_item_id}': {exc.message}"
@@ -354,9 +351,8 @@ async def create_document_comments(  # noqa: PLR0913
     try:
         response = await client.post(path, json=cast(dict[str, object], payload))
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot create document comments -- check your POLARION_TOKEN permissions."
-        ) from exc
+        hint = await document_status_hint(client, project_id, space_id, document_name)
+        raise auth_error("create document comments", exc, document_hint=hint) from exc
     except PolarionNotFoundError as exc:
         raise ValueError(
             f"Document '{document_name}' (space '{space_id}',"
@@ -445,9 +441,7 @@ async def create_work_item_comments(
     try:
         response = await client.post(path, json=cast(dict[str, object], payload))
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot create work item comments -- check your POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error("create work item comments", exc) from exc
     except PolarionNotFoundError as exc:
         raise ValueError(
             f"Work item '{work_item_id}' (project '{project_id}') not found."
@@ -534,9 +528,8 @@ async def update_document_comment(  # noqa: PLR0913
     try:
         await client.patch(path, json=cast(dict[str, object], payload))
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot update document comment -- check your POLARION_TOKEN permissions."
-        ) from exc
+        hint = await document_status_hint(client, project_id, space_id, document_name)
+        raise auth_error("update document comment", exc, document_hint=hint) from exc
     except PolarionNotFoundError as exc:
         raise ValueError(
             f"Comment '{comment_id}' on document '{document_name}'"
@@ -613,9 +606,7 @@ async def update_work_item_comment(  # noqa: PLR0913
     try:
         await client.patch(path, json=cast(dict[str, object], payload))
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot update work item comment -- check your POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error("update work item comment", exc) from exc
     except PolarionNotFoundError as exc:
         raise ValueError(
             f"Comment '{comment_id}' on work item '{work_item_id}'"

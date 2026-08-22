@@ -72,6 +72,41 @@ class TestListWorkItemLinks:
     ``back``). Pagination match other list tools' convention.
     """
 
+    async def test_403_carries_server_detail(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionAuthError(
+            "links blocked by policy", status_code=403
+        )
+
+        with pytest.raises(PermissionError, match="links blocked by policy"):
+            await list_work_item_links(
+                mock_ctx,
+                project_id="proj1",
+                work_item_id="MCPT-001",
+                direction="forward",
+                page_size=100,
+                page_number=1,
+            )
+
+    async def test_back_direction_403_carries_server_detail(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Back direction = separate Lucene query path, own handler.
+        mock_client.get.side_effect = PolarionAuthError(
+            "backlink query blocked", status_code=403
+        )
+
+        with pytest.raises(PermissionError, match="backlink query blocked"):
+            await list_work_item_links(
+                mock_ctx,
+                project_id="proj1",
+                work_item_id="MCPT-001",
+                direction="back",
+                page_size=100,
+                page_number=1,
+            )
+
     async def test_forward_returns_paginated_result(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:

@@ -41,6 +41,7 @@ from mcp_server_polarion.tools._shared.custom_fields import (
     extract_custom_fields,
     merge_custom_fields,
 )
+from mcp_server_polarion.tools._shared.errors import auth_error, document_status_hint
 from mcp_server_polarion.tools._shared.fields import (
     DOCUMENT_DETAIL_FIELDS,
     WORK_ITEM_PART_FIELDS,
@@ -652,9 +653,7 @@ async def list_documents(
             "Use `list_projects` to discover valid project IDs."
         ) from exc
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot list documents -- check your POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error("list documents", exc) from exc
     except PolarionError as exc:
         raise RuntimeError(
             f"Failed to list documents for project '{project_id}': {exc.message}"
@@ -739,9 +738,7 @@ async def get_document(
             "Use `list_documents` to verify the space ID and document name."
         ) from exc
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot access document -- check your POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error("access document", exc) from exc
     except PolarionError as exc:
         raise RuntimeError(
             f"Failed to get document '{document_name}': {exc.message}"
@@ -832,9 +829,7 @@ async def read_document_parts(  # noqa: PLR0913
             "Use `list_documents` to discover valid space IDs and document names."
         ) from exc
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot access document parts -- check your POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error("access document parts", exc) from exc
     except PolarionError as exc:
         raise RuntimeError(
             f"Failed to get parts for '{document_name}': {exc.message}"
@@ -919,9 +914,7 @@ async def _fetch_document_attributes(  # noqa: PLR0913
             f"'{project_id}'. Use `list_documents` to verify the space ID and name."
         ) from exc
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot read document -- check your POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error("read document", exc) from exc
     except PolarionError as exc:
         raise RuntimeError(f"Failed to read document {what}: {exc.message}") from exc
     data = response.get("data", {})
@@ -1164,9 +1157,8 @@ async def update_document(  # noqa: PLR0913
     try:
         await client.patch(patch_path, json=cast(dict[str, object], payload))
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot update document -- check your POLARION_TOKEN permissions."
-        ) from exc
+        hint = await document_status_hint(client, project_id, space_id, document_name)
+        raise auth_error("update document", exc, document_hint=hint) from exc
     except PolarionNotFoundError as exc:
         raise ValueError(
             f"Document '{document_name}' (space '{space_id}', "
@@ -1327,9 +1319,7 @@ async def create_document(  # noqa: PLR0913
     try:
         response = await client.post(path, json=cast(dict[str, object], payload))
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot create document -- check your POLARION_TOKEN permissions."
-        ) from exc
+        raise auth_error("create document", exc) from exc
     except PolarionNotFoundError as exc:
         raise ValueError(
             f"Project '{project_id}' or space '{space_id}' not found. "
@@ -1455,9 +1445,8 @@ async def copy_document(  # noqa: PLR0913
     try:
         response = await client.post(path, json=cast(dict[str, object], payload))
     except PolarionAuthError as exc:
-        raise PermissionError(
-            "Cannot copy document -- check your POLARION_TOKEN permissions."
-        ) from exc
+        hint = await document_status_hint(client, project_id, space_id, document_name)
+        raise auth_error("copy document", exc, document_hint=hint) from exc
     except PolarionNotFoundError as exc:
         raise ValueError(
             f"Source document '{document_name}' (space '{space_id}', project "
