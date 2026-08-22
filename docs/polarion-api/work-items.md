@@ -1,6 +1,6 @@
 # Work items and links
 
-Work item query, delete, and link contracts. Read before touching `list_work_items`, `get_work_item`, `read_work_item`, `create_work_items`, `update_work_items`, or any `*_work_item_links` tool. Baseline Polarion REST API v2506.
+Work item query, delete, document-membership, and link contracts. Read before touching `list_work_items`, `get_work_item`, `read_work_item`, `create_work_items`, `update_work_items`, `move_work_item_to_document`, `move_work_item_from_document`, or any `*_work_item_links` tool. Baseline Polarion REST API v2506.
 
 ## Endpoints
 
@@ -8,8 +8,12 @@ Work item query, delete, and link contracts. Read before touching `list_work_ite
 |---|---|---|
 | GET | `projects/{p}/workitems` | `query=linkedWorkItems:{wi}` is the only back-link direction |
 | DELETE | `projects/{p}/workitems` | 204 with a `{"data": [...]}` body |
-| DELETE | `workitems/{wi}` | 405 — the single-resource form does not exist |
-| GET | `workitems/{wi}/backlinkedworkitems` | unsupported |
+| DELETE | `projects/{p}/workitems/{wi}` | 405 — the single-resource form does not exist |
+| GET | `projects/{p}/workitems/{wi}/backlinkedworkitems` | unsupported |
+| POST | `projects/{p}/workitems/{wi}/actions/moveToDocument` | flat body, not `{"data": [...]}` |
+| POST | `projects/{p}/workitems/{wi}/actions/moveFromDocument` | takes no body |
+| GET, POST, DELETE | `projects/{p}/workitems/{wi}/linkedworkitems` | DELETE takes a `{"data": [...]}` body |
+| PATCH | `projects/{p}/workitems/{wi}/linkedworkitems/{role}/{targetProject}/{targetId}` | the link coordinate — the same 5 segments as the link `id` |
 
 ## Read contract
 

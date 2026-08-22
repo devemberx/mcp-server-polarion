@@ -19,6 +19,7 @@ diff-cover changed lines ≥90% cover `src/` + `evals/` both — incl parser def
 ## Architecture
 
 - `core/client.py` — async httpx; serialize + pace + retry per Gotchas.
+- `core/exceptions.py` — `PolarionError` tree raised by client; map to builtins per Non-Negotiable Rules.
 - `core/config.py` — `POLARION_URL`/`POLARION_TOKEN`/`POLARION_MAX_REQUESTS_PER_SECOND`.
 - `core/logging.py` — stderr-only.
 - `tools/` — domain module per resource; `tools/__init__.py` import registers `@mcp.tool`s.
@@ -35,7 +36,7 @@ diff-cover changed lines ≥90% cover `src/` + `evals/` both — incl parser def
 
 - NEVER `print()` — stdout = MCP JSON-RPC; log to stderr.
 - NEVER `typing.Any` — concrete types or `object`.
-- NEVER ship delete tool for unrecoverable data (attachment, work item, document) even where REST allow it — removal = human via portal.
+- NEVER ship delete tool for unrecoverable data (attachment, work item, document) even where REST allow it (test record attachment DELETE = 204) — removal = human via portal.
   - `dry_run` + `destructiveHint` = advisory, model still call with `dry_run=False`; withhold capability = only hard guarantee.
   - Reversible relationship delete allowed (`delete_work_item_links` — recreate from context, zero data loss).
   - Deliberate posture, not gap — no re-litigate per review round.
@@ -59,7 +60,7 @@ diff-cover changed lines ≥90% cover `src/` + `evals/` both — incl parser def
 - Field descriptions one line, skip when name + type say all.
 - Tool description template (order, skip empty): [1] verb-first what + hard limits; [2] sibling routing ("— use X instead"); [3] call strategy only if behavior-change (REPLACE / "Call X first" / Atomic); [4] round-trip format rules; [5] returns + follow-up; [6] errors as prevention-form ("resolve via list_*_enum_options first").
 - Shipped text = docstring prose + `Field(description=...)` + input spec-model class docstrings (`$defs` ship them).
-- Bans + budgets (read ≤~50, write ≤~150 words) enforced by `test_tool_description_style.py`: no exception class names / raw HTTP codes / RST double-backticks, params single-line, `dry_run` byte-exact. Caps only NEVER/REPLACE/Atomic.
+- Budget advisory: read ≤~50, write ≤~150 words. Bans enforced by `test_tool_description_style.py` (char caps + text rules): no exception class names / raw HTTP codes / RST double-backticks, params single-line, `dry_run` byte-exact. Caps only NEVER/REPLACE/Atomic.
 - Eval-FAIL-restored phrase = lock via docstring contract test.
 - No `WARNING:`/`NOTE:` prefixes, dev-narrative, banner dividers.
 - CLAUDE.md dev-only — MCP-user info live in `@mcp.tool` docstrings. Module docstring = why module exist; constraints inline next to what they constrain.
@@ -90,7 +91,7 @@ Baseline: Polarion REST API v2506 — assume that version behavior. Rules below 
 | test runs, test records, e-signature | [docs/polarion-api/test-runs.md](docs/polarion-api/test-runs.md) |
 | documents, `renderingLayouts`, copy | [docs/polarion-api/documents.md](docs/polarion-api/documents.md) |
 | comments (all three resources) | [docs/polarion-api/comments.md](docs/polarion-api/comments.md) |
-| work items, links | [docs/polarion-api/work-items.md](docs/polarion-api/work-items.md) |
+| work items, links, document-membership moves | [docs/polarion-api/work-items.md](docs/polarion-api/work-items.md) |
 
 - JSON:API v1. HTML stored as `{"type": "text/html", "value": "..."}`.
 - Linked-work-item ids = 5 segments — derive targets via `relationships.workItem.data.id`, never parse.

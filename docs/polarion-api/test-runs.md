@@ -7,7 +7,8 @@ Test run and test record contracts, including the e-signature block. Read before
 | Method | Path | Notes |
 |---|---|---|
 | GET, POST, PATCH | `projects/{p}/testruns` | POST requires an explicit `id` |
-| GET, PATCH | `testruns/{r}/testrecords` | PATCH batches are atomic |
+| GET, POST, PATCH | `projects/{p}/testruns/{r}/testrecords` | PATCH batches are atomic |
+| GET | `projects/{p}/testruns/{r}/testrecords/{tcProj}/{tcId}/{iter}` | the single-record coordinate — `{tcProj}/{tcId}` is the full test case id split in two |
 | GET | `projects/{p}/enumerations/testing/{enumName}/~` | the `~` context returns 404 for test run enums |
 
 ## Read contract
@@ -29,6 +30,7 @@ Test run and test record contracts, including the e-signature block. Read before
 - Test record PATCH batches are atomic — one bad id fails the whole batch with 400, and `"was not found"` arrives as 400, not 404.
 - Partial PATCH is safe: omitted attributes are preserved.
 - REST auto-fills nothing. The server never populates `executed`, `duration`, or `testCaseRevision`; all three are settable explicitly via PATCH (204, preserved).
+- A record comment is `attributes.comment` on the record itself, not a comment sub-resource. A `text/plain` value is stored and served as `text/html`, and the text stays editable by PATCH.
 - A run's type may require an e-signature. Record PATCH then fails 403 and the remedy is portal-only — REST cannot supply the signature. Surface the Polarion detail in the error; a token hint alone misleads the caller.
 - The e-signature block covers record PATCH only.
 
@@ -41,7 +43,7 @@ Test run and test record contracts, including the e-signature block. Read before
 ## Cross-domain
 
 - Record attachments, including why the e-signature block does not reach them: [attachments.md](attachments.md).
-- A `text/plain` record comment is stored as `text/html`: [comments.md](comments.md).
+- The same plain-text-to-HTML storage rule on document and work item comment resources: [comments.md](comments.md).
 
 ## Verified
 

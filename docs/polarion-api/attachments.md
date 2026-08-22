@@ -6,17 +6,20 @@ Document, work item, and test record attachments — three resources with three 
 
 | Method | Path | Notes |
 |---|---|---|
-| GET, POST | `documents/{d}/attachments` | DELETE 405 — uploads REST-irreversible |
-| GET, POST | `workitems/{wi}/attachments` | DELETE 204 |
-| GET, POST | `testruns/{r}/testrecords/{tcProj}/{tc}/{iter}/attachments` | DELETE 204; single-attachment GET returns `data` as a dict, default attrs `@basic` |
+| GET, POST | `projects/{p}/spaces/{s}/documents/{d}/attachments` | DELETE 405 — uploads REST-irreversible |
+| GET | `projects/{p}/spaces/{s}/documents/{d}/attachments/{id}/content` | |
+| GET, POST | `projects/{p}/workitems/{wi}/attachments` | DELETE 204 |
+| GET | `projects/{p}/workitems/{wi}/attachments/{id}/content` | |
+| GET, POST | `projects/{p}/testruns/{r}/testrecords/{tcProj}/{tcId}/{iter}/attachments` | DELETE 204 |
+| GET | `projects/{p}/testruns/{r}/testrecords/{tcProj}/{tcId}/{iter}/attachments/{id}` | `data` is a dict, default attrs `@basic`; `/content` serves the bytes |
 
 ## Read contract
 
 | Aspect | Document | Work item | Test record |
 |---|---|---|---|
-| Default GET attrs | full attribute set | full attribute set | none — `type`/`id`/`links` only |
+| Default GET attrs | not probed — the tools always send `fields[]` | not probed — the tools always send `fields[]` | none — `type`/`id`/`links` only |
 | `@basic` | `id,fileName,title` | `id,fileName` | `id,fileName,title` |
-| `meta.totalCount` | only when a page overshoots a non-empty collection | every page of a multi-page collection; absent single-page | every page of a multi-page collection **and** on overshoot; absent single-page or empty |
+| `meta.totalCount` | only when a page overshoots a non-empty collection; absent on an empty one | every page of a multi-page collection; absent single-page, empty collection not probed | every page of a multi-page collection **and** on overshoot; absent single-page or empty |
 | Body ref scheme | `attachment:{id}` | `workitemimg:{id}` | n/a |
 
 - Attributes are `id`, `fileName`, `title`, `updated`, `length` — no `created`, no mime anywhere.
@@ -29,6 +32,8 @@ Document, work item, and test record attachments — three resources with three 
 - An unseeded document or the wrong space returns 404.
 - A bad run, test case, or iteration returns 404 `"Test Record ... was not found"`.
 - The test record `revision` query param addresses the record revision, not the attachment.
+- In a body the ref token is URL-encoded against the raw `attributes.id`.
+- Non-image attachments are embeddable via `img`.
 
 ## Write contract
 
@@ -48,6 +53,7 @@ Server-side id rewriting differs per resource:
 | Served `fileName` | as uploaded | as uploaded | rewritten to the prefixed token |
 | DELETE | 405 | 204 | 204 |
 
+- The two 204 DELETEs are API capability only: the repo ships no attachment delete tool by policy.
 - The work item counter is monotonic per work item and is not reset by delete, so `workitemimg:{id}` is unpredictable before upload — read it from the 201 echo.
 - Test record 201 echo ids never match the uploaded names.
 - A nonexistent test record coordinate returns 404 and creates no ghost.
@@ -55,10 +61,7 @@ Server-side id rewriting differs per resource:
 
 ## Server does not validate
 
-Body refs are validated by the resource that owns the body, not by this one — see the *Cross-domain* links below. This resource contributes only the id facts that make a ref easy to get wrong:
-
-- In a body the ref token is URL-encoded against the raw `attributes.id`.
-- Non-image attachments are embeddable via `img` and render as broken, not as an error.
+This resource has no unvalidated surface of its own: a body ref is validated by the resource whose body holds it, and each guard is named in the doc linked below.
 
 ## Cross-domain
 
