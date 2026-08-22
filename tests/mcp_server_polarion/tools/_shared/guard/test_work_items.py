@@ -410,7 +410,7 @@ class TestGuardWorkItemCustomFieldEnums:
     async def test_not_found_outlives_guard_ttl(
         self, mock_client: AsyncMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # 404 entries get the long not_found TTL; positive sets keep 60s.
+        # 404 entries get long not_found TTL; positive sets keep enum TTL.
         mock_client.get.side_effect = PolarionNotFoundError("not enum", status_code=404)
         clock = [1000.0]
         monkeypatch.setattr(cache_mod, "_now", lambda: clock[0])
@@ -420,13 +420,12 @@ class TestGuardWorkItemCustomFieldEnums:
         store_work_item_custom_keys("P", "task", frozenset({"f"}))
 
         await guard_work_item_custom_fields(mock_client, "P", "task", {"f": "x"})
-        clock[0] += 61.0  # past _GUARD_TTL_SECONDS, within not_found TTL
-        # Key schema share 60s TTL; re-prime so only enum cache expiry measured.
+        clock[0] += cache_mod._ENUM_TTL_SECONDS + 1.0  # within not_found TTL
         store_work_item_custom_keys("P", "task", frozenset({"f"}))
         await guard_work_item_custom_fields(mock_client, "P", "task", {"f": "x"})
         assert mock_client.get.await_count == 1
 
-        clock[0] += 600.0  # past _FIELD_OPTIONS_NOT_FOUND_TTL_SECONDS
+        clock[0] += cache_mod._FIELD_OPTIONS_NOT_FOUND_TTL_SECONDS
         store_work_item_custom_keys("P", "task", frozenset({"f"}))
         await guard_work_item_custom_fields(mock_client, "P", "task", {"f": "x"})
         assert mock_client.get.await_count == 2

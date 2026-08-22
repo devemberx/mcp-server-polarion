@@ -952,10 +952,11 @@ class TestUpdateWorkItemsHyperlinkRoleGuard:
     async def test_bad_role_names_offending_item_via_cache(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
-        # Item 0 role pass; item 1 reuse cached options (no second enum
-        # GET), rejected with batch position and id.
+        # Item 0 role pass off cached options; item 1 miss them, so guard
+        # refetch once before naming batch position + id.
         mock_client.get.side_effect = [
             _existence_response(("MCPT-1", "task"), ("MCPT-2", "task")),
+            _project_enum_get_response("hyperlink-role", ["ref_int", "ref_ext"]),
             _project_enum_get_response("hyperlink-role", ["ref_int", "ref_ext"]),
         ]
 
@@ -972,7 +973,8 @@ class TestUpdateWorkItemsHyperlinkRoleGuard:
                 dry_run=True,
             )
 
-        assert mock_client.get.await_count == 2
+        # Existence query + first enum fetch + one stale-cache refetch.
+        assert mock_client.get.await_count == 3
         mock_client.patch.assert_not_called()
 
 
@@ -1453,10 +1455,11 @@ class TestEnumGuardUpdateWorkItems:
         mock_client: AsyncMock,
         reset_enum_guard_caches: None,
     ) -> None:
-        # Item 1 pass; item 2 reuse cached options — rejected with batch
-        # position and id.
+        # Item 1 pass off cached options; item 2 miss them, so guard refetch
+        # once (option may be admin-added) before naming batch position + id.
         mock_client.get.side_effect = [
             _existence_response(("MCPT-1", "task"), ("MCPT-2", "task")),
+            _enum_get_response(["50.0"]),
             _enum_get_response(["50.0"]),
         ]
 

@@ -74,12 +74,21 @@ class DiscoveredDocument(NamedTuple):
     last_updated_by_name: str = ""
 
 
-# 60s cap window where stale entry accept admin-removed option.
-_GUARD_TTL_SECONDS: Final[float] = 60.0
+# Custom-field key schema: sampling scan = priciest guard fetch, and only
+# admin field edit change it. Stale window trade against that scan.
+_SCHEMA_TTL_SECONDS: Final[float] = 900.0
+
+# Enum options: admin-configured too, but guard reject against them, so
+# refetch-once (guard/_revalidate.py) carry the freshness, not TTL.
+_ENUM_TTL_SECONDS: Final[float] = 600.0
+
+# Work item existence: saved fetch = one batched query, and portal user
+# delete work items any time -- keep dangling window narrow.
+_TARGET_TTL_SECONDS: Final[float] = 60.0
 
 # 404 "not an Enumeration field" = stable schema fact; stale worst case
 # just defer to Polarion — safe to outlive positive option sets.
-_FIELD_OPTIONS_NOT_FOUND_TTL_SECONDS: Final[float] = 600.0
+_FIELD_OPTIONS_NOT_FOUND_TTL_SECONDS: Final[float] = 3600.0
 
 # New documents surface within ~1 min (create also invalidate on write).
 _DOCUMENT_LIST_TTL_SECONDS: Final[float] = 60.0
@@ -114,7 +123,7 @@ def invalidate_documents_cache(project_id: str) -> None:
 # beside id so display-name reader (rendering layout `label`) reuse guard's
 # fetch instead of spending second request; unnamed option = "".
 _field_option_cache: TTLCache[tuple[str, Resource, str, str], Mapping[str, str]] = (
-    TTLCache(_GUARD_TTL_SECONDS)
+    TTLCache(_ENUM_TTL_SECONDS)
 )
 
 
@@ -149,9 +158,19 @@ def store_cached_field_options(  # noqa: PLR0913
     )
 
 
+def invalidate_field_options(
+    project_id: str,
+    resource: Resource,
+    field_id: str,
+    type_id: str,
+) -> None:
+    """Drop cached options for field/type (refetch-once before reject)."""
+    _field_option_cache.invalidate((project_id, resource, field_id, type_id))
+
+
 # (project, enum_name) -> project-level enum option ids (no type axis).
 _enum_option_id_cache: TTLCache[tuple[str, str], frozenset[str]] = TTLCache(
-    _GUARD_TTL_SECONDS
+    _ENUM_TTL_SECONDS
 )
 
 
@@ -168,14 +187,19 @@ def store_cached_enum_option_ids(
     enum_name: str,
     option_ids: frozenset[str],
 ) -> None:
-    """Cache valid option ids for project enum for ``_GUARD_TTL_SECONDS``."""
+    """Cache valid option ids for project enum for ``_ENUM_TTL_SECONDS``."""
     _enum_option_id_cache.set((project_id, enum_name), option_ids)
+
+
+def invalidate_enum_option_ids(project_id: str, enum_name: str) -> None:
+    """Drop cached option ids for project enum (refetch-once before reject)."""
+    _enum_option_id_cache.invalidate((project_id, enum_name))
 
 
 # (project, work_item_id) -> True once confirmed existing. Positives only --
 # a missing WI may be created later, so absence never cache as a negative.
 _confirmed_work_item_cache: TTLCache[tuple[str, str], bool] = TTLCache(
-    _GUARD_TTL_SECONDS
+    _TARGET_TTL_SECONDS
 )
 
 
@@ -189,7 +213,7 @@ def get_cached_confirmed_work_item(project_id: str, work_item_id: str) -> bool |
 
 def store_cached_confirmed_work_item(project_id: str, work_item_id: str) -> None:
     """Mark ``(project, work_item)`` confirmed existing for
-    ``_GUARD_TTL_SECONDS`` -- partial batches merge naturally since each
+    ``_TARGET_TTL_SECONDS`` -- partial batches merge naturally since each
     id is its own entry.
     """
     _confirmed_work_item_cache.set((project_id, work_item_id), True)
@@ -197,7 +221,7 @@ def store_cached_confirmed_work_item(project_id: str, work_item_id: str) -> None
 
 # (project, work_item_type) -> full custom-field key schema (MIN-per-key sample).
 _work_item_custom_key_cache: TTLCache[tuple[str, str], frozenset[str]] = TTLCache(
-    _GUARD_TTL_SECONDS
+    _SCHEMA_TTL_SECONDS
 )
 
 
@@ -227,7 +251,7 @@ def invalidate_work_item_custom_keys(project_id: str, work_item_type: str) -> No
 
 # (project, document_type) -> custom-field key schema; document-side mirror.
 _document_type_custom_key_cache: TTLCache[tuple[str, str], frozenset[str]] = TTLCache(
-    _GUARD_TTL_SECONDS
+    _SCHEMA_TTL_SECONDS
 )
 
 
@@ -256,7 +280,9 @@ def invalidate_document_type_custom_keys(project_id: str, document_type: str) ->
 
 
 # project -> testrun custom-field key schema (project config, no type axis).
-_test_run_custom_key_cache: TTLCache[str, frozenset[str]] = TTLCache(_GUARD_TTL_SECONDS)
+_test_run_custom_key_cache: TTLCache[str, frozenset[str]] = TTLCache(
+    _SCHEMA_TTL_SECONDS
+)
 
 
 def get_test_run_custom_keys(project_id: str) -> frozenset[str] | None:
@@ -289,6 +315,8 @@ __all__ = [
     "get_work_item_custom_keys",
     "invalidate_document_type_custom_keys",
     "invalidate_documents_cache",
+    "invalidate_enum_option_ids",
+    "invalidate_field_options",
     "invalidate_test_run_custom_keys",
     "invalidate_work_item_custom_keys",
     "store_cached_confirmed_work_item",

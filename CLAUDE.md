@@ -18,7 +18,7 @@ CI: same order + `ruff format --check` + `pytest --cov-fail-under=90`; diff-cove
 ## Architecture
 
 - `core/` — `client.py` (async httpx; serialize + pace + retry per Gotchas), `exceptions.py`, `config.py` (`POLARION_URL`/`POLARION_TOKEN`), `logging.py` (stderr-only).
-- `tools/` — domain module per resource; `_build_*_payload` = unit-test seam; `tools/__init__.py` import registers `@mcp.tool`s. `_shared/`: `parse.py` (JSON:API→models), `pagination.py`, `fields.py`/`custom_fields.py` (sparse-fieldset + custom-field policy), `cache.py` (`TTLCache`), `sql.py`, `guard/` (pre-write validation, submodule per domain axis; new guards compose `_http.py` `guarded_get`/`guarded_pages` + `_custom_keys.py` `check_custom_keys`). `tools/guides/` = on-demand data served by `recipes.py`.
+- `tools/` — domain module per resource; `_build_*_payload` = unit-test seam; `tools/__init__.py` import registers `@mcp.tool`s. `_shared/`: `parse.py` (JSON:API→models), `pagination.py`, `fields.py`/`custom_fields.py` (sparse-fieldset + custom-field policy), `cache.py` (`TTLCache`), `sql.py`, `guard/` (pre-write validation, submodule per domain axis; new guards compose `_http.py` `guarded_get`/`guarded_pages` + `_custom_keys.py` `check_custom_keys` + `_revalidate.py` `resolve_with_refetch` — any guard rejecting against cached set route through it, stale entry never reject alone). `tools/guides/` = on-demand data served by `recipes.py`.
 - `middleware.py` — compact tool-arg `ValidationError` to one-line summary (raw Pydantic dump = token waste).
 - `utils/html.py` — Markdown↔HTML, `stamp_block_ids`, `first_anchorless_block`.
 - `models/` — Pydantic v2, re-exported from `models/__init__.py`; `PaginatedResult[T]` wrap list responses.

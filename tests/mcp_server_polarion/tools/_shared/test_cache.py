@@ -17,6 +17,8 @@ from mcp_server_polarion.tools._shared.cache import (
     get_work_item_custom_keys,
     invalidate_document_type_custom_keys,
     invalidate_documents_cache,
+    invalidate_enum_option_ids,
+    invalidate_field_options,
     invalidate_work_item_custom_keys,
     store_cached_documents,
     store_cached_enum_option_ids,
@@ -196,10 +198,21 @@ class TestFieldOptionCache:
         assert get_cached_field_options("P", "documents", "severity", "task") is None
         assert get_cached_field_options("P", "workitems", "status", "task") is None
 
-    def test_expiry_uses_guard_ttl(self, clock: list[float]) -> None:
+    def test_invalidate_drops_only_its_axis(self) -> None:
+        store_cached_field_options("P", "workitems", "severity", "task", {"high": ""})
+        store_cached_field_options("P", "workitems", "severity", "bug", {"high": ""})
+
+        invalidate_field_options("P", "workitems", "severity", "task")
+
+        assert get_cached_field_options("P", "workitems", "severity", "task") is None
+        assert get_cached_field_options("P", "workitems", "severity", "bug") == (
+            {"high": ""}
+        )
+
+    def test_expiry_uses_enum_ttl(self, clock: list[float]) -> None:
         store_cached_field_options("P", "workitems", "severity", "task", {"high": ""})
 
-        clock[0] += cache_mod._GUARD_TTL_SECONDS + 1.0
+        clock[0] += cache_mod._ENUM_TTL_SECONDS + 1.0
         assert get_cached_field_options("P", "workitems", "severity", "task") is None
 
     def test_not_found_entries_use_long_ttl(self, clock: list[float]) -> None:
@@ -207,7 +220,7 @@ class TestFieldOptionCache:
             "P", "workitems", "freeText", "task", {}, not_found=True
         )
 
-        clock[0] += cache_mod._GUARD_TTL_SECONDS + 1.0
+        clock[0] += cache_mod._ENUM_TTL_SECONDS + 1.0
         assert get_cached_field_options("P", "workitems", "freeText", "task") == {}
 
         clock[0] += cache_mod._FIELD_OPTIONS_NOT_FOUND_TTL_SECONDS
@@ -232,10 +245,21 @@ class TestEnumOptionIdCache:
         assert get_cached_enum_option_ids("P", "hyperlink-role") is None
         assert get_cached_enum_option_ids("Q", "workitem-link-role") is None
 
-    def test_expiry_uses_guard_ttl(self, clock: list[float]) -> None:
+    def test_invalidate_drops_only_its_enum(self) -> None:
+        store_cached_enum_option_ids("P", "workitem-link-role", frozenset({"parent"}))
         store_cached_enum_option_ids("P", "hyperlink-role", frozenset({"ref_ext"}))
 
-        clock[0] += cache_mod._GUARD_TTL_SECONDS + 1.0
+        invalidate_enum_option_ids("P", "workitem-link-role")
+
+        assert get_cached_enum_option_ids("P", "workitem-link-role") is None
+        assert get_cached_enum_option_ids("P", "hyperlink-role") == frozenset(
+            {"ref_ext"}
+        )
+
+    def test_expiry_uses_enum_ttl(self, clock: list[float]) -> None:
+        store_cached_enum_option_ids("P", "hyperlink-role", frozenset({"ref_ext"}))
+
+        clock[0] += cache_mod._ENUM_TTL_SECONDS + 1.0
         assert get_cached_enum_option_ids("P", "hyperlink-role") is None
 
 
@@ -271,7 +295,7 @@ class TestWorkItemCustomKeys:
     def test_expiry(self, clock: list[float]) -> None:
         store_work_item_custom_keys("P", "task", frozenset({"a"}))
 
-        clock[0] += cache_mod._GUARD_TTL_SECONDS + 1.0
+        clock[0] += cache_mod._SCHEMA_TTL_SECONDS + 1.0
         assert get_work_item_custom_keys("P", "task") is None
 
 
@@ -308,5 +332,5 @@ class TestDocumentTypeCustomKeys:
     def test_expiry(self, clock: list[float]) -> None:
         store_document_type_custom_keys("P", "generic", frozenset({"a"}))
 
-        clock[0] += cache_mod._GUARD_TTL_SECONDS + 1.0
+        clock[0] += cache_mod._SCHEMA_TTL_SECONDS + 1.0
         assert get_document_type_custom_keys("P", "generic") is None
