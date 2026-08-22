@@ -1,4 +1,7 @@
-"""Comment tools — list comments, create + resolve them."""
+"""Comment tools — list comments, create + resolve them.
+
+API contract quirks: docs/polarion-api/comments.md
+"""
 
 from __future__ import annotations
 

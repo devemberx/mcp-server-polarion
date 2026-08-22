@@ -1,4 +1,7 @@
-"""Document tools — query, read, create, update, and copy."""
+"""Document tools — query, read, create, update, and copy.
+
+API contract quirks: docs/polarion-api/documents.md
+"""
 
 from __future__ import annotations
 
