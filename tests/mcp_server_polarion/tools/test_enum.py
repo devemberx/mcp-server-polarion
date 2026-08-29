@@ -15,6 +15,7 @@ from mcp_server_polarion.core.exceptions import (
     PolarionNotFoundError,
 )
 from mcp_server_polarion.models import EnumOption, PaginatedResult
+from mcp_server_polarion.tools._shared.cache import get_cached_field_options
 from mcp_server_polarion.tools.enum import (
     list_document_enum_options,
     list_work_item_enum_options,
@@ -516,3 +517,159 @@ class TestListDocumentEnumOptionsFieldValidation:
     def test_page_number_rejects_zero(self) -> None:
         with pytest.raises(ValidationError):
             self._adapter_for("page_number").validate_python(0)
+
+
+class TestGuardCacheWriteThrough:
+    """Complete first page prime the write guards' option cache."""
+
+    async def test_single_page_primes_guard_cache(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {"data": _STATUS_DATA, "meta": {"totalCount": 3}}
+
+        await list_work_item_enum_options(
+            mock_ctx,
+            project_id="MCP_Test_Project",
+            field_id="status",
+            work_item_type="task",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert get_cached_field_options(
+            "MCP_Test_Project", "workitems", "status", "task"
+        ) == {"draft": "Draft", "inreview": "In Review", "approved": "Approved"}
+
+    async def test_document_options_prime_document_axis(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {"data": _STATUS_DATA, "meta": {"totalCount": 3}}
+
+        await list_document_enum_options(
+            mock_ctx,
+            project_id="MCP_Test_Project",
+            field_id="status",
+            document_type="generic",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert (
+            get_cached_field_options(
+                "MCP_Test_Project", "documents", "status", "generic"
+            )
+            is not None
+        )
+
+    async def test_partial_page_leaves_cache_untouched(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Storing part of option set would reject valid ids for whole TTL.
+        mock_client.get.return_value = {
+            "data": _STATUS_DATA * 34,
+            "meta": {"totalCount": 150},
+        }
+
+        await list_work_item_enum_options(
+            mock_ctx,
+            project_id="MCP_Test_Project",
+            field_id="status",
+            work_item_type="task",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert (
+            get_cached_field_options("MCP_Test_Project", "workitems", "status", "task")
+            is None
+        )
+
+    async def test_later_page_leaves_cache_untouched(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = {"data": _STATUS_DATA, "meta": {"totalCount": 3}}
+
+        await list_work_item_enum_options(
+            mock_ctx,
+            project_id="MCP_Test_Project",
+            field_id="status",
+            work_item_type="task",
+            page_size=100,
+            page_number=2,
+        )
+
+        assert (
+            get_cached_field_options("MCP_Test_Project", "workitems", "status", "task")
+            is None
+        )
+
+    async def test_not_found_caches_deferral(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = PolarionNotFoundError(
+            "Not found", status_code=404
+        )
+
+        with pytest.raises(ValueError, match="No enum options"):
+            await list_work_item_enum_options(
+                mock_ctx,
+                project_id="MCP_Test_Project",
+                field_id="freeText",
+                work_item_type="task",
+                page_size=100,
+                page_number=1,
+            )
+
+        assert (
+            get_cached_field_options(
+                "MCP_Test_Project", "workitems", "freeText", "task"
+            )
+            == {}
+        )
+
+    async def test_later_page_not_found_leaves_cache_untouched(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Overshoot 404 != guard's page-1 probe fact; storing deferral here
+        # would disable enum validation for whole TTL.
+        mock_client.get.side_effect = PolarionNotFoundError(
+            "Not found", status_code=404
+        )
+
+        with pytest.raises(ValueError, match="No enum options"):
+            await list_work_item_enum_options(
+                mock_ctx,
+                project_id="MCP_Test_Project",
+                field_id="status",
+                work_item_type="task",
+                page_size=100,
+                page_number=7,
+            )
+
+        assert (
+            get_cached_field_options("MCP_Test_Project", "workitems", "status", "task")
+            is None
+        )
+
+    async def test_prime_skips_ids_the_guard_parser_drops(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Guard populate same entry from raw ids -- coerced key would accept a
+        # value the guard's own fetch reject.
+        mock_client.get.return_value = {
+            "data": [{"id": 5, "name": "Five"}, {"id": "open", "name": "Open"}],
+            "meta": {"totalCount": 2},
+        }
+
+        await list_work_item_enum_options(
+            mock_ctx,
+            project_id="MCP_Test_Project",
+            field_id="status",
+            work_item_type="task",
+            page_size=100,
+            page_number=1,
+        )
+
+        assert get_cached_field_options(
+            "MCP_Test_Project", "workitems", "status", "task"
+        ) == {"open": "Open"}

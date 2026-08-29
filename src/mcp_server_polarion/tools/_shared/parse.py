@@ -639,6 +639,26 @@ def parse_attachments_page(
     return make_page(attachment_items, response, page_number, page_size)
 
 
+def parse_option_map(data: object) -> dict[str, str]:
+    """``getAvailableOptions`` payload → option id → display name.
+
+    Non-string / empty id skipped: they cannot address an option, and both
+    the write guard and the read tool prime one cache entry from here — a
+    coerced key would accept a value the other writer reject.
+    """
+    options: dict[str, str] = {}
+    if not isinstance(data, list):
+        return options
+    for entry in data:
+        if not isinstance(entry, dict):
+            continue
+        opt_id = entry.get("id")
+        if isinstance(opt_id, str) and opt_id:
+            name = entry.get("name")
+            options[opt_id] = name if isinstance(name, str) else ""
+    return options
+
+
 def parse_enum_option(entry: dict[str, object]) -> EnumOption:
     """JSON:API enumeration entry → ``EnumOption``; non-bool flags coerce to False."""
 
@@ -669,6 +689,7 @@ __all__: list[str] = [
     "parse_hyperlinks",
     "parse_included_user_name_map",
     "parse_included_work_item_map",
+    "parse_option_map",
     "parse_test_record_detail",
     "parse_work_item_detail",
     "parse_work_item_summaries",

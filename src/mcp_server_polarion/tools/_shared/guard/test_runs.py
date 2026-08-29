@@ -10,7 +10,6 @@ from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.core.exceptions import PolarionNotFoundError
 from mcp_server_polarion.tools._shared.cache import (
     get_test_run_custom_keys,
-    invalidate_test_run_custom_keys,
     store_test_run_custom_keys,
 )
 from mcp_server_polarion.tools._shared.custom_fields import (
@@ -138,7 +137,6 @@ async def _check_test_run_custom_keys(
     await check_custom_keys(
         custom_fields,
         get_cached=lambda: get_test_run_custom_keys(project_id),
-        invalidate=lambda: invalidate_test_run_custom_keys(project_id),
         fetch=lambda: _fetch_test_run_custom_keys(client, project_id),
         scope=f"test runs in project '{project_id}'",
         discovery_tool="sample of existing runs",

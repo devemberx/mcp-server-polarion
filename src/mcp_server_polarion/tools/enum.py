@@ -18,6 +18,7 @@ from mcp_server_polarion.core.exceptions import (
 )
 from mcp_server_polarion.models import EnumOption, PaginatedResult
 from mcp_server_polarion.server import mcp
+from mcp_server_polarion.tools._shared.cache import store_cached_field_options
 from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
     get_client,
@@ -26,7 +27,10 @@ from mcp_server_polarion.tools._shared.pagination import (
     DEFAULT_PAGE_SIZE,
     make_page,
 )
-from mcp_server_polarion.tools._shared.parse import parse_enum_option
+from mcp_server_polarion.tools._shared.parse import (
+    parse_enum_option,
+    parse_option_map,
+)
 
 
 async def _list_enum_options(  # noqa: PLR0913
@@ -54,6 +58,13 @@ async def _list_enum_options(  # noqa: PLR0913
     try:
         response = await client.get(path, params=params)
     except PolarionNotFoundError as exc:
+        # Page 1 only: same fact write guards cache on own 404 probe, so store
+        # it and later writes skip one request. Overshoot 404 = different fact
+        # -- storing it would defer enum validation for whole TTL.
+        if page_number == 1:
+            store_cached_field_options(
+                project_id, resource, field_id, type_id, {}, not_found=True
+            )
         raise ValueError(
             f"No enum options for field '{field_id}' on {type_label} type "
             f"'{type_id}' in project '{project_id}' -- field unknown or not "
@@ -76,7 +87,19 @@ async def _list_enum_options(  # noqa: PLR0913
             if isinstance(entry, dict):
                 items.append(parse_enum_option(entry))
 
-    return make_page(items, response, page_number, page_size)
+    page = make_page(items, response, page_number, page_size)
+    # Complete option set only: partial page prime = valid ids rejected until
+    # expiry. Never invalidate here -- discovery typically run right before
+    # write, so dropping entry cost that write one fetch.
+    if page_number == 1 and not page.has_more:
+        store_cached_field_options(
+            project_id,
+            resource,
+            field_id,
+            type_id,
+            parse_option_map(data),
+        )
+    return page
 
 
 @mcp.tool(

@@ -25,7 +25,7 @@ diff-cover changed lines ≥90% cover `src/` + `evals/` both — incl parser def
 - `tools/` — domain module per resource; `tools/__init__.py` import registers `@mcp.tool`s.
 - `_build_*_payload` = unit-test seam.
 - `tools/_shared/` — `parse.py` (JSON:API→models), `pagination.py`, `fields.py`/`custom_fields.py` (sparse-fieldset + custom-field policy), `cache.py` (`TTLCache`), `sql.py`.
-- `tools/_shared/guard/` — pre-write validation, submodule per domain axis; new guards compose `_http.py` `guarded_get`/`guarded_pages` + `_custom_keys.py` `check_custom_keys`.
+- `tools/_shared/guard/` — pre-write validation, submodule per domain axis; new guards compose `_http.py` `guarded_get`/`guarded_pages` + `_custom_keys.py` `check_custom_keys` + `_revalidate.py` `resolve_with_refetch` — any guard rejecting against cached set route through it, stale entry never reject alone.
 - `tools/guides/` — on-demand data served by `recipes.py`.
 - `middleware.py` — compact tool-arg `ValidationError` to one-line summary (raw Pydantic dump = token waste).
 - `utils/html.py` — Markdown↔HTML, `stamp_block_ids`, `first_anchorless_block`.

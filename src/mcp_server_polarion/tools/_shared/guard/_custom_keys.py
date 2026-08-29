@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 
+from mcp_server_polarion.tools._shared.guard._revalidate import resolve_with_refetch
 from mcp_server_polarion.tools._shared.helpers import format_option_list
 
 
@@ -14,7 +15,6 @@ async def check_custom_keys(  # noqa: PLR0913
     custom_fields: dict[str, object],
     *,
     get_cached: Callable[[], frozenset[str] | None],
-    invalidate: Callable[[], None],
     fetch: Callable[[], Awaitable[frozenset[str]]],
     scope: str,
     discovery_tool: str,
@@ -26,18 +26,17 @@ async def check_custom_keys(  # noqa: PLR0913
     empty schema fail closed with ``RuntimeError(empty_schema_error)`` (ghost
     write unrecoverable).
     """
-    schema = get_cached()
-    fetched_fresh = schema is None
-    if schema is None:
-        schema = await fetch()
 
-    if all(key in schema for key in custom_fields):
+    def known_keys(schema: frozenset[str]) -> bool:
+        return all(key in schema for key in custom_fields)
+
+    schema = await resolve_with_refetch(
+        get_cached=get_cached,
+        fetch=fetch,
+        accepts=known_keys,
+    )
+    if known_keys(schema):
         return
-
-    # Unknown key may be admin-added since caching; refetch once before reject.
-    if not fetched_fresh:
-        invalidate()
-        schema = await fetch()
 
     if not schema:
         raise RuntimeError(empty_schema_error)

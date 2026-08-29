@@ -14,8 +14,16 @@ from mcp_server_polarion.core.exceptions import (
     PolarionNotFoundError,
 )
 from mcp_server_polarion.tools._shared import cache as cache_mod
+from mcp_server_polarion.tools._shared.cache import (
+    get_cached_field_options,
+    store_cached_enum_option_ids,
+    store_cached_field_options,
+)
 from mcp_server_polarion.tools._shared.guard import guard_work_item_enums
 from mcp_server_polarion.tools._shared.guard.enums import (
+    check_custom_field_enum_values,
+    check_enum_values,
+    check_field_value,
     fetch_enum_option_ids,
     fetch_field_options,
 )
@@ -78,7 +86,7 @@ class TestFetchFieldOptions:
         monkeypatch.setattr(cache_mod, "_now", lambda: clock[0])
 
         await fetch_field_options(mock_client, "P", "workitems", "severity", "task")
-        clock[0] += 61.0  # past the 60s TTL
+        clock[0] += cache_mod._ENUM_TTL_SECONDS + 1.0
         await fetch_field_options(mock_client, "P", "workitems", "severity", "task")
 
         assert mock_client.get.await_count == 2
@@ -216,7 +224,7 @@ class TestFetchEnumOptionIds:
         monkeypatch.setattr(cache_mod, "_now", lambda: clock[0])
 
         await fetch_enum_option_ids(mock_client, "P", "hyperlink-role")
-        clock[0] += cache_mod._GUARD_TTL_SECONDS + 1
+        clock[0] += cache_mod._ENUM_TTL_SECONDS + 1
         await fetch_enum_option_ids(mock_client, "P", "hyperlink-role")
 
         assert mock_client.get.await_count == 2
@@ -264,3 +272,181 @@ class TestFetchEnumOptionIds:
         result = await fetch_enum_option_ids(mock_client, "P", "workitem-link-role")
 
         assert result == frozenset({"ok"})
+
+
+class TestStaleCacheRefetch:
+    """Cached option set never reject alone -- one refetch settle it."""
+
+    async def test_stale_field_options_refetched_then_value_accepted(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # Admin added `blocked` after cache entry stored.
+        store_cached_field_options("P", "workitems", "status", "task", {"open": "Open"})
+        mock_client.get.return_value = enum_response(["open", "blocked"])
+
+        await check_field_value(
+            mock_client, "P", "workitems", "status", "task", "blocked"
+        )
+
+        assert mock_client.get.await_count == 1
+
+    async def test_cached_value_hit_skips_refetch(self, mock_client: AsyncMock) -> None:
+        store_cached_field_options("P", "workitems", "status", "task", {"open": "Open"})
+
+        await check_field_value(mock_client, "P", "workitems", "status", "task", "open")
+
+        mock_client.get.assert_not_awaited()
+
+    async def test_empty_cached_options_defer_without_refetch(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # 404 entry: nothing to validate against, so no refetch, no rejection.
+        store_cached_field_options(
+            "P", "workitems", "freeText", "task", {}, not_found=True
+        )
+
+        await check_field_value(
+            mock_client, "P", "workitems", "freeText", "task", "anything"
+        )
+
+        mock_client.get.assert_not_awaited()
+
+    async def test_refetch_still_missing_rejects_with_fresh_options(
+        self, mock_client: AsyncMock
+    ) -> None:
+        store_cached_field_options("P", "workitems", "status", "task", {"stale": ""})
+        mock_client.get.return_value = enum_response(["open"])
+
+        with pytest.raises(ValueError, match="open") as exc_info:
+            await check_field_value(
+                mock_client, "P", "workitems", "status", "task", "ghost"
+            )
+
+        assert "stale" not in str(exc_info.value)
+        assert mock_client.get.await_count == 1
+
+    async def test_fresh_fetch_rejects_without_second_request(
+        self, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.return_value = enum_response(["open"])
+
+        with pytest.raises(ValueError, match="ghost"):
+            await check_field_value(
+                mock_client, "P", "workitems", "status", "task", "ghost"
+            )
+
+        assert mock_client.get.await_count == 1
+
+    async def test_stale_custom_field_options_refetched(
+        self, mock_client: AsyncMock
+    ) -> None:
+        store_cached_field_options("P", "workitems", "asil", "task", {"a": "A"})
+        mock_client.get.return_value = enum_response(["a", "b"])
+
+        await check_custom_field_enum_values(
+            mock_client, "P", "workitems", "task", {"asil": "b"}
+        )
+
+        assert mock_client.get.await_count == 1
+
+    async def test_stale_custom_field_list_value_refetched(
+        self, mock_client: AsyncMock
+    ) -> None:
+        store_cached_field_options("P", "workitems", "platform", "task", {"a": "A"})
+        mock_client.get.return_value = enum_response(["a", "b"])
+
+        await check_custom_field_enum_values(
+            mock_client, "P", "workitems", "task", {"platform": ["a", "b"]}
+        )
+
+        assert mock_client.get.await_count == 1
+
+    async def test_wrong_shaped_custom_value_rejects_without_refetch(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # Refetch cannot turn int into option id -- spend no request.
+        store_cached_field_options("P", "workitems", "asil", "task", {"a": "A"})
+
+        with pytest.raises(ValueError, match="enumeration field but got int"):
+            await check_custom_field_enum_values(
+                mock_client, "P", "workitems", "task", {"asil": 5}
+            )
+
+        mock_client.get.assert_not_awaited()
+
+    async def test_stale_enum_option_ids_refetched_then_role_accepted(
+        self, mock_client: AsyncMock
+    ) -> None:
+        store_cached_enum_option_ids("P", "~/workitem-link-role", frozenset({"parent"}))
+        mock_client.get.return_value = project_enum_response(
+            "workitem-link-role", ["parent", "verifies"]
+        )
+
+        await check_enum_values(
+            mock_client,
+            "P",
+            "workitem-link-role",
+            ["verifies"],
+            field_label="role",
+            discovery_hint="read an existing link.",
+        )
+
+        assert mock_client.get.await_count == 1
+
+    async def test_stale_enum_option_ids_reject_after_refetch(
+        self, mock_client: AsyncMock
+    ) -> None:
+        store_cached_enum_option_ids("P", "~/workitem-link-role", frozenset({"stale"}))
+        mock_client.get.return_value = project_enum_response(
+            "workitem-link-role", ["parent"]
+        )
+
+        with pytest.raises(ValueError, match="parent") as exc_info:
+            await check_enum_values(
+                mock_client,
+                "P",
+                "workitem-link-role",
+                ["ghost"],
+                field_label="role",
+                discovery_hint="read an existing link.",
+            )
+
+        assert "stale" not in str(exc_info.value)
+        assert mock_client.get.await_count == 1
+
+    async def test_refetch_error_blocks_write(self, mock_client: AsyncMock) -> None:
+        # Fail-closed hold through refetch: stale set never serve as fallback.
+        store_cached_field_options("P", "workitems", "status", "task", {"stale": ""})
+        mock_client.get.side_effect = PolarionError("backend down")
+
+        with pytest.raises(RuntimeError, match="Refusing the write"):
+            await check_field_value(
+                mock_client, "P", "workitems", "status", "task", "ghost"
+            )
+
+    async def test_refetch_not_found_defers_instead_of_rejecting(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # Refetch 404 = field no longer enum-typed; defer, not reject on stale.
+        store_cached_field_options("P", "workitems", "status", "task", {"stale": ""})
+        mock_client.get.side_effect = PolarionNotFoundError("nope", status_code=404)
+
+        await check_field_value(
+            mock_client, "P", "workitems", "status", "task", "ghost"
+        )
+
+    async def test_failed_refetch_keeps_cached_options(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # Entry still usable by next caller -- dropping it buys a cold fetch.
+        store_cached_field_options("P", "workitems", "status", "task", {"open": "Open"})
+        mock_client.get.side_effect = PolarionError("backend down")
+
+        with pytest.raises(RuntimeError, match="Refusing the write"):
+            await check_field_value(
+                mock_client, "P", "workitems", "status", "task", "ghost"
+            )
+
+        assert get_cached_field_options("P", "workitems", "status", "task") == {
+            "open": "Open"
+        }

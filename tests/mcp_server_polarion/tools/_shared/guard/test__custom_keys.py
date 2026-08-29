@@ -21,13 +21,11 @@ class TestCheckCustomKeys:
         custom_fields: dict[str, object],
         *,
         get_cached: MagicMock,
-        invalidate: MagicMock,
         fetch: AsyncMock,
     ) -> None:
         await check_custom_keys(
             custom_fields,
             get_cached=get_cached,
-            invalidate=invalidate,
             fetch=fetch,
             scope="scope 'S'",
             discovery_tool="a sample",
@@ -36,63 +34,44 @@ class TestCheckCustomKeys:
 
     async def test_cached_schema_passes_without_fetch(self) -> None:
         get_cached = MagicMock(return_value=frozenset({"risk"}))
-        invalidate = MagicMock()
         fetch = AsyncMock()
 
-        await self._run(
-            {"risk": 1}, get_cached=get_cached, invalidate=invalidate, fetch=fetch
-        )
+        await self._run({"risk": 1}, get_cached=get_cached, fetch=fetch)
 
         fetch.assert_not_awaited()
-        invalidate.assert_not_called()
 
     async def test_cache_miss_fetches_once_and_passes(self) -> None:
         get_cached = MagicMock(return_value=None)
-        invalidate = MagicMock()
         fetch = AsyncMock(return_value=frozenset({"risk"}))
 
-        await self._run(
-            {"risk": 1}, get_cached=get_cached, invalidate=invalidate, fetch=fetch
-        )
+        await self._run({"risk": 1}, get_cached=get_cached, fetch=fetch)
 
         fetch.assert_awaited_once()
-        invalidate.assert_not_called()
 
     async def test_unknown_key_against_cached_schema_refetches_once(self) -> None:
         # Key admin-added since caching: stale cache says unknown, fresh says known.
         get_cached = MagicMock(return_value=frozenset({"risk"}))
-        invalidate = MagicMock()
         fetch = AsyncMock(return_value=frozenset({"risk", "newKey"}))
 
-        await self._run(
-            {"newKey": 1}, get_cached=get_cached, invalidate=invalidate, fetch=fetch
-        )
+        await self._run({"newKey": 1}, get_cached=get_cached, fetch=fetch)
 
-        invalidate.assert_called_once()
         fetch.assert_awaited_once()
 
     async def test_unknown_key_against_fresh_fetch_rejects_without_retry(self) -> None:
         get_cached = MagicMock(return_value=None)
-        invalidate = MagicMock()
         fetch = AsyncMock(return_value=frozenset({"risk"}))
 
         with pytest.raises(ValueError, match=r"\['ghost'\]"):
-            await self._run(
-                {"ghost": 1}, get_cached=get_cached, invalidate=invalidate, fetch=fetch
-            )
+            await self._run({"ghost": 1}, get_cached=get_cached, fetch=fetch)
 
         fetch.assert_awaited_once()
-        invalidate.assert_not_called()
 
     async def test_empty_schema_fails_closed_with_supplied_error(self) -> None:
         get_cached = MagicMock(return_value=None)
-        invalidate = MagicMock()
         fetch = AsyncMock(return_value=frozenset())
 
         with pytest.raises(RuntimeError, match="empty schema for S"):
-            await self._run(
-                {"ghost": 1}, get_cached=get_cached, invalidate=invalidate, fetch=fetch
-            )
+            await self._run({"ghost": 1}, get_cached=get_cached, fetch=fetch)
 
 
 class TestRejectUnknownCustomKeys:

@@ -15,9 +15,7 @@ from mcp_server_polarion.tools._shared.cache import (
     get_cached_field_options,
     get_document_type_custom_keys,
     get_work_item_custom_keys,
-    invalidate_document_type_custom_keys,
     invalidate_documents_cache,
-    invalidate_work_item_custom_keys,
     store_cached_documents,
     store_cached_enum_option_ids,
     store_cached_field_options,
@@ -196,10 +194,10 @@ class TestFieldOptionCache:
         assert get_cached_field_options("P", "documents", "severity", "task") is None
         assert get_cached_field_options("P", "workitems", "status", "task") is None
 
-    def test_expiry_uses_guard_ttl(self, clock: list[float]) -> None:
+    def test_expiry_uses_enum_ttl(self, clock: list[float]) -> None:
         store_cached_field_options("P", "workitems", "severity", "task", {"high": ""})
 
-        clock[0] += cache_mod._GUARD_TTL_SECONDS + 1.0
+        clock[0] += cache_mod._ENUM_TTL_SECONDS + 1.0
         assert get_cached_field_options("P", "workitems", "severity", "task") is None
 
     def test_not_found_entries_use_long_ttl(self, clock: list[float]) -> None:
@@ -207,7 +205,7 @@ class TestFieldOptionCache:
             "P", "workitems", "freeText", "task", {}, not_found=True
         )
 
-        clock[0] += cache_mod._GUARD_TTL_SECONDS + 1.0
+        clock[0] += cache_mod._ENUM_TTL_SECONDS + 1.0
         assert get_cached_field_options("P", "workitems", "freeText", "task") == {}
 
         clock[0] += cache_mod._FIELD_OPTIONS_NOT_FOUND_TTL_SECONDS
@@ -232,15 +230,15 @@ class TestEnumOptionIdCache:
         assert get_cached_enum_option_ids("P", "hyperlink-role") is None
         assert get_cached_enum_option_ids("Q", "workitem-link-role") is None
 
-    def test_expiry_uses_guard_ttl(self, clock: list[float]) -> None:
+    def test_expiry_uses_enum_ttl(self, clock: list[float]) -> None:
         store_cached_enum_option_ids("P", "hyperlink-role", frozenset({"ref_ext"}))
 
-        clock[0] += cache_mod._GUARD_TTL_SECONDS + 1.0
+        clock[0] += cache_mod._ENUM_TTL_SECONDS + 1.0
         assert get_cached_enum_option_ids("P", "hyperlink-role") is None
 
 
 class TestWorkItemCustomKeys:
-    """``store/get/invalidate_work_item_custom_keys`` — type key schema."""
+    """``store/get_work_item_custom_keys`` — type key schema."""
 
     def test_store_then_get(self) -> None:
         store_work_item_custom_keys("P", "task", frozenset({"a", "b"}))
@@ -262,21 +260,15 @@ class TestWorkItemCustomKeys:
     def test_miss_returns_none(self) -> None:
         assert get_work_item_custom_keys("P", "never_sampled") is None
 
-    def test_invalidate(self) -> None:
-        store_work_item_custom_keys("P", "task", frozenset({"a"}))
-        invalidate_work_item_custom_keys("P", "task")
-
-        assert get_work_item_custom_keys("P", "task") is None
-
     def test_expiry(self, clock: list[float]) -> None:
         store_work_item_custom_keys("P", "task", frozenset({"a"}))
 
-        clock[0] += cache_mod._GUARD_TTL_SECONDS + 1.0
+        clock[0] += cache_mod._SCHEMA_TTL_SECONDS + 1.0
         assert get_work_item_custom_keys("P", "task") is None
 
 
 class TestDocumentTypeCustomKeys:
-    """``store/get/invalidate_document_type_custom_keys`` keyed by (project, type)."""
+    """``store/get_document_type_custom_keys`` keyed by (project, type)."""
 
     def test_store_then_get(self) -> None:
         store_document_type_custom_keys(
@@ -299,14 +291,8 @@ class TestDocumentTypeCustomKeys:
         assert get_document_type_custom_keys("P", "systemReqSpecification") is None
         assert get_document_type_custom_keys("Q", "generic") is None
 
-    def test_invalidate(self) -> None:
-        store_document_type_custom_keys("P", "generic", frozenset({"a"}))
-        invalidate_document_type_custom_keys("P", "generic")
-
-        assert get_document_type_custom_keys("P", "generic") is None
-
     def test_expiry(self, clock: list[float]) -> None:
         store_document_type_custom_keys("P", "generic", frozenset({"a"}))
 
-        clock[0] += cache_mod._GUARD_TTL_SECONDS + 1.0
+        clock[0] += cache_mod._SCHEMA_TTL_SECONDS + 1.0
         assert get_document_type_custom_keys("P", "generic") is None

@@ -8,7 +8,8 @@ type; ``enum_*`` = ``/projects/{p}/enumerations/``, scoped per enum name.
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
+from functools import partial
 
 from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.core.exceptions import PolarionNotFoundError
@@ -23,10 +24,12 @@ from mcp_server_polarion.tools._shared.guard._http import (
     GUARD_PAGE_SIZE,
     guarded_get,
 )
+from mcp_server_polarion.tools._shared.guard._revalidate import resolve_with_refetch
 from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
     format_option_list,
 )
+from mcp_server_polarion.tools._shared.parse import parse_option_map
 
 logger = logging.getLogger("mcp_server_polarion.tools._shared.guard.enums")
 
@@ -53,12 +56,29 @@ async def fetch_field_options(
     cached = get_cached_field_options(project_id, resource, field_id, type_id)
     if cached is not None:
         return cached
+    return await _fetch_field_options_uncached(
+        client, project_id, resource, field_id, type_id
+    )
 
+
+async def _fetch_field_options_uncached(
+    client: PolarionClient,
+    project_id: str,
+    resource: Resource,
+    field_id: str,
+    type_id: str,
+) -> Mapping[str, str]:
+    """Request + parse + store, bypassing any cached entry — refetch seam for
+    :func:`resolve_with_refetch`.
+    """
     path = (
         f"/projects/{encode_path_segment(project_id)}"
         f"/{resource}/fields/{encode_path_segment(field_id)}"
         "/actions/getAvailableOptions"
     )
+    # Page 1 only: field with over GUARD_PAGE_SIZE options cache truncated and
+    # reject the rest, refetch cannot heal that. Accepted -- paging every probe
+    # cost one request per page at the client's pace.
     params: dict[str, str | int] = {
         "type": type_id,
         "page[size]": GUARD_PAGE_SIZE,
@@ -85,19 +105,31 @@ async def fetch_field_options(
         )
         return {}
 
-    data = response.get("data", [])
-    options: dict[str, str] = {}
-    if isinstance(data, list):
-        for entry in data:
-            if not isinstance(entry, dict):
-                continue
-            opt_id = entry.get("id")
-            if isinstance(opt_id, str) and opt_id:
-                name = entry.get("name")
-                options[opt_id] = name if isinstance(name, str) else ""
-
+    options = parse_option_map(response.get("data", []))
     store_cached_field_options(project_id, resource, field_id, type_id, options)
     return options
+
+
+async def _options_for_check(  # noqa: PLR0913
+    client: PolarionClient,
+    project_id: str,
+    resource: Resource,
+    field_id: str,
+    type_id: str,
+    accepts: Callable[[Mapping[str, str]], bool],
+) -> Mapping[str, str]:
+    """Option set to judge against: stale cache refetch once before it may
+    reject, so admin-added option never block a legitimate write.
+    """
+    return await resolve_with_refetch(
+        get_cached=lambda: get_cached_field_options(
+            project_id, resource, field_id, type_id
+        ),
+        fetch=lambda: _fetch_field_options_uncached(
+            client, project_id, resource, field_id, type_id
+        ),
+        accepts=accepts,
+    )
 
 
 async def check_field_value(  # noqa: PLR0913
@@ -108,9 +140,15 @@ async def check_field_value(  # noqa: PLR0913
     type_id: str,
     value: str,
 ) -> None:
-    options = await fetch_field_options(client, project_id, resource, field_id, type_id)
-    # Empty mapping = successful no-options fetch; defer rather than false-positive.
-    if not options or value in options:
+    def accepts(known: Mapping[str, str]) -> bool:
+        # Empty mapping = successful no-options fetch; defer rather than
+        # false-positive.
+        return not known or value in known
+
+    options = await _options_for_check(
+        client, project_id, resource, field_id, type_id, accepts
+    )
+    if accepts(options):
         return
     raise ValueError(
         f"{field_id}='{value}' is not a valid {field_id} option in "
@@ -131,14 +169,32 @@ async def fetch_enum_option_ids(
     (link/hyperlink role, testrun type/status). ``context`` = enumeration
     context path segment (``testing`` for testrun enums; ``~`` does NOT
     resolve them). Response ``data`` = dict (not list), options at
-    ``data.attributes.options[].id``. Cached for the default guard TTL
+    ``data.attributes.options[].id``. Cached for ``_ENUM_TTL_SECONDS``
     (404 included); fail-closed.
     """
-    cache_key = f"{context}/{enum_name}"
-    cached = get_cached_enum_option_ids(project_id, cache_key)
+    cached = get_cached_enum_option_ids(project_id, _enum_cache_key(context, enum_name))
     if cached is not None:
         return cached
+    return await _fetch_enum_option_ids_uncached(client, project_id, enum_name, context)
 
+
+def _enum_cache_key(context: str, enum_name: str) -> str:
+    """Cache key folding both path segments — same enum name resolve to
+    different option sets per context.
+    """
+    return f"{context}/{enum_name}"
+
+
+async def _fetch_enum_option_ids_uncached(
+    client: PolarionClient,
+    project_id: str,
+    enum_name: str,
+    context: str,
+) -> frozenset[str]:
+    """Request + parse + store, bypassing any cached entry — refetch seam for
+    :func:`resolve_with_refetch`.
+    """
+    cache_key = _enum_cache_key(context, enum_name)
     path = (
         f"/projects/{encode_path_segment(project_id)}"
         f"/enumerations/{encode_path_segment(context)}"
@@ -195,20 +251,29 @@ async def check_enum_values(  # noqa: PLR0913
     if not requested:
         return
 
-    option_ids = await fetch_enum_option_ids(client, project_id, enum_name, context)
-    # Empty set = no options / enum unsupported; defer.
-    if not option_ids:
+    def accepts(known: frozenset[str]) -> bool:
+        # Empty set = no options / enum unsupported; defer.
+        return not known or requested <= known
+
+    cache_key = _enum_cache_key(context, enum_name)
+    option_ids = await resolve_with_refetch(
+        get_cached=lambda: get_cached_enum_option_ids(project_id, cache_key),
+        fetch=lambda: _fetch_enum_option_ids_uncached(
+            client, project_id, enum_name, context
+        ),
+        accepts=accepts,
+    )
+    if accepts(option_ids):
         return
 
     unknown = sorted(requested - option_ids)
-    if unknown:
-        raise ValueError(
-            f"{field_label} id(s) {format_option_list(unknown)} are not valid "
-            f"in project '{project_id}'. "
-            f"Valid options: {format_option_list(option_ids)}. "
-            f"An unknown {field_label} ghosts silently (never matches Lucene) "
-            f"-- {discovery_hint}"
-        )
+    raise ValueError(
+        f"{field_label} id(s) {format_option_list(unknown)} are not valid "
+        f"in project '{project_id}'. "
+        f"Valid options: {format_option_list(option_ids)}. "
+        f"An unknown {field_label} ghosts silently (never matches Lucene) "
+        f"-- {discovery_hint}"
+    )
 
 
 def _bad_custom_enum_value(  # noqa: PLR0913
@@ -236,6 +301,19 @@ def _bad_custom_enum_value(  # noqa: PLR0913
     )
 
 
+def _custom_value_known(value: object, options: Mapping[str, str]) -> bool:
+    """Whether *value* already satisfy *options*. Shape error count as known —
+    refetch cannot turn a non-string into a valid option id.
+    """
+    if not options:
+        return True
+    if isinstance(value, str):
+        return value in options
+    if isinstance(value, list):
+        return all(element in options for element in value if isinstance(element, str))
+    return True
+
+
 async def check_custom_field_enum_values(
     client: PolarionClient,
     project_id: str,
@@ -255,8 +333,13 @@ async def check_custom_field_enum_values(
         # Payload builders drop empty values — nothing to validate, skip probe.
         if value is None or value in ("", []):
             continue
-        options = await fetch_field_options(
-            client, project_id, resource, field_id, type_id
+        options = await _options_for_check(
+            client,
+            project_id,
+            resource,
+            field_id,
+            type_id,
+            partial(_custom_value_known, value),
         )
         if not options:
             continue

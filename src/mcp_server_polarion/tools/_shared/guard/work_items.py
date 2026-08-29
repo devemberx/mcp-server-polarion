@@ -10,7 +10,6 @@ from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.core.exceptions import PolarionNotFoundError
 from mcp_server_polarion.tools._shared.cache import (
     get_work_item_custom_keys,
-    invalidate_work_item_custom_keys,
     store_work_item_custom_keys,
 )
 from mcp_server_polarion.tools._shared.custom_fields import (
@@ -116,7 +115,6 @@ async def _check_work_item_custom_keys(
     await check_custom_keys(
         custom_fields,
         get_cached=lambda: get_work_item_custom_keys(project_id, work_item_type),
-        invalidate=lambda: invalidate_work_item_custom_keys(project_id, work_item_type),
         fetch=lambda: _fetch_work_item_type_custom_keys(
             client, project_id, work_item_type
         ),

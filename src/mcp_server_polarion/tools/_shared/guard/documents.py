@@ -8,7 +8,6 @@ from collections.abc import Iterable, Sequence
 from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.tools._shared.cache import (
     get_document_type_custom_keys,
-    invalidate_document_type_custom_keys,
     store_document_type_custom_keys,
 )
 from mcp_server_polarion.tools._shared.custom_fields import (
@@ -158,9 +157,6 @@ async def _check_document_custom_keys(
     await check_custom_keys(
         custom_fields,
         get_cached=lambda: get_document_type_custom_keys(project_id, document_type),
-        invalidate=lambda: invalidate_document_type_custom_keys(
-            project_id, document_type
-        ),
         fetch=lambda: _fetch_document_type_custom_keys(
             client, project_id, document_type
         ),
