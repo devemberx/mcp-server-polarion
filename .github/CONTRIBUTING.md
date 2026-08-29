@@ -4,7 +4,7 @@ Thanks for taking the time to contribute. Every bug report, doc fix, and pull re
 
 This guide walks you through the contributor's path: **find something to work on → set up your
 environment → make the change → open a pull request.** For the codebase architecture, tool-design
-conventions, and cross-cutting Polarion API gotchas, see [CLAUDE.md](../CLAUDE.md) — read it before
+conventions, and cross-cutting Polarion API gotchas, see [AGENTS.md](../AGENTS.md) — read it before
 touching `tools/` or `core/`. Per-domain API contracts live in
 [docs/polarion-api/](../docs/polarion-api/); read the one for the domain you are changing.
 
@@ -72,7 +72,7 @@ git config core.hooksPath .githooks
 
    One topic per branch; split unrelated work apart.
 
-2. **Make your change.** Follow the rules in [CLAUDE.md](../CLAUDE.md) — strict async, full type
+2. **Make your change.** Follow the rules in [AGENTS.md](../AGENTS.md) — strict async, full type
    annotations, log to stderr (never `print()`), and keep tool docstrings in sync with their models.
 
 3. **Add tests.** `tests/` mirrors the source tree one-to-one. For write tools, verify the
