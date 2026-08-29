@@ -2993,7 +2993,7 @@ class TestUpdateDocumentFieldValidation:
 
 class TestUpdateDocumentPitfallDocumentation:
     """Lock macro-div pitfall into ``update_document.__doc__`` — reproduced on
-    live testdrive server, user-facing (other MCP hosts never load CLAUDE.md).
+    live testdrive server, user-facing (other MCP hosts never load AGENTS.md).
     Anchorless-block pitfall intentionally absent: ids now auto-stamped.
     """
 
