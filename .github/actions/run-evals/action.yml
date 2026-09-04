@@ -13,7 +13,11 @@ inputs:
   model:
     description: LiteLLM model id (sets EVAL_MODEL).
     required: false
-    default: openai/gpt-4o-mini
+    default: openai/gpt-5.6-luna
+  reasoning-effort:
+    description: Reasoning depth for the agent under test (sets EVAL_REASONING_EFFORT).
+    required: false
+    default: medium
   runs:
     description: Runs per case (sets EVAL_RUNS).
     required: false
@@ -41,6 +45,7 @@ runs:
       env:
         OPENAI_API_KEY: ${{ inputs.openai-api-key }}
         EVAL_MODEL: ${{ inputs.model }}
+        EVAL_REASONING_EFFORT: ${{ inputs.reasoning-effort }}
         EVAL_RUNS: ${{ inputs.runs }}
       run: uv run python -m evals.run --category "${{ inputs.category }}"
 
