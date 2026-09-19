@@ -31,7 +31,7 @@ from .model import build_model
 # _CASE_TIMEOUT_SECONDS = wall-clock ceiling on invoke_async.
 _MAX_CYCLES: int = max(1, int(os.environ.get("EVAL_MAX_CYCLES", "10")))
 _CASE_TIMEOUT_SECONDS: float = max(
-    1.0, float(os.environ.get("EVAL_CASE_TIMEOUT", "120"))
+    1.0, float(os.environ.get("EVAL_CASE_TIMEOUT", "600"))
 )
 
 # Deliberately generic: must NOT teach case rules, else eval test prompt

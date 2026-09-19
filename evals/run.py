@@ -38,7 +38,7 @@ from evals.cases.orchestration import CASES as ORCHESTRATION_CASES
 from evals.cases.safety import CASES as SAFETY_CASES
 from evals.cases.triggers import CASES as TRIGGER_CASES
 from evals.evaluators.dispatch import CheckDispatchEvaluator
-from evals.harness.model import resolve_model_id
+from evals.harness.model import resolve_model_id, resolve_reasoning_effort
 from evals.harness.runner import AGENT_ERROR_PREFIX, run_case
 
 _REPORT_DIR = Path(__file__).parent / "reports"
@@ -169,9 +169,10 @@ def main() -> int:
 
     evaluator = CheckDispatchEvaluator()
     model = resolve_model_id()
+    reasoning_effort = resolve_reasoning_effort()
     print(
         f"Eval gate · category={args.category} · model={model} · "
-        f"runs={args.runs} · cases={len(cases)}\n"
+        f"effort={reasoning_effort} · runs={args.runs} · cases={len(cases)}\n"
     )
 
     results = [_run_case_n_times(c, args.runs, evaluator) for c in cases]
@@ -185,13 +186,15 @@ def main() -> int:
     report = {
         "git_sha": _git_sha(),
         "model": model,
+        "reasoning_effort": reasoning_effort,
         "runs": args.runs,
         "gate_passed": gate_passed,
         "cases": results,
     }
     _REPORT_DIR.mkdir(exist_ok=True)
-    model_slug = re.sub(r"[^A-Za-z0-9]+", "-", model).strip("-")
-    report_path = _REPORT_DIR / f"gate-{report['git_sha']}-{model_slug}.json"
+    # Effort in filename: same sha + model at another effort = other verdict.
+    run_slug = re.sub(r"[^A-Za-z0-9]+", "-", f"{model}-{reasoning_effort}").strip("-")
+    report_path = _REPORT_DIR / f"gate-{report['git_sha']}-{run_slug}.json"
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
 
     print("\n=== Gate summary ===")

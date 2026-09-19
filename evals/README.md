@@ -57,31 +57,44 @@ report is written to `evals/reports/gate-<sha>-<model>.json` (gitignored).
 
 ## Model
 
-Switch with `EVAL_MODEL` (one LiteLLM adapter serves cloud and local):
+The gate runs `openai/gpt-5.6-luna` at reasoning effort `medium`; both are
+switchable through the LiteLLM adapter, and both need `OPENAI_API_KEY`.
 
 ```bash
-EVAL_MODEL=openai/gpt-4o-mini uv run python -m evals.run         # cloud (CI default), needs OPENAI_API_KEY
-EVAL_MODEL=ollama_chat/qwen3.5:9b-mlx uv run python -m evals.run # local, free; set EVAL_MODEL_BASE_URL if not localhost:11434
+uv run python -m evals.run                                     # defaults above
+EVAL_MODEL=openai/gpt-5.6-terra uv run python -m evals.run     # other model
+EVAL_REASONING_EFFORT=high uv run python -m evals.run          # other effort
 ```
 
-`temperature` is pinned to 0 and `parallel_tool_calls` off (gpt-4o-mini can emit
-the same call twice in one parallel block) to keep the gate stable.
+Use the `-luna` id, not the bare `openai/gpt-5.6` alias — that alias routes to
+the Sol tier.
+
+`reasoning_effort` is always sent explicitly, for two reasons: GPT-5.6 rejects
+function tools on `/v1/chat/completions`, and LiteLLM only bridges the call to
+the Responses API when the parameter is present. `temperature` is not sent at
+all (the gpt-5 family accepts `1` only), so gate stability rests on the fixed
+effort plus `parallel_tool_calls` off — a model can otherwise emit the same call
+twice in one parallel block. `drop_params` is deliberately not set: a silently
+dropped `reasoning_effort` would run the whole gate unreasoned and still report
+a pass.
 
 ## Limits
 
-Local models can loop; cloud providers return 429 when TPM/RPM is exhausted.
+An agent can loop; cloud providers return 429 when TPM/RPM is exhausted.
 Each case is bounded fail-closed (via `<agent-error: ...>`).
 
 | Env var | Default | Cap |
 | --- | --- | --- |
 | `EVAL_MAX_CYCLES` | `10` | Model calls per case. |
-| `EVAL_CASE_TIMEOUT` | `120` | Wall-clock seconds per case. |
+| `EVAL_CASE_TIMEOUT` | `600` | Wall-clock seconds per case. |
 | `EVAL_NUM_RETRIES` | `10` | LiteLLM retries; OpenAI SDK sleeps `min(0.5·2ⁿ, 8)s` ±25 % jitter, or honours `Retry-After`. |
-| `EVAL_LLM_TIMEOUT` | `60` | Wall-clock seconds per model call. |
+| `EVAL_LLM_TIMEOUT` | `180` | Wall-clock seconds per model call. |
+| `EVAL_REASONING_EFFORT` | `medium` | Reasoning depth; higher raises latency and output-token cost. |
 
-`EVAL_LLM_TIMEOUT` is per attempt, so worst-case per model call is
+The timeout defaults assume reasoning at `medium` — a raised effort needs them
+raised too. `EVAL_LLM_TIMEOUT` is per attempt, so worst-case per model call is
 `EVAL_NUM_RETRIES × EVAL_LLM_TIMEOUT`. Raise `EVAL_CASE_TIMEOUT` in lockstep when
-bumping either (and for slow CPU inference), or the case fail-closes first.
+bumping either, or the case fail-closes first.
 
 ## Release pipeline
 
@@ -89,7 +102,8 @@ bumping either (and for slow CPU inference), or the case fail-closes first.
   calls [`publish-gate.yml`](../.github/workflows/publish-gate.yml) on tag push;
   every later publish job depends on it.
 - **On-demand** — [`evals-on-demand.yml`](../.github/workflows/evals-on-demand.yml)
-  is `workflow_dispatch`: pick a `model` and `runs` from the Actions tab before tagging.
+  is `workflow_dispatch`: pick a `model`, `reasoning_effort` and `runs` from the
+  Actions tab before tagging.
 
 Both read the **`OPENAI_API_KEY` repository secret**; if it is missing the job
 fails and the release is blocked (fail-closed).
