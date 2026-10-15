@@ -16,8 +16,18 @@ on:
           - orchestration
       model:
         description: "LiteLLM model id (EVAL_MODEL)"
-        default: "openai/gpt-4o-mini"
+        default: "openai/gpt-5.6-luna"
         type: string
+      reasoning_effort:
+        description: "Reasoning depth (EVAL_REASONING_EFFORT)"
+        default: "medium"
+        type: choice
+        options:
+          - none
+          - low
+          - medium
+          - high
+          - xhigh
       runs:
         description: "Runs per case (EVAL_RUNS)"
         default: "10"
@@ -26,13 +36,15 @@ on:
 jobs:
   evals:
     runs-on: ubuntu-latest
-    # category=all x runs=10 ~ 95 min healthy; hung run die here, not at 360.
-    timeout-minutes: 180
+    # 95 min figure was gpt-4o-mini; reasoning runs longer and no measured
+    # baseline yet, so sit just under the 360 default until one full run land.
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/run-evals
         with:
           category: ${{ inputs.category }}
           model: ${{ inputs.model }}
+          reasoning-effort: ${{ inputs.reasoning_effort }}
           runs: ${{ inputs.runs }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}

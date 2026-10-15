@@ -59,7 +59,7 @@ Per param, confirm schema description text matches what you intend to edit. Para
 
 **Global prep**
 1. Work on branch off `main` (e.g. `chore/shrink-mcp-tool-docs`) — never run loop on `main`. Each adopted GREEN committed, so per-cut rollback just `git restore <file>` (or `git checkout -- <file>`) back to that commit — no stash juggling; working tree only ever holds in-flight cut. Whole session lands as one squashed commit/PR.
-2. **Match publish gate's model, or don't run.** Failure boundary model-specific, so optimize against *exact* model publish gate uses — `EVAL_MODEL`'s default `openai/gpt-4o-mini` (CI doesn't override). Needs `OPENAI_API_KEY`; if unset, **STOP and report** — never substitute local/ollama model, boundary found on different model REDs real gate. Then assume branch starts GREEN (released tip), run **one Fast gate** to confirm harness runs and green — not full Confirm; re-proving already-green tip with 10 runs wasted cost. Fast RED at entry = pre-existing breakage → STOP (not yours to fix here). That first GREEN your baseline; checkpoint it.
+2. **Match publish gate's model AND effort, or don't run.** Failure boundary model-specific, so optimize against *exact* model publish gate uses — `EVAL_MODEL`'s default `openai/gpt-5.6-luna` at `EVAL_REASONING_EFFORT`'s default `medium` (CI doesn't override). Needs `OPENAI_API_KEY`; if unset, **STOP and report** — never substitute another model or effort, boundary found elsewhere REDs real gate. Then assume branch starts GREEN (released tip), run **one Fast gate** to confirm harness runs and green — not full Confirm; re-proving already-green tip with 10 runs wasted cost. Fast RED at entry = pre-existing breakage → STOP (not yours to fix here). That first GREEN your baseline; checkpoint it.
 3. Step-0 dump + baseline chars.
 4. Sort tools by LLM-facing chars **descending**.
 
@@ -92,7 +92,7 @@ Per param, confirm schema description text matches what you intend to edit. Para
 
 ## Gates
 
-**Preconditions** (once): `uv sync --group evals` — `strands_evals` not in default env. Eval agent's model from `EVAL_MODEL` (default `openai/gpt-4o-mini`), publish gate uses that default — so **leave at default, provide `OPENAI_API_KEY`**. Optimizing against different model (e.g. local ollama) unsound vs gate (see Global prep 2). Run eval/pytest from CWD outside repo when repo `.env` carries `OPENAI_API_KEY` (shadows `PolarionConfig`); `cd /tmp && uv run --project <repo> ...` avoids it.
+**Preconditions** (once): `uv sync --group evals` — `strands_evals` not in default env. Eval agent's model from `EVAL_MODEL` (default `openai/gpt-5.6-luna`) + `EVAL_REASONING_EFFORT` (default `medium`), publish gate uses those defaults — so **leave both at default, provide `OPENAI_API_KEY`**. Optimizing against different model or effort unsound vs gate (see Global prep 2). Run eval/pytest from CWD outside repo when repo `.env` carries `OPENAI_API_KEY` (shadows `PolarionConfig`); `cd /tmp && uv run --project <repo> ...` avoids it.
 
 **Fast gate** (cheap triage after each cut):
 ```bash
