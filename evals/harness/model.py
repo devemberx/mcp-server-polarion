@@ -1,8 +1,10 @@
 """Eval-agent model factory: one LiteLLM adapter, model switched via
 ``EVAL_MODEL``, reasoning depth via ``EVAL_REASONING_EFFORT``.
-``reasoning_effort`` ship explicit always: gpt-5.6 reject function tools on
-``/v1/chat/completions``, and litellm bridge to the Responses API only when the
-param is present. ``parallel_tool_calls=False`` keep gate stable;
+``reasoning_effort`` ship explicit always: gpt-6-luna serve function tools on
+``/v1/chat/completions`` only at effort ``none``, so reasoning run must ride the
+Responses API. Explicit effort = litellm bridge on any OpenAI base (unset bridge
+only on hosts litellm recognise as OpenAI) + effort pinned vs server-default
+drift. ``parallel_tool_calls=False`` keep gate stable;
 ``EVAL_NUM_RETRIES``/``EVAL_LLM_TIMEOUT`` absorb transient 429s.
 """
 
@@ -12,8 +14,8 @@ import os
 
 from strands.models.litellm import LiteLLMModel
 
-# Luna = cheapest gpt-5.6 tier. Bare `gpt-5.6` alias route to Sol instead.
-DEFAULT_MODEL = "openai/gpt-5.6-luna"
+# Luna = gpt-6 high-volume tier.
+DEFAULT_MODEL = "openai/gpt-6-luna"
 DEFAULT_REASONING_EFFORT = "medium"
 
 

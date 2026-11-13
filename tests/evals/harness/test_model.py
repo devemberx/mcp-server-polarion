@@ -25,12 +25,13 @@ class TestResolveModelId:
         assert resolve_model_id() == DEFAULT_MODEL
 
     def test_default_is_luna_tier(self) -> None:
-        # Bare `openai/gpt-5.6` route to Sol -- gate price/behaviour differ.
-        assert DEFAULT_MODEL == "openai/gpt-5.6-luna"
+        # Gate verdict + shrink-mcp-tool-docs boundaries model-specific;
+        # change = re-baseline.
+        assert DEFAULT_MODEL == "openai/gpt-6-luna"
 
     def test_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("EVAL_MODEL", "openai/gpt-5.6-terra")
-        assert resolve_model_id() == "openai/gpt-5.6-terra"
+        monkeypatch.setenv("EVAL_MODEL", "openai/gpt-6.1-sol")
+        assert resolve_model_id() == "openai/gpt-6.1-sol"
 
 
 class TestResolveReasoningEffort:
@@ -56,15 +57,15 @@ class TestBuildModel:
     def test_reasoning_effort_always_sent(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # Explicit effort = litellm Responses-API bridge trigger; absent param
-        # send tools over chat-completions, which gpt-5.6 reject.
+        # Explicit effort = Responses-API bridge on any OpenAI base; chat
+        # completions reject function tools while gpt-6-luna reason.
         monkeypatch.setenv("EVAL_REASONING_EFFORT", "low")
         assert build_model().get_config()["params"]["reasoning_effort"] == "low"
 
     def test_no_temperature_and_no_drop_params(self) -> None:
         params = build_model().get_config()["params"]
-        # gpt-5 family accept temperature=1 only; drop_params would mask a
-        # silently discarded reasoning_effort.
+        # gpt-6 reject temperature unless effort none; drop_params would mask
+        # a silently discarded reasoning_effort.
         assert "temperature" not in params
         assert "drop_params" not in params
 
@@ -87,26 +88,33 @@ class TestBuildModel:
 class TestResponsesApiBridge:
     """Upstream-regression alarm: litellm unpinned, so routing can shift.
 
-    gpt-5.6 + function tools 400 on ``/v1/chat/completions``; litellm dodge it
-    by bridging to the Responses API, but only when ``reasoning_effort`` ride
-    along. Chat routing here = whole gate 400s at run time.
+    gpt-6-luna + function tools 400 on ``/v1/chat/completions`` unless effort
+    ``none``; litellm dodge it by bridging to the Responses API. Chat routing
+    here = whole gate 400s at run time.
     """
 
     @staticmethod
-    def _bridge_mode(reasoning_effort: str | None) -> str | None:
+    def _bridge_mode(reasoning_effort: str, api_base: str | None = None) -> str | None:
         provider, _, model = DEFAULT_MODEL.partition("/")
         model_info, _ = responses_api_bridge_check(
             model=model,
             custom_llm_provider=provider,
             tools=[{"type": "function", "function": {"name": "list_projects"}}],
             reasoning_effort=reasoning_effort,
+            api_base=api_base,
         )
         mode = model_info.get("mode")
         return str(mode) if mode is not None else None
 
-    def test_default_model_with_effort_routes_to_responses(self) -> None:
-        assert self._bridge_mode(DEFAULT_REASONING_EFFORT) == "responses"
+    # Mirror reasoning efforts evals-on-demand.yml offer, minus chat-safe none.
+    @pytest.mark.parametrize("effort", ["low", "medium", "high", "xhigh", "max"])
+    def test_reasoning_effort_routes_to_responses(self, effort: str) -> None:
+        assert self._bridge_mode(effort) == "responses"
 
-    def test_effortless_call_stays_on_chat(self) -> None:
-        # Pin why build_model never omit param.
-        assert self._bridge_mode(None) == "chat"
+    def test_explicit_effort_bridges_custom_openai_base(self) -> None:
+        # Unset effort bridge only on hosts litellm recognise as OpenAI --
+        # why build_model never omit param.
+        mode = self._bridge_mode(
+            DEFAULT_REASONING_EFFORT, api_base="https://llm-proxy.example.com/v1"
+        )
+        assert mode == "responses"

@@ -16,7 +16,7 @@ on:
           - orchestration
       model:
         description: "LiteLLM model id (EVAL_MODEL)"
-        default: "openai/gpt-5.6-luna"
+        default: "openai/gpt-6-luna"
         type: string
       reasoning_effort:
         description: "Reasoning depth (EVAL_REASONING_EFFORT)"
@@ -28,6 +28,7 @@ on:
           - medium
           - high
           - xhigh
+          - max
       runs:
         description: "Runs per case (EVAL_RUNS)"
         default: "10"

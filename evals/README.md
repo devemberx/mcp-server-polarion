@@ -53,30 +53,29 @@ uv run python -m evals.run --case SAFE-READONLY --runs 1    # one case, once (sm
 ```
 
 The gate fails (exit 1) if any case falls below its `min_pass_rate`. A JSON
-report is written to `evals/reports/gate-<sha>-<model>.json` (gitignored).
+report is written to `evals/reports/gate-<sha>-<model>-<effort>.json` (gitignored).
 
 ## Model
 
-The gate runs `openai/gpt-5.6-luna` at reasoning effort `medium`; both are
+The gate runs `openai/gpt-6-luna` at reasoning effort `medium`; both are
 switchable through the LiteLLM adapter, and both need `OPENAI_API_KEY`.
 
 ```bash
 uv run python -m evals.run                                     # defaults above
-EVAL_MODEL=openai/gpt-5.6-terra uv run python -m evals.run     # other model
+EVAL_MODEL=openai/gpt-6.1-sol uv run python -m evals.run       # other model
 EVAL_REASONING_EFFORT=high uv run python -m evals.run          # other effort
 ```
 
-Use the `-luna` id, not the bare `openai/gpt-5.6` alias — that alias routes to
-the Sol tier.
-
-`reasoning_effort` is always sent explicitly, for two reasons: GPT-5.6 rejects
-function tools on `/v1/chat/completions`, and LiteLLM only bridges the call to
-the Responses API when the parameter is present. `temperature` is not sent at
-all (the gpt-5 family accepts `1` only), so gate stability rests on the fixed
-effort plus `parallel_tool_calls` off — a model can otherwise emit the same call
-twice in one parallel block. `drop_params` is deliberately not set: a silently
-dropped `reasoning_effort` would run the whole gate unreasoned and still report
-a pass.
+`reasoning_effort` is always sent explicitly. GPT-6 Luna serves function tools
+on `/v1/chat/completions` only at effort `none`, so a reasoning run has to go
+through the Responses API. LiteLLM (>= 1.101.0) bridges the call there whenever
+an effort is given; with the parameter unset it bridges only on hosts it
+recognises as OpenAI, and the effort would follow the server default.
+`temperature` is not sent at all (GPT-6 rejects it unless effort is `none`), so
+gate stability rests on the fixed effort plus `parallel_tool_calls` off — a
+model can otherwise emit the same call twice in one parallel block.
+`drop_params` is deliberately not set: a silently dropped `reasoning_effort`
+would run the whole gate unreasoned and still report a pass.
 
 ## Limits
 

@@ -164,7 +164,7 @@ class TestMain:
                 "failures": [],
             },
         )
-        monkeypatch.setattr(run, "resolve_model_id", lambda: "openai/gpt-5.6-luna")
+        monkeypatch.setattr(run, "resolve_model_id", lambda: "openai/gpt-6-luna")
         monkeypatch.setattr(run, "resolve_reasoning_effort", lambda: "high")
         monkeypatch.setattr(run, "_git_sha", lambda: "abc123")
         monkeypatch.setattr(run, "_REPORT_DIR", tmp_path)
@@ -175,11 +175,11 @@ class TestMain:
         assert run.main() == 0
         # Effort in filename: same sha + model at other effort must not clobber.
         report = json.loads(
-            (tmp_path / "gate-abc123-openai-gpt-5-6-luna-high.json").read_text(
+            (tmp_path / "gate-abc123-openai-gpt-6-luna-high.json").read_text(
                 encoding="utf-8"
             )
         )
-        assert report["model"] == "openai/gpt-5.6-luna"
+        assert report["model"] == "openai/gpt-6-luna"
         assert report["reasoning_effort"] == "high"
 
     def test_list_flag_prints_catalog_without_running(

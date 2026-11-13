@@ -45,10 +45,11 @@ dev = [
 evals = [
     "strands-agents[litellm]",
     "strands-agents-evals",
-    # Upper pin dropped with the gpt-4o-mini gate: that 1.89.x regression was
-    # 4o-mini tool-calling only. gpt-5.6 need the Responses-API bridge, which
-    # keeps moving upstream -- test_model.py alarm catch a routing regression.
-    "litellm>=1.83.10",
+    # Floor 1.101.0 = first release treat gpt-6-* as reasoning family; older
+    # drop reasoning_effort for gpt-6-luna. No upper pin: 1.89.x regression was
+    # gpt-4o-mini only. Responses-API bridge keep moving upstream --
+    # test_model.py alarm catch a routing regression.
+    "litellm>=1.101.0",
 ]
 
 [build-system]
