@@ -1,6 +1,6 @@
 # AGENTS.md
 
-MCP server: AI read/write Polarion ALM. FastMCP 3.0, strict async, fully typed.
+MCP server: AI read/write Polarion ALM. FastMCP 4 (MCP SDK v2), strict async, fully typed.
 
 ## Commands
 
