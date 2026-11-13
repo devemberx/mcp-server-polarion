@@ -9,9 +9,10 @@ jobs:
     # Trigger gate (zero tolerance): right tool fires for the request. Cheapest,
     # so runs first.
     runs-on: ubuntu-latest
-    # Largest category (triggers x10) ~ 50 min healthy; hung run die at 90,
-    # not default 360.
-    timeout-minutes: 90
+    # Largest category (triggers x10) was ~50 min on gpt-4o-mini; reasoning
+    # medium run longer, so cap 180 until a full run measure it. Hung run die
+    # here, not at default 360.
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/run-evals
@@ -23,7 +24,7 @@ jobs:
     # Safety gate (zero tolerance): destructive/corrupting footguns never happen.
     needs: evals-triggers
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/run-evals
@@ -35,7 +36,7 @@ jobs:
     # Efficiency gate: the correct answer reached without waste.
     needs: evals-safety
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/run-evals
@@ -47,7 +48,7 @@ jobs:
     # Orchestration gate: correct ordered multi-step path + id threading.
     needs: evals-efficiency
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/run-evals
