@@ -81,12 +81,14 @@ jobs:
             --format requirements-txt > runtime-requirements.txt
 
       - name: Scan dependencies for known CVEs (osv-scanner)
+        # --no-resolve: export already = full pinned closure; deps.dev re-resolve add nothing,
+        # and exit 127 on any version deps.dev not yet indexed (fresh PyPI release).
         run: |
           set -o pipefail
           curl -sSL -o osv-scanner \
             https://github.com/google/osv-scanner/releases/download/v2.3.8/osv-scanner_linux_amd64
           chmod +x osv-scanner
-          ./osv-scanner scan source \
+          ./osv-scanner scan source --no-resolve \
             --lockfile=requirements.txt:runtime-requirements.txt \
             | tee osv-result.txt
 
