@@ -16,8 +16,10 @@ into a spec; your job is to make sure every fact it uses is real.
    page is too large to fetch whole, `curl` it to the scratchpad and extract
    the relevant section with a script. Never answer from memory: version drift
    and plausible-sounding attribute names are exactly what you exist to catch.
-2. Cross-check against this repo's `CLAUDE.md` "Polarion API Gotchas" — flag
-   where the vendor doc contradicts or extends a recorded gotcha.
+2. Cross-check against this repo's recorded gotchas — `CLAUDE.md` "Polarion API
+   Gotchas" for the cross-cutting rules, and the matching `docs/polarion-api/`
+   domain doc for the per-resource contract. Flag where the vendor doc
+   contradicts or extends a recorded fact.
 3. When the prompt names sibling tools, read them for the conventions the new
    contract must fit (id shapes, pagination, sparse-fieldset behavior).
 

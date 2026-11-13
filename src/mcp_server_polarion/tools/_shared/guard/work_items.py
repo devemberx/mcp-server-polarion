@@ -32,7 +32,7 @@ from mcp_server_polarion.tools._shared.guard._http import (
 )
 from mcp_server_polarion.tools._shared.guard.enums import (
     check_custom_field_enum_values,
-    check_enum,
+    check_field_value,
 )
 from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
@@ -61,21 +61,21 @@ async def guard_work_item_enums(  # noqa: PLR0913
     reuse as scoping axis.
     """
     if type is not None and type != "":
-        await check_enum(client, project_id, "workitems", "type", "~", type)
+        await check_field_value(client, project_id, "workitems", "type", "~", type)
     if status is not None and status != "":
-        await check_enum(
+        await check_field_value(
             client, project_id, "workitems", "status", work_item_type, status
         )
     if severity is not None and severity != "":
-        await check_enum(
+        await check_field_value(
             client, project_id, "workitems", "severity", work_item_type, severity
         )
     if priority is not None and priority != "":
-        await check_enum(
+        await check_field_value(
             client, project_id, "workitems", "priority", work_item_type, priority
         )
     if resolution is not None and resolution != "":
-        await check_enum(
+        await check_field_value(
             client, project_id, "workitems", "resolution", work_item_type, resolution
         )
 

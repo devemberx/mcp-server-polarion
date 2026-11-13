@@ -1,4 +1,7 @@
-"""Test record tools — list, get, create, and update execution records of a test run."""
+"""Test record tools — list, get, create, and update execution records of a test run.
+
+API contract quirks: docs/polarion-api/test-runs.md
+"""
 
 from __future__ import annotations
 

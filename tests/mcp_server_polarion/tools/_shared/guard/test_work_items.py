@@ -426,7 +426,7 @@ class TestGuardWorkItemCustomFieldEnums:
         await guard_work_item_custom_fields(mock_client, "P", "task", {"f": "x"})
         assert mock_client.get.await_count == 1
 
-        clock[0] += 600.0  # past _ENUM_NOT_FOUND_TTL_SECONDS
+        clock[0] += 600.0  # past _FIELD_OPTIONS_NOT_FOUND_TTL_SECONDS
         store_work_item_custom_keys("P", "task", frozenset({"f"}))
         await guard_work_item_custom_fields(mock_client, "P", "task", {"f": "x"})
         assert mock_client.get.await_count == 2

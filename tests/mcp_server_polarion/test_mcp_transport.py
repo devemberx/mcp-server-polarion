@@ -17,7 +17,7 @@ from fastmcp.client.transports.memory import FastMCPTransport
 from fastmcp.exceptions import ToolError
 
 import mcp_server_polarion.core.client as _client_mod
-from mcp_server_polarion.server import mcp
+from mcp_server_polarion.server import ICON_URL, mcp
 
 _POLARION_HOST = "https://polarion.example.com"
 _BASE = f"{_POLARION_HOST}/polarion/rest/v1"
@@ -95,6 +95,19 @@ async def mcp_client(_polarion_env: None) -> AsyncIterator[_MCPClient]:
     """In-memory fastmcp Client connected to real server."""
     async with Client(mcp) as client:
         yield client
+
+
+class TestServerMetadata:
+    """Server icon reach client handshake intact."""
+
+    async def test_icon_advertised_with_mime_type(self, mcp_client: _MCPClient) -> None:
+        # Icon ignore unknown kwargs — misspelled/old-SDK field = silent drop.
+        info = mcp_client.server_info
+        assert info is not None
+        dumped = info.model_dump(by_alias=True, mode="json", exclude_none=True)
+        assert dumped["icons"] == [
+            {"src": ICON_URL, "mimeType": "image/png", "sizes": ["512x512"]}
+        ]
 
 
 class TestToolRegistration:

@@ -102,6 +102,21 @@ def _enum_get_response(ids: list[str]) -> dict[str, object]:
     }
 
 
+def _layout_entry(type_id: str, label: str = "") -> dict[str, object]:
+    """Expected generated ``renderingLayouts`` entry; full literal pinned in
+    ``test_create_entry_matches_ui_shape``.
+    """
+    entry: dict[str, object] = {"type": type_id}
+    if label:
+        entry["label"] = label
+    entry["layouter"] = "paragraph"
+    entry["properties"] = [
+        {"key": "fieldsAtStart", "value": "id"},
+        {"key": "fieldsAtEnd", "value": "status"},
+    ]
+    return entry
+
+
 def _enum_get_by_resource(
     document_types: list[str], work_item_types: list[str]
 ) -> Callable[..., dict[str, object]]:
@@ -187,8 +202,8 @@ def _project_enum_get_response(enum_name: str, ids: list[str]) -> dict[str, obje
 @pytest.fixture
 def reset_enum_guard_caches() -> None:
     """Drop guard caches between tests — each scenario start cold."""
-    _cache_mod._enum_option_cache.clear()
-    _cache_mod._project_enum_cache.clear()
+    _cache_mod._field_option_cache.clear()
+    _cache_mod._enum_option_id_cache.clear()
     _cache_mod._work_item_custom_key_cache.clear()
     _cache_mod._document_type_custom_key_cache.clear()
 
@@ -2978,7 +2993,7 @@ class TestUpdateDocumentFieldValidation:
 
 class TestUpdateDocumentPitfallDocumentation:
     """Lock macro-div pitfall into ``update_document.__doc__`` — reproduced on
-    live testdrive server, user-facing (other MCP hosts never load CLAUDE.md).
+    live testdrive server, user-facing (other MCP hosts never load AGENTS.md).
     Anchorless-block pitfall intentionally absent: ids now auto-stamped.
     """
 
@@ -4460,7 +4475,34 @@ class TestUpdateDocumentAttachmentRefDocstringClause:
 class TestBuildDocumentPayloadRenderingLayouts:
     """``renderingLayouts`` serialization in both payload builders."""
 
-    def test_create_wraps_each_type_with_fixed_section_layouter(self) -> None:
+    def test_create_entry_matches_ui_shape(self) -> None:
+        # Byte-exact entry portal write for fresh document -- helper elsewhere
+        # build from this shape, so pin it once literally.
+        payload = _build_create_document_payload(
+            document_name="D",
+            title="T",
+            type="softwareReqSpecification",
+            home_page_content_html="",
+            status=None,
+            rendering_layout_types=["softwarerequirement"],
+            rendering_layout_labels={"softwarerequirement": "Software Requirement"},
+        )
+
+        item = cast(list[dict[str, object]], payload["data"])[0]
+        attributes = cast(dict[str, object], item["attributes"])
+        assert attributes["renderingLayouts"] == [
+            {
+                "type": "softwarerequirement",
+                "label": "Software Requirement",
+                "layouter": "paragraph",
+                "properties": [
+                    {"key": "fieldsAtStart", "value": "id"},
+                    {"key": "fieldsAtEnd", "value": "status"},
+                ],
+            }
+        ]
+
+    def test_create_wraps_each_type_with_fixed_paragraph_layouter(self) -> None:
         payload = _build_create_document_payload(
             document_name="D",
             title="T",
@@ -4468,14 +4510,33 @@ class TestBuildDocumentPayloadRenderingLayouts:
             home_page_content_html="",
             status=None,
             rendering_layout_types=["softwarerequirement", "softwaretestcase"],
+            rendering_layout_labels={
+                "softwarerequirement": "Software Requirement",
+                "softwaretestcase": "Software Test Case",
+            },
         )
 
         item = cast(list[dict[str, object]], payload["data"])[0]
         attributes = cast(dict[str, object], item["attributes"])
         assert attributes["renderingLayouts"] == [
-            {"type": "softwarerequirement", "layouter": "section"},
-            {"type": "softwaretestcase", "layouter": "section"},
+            _layout_entry("softwarerequirement", "Software Requirement"),
+            _layout_entry("softwaretestcase", "Software Test Case"),
         ]
+
+    def test_create_omits_label_when_name_unresolved(self) -> None:
+        payload = _build_create_document_payload(
+            document_name="D",
+            title="T",
+            type="softwareReqSpecification",
+            home_page_content_html="",
+            status=None,
+            rendering_layout_types=["task"],
+            rendering_layout_labels={"task": ""},
+        )
+
+        item = cast(list[dict[str, object]], payload["data"])[0]
+        attributes = cast(dict[str, object], item["attributes"])
+        assert attributes["renderingLayouts"] == [_layout_entry("task")]
 
     def test_update_serializes_merged_layouts_verbatim(self) -> None:
         payload = _build_update_document_payload(
@@ -4535,7 +4596,7 @@ class TestBuildDocumentPayloadRenderingLayouts:
 class TestCreateDocumentRenderingLayouts:
     """``rendering_layout_types`` on the create path."""
 
-    async def test_dry_run_previews_section_entries(
+    async def test_dry_run_previews_paragraph_entries(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
         result = cast(
@@ -4551,9 +4612,7 @@ class TestCreateDocumentRenderingLayouts:
         preview = cast(dict[str, object], result.payload_preview)
         item = cast(list[dict[str, object]], preview["data"])[0]
         attributes = cast(dict[str, object], item["attributes"])
-        assert attributes["renderingLayouts"] == [
-            {"type": "softwarerequirement", "layouter": "section"}
-        ]
+        assert attributes["renderingLayouts"] == [_layout_entry("softwarerequirement")]
 
     async def test_unknown_type_blocks_post(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -4595,12 +4654,41 @@ class TestCreateDocumentRenderingLayouts:
             "data": [{"type": "documents", "id": "MyProj/_default/Doc"}]
         }
 
+        mock_client.get.side_effect = _enum_get_by_resource(
+            ["systemRequirementSpecification"], ["softwarerequirement"]
+        )
+
         await _call_create_doc(mock_ctx, rendering_layout_types=["softwarerequirement"])
 
         body = mock_client.post.call_args.kwargs["json"]
         attributes = body["data"][0]["attributes"]
         assert attributes["renderingLayouts"] == [
-            {"type": "softwarerequirement", "layouter": "section"}
+            _layout_entry("softwarerequirement", "softwarerequirement")
+        ]
+
+    async def test_label_reuses_guard_options_without_extra_request(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        # Label come from type options guard already fetch -- second GET for
+        # same options would double every layout write's request cost.
+        mock_client.post.return_value = {
+            "data": [{"type": "documents", "id": "MyProj/_default/Doc"}]
+        }
+        mock_client.get.side_effect = _enum_get_by_resource(
+            ["systemRequirementSpecification"], ["task"]
+        )
+
+        await _call_create_doc(mock_ctx, rendering_layout_types=["task"])
+
+        work_item_gets = [
+            call
+            for call in mock_client.get.call_args_list
+            if "/workitems/" in str(call.args[0])
+        ]
+        assert len(work_item_gets) == 1
+        body = mock_client.post.call_args.kwargs["json"]
+        assert body["data"][0]["attributes"]["renderingLayouts"] == [
+            _layout_entry("task", "task")
         ]
 
 
@@ -4621,9 +4709,7 @@ class TestUpdateDocumentRenderingLayouts:
         preview = cast(dict[str, object], result.payload_preview)
         data = cast(dict[str, object], preview["data"])
         attributes = cast(dict[str, object], data["attributes"])
-        assert attributes["renderingLayouts"] == [
-            {"type": "task", "layouter": "section"}
-        ]
+        assert attributes["renderingLayouts"] == [_layout_entry("task")]
 
     async def test_listed_in_missing_field_error(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
@@ -4666,16 +4752,36 @@ class TestUpdateDocumentRenderingLayouts:
 
         body = mock_client.patch.call_args.kwargs["json"]
         assert body["data"]["attributes"]["renderingLayouts"] == [
-            {"type": "softwarerequirement", "layouter": "section"},
-            {"type": "softwaretestcase", "layouter": "section"},
+            _layout_entry("softwarerequirement"),
+            _layout_entry("softwaretestcase"),
+        ]
+
+    async def test_new_type_entry_carries_label(
+        self, mock_ctx: MagicMock, mock_client: AsyncMock
+    ) -> None:
+        mock_client.get.side_effect = [
+            {
+                "data": [{"id": "task", "name": "Task"}],
+                "meta": {"totalCount": 1},
+            },
+            {"data": {"attributes": {}}},
+        ]
+
+        await _call_update_doc(mock_ctx, rendering_layout_types=["task"])
+
+        body = mock_client.patch.call_args.kwargs["json"]
+        assert body["data"]["attributes"]["renderingLayouts"] == [
+            _layout_entry("task", "Task")
         ]
 
     async def test_served_layout_settings_survive_echo(
         self, mock_ctx: MagicMock, mock_client: AsyncMock
     ) -> None:
+        # Served layouter differ from fallback — echo assertion then also
+        # prove entry reused, not rebuilt.
         served = {
             "type": "requirement",
-            "layouter": "paragraph",
+            "layouter": "title",
             "label": "Requirement",
             "properties": [{"key": "fieldsAtStart", "value": "id"}],
         }
@@ -4689,7 +4795,7 @@ class TestUpdateDocumentRenderingLayouts:
         body = mock_client.patch.call_args.kwargs["json"]
         assert body["data"]["attributes"]["renderingLayouts"] == [
             served,
-            {"type": "task", "layouter": "section"},
+            _layout_entry("task", "task"),
         ]
 
     async def test_unlisted_type_dropped_from_array(
@@ -4701,7 +4807,7 @@ class TestUpdateDocumentRenderingLayouts:
                 "data": {
                     "attributes": {
                         "renderingLayouts": [
-                            {"type": "requirement", "layouter": "paragraph"},
+                            {"type": "requirement", "layouter": "title"},
                             {"type": "task", "layouter": "section"},
                         ]
                     }
@@ -4713,7 +4819,7 @@ class TestUpdateDocumentRenderingLayouts:
 
         body = mock_client.patch.call_args.kwargs["json"]
         assert body["data"]["attributes"]["renderingLayouts"] == [
-            {"type": "requirement", "layouter": "paragraph"}
+            {"type": "requirement", "layouter": "title"}
         ]
 
     async def test_dry_run_preview_reflects_served_layouts(
@@ -4785,28 +4891,36 @@ class TestMergeRenderingLayouts:
             {"type": "task", "layouter": "paragraph", "label": "Tasks"},
         ]
 
-        assert _merge_rendering_layouts(current, ["task"]) == current
+        assert _merge_rendering_layouts(current, ["task"], {}) == current
 
     def test_order_follows_requested_types(self) -> None:
+        # Served layouters differ from fallback — order assertion then also
+        # prove entries reused, not rebuilt.
         current = [
-            {"type": "task", "layouter": "paragraph"},
+            {"type": "task", "layouter": "section"},
             {"type": "defect", "layouter": "title"},
         ]
 
-        assert _merge_rendering_layouts(current, ["defect", "task"]) == [
+        assert _merge_rendering_layouts(current, ["defect", "task"], {}) == [
             {"type": "defect", "layouter": "title"},
-            {"type": "task", "layouter": "paragraph"},
+            {"type": "task", "layouter": "section"},
         ]
+
+    def test_served_entry_keeps_own_label_over_type_name(self) -> None:
+        # Portal-tuned label survive even when enum name differ.
+        current = [{"type": "task", "layouter": "section", "label": "Chores"}]
+
+        assert _merge_rendering_layouts(current, ["task"], {"task": "Task"}) == current
 
     @pytest.mark.parametrize(
         "current",
         [None, "notalist", [], ["notadict"], [{"layouter": "section"}], [{"type": 7}]],
     )
-    def test_unusable_served_entries_fall_back_to_section(
+    def test_unusable_served_entries_fall_back_to_paragraph(
         self, current: object
     ) -> None:
-        assert _merge_rendering_layouts(current, ["task"]) == [
-            {"type": "task", "layouter": "section"}
+        assert _merge_rendering_layouts(current, ["task"], {"task": "Task"}) == [
+            _layout_entry("task", "Task")
         ]
 
 

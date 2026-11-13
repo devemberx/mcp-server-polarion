@@ -14,7 +14,7 @@ from mcp_server_polarion.core.exceptions import (
 from mcp_server_polarion.models import WorkItemLinkSpec
 from mcp_server_polarion.tools._shared.guard._http import paged_responses
 from mcp_server_polarion.tools._shared.guard._targets import missing_work_item_targets
-from mcp_server_polarion.tools._shared.guard.enums import check_project_enum_roles
+from mcp_server_polarion.tools._shared.guard.enums import check_enum_values
 from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
     format_option_list,
@@ -31,7 +31,7 @@ async def guard_work_item_link_roles(
     """Reject link roles not in ``workitem-link-role`` — unknown role store
     verbatim (HTTP 201) as ghost link.
     """
-    await check_project_enum_roles(
+    await check_enum_values(
         client,
         project_id,
         "workitem-link-role",
@@ -52,7 +52,7 @@ async def guard_hyperlink_roles(
     """Reject hyperlink roles not in project ``hyperlink-role`` enum
     (typically ``ref_int``/``ref_ext``) — unknown roles ghost silently.
     """
-    await check_project_enum_roles(
+    await check_enum_values(
         client,
         project_id,
         "hyperlink-role",

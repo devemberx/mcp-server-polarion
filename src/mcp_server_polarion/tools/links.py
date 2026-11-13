@@ -1,4 +1,7 @@
-"""Work item link tools — list, create, delete, and update links."""
+"""Work item link tools — list, create, delete, and update links.
+
+API contract quirks: docs/polarion-api/work-items.md
+"""
 
 from __future__ import annotations
 

@@ -17,7 +17,7 @@ from mcp_server_polarion.tools._shared import cache as cache_mod
 from mcp_server_polarion.tools._shared.guard import guard_work_item_enums
 from mcp_server_polarion.tools._shared.guard.enums import (
     fetch_enum_option_ids,
-    fetch_project_enum_option_ids,
+    fetch_field_options,
 )
 from tests.mcp_server_polarion.tools._shared.guard._builders import (
     enum_response,
@@ -25,19 +25,19 @@ from tests.mcp_server_polarion.tools._shared.guard._builders import (
 )
 
 
-class TestFetchEnumOptionIds:
+class TestFetchFieldOptions:
     """Direct ``getAvailableOptions`` parsing + caching."""
 
-    async def test_first_call_hits_polarion_and_parses_ids(
+    async def test_first_call_hits_polarion_and_parses_options(
         self, mock_client: AsyncMock
     ) -> None:
         mock_client.get.return_value = enum_response(["must_have", "should_have"])
 
-        ids = await fetch_enum_option_ids(
+        options = await fetch_field_options(
             mock_client, "P", "workitems", "severity", "task"
         )
 
-        assert ids == frozenset({"must_have", "should_have"})
+        assert options == {"must_have": "must_have", "should_have": "should_have"}
         mock_client.get.assert_awaited_once()
         path, kwargs = (
             mock_client.get.call_args.args[0],
@@ -48,11 +48,25 @@ class TestFetchEnumOptionIds:
         assert kwargs["params"]["type"] == "task"
         assert kwargs["params"]["page[size]"] == 100
 
+    async def test_display_name_kept_when_it_differs_from_id(
+        self, mock_client: AsyncMock
+    ) -> None:
+        # Rendering-layout `label` read the name, so id -> name must not
+        # collapse; shared builder always set name == id, hide the mapping.
+        mock_client.get.return_value = {
+            "data": [{"id": "testcase", "name": "Test Case"}],
+            "meta": {"totalCount": 1},
+        }
+
+        options = await fetch_field_options(mock_client, "P", "workitems", "type", "~")
+
+        assert options == {"testcase": "Test Case"}
+
     async def test_second_call_uses_cache(self, mock_client: AsyncMock) -> None:
         mock_client.get.return_value = enum_response(["a", "b"])
 
-        await fetch_enum_option_ids(mock_client, "P", "workitems", "severity", "task")
-        await fetch_enum_option_ids(mock_client, "P", "workitems", "severity", "task")
+        await fetch_field_options(mock_client, "P", "workitems", "severity", "task")
+        await fetch_field_options(mock_client, "P", "workitems", "severity", "task")
 
         assert mock_client.get.await_count == 1
 
@@ -63,9 +77,9 @@ class TestFetchEnumOptionIds:
         clock = [1000.0]
         monkeypatch.setattr(cache_mod, "_now", lambda: clock[0])
 
-        await fetch_enum_option_ids(mock_client, "P", "workitems", "severity", "task")
+        await fetch_field_options(mock_client, "P", "workitems", "severity", "task")
         clock[0] += 61.0  # past the 60s TTL
-        await fetch_enum_option_ids(mock_client, "P", "workitems", "severity", "task")
+        await fetch_field_options(mock_client, "P", "workitems", "severity", "task")
 
         assert mock_client.get.await_count == 2
 
@@ -84,9 +98,7 @@ class TestFetchEnumOptionIds:
         mock_client.get.side_effect = PolarionError("backend down")
 
         with pytest.raises(RuntimeError, match="Refusing the write"):
-            await fetch_enum_option_ids(
-                mock_client, "P", "workitems", "severity", "task"
-            )
+            await fetch_field_options(mock_client, "P", "workitems", "severity", "task")
 
         assert any("blocking write" in r.message for r in caplog.records)
 
@@ -96,9 +108,7 @@ class TestFetchEnumOptionIds:
         mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
 
         with pytest.raises(PermissionError, match="lacks permission"):
-            await fetch_enum_option_ids(
-                mock_client, "P", "workitems", "severity", "task"
-            )
+            await fetch_field_options(mock_client, "P", "workitems", "severity", "task")
 
     async def test_not_found_defers_instead_of_blocking(
         self,
@@ -115,19 +125,19 @@ class TestFetchEnumOptionIds:
             "no such endpoint", status_code=404
         )
 
-        ids = await fetch_enum_option_ids(
+        options = await fetch_field_options(
             mock_client, "P", "workitems", "severity", "task"
         )
 
-        assert ids == frozenset()
+        assert options == {}
         assert any("404" in r.message for r in caplog.records)
 
     async def test_not_found_result_is_cached(self, mock_client: AsyncMock) -> None:
         # Deferred result cached; missing endpoint not re-probed within TTL.
         mock_client.get.side_effect = PolarionNotFoundError("nope", status_code=404)
 
-        await fetch_enum_option_ids(mock_client, "P", "workitems", "severity", "task")
-        await fetch_enum_option_ids(mock_client, "P", "workitems", "severity", "task")
+        await fetch_field_options(mock_client, "P", "workitems", "severity", "task")
+        await fetch_field_options(mock_client, "P", "workitems", "severity", "task")
 
         assert mock_client.get.await_count == 1
 
@@ -141,16 +151,16 @@ class TestFetchEnumOptionIds:
             mock_client, "P", "task", severity="anything"
         )  # must not raise
 
-    async def test_unknown_resource_field_returns_empty_set(
+    async def test_unknown_resource_field_returns_empty_mapping(
         self, mock_client: AsyncMock
     ) -> None:
         mock_client.get.return_value = {"data": [], "meta": {"totalCount": 0}}
 
-        ids = await fetch_enum_option_ids(
+        options = await fetch_field_options(
             mock_client, "P", "workitems", "weirdField", "task"
         )
 
-        assert ids == frozenset()
+        assert options == {}
 
     async def test_malformed_data_entries_are_skipped(
         self, mock_client: AsyncMock
@@ -160,14 +170,14 @@ class TestFetchEnumOptionIds:
             "meta": {},
         }
 
-        ids = await fetch_enum_option_ids(
+        options = await fetch_field_options(
             mock_client, "P", "workitems", "severity", "task"
         )
 
-        assert ids == frozenset({"ok"})
+        assert options == {"ok": ""}
 
 
-class TestFetchProjectEnumOptionIds:
+class TestFetchEnumOptionIds:
     """Single-enumeration GET parsing (dict ``data``) + caching + fail-closed."""
 
     async def test_first_call_hits_polarion_and_parses_dict_options(
@@ -177,9 +187,7 @@ class TestFetchProjectEnumOptionIds:
             "workitem-link-role", ["parent", "relates_to"]
         )
 
-        result = await fetch_project_enum_option_ids(
-            mock_client, "P", "workitem-link-role"
-        )
+        result = await fetch_enum_option_ids(mock_client, "P", "workitem-link-role")
 
         assert result == frozenset({"parent", "relates_to"})
         mock_client.get.assert_awaited_once()
@@ -195,8 +203,8 @@ class TestFetchProjectEnumOptionIds:
             "hyperlink-role", ["ref_int", "ref_ext"]
         )
 
-        await fetch_project_enum_option_ids(mock_client, "P", "hyperlink-role")
-        await fetch_project_enum_option_ids(mock_client, "P", "hyperlink-role")
+        await fetch_enum_option_ids(mock_client, "P", "hyperlink-role")
+        await fetch_enum_option_ids(mock_client, "P", "hyperlink-role")
 
         assert mock_client.get.await_count == 1
 
@@ -207,9 +215,9 @@ class TestFetchProjectEnumOptionIds:
         clock = [1000.0]
         monkeypatch.setattr(cache_mod, "_now", lambda: clock[0])
 
-        await fetch_project_enum_option_ids(mock_client, "P", "hyperlink-role")
+        await fetch_enum_option_ids(mock_client, "P", "hyperlink-role")
         clock[0] += cache_mod._GUARD_TTL_SECONDS + 1
-        await fetch_project_enum_option_ids(mock_client, "P", "hyperlink-role")
+        await fetch_enum_option_ids(mock_client, "P", "hyperlink-role")
 
         assert mock_client.get.await_count == 2
 
@@ -217,7 +225,7 @@ class TestFetchProjectEnumOptionIds:
         mock_client.get.side_effect = PolarionError("backend down")
 
         with pytest.raises(RuntimeError, match="Refusing the write"):
-            await fetch_project_enum_option_ids(mock_client, "P", "workitem-link-role")
+            await fetch_enum_option_ids(mock_client, "P", "workitem-link-role")
 
     async def test_auth_error_raises_permission_error(
         self, mock_client: AsyncMock
@@ -225,24 +233,22 @@ class TestFetchProjectEnumOptionIds:
         mock_client.get.side_effect = PolarionAuthError("forbidden", status_code=403)
 
         with pytest.raises(PermissionError, match="lacks permission"):
-            await fetch_project_enum_option_ids(mock_client, "P", "workitem-link-role")
+            await fetch_enum_option_ids(mock_client, "P", "workitem-link-role")
 
     async def test_not_found_defers_with_empty_set(
         self, mock_client: AsyncMock
     ) -> None:
         mock_client.get.side_effect = PolarionNotFoundError("nope", status_code=404)
 
-        result = await fetch_project_enum_option_ids(
-            mock_client, "P", "workitem-link-role"
-        )
+        result = await fetch_enum_option_ids(mock_client, "P", "workitem-link-role")
 
         assert result == frozenset()
 
     async def test_not_found_result_is_cached(self, mock_client: AsyncMock) -> None:
         mock_client.get.side_effect = PolarionNotFoundError("nope", status_code=404)
 
-        await fetch_project_enum_option_ids(mock_client, "P", "workitem-link-role")
-        await fetch_project_enum_option_ids(mock_client, "P", "workitem-link-role")
+        await fetch_enum_option_ids(mock_client, "P", "workitem-link-role")
+        await fetch_enum_option_ids(mock_client, "P", "workitem-link-role")
 
         assert mock_client.get.await_count == 1
 
@@ -255,8 +261,6 @@ class TestFetchProjectEnumOptionIds:
             }
         }
 
-        result = await fetch_project_enum_option_ids(
-            mock_client, "P", "workitem-link-role"
-        )
+        result = await fetch_enum_option_ids(mock_client, "P", "workitem-link-role")
 
         assert result == frozenset({"ok"})

@@ -24,7 +24,7 @@ from mcp_server_polarion.tools._shared.guard._http import (
     guarded_get,
     guarded_pages,
 )
-from mcp_server_polarion.tools._shared.guard.enums import check_project_enum_roles
+from mcp_server_polarion.tools._shared.guard.enums import check_enum_values
 from mcp_server_polarion.tools._shared.helpers import (
     encode_path_segment,
     format_option_list,
@@ -42,7 +42,7 @@ async def guard_test_run_enums(
     project enumerations — testruns have no ``getAvailableOptions`` endpoint,
     and ``~`` wildcard context not resolve these enums.
     """
-    await check_project_enum_roles(
+    await check_enum_values(
         client,
         project_id,
         "testrun-type",
@@ -51,7 +51,7 @@ async def guard_test_run_enums(
         discovery_hint="use list_test_runs to see values in use.",
         context="testing",
     )
-    await check_project_enum_roles(
+    await check_enum_values(
         client,
         project_id,
         "testrun-status",

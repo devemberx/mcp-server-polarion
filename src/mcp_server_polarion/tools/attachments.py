@@ -1,5 +1,8 @@
-"""Attachment tools — list attachments of a document or work item; fetch one
-attachment's content for viewing; upload document or work item attachments.
+"""Attachment tools — list attachments of a document, work item, or test
+record; fetch one attachment's content for viewing; upload attachments to any
+of the three.
+
+API contract quirks: docs/polarion-api/attachments.md
 """
 
 from __future__ import annotations

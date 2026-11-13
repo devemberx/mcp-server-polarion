@@ -9,7 +9,7 @@ from collections.abc import Iterable
 
 from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.tools._shared.guard._targets import missing_work_item_targets
-from mcp_server_polarion.tools._shared.guard.enums import check_project_enum_roles
+from mcp_server_polarion.tools._shared.guard.enums import check_enum_values
 from mcp_server_polarion.tools._shared.helpers import format_option_list
 
 
@@ -22,7 +22,7 @@ async def guard_test_record_results(
     enum -- unknown value stores verbatim (HTTP 201), ghosting silently
     against Lucene/UI result filters.
     """
-    await check_project_enum_roles(
+    await check_enum_values(
         client,
         project_id,
         "test-result",
