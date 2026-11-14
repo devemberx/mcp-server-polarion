@@ -65,15 +65,16 @@ jobs:
     # PR: fail only on CVEs head add over base (absolute gate deadlocked two CVE-fix PRs,
     # each red on the other's CVE). push/schedule: no base = full audit, main's CVEs stay red.
     runs-on: ubuntu-latest
+    permissions:
+      contents: read   # no PR comment here; fetched scanner binary gets no write token
+    env:
+      # Event picks mode, not files on disk: committed osv-base.json / base/ can't flip push/cron.
+      DIFF_AUDIT: ${{ github.event_name == 'pull_request' }}
     steps:
       - uses: actions/checkout@v6
-
-      - name: Check out PR base
-        if: github.event_name == 'pull_request'
-        uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
-          path: base
+          fetch-depth: 2   # PR merge ref + parents: HEAD^1 = exact base head was merged onto
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -83,21 +84,34 @@ jobs:
 
       - name: Export production-only requirements
         # Wheel deps only; --no-hashes since OSV's pip parser can't read multiline hashes.
+        # --frozen: audit committed lock as-is; never re-resolve.
+        # Base = HEAD^1, not pull_request.base.sha (can lag merge ref's base parent).
+        # Base dir outside workspace: uv settings discovery walk up into head's [tool.uv].
         run: |
           export_reqs() {
-            uv export --directory "$1" --no-dev --no-emit-project --no-hashes \
+            uv export --directory "$1" --frozen --no-dev --no-emit-project --no-hashes \
               --format requirements-txt > "$2"
           }
           export_reqs . runtime-requirements.txt
-          if [ -d base ]; then export_reqs base base-requirements.txt; fi
+          if [ "$DIFF_AUDIT" = true ]; then
+            base="$RUNNER_TEMP/osv-base"
+            mkdir -p "$base"
+            for f in pyproject.toml uv.lock; do git show "HEAD^1:$f" > "$base/$f"; done
+            export_reqs "$base" base-requirements.txt
+          fi
 
       - name: Scan dependencies for known CVEs (osv-scanner)
         # --no-resolve: export already = full pinned closure; deps.dev re-resolve add nothing,
         # and exit 127 on any version deps.dev not yet indexed (fresh PyPI release).
         # Exit 1 = vulns found (gated next step); any other non-zero = scanner broke, fail closed.
+        # Pinned + sha256-checked: bump version and checksum together; runner always linux/amd64.
+        env:
+          OSV_SCANNER_VERSION: v2.3.8
+          OSV_SCANNER_SHA256: bc98e15319ed0d515e3f9235287ba53cdc5535d576d24fd573978ecfe9ab92dc
         run: |
-          curl -sSL -o osv-scanner \
-            https://github.com/google/osv-scanner/releases/download/v2.3.8/osv-scanner_linux_amd64
+          curl -fsSL -o osv-scanner \
+            "https://github.com/google/osv-scanner/releases/download/${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
+          echo "${OSV_SCANNER_SHA256}  osv-scanner" | sha256sum -c -
           chmod +x osv-scanner
           scan() {
             rc=0
@@ -107,15 +121,21 @@ jobs:
               echo "::error title=osv-scanner::exit $rc scanning $1"
               exit "$rc"
             fi
+            # Gate cross-check rc vs parse: exit 1 + zero parsed findings = format drift.
+            echo "$3=$rc" >> "$GITHUB_ENV"
           }
-          scan runtime-requirements.txt osv-head.json
-          if [ -f base-requirements.txt ]; then scan base-requirements.txt osv-base.json; fi
+          scan runtime-requirements.txt osv-head.json OSV_HEAD_RC
+          if [ "$DIFF_AUDIT" = true ]; then
+            scan base-requirements.txt osv-base.json OSV_BASE_RC
+          fi
 
       - name: Gate on vulnerabilities
         run: |
-          base_args=()
-          if [ -f osv-base.json ]; then base_args=(--base osv-base.json); fi
-          python3 .github/scripts/osv_audit_diff.py osv-head.json "${base_args[@]}"
+          args=(osv-head.json --head-rc "$OSV_HEAD_RC")
+          if [ "$DIFF_AUDIT" = true ]; then
+            args+=(--base osv-base.json --base-rc "$OSV_BASE_RC")
+          fi
+          python3 .github/scripts/osv_audit_diff.py "${args[@]}"
 
       - name: Summarize audit
         if: always()

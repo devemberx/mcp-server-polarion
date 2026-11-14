@@ -43,7 +43,7 @@ dev = [
     "mypy>=2.0",
 ]
 evals = [
-    # Floor = locked version. strands-agents caps litellm (1.64.0: <1.107); no
+    # Floor blocks downgrade: strands-agents caps litellm (1.64.0: <1.107); no
     # floor = resolver satisfy newer litellm by downgrading strands-agents, which
     # drags mcp/fastmcp back onto CVE versions.
     "strands-agents[litellm]>=1.64.0",
