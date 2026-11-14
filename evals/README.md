@@ -94,7 +94,8 @@ An agent can loop; cloud providers return 429 when TPM/RPM is exhausted.
 Each case is bounded fail-closed (via `<agent-error: ...>`). A provider-side
 failure that outlives LiteLLM's retries — 408, 429, 5xx, connection error,
 provider timeout, anywhere in the exception chain — is reported as
-`<infra-error: ...>` instead: that run is re-run rather than counted as a FAIL,
+`<infra-error: ...>` instead: that run is re-run rather than counted as a FAIL
+(only if the error came before any tool call; after one it stays a plain FAIL),
 and fails closed once `EVAL_INFRA_RETRIES` re-runs are spent. The case timeout,
 the cycle cap and every other 4xx stay plain FAILs.
 

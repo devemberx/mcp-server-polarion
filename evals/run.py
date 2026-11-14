@@ -122,7 +122,14 @@ def _evaluate_once(case: Case, evaluator: CheckDispatchEvaluator) -> Verdict:
     task_output = run_case(case)
     output = task_output.get("output")
     if isinstance(output, str) and output.startswith(INFRA_ERROR_PREFIX):
-        return Verdict(False, f"infra error: {output}", infra=True)
+        calls = task_output.get("trajectory") or []
+        if not calls:
+            return Verdict(False, f"infra error: {output}", infra=True)
+        # Tool call already happened: clean re-run would erase a forbidden write.
+        return Verdict(
+            False,
+            f"agent run failed: {output} (after {len(calls)} tool calls; not re-run)",
+        )
     if isinstance(output, str) and output.startswith(AGENT_ERROR_PREFIX):
         # Crashed agent: partial trajectory must not read clean.
         return Verdict(False, f"agent run failed: {output}")

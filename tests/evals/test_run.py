@@ -163,6 +163,27 @@ class TestEvaluateOnceInfra:
         assert verdict.infra is True
         assert verdict.reason.startswith("infra error: ")
 
+    def test_infra_after_tool_call_not_infra(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            run,
+            "run_case",
+            lambda case: {
+                "input": case.input,
+                "output": f"{INFRA_ERROR_PREFIX} OSError: net down>",
+                "trajectory": [
+                    {"name": "update_work_items", "args": {}, "result": None}
+                ],
+            },
+        )
+        verdict = run._evaluate_once(_case(), evaluator=object())
+        assert verdict.passed is False
+        assert verdict.infra is False
+        assert "not re-run" in verdict.reason
+        assert "1 tool call" in verdict.reason
+        assert INFRA_ERROR_PREFIX in verdict.reason
+
     def test_agent_error_not_infra(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             run,
@@ -242,6 +263,27 @@ class TestRunJob:
         assert calls["n"] == 1
         assert outcome.passed is False
         assert outcome.infra_retries == 0
+
+    def test_infra_after_tool_call_no_rerun(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("EVAL_INFRA_RETRIES", "2")
+        monkeypatch.setattr(
+            run,
+            "run_case",
+            lambda case: {
+                "input": case.input,
+                "output": f"{INFRA_ERROR_PREFIX} OSError: net down>",
+                "trajectory": [
+                    {"name": "update_work_items", "args": {}, "result": None}
+                ],
+            },
+        )
+        monkeypatch.setattr(run.time, "sleep", lambda s: pytest.fail("no sleep"))
+        outcome = run._run_job(_case(), object())
+        assert outcome.passed is False
+        assert outcome.infra_retries == 0
+        assert "not re-run" in outcome.reason
 
     def test_real_failure_not_retried(self, monkeypatch: pytest.MonkeyPatch) -> None:
         calls = {"n": 0}
@@ -525,7 +567,6 @@ class TestRunParallel:
         pools[0].shutdown(wait=True)
         time.sleep(1.0)
         started = len(log.read_text(encoding="utf-8").splitlines())
-        print(f"jobs started: {started}/12")
         # 12 jobs total; only in-flight + call-queue may start (6 observed with
         # fix, 9 without).
         assert started <= 7
