@@ -178,6 +178,10 @@ def _aggregate(case: Case, outcomes: list[RunOutcome]) -> dict[str, Any]:
     }
 
 
+def _print_run(name: str, idx: int, runs: int, outcome: RunOutcome) -> None:
+    print(f"  {name} run {idx + 1}/{runs}: {'PASS' if outcome.passed else 'FAIL'}")
+
+
 def _run_case_n_times(
     case: Case, runs: int, evaluator: CheckDispatchEvaluator
 ) -> dict[str, Any]:
@@ -185,9 +189,7 @@ def _run_case_n_times(
     for i in range(runs):
         outcome = _run_job(case, evaluator)
         outcomes.append(outcome)
-        print(
-            f"  {case.name} run {i + 1}/{runs}: {'PASS' if outcome.passed else 'FAIL'}"
-        )
+        _print_run(str(case.name), i, runs, outcome)
     return _aggregate(case, outcomes)
 
 
@@ -235,9 +237,7 @@ def _run_parallel(
         for future in as_completed(futures):
             name, idx, outcome = future.result()
             slots[name][idx] = outcome
-            print(
-                f"  {name} run {idx + 1}/{runs}: {'PASS' if outcome.passed else 'FAIL'}"
-            )
+            _print_run(name, idx, runs, outcome)
     return [
         _aggregate(c, [o for o in slots[str(c.name)] if o is not None]) for c in cases
     ]
