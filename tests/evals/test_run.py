@@ -1,5 +1,7 @@
 """Gate-orchestration tests with ``run_case`` stubbed: pass-rate aggregation,
-fail-closed crashed runs, git-sha resolution, unknown-case exit code.
+fail-closed crashed runs, git-sha resolution, unknown-case exit code, worker
+resolution, parallel pool (thread + real spawn cancel), infra re-runs, report
+fields (workers, wall_s, peak_rss_mb, cpu_s).
 """
 
 from __future__ import annotations
@@ -10,7 +12,7 @@ import pickle
 import subprocess
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Executor, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +29,7 @@ from evals.cases.orchestration import CASES as ORCHESTRATION_CASES
 from evals.cases.safety import CASES as SAFETY_CASES
 from evals.cases.triggers import CASES as TRIGGER_CASES
 from evals.harness.runner import AGENT_ERROR_PREFIX, INFRA_ERROR_PREFIX
+from tests.evals import _pool_jobs
 
 
 @pytest.fixture(autouse=True)
@@ -120,6 +123,28 @@ class TestEvaluateOnce:
         verdict = run._evaluate_once(_case(), evaluator=object())
         assert verdict.passed is False
         assert "agent run failed" in verdict.reason
+
+
+class TestEvaluateOnceEvaluator:
+    def test_evaluator_result_becomes_verdict(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            run,
+            "run_case",
+            lambda case: {"input": case.input, "output": "fine", "trajectory": []},
+        )
+
+        class _Result:
+            test_pass = True
+            reason = "ok"
+
+        class _Eval:
+            def evaluate(self, data: Any) -> list[_Result]:
+                return [_Result()]
+
+        verdict = run._evaluate_once(_case(), evaluator=_Eval())  # type: ignore[arg-type]
+        assert verdict == run.Verdict(True, "ok", infra=False)
 
 
 class TestEvaluateOnceInfra:
@@ -478,6 +503,32 @@ class TestRunParallel:
         # 12 jobs, 2 workers, 0.3 s each: full drain ~1.8 s.
         assert elapsed < 0.9
         assert len(ran) < 12
+
+    def test_job_exception_cancels_queue_on_real_spawn_pool(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        log = tmp_path / "started.log"
+        cases = run.ALL_CASES[:4]
+        monkeypatch.setenv("EVAL_POOL_LOG", str(log))
+        monkeypatch.setenv("EVAL_POOL_FAIL", str(cases[0].name))
+        monkeypatch.setattr(run, "_pool_job", _pool_jobs.logging_job)
+        pools: list[Executor] = []
+
+        def _factory(n: int) -> Executor:
+            pools.append(run._spawn_pool(n))
+            return pools[-1]
+
+        with pytest.raises(RuntimeError, match="early boom"):
+            run._run_parallel(cases, 3, 2, executor_factory=_factory)
+        # Idempotent shutdown no re-join manager: sleep > 2x job time so any
+        # uncancelled queued job has started before counting.
+        pools[0].shutdown(wait=True)
+        time.sleep(1.0)
+        started = len(log.read_text(encoding="utf-8").splitlines())
+        print(f"jobs started: {started}/12")
+        # 12 jobs total; only in-flight + call-queue may start (6 observed with
+        # fix, 9 without).
+        assert started <= 7
 
     def test_unfilled_slot_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def _fake(case_name: str, run_idx: int) -> tuple[str, int, run.RunOutcome]:

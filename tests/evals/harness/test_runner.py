@@ -9,13 +9,15 @@ import os
 from typing import Any
 
 import httpx
-import litellm
-import openai
 import pytest
 
 # ``runner`` import ``strands`` / ``strands_evals`` at load; skip on bare install.
 pytest.importorskip("strands_evals")
+pytest.importorskip("litellm")
+pytest.importorskip("openai")
 
+import litellm
+import openai
 from strands.types.exceptions import (
     ContextWindowOverflowException,
     EventLoopException,

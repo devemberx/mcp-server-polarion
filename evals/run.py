@@ -6,6 +6,7 @@ efficiency/orchestration).
     uv run python -m evals.run --category triggers   # one category (gate stages them)
     uv run python -m evals.run --list                # print the case catalog (no model)
     uv run python -m evals.run --case SAFE-READONLY --runs 1
+    uv run python -m evals.run --workers 4           # procs (default 8, EVAL_WORKERS)
 """
 
 from __future__ import annotations
@@ -233,22 +234,23 @@ def _run_parallel(
     slots: dict[str, list[RunOutcome | None]] = {
         str(c.name): [None] * runs for c in cases
     }
-    with executor_factory(workers) as pool:
-        try:
-            # Round-major: run 0 of every case first, spread load across cases.
-            futures = [
-                pool.submit(_pool_job, str(c.name), i)
-                for i in range(runs)
-                for c in cases
-            ]
-            for future in as_completed(futures):
-                name, idx, outcome = future.result()
-                slots[name][idx] = outcome
-                _print_run(name, idx, runs, outcome)
-        except BaseException:
-            # Job error = gate abort; drop queued jobs (running ones can't cancel).
-            pool.shutdown(wait=False, cancel_futures=True)
-            raise
+    pool = executor_factory(workers)
+    try:
+        # Round-major: run 0 of every case first, spread load across cases.
+        futures = [
+            pool.submit(_pool_job, str(c.name), i) for i in range(runs) for c in cases
+        ]
+        for future in as_completed(futures):
+            name, idx, outcome = future.result()
+            slots[name][idx] = outcome
+            _print_run(name, idx, runs, outcome)
+    except BaseException:
+        # Job error = gate abort; drop queued jobs (running ones can't cancel).
+        # Single shutdown call: 2nd call (e.g. `with` exit) reset cancel flag
+        # before process pool manager thread apply it.
+        pool.shutdown(wait=True, cancel_futures=True)
+        raise
+    pool.shutdown(wait=True)
     aggregated: list[dict[str, Any]] = []
     for c in cases:
         outcomes: list[RunOutcome] = []
@@ -306,7 +308,6 @@ def main() -> int:
     if workers < 1:
         parser.error("workers must be >= 1")
 
-    evaluator = CheckDispatchEvaluator()
     effective_workers = max(1, min(workers, len(cases) * args.runs))
     model = resolve_model_id()
     reasoning_effort = resolve_reasoning_effort()
@@ -318,6 +319,7 @@ def main() -> int:
 
     start = time.monotonic()
     if effective_workers == 1:
+        evaluator = CheckDispatchEvaluator()
         results = [_run_case_n_times(c, args.runs, evaluator) for c in cases]
     else:
         results = _run_parallel(
