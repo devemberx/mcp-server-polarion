@@ -33,6 +33,7 @@ from evals.harness.runner import AGENT_ERROR_PREFIX, INFRA_ERROR_PREFIX
 def _serial_workers(monkeypatch: pytest.MonkeyPatch) -> None:
     # Serial path: main tests patch _run_case_n_times; spawned child miss patches.
     monkeypatch.setenv("EVAL_WORKERS", "1")
+    monkeypatch.setattr(run, "_EVALUATOR", None)
 
 
 def _case(name: str = "GATE-X", min_rate: float = 1.0) -> Case:
@@ -198,7 +199,8 @@ class TestRunJob:
         assert calls["n"] == 3
         assert outcome.passed is False
         assert outcome.infra_retries == 2
-        assert "infra error after 2 retries" in outcome.reason
+        assert "infra error after 2 retries: down" in outcome.reason
+        assert "infra error: " not in outcome.reason
         assert "down" in outcome.reason
 
     def test_zero_retries_no_rerun(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -337,6 +339,13 @@ class TestMain:
         monkeypatch.setattr("sys.argv", ["run", "--list", "--category", "safety"])
         assert run.main() == 0
 
+    def test_list_ignores_bad_workers_env(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("EVAL_WORKERS", "abc")
+        monkeypatch.setattr("sys.argv", ["run", "--list", "--category", "safety"])
+        assert run.main() == 0
+
 
 class TestAllCases:
     def test_gate_loads_all_categories(self) -> None:
@@ -447,6 +456,38 @@ class TestRunParallel:
             "run 3: bad2",
         ]
 
+    def test_job_exception_stops_queue_promptly(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ran: list[tuple[str, int]] = []
+        cases = run.ALL_CASES[:4]
+        first = str(cases[0].name)
+
+        def _fake(case_name: str, run_idx: int) -> tuple[str, int, run.RunOutcome]:
+            ran.append((case_name, run_idx))
+            if (case_name, run_idx) == (first, 0):
+                raise RuntimeError("early boom")
+            time.sleep(0.3)
+            return case_name, run_idx, run.RunOutcome(True, "", 0.3, 0)
+
+        monkeypatch.setattr(run, "_pool_job", _fake)
+        start = time.monotonic()
+        with pytest.raises(RuntimeError, match="early boom"):
+            run._run_parallel(cases, 3, 2, executor_factory=ThreadPoolExecutor)
+        elapsed = time.monotonic() - start
+        # 12 jobs, 2 workers, 0.3 s each: full drain ~1.8 s.
+        assert elapsed < 0.9
+        assert len(ran) < 12
+
+    def test_unfilled_slot_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def _fake(case_name: str, run_idx: int) -> tuple[str, int, run.RunOutcome]:
+            return case_name, 0, run.RunOutcome(True, "", 0.1, 0)
+
+        monkeypatch.setattr(run, "_pool_job", _fake)
+        case = run.ALL_CASES[0]
+        with pytest.raises(RuntimeError, match=rf"{case.name}.*run 2"):
+            run._run_parallel([case], 2, 2, executor_factory=ThreadPoolExecutor)
+
     def test_job_exception_propagates(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def _boom(case: Case, evaluator: Any) -> run.Verdict:
             raise RuntimeError("pool boom")
@@ -499,7 +540,10 @@ class TestSpawnPool:
 
 class TestMainWorkers:
     def test_parallel_report_fields(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         _ok_report_patches(monkeypatch, tmp_path)
         monkeypatch.setattr(run, "_spawn_pool", ThreadPoolExecutor)
@@ -510,6 +554,9 @@ class TestMainWorkers:
             "sys.argv", ["run", "--category", "safety", "--runs", "2", "--workers", "3"]
         )
         assert run.main() == 0
+        out = capsys.readouterr().out
+        assert "workers=3" in out
+        assert "wall: " in out
         report = _read_report(tmp_path)
         assert report["workers"] == 3
         for key in ("wall_s", "peak_rss_mb", "cpu_s"):

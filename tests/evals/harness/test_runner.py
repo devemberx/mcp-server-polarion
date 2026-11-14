@@ -229,6 +229,23 @@ def test_is_infra_error(exc: BaseException, expected: bool) -> None:
     assert _is_infra_error(exc) is expected
 
 
+def _long_chain(plain_links: int) -> BaseException:
+    tail: BaseException = _rate_limit()
+    for _ in range(plain_links):
+        head = RuntimeError("link")
+        head.__cause__ = tail
+        tail = head
+    return tail
+
+
+class TestChainDepthBound:
+    def test_infra_link_within_bound_found(self) -> None:
+        assert _is_infra_error(_long_chain(runner._MAX_CHAIN_DEPTH - 1)) is True
+
+    def test_infra_link_beyond_bound_ignored(self) -> None:
+        assert _is_infra_error(_long_chain(20)) is False
+
+
 class TestErrorOutput:
     def test_infra_prefix_and_message(self) -> None:
         out = _error_output(_rate_limit())

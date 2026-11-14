@@ -154,7 +154,10 @@ def _run_job(case: Case, evaluator: CheckDispatchEvaluator) -> RunOutcome:
         verdict = _evaluate_once(case, evaluator)
     reason = verdict.reason
     if verdict.infra:
-        reason = f"infra error after {retries} retries: {reason}"
+        reason = (
+            f"infra error after {retries} retries: "
+            f"{reason.removeprefix('infra error: ')}"
+        )
     return RunOutcome(verdict.passed, reason, time.monotonic() - start, retries)
 
 
@@ -201,8 +204,9 @@ def _resolve_workers(cli: int | None) -> int:
 
 
 def _spawn_pool(n: int) -> Executor:
-    # spawn mandatory: fork default on Linux 3.13; respx routing, os.environ
-    # patches, write-delay module patch = process-global, must not leak across jobs.
+    # spawn avoids fork copying parent globals/threads mid-state (respx router,
+    # os.environ + module patches). Workers still run many jobs sequentially in
+    # one process.
     return ProcessPoolExecutor(
         max_workers=n, mp_context=multiprocessing.get_context("spawn")
     )
@@ -230,17 +234,31 @@ def _run_parallel(
         str(c.name): [None] * runs for c in cases
     }
     with executor_factory(workers) as pool:
-        # Round-major: run 0 of every case first, spread load across cases.
-        futures = [
-            pool.submit(_pool_job, str(c.name), i) for i in range(runs) for c in cases
-        ]
-        for future in as_completed(futures):
-            name, idx, outcome = future.result()
-            slots[name][idx] = outcome
-            _print_run(name, idx, runs, outcome)
-    return [
-        _aggregate(c, [o for o in slots[str(c.name)] if o is not None]) for c in cases
-    ]
+        try:
+            # Round-major: run 0 of every case first, spread load across cases.
+            futures = [
+                pool.submit(_pool_job, str(c.name), i)
+                for i in range(runs)
+                for c in cases
+            ]
+            for future in as_completed(futures):
+                name, idx, outcome = future.result()
+                slots[name][idx] = outcome
+                _print_run(name, idx, runs, outcome)
+        except BaseException:
+            # Job error = gate abort; drop queued jobs (running ones can't cancel).
+            pool.shutdown(wait=False, cancel_futures=True)
+            raise
+    aggregated: list[dict[str, Any]] = []
+    for c in cases:
+        outcomes: list[RunOutcome] = []
+        for i, o in enumerate(slots[str(c.name)]):
+            if o is None:
+                # Fail closed: missing slot must not shrink runs.
+                raise RuntimeError(f"no outcome for case {c.name} run {i + 1}")
+            outcomes.append(o)
+        aggregated.append(_aggregate(c, outcomes))
+    return aggregated
 
 
 def main() -> int:
@@ -270,13 +288,6 @@ def main() -> int:
         help="print the case catalog (name/category/check/covers/intent) and exit",
     )
     args = parser.parse_args()
-    try:
-        workers = _resolve_workers(args.workers)
-    except ValueError:
-        parser.error("EVAL_WORKERS must be an integer")
-    if workers < 1:
-        parser.error("workers must be >= 1")
-
     cases = CATEGORIES[args.category]
     if args.case:
         cases = [c for c in cases if c.name == args.case]
@@ -287,6 +298,13 @@ def main() -> int:
     if args.list:
         _print_catalog(cases)
         return 0
+
+    try:
+        workers = _resolve_workers(args.workers)
+    except ValueError:
+        parser.error("EVAL_WORKERS must be an integer")
+    if workers < 1:
+        parser.error("workers must be >= 1")
 
     evaluator = CheckDispatchEvaluator()
     effective_workers = max(1, min(workers, len(cases) * args.runs))
