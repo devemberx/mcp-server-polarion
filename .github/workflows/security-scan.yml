@@ -62,11 +62,18 @@ jobs:
           if-no-files-found: warn
 
   audit:
-    # Dependabot covers deps nightly, so skip the audit on the cron run.
-    if: github.event_name != 'schedule'
+    # PR: fail only on CVEs head add over base (absolute gate deadlocked two CVE-fix PRs,
+    # each red on the other's CVE). push/schedule: no base = full audit, main's CVEs stay red.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+
+      - name: Check out PR base
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -77,26 +84,51 @@ jobs:
       - name: Export production-only requirements
         # Wheel deps only; --no-hashes since OSV's pip parser can't read multiline hashes.
         run: |
-          uv export --no-dev --no-emit-project --no-hashes \
-            --format requirements-txt > runtime-requirements.txt
+          export_reqs() {
+            uv export --directory "$1" --no-dev --no-emit-project --no-hashes \
+              --format requirements-txt > "$2"
+          }
+          export_reqs . runtime-requirements.txt
+          if [ -d base ]; then export_reqs base base-requirements.txt; fi
 
       - name: Scan dependencies for known CVEs (osv-scanner)
         # --no-resolve: export already = full pinned closure; deps.dev re-resolve add nothing,
         # and exit 127 on any version deps.dev not yet indexed (fresh PyPI release).
+        # Exit 1 = vulns found (gated next step); any other non-zero = scanner broke, fail closed.
         run: |
-          set -o pipefail
           curl -sSL -o osv-scanner \
             https://github.com/google/osv-scanner/releases/download/v2.3.8/osv-scanner_linux_amd64
           chmod +x osv-scanner
-          ./osv-scanner scan source --no-resolve \
-            --lockfile=requirements.txt:runtime-requirements.txt \
-            | tee osv-result.txt
+          scan() {
+            rc=0
+            ./osv-scanner scan source --no-resolve --format json \
+              --lockfile="requirements.txt:$1" > "$2" || rc=$?
+            if [ "$rc" -gt 1 ]; then
+              echo "::error title=osv-scanner::exit $rc scanning $1"
+              exit "$rc"
+            fi
+          }
+          scan runtime-requirements.txt osv-head.json
+          if [ -f base-requirements.txt ]; then scan base-requirements.txt osv-base.json; fi
+
+      - name: Gate on vulnerabilities
+        run: |
+          base_args=()
+          if [ -f osv-base.json ]; then base_args=(--base osv-base.json); fi
+          python3 .github/scripts/osv_audit_diff.py osv-head.json "${base_args[@]}"
+
+      - name: Summarize audit
+        if: always()
+        run: if [ -f osv-summary.md ]; then cat osv-summary.md >> "$GITHUB_STEP_SUMMARY"; fi
 
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: osv-scan-report
-          path: osv-result.txt
+          path: |
+            osv-head.json
+            osv-base.json
+            osv-summary.md
           retention-days: 30
           if-no-files-found: warn
