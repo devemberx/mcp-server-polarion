@@ -45,10 +45,11 @@ dev = [
 evals = [
     "strands-agents[litellm]",
     "strands-agents-evals",
-    # 1.89.x regresses gpt-4o-mini tool-calling: the agent skips
-    # read_document_parts and loops past the cycle cap, breaking orchestration
-    # cases (ORCH-DEDUP-BEFORE-CREATE, ORCH-BULK-SPEC-INTO-DOC).
-    "litellm>=1.83.10,<1.89",
+    # Floor 1.101.0 = first release treat gpt-6-* as reasoning family; older
+    # drop reasoning_effort for gpt-6-luna. No upper pin: 1.89.x regression was
+    # gpt-4o-mini only. Responses-API bridge keep moving upstream --
+    # test_model.py alarm catch a routing regression.
+    "litellm>=1.101.0",
 ]
 
 [build-system]
