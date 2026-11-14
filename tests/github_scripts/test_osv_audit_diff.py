@@ -43,6 +43,15 @@ def report(*packages: tuple[str, str, list[str], str]) -> dict[str, object]:
     }
 
 
+def group_report(
+    name: str, version: str, *, ids: list[str], aliases: list[str]
+) -> dict[str, object]:
+    """Single-package report with explicit group `aliases`."""
+    group = {"ids": ids, "aliases": aliases, "max_severity": "7.5"}
+    pkg = {"package": {"name": name, "version": version}, "groups": [group]}
+    return {"results": [{"packages": [pkg]}]}
+
+
 class TestParseReport:
     def test_one_finding_per_group(self) -> None:
         findings = oad.parse_report(report(MCP))
@@ -55,13 +64,24 @@ class TestParseReport:
             )
         ]
 
-    @pytest.mark.parametrize("data", [{}, {"results": None}, {"results": []}])
-    def test_clean_scan_yields_nothing(self, data: dict[str, object]) -> None:
-        assert oad.parse_report(data) == []
+    def test_clean_scan_yields_nothing(self) -> None:
+        # osv-scanner 2.x clean scan still emit `results: []`.
+        assert oad.parse_report({"results": []}) == []
+
+    @pytest.mark.parametrize("data", [{}, {"results": None}, {"results": {}}])
+    def test_missing_results_list_rejected(self, data: dict[str, object]) -> None:
+        # Renamed/dropped key = schema drift, not clean scan.
+        with pytest.raises(ValueError, match="results"):
+            oad.parse_report(data)
 
     def test_non_object_report_rejected(self) -> None:
         with pytest.raises(ValueError, match="JSON object"):
             oad.parse_report(["not", "a", "report"])
+
+    def test_group_aliases_join_ids(self) -> None:
+        data = group_report("mcp", "2.1.1", ids=["GHSA-a"], aliases=["CVE-1", "GHSA-a"])
+        [finding] = oad.parse_report(data)
+        assert finding.ids == ("GHSA-a", "CVE-1")
 
     def test_vulns_without_groups_still_reported(self) -> None:
         # Format drift must not silently pass: fall back to raw vulnerabilities.
@@ -125,6 +145,24 @@ class TestSplit:
         new, _ = oad.split(head, base)
         assert new == []
 
+    def test_shared_group_alias_counts_as_existing(self) -> None:
+        # Version bump matched only by twin advisory; shared CVE live in aliases.
+        base = oad.parse_report(
+            group_report("mcp", "1", ids=["GHSA-a", "PYSEC-b"], aliases=["CVE-1"])
+        )
+        head = oad.parse_report(
+            group_report("mcp", "2", ids=["GHSA-c"], aliases=["CVE-1"])
+        )
+        new, _ = oad.split(head, base)
+        assert new == []
+
+    def test_group_without_ids_is_new(self) -> None:
+        # Nothing to match on = fail closed, even when base flag same package.
+        base = oad.parse_report(report(DNSPYTHON))
+        head = oad.parse_report(group_report("dnspython", "2.9.0", ids=[], aliases=[]))
+        new, _ = oad.split(head, base)
+        assert [f.package for f in new] == ["dnspython"]
+
     def test_same_id_on_other_package_is_new(self) -> None:
         base = oad.parse_report(report(("fastmcp", "4.1.1", ["GHSA-x"], "6.8")))
         head = oad.parse_report(report(("fastmcp-slim", "4.1.1", ["GHSA-x"], "6.8")))
@@ -149,8 +187,13 @@ class TestRender:
         assert "| opentelemetry-api | 1.45.1 |" in out
 
     def test_no_baseline_wording(self) -> None:
+        # No base scanned: findings must not read as PR-introduced.
         out = oad.render(oad.parse_report(report(DNSPYTHON)), [], baseline=False)
         assert "Full audit" in out
+        assert "**1 found** (blocking)" in out
+        assert "### Found (blocking)" in out
+        assert "new" not in out.lower()
+        assert "pre-existing" not in out.lower()
 
 
 class TestMain:
@@ -193,9 +236,43 @@ class TestMain:
         head = tmp_path / "head.json"
         if content is not None:
             head.write_text(content)
-        rc = oad.main([str(head), "--summary", str(tmp_path / "s.md")])
+        summary = tmp_path / "s.md"
+        rc = oad.main([str(head), "--summary", str(summary)])
         assert rc == 2
         assert "::error title=osv audit::" in capsys.readouterr().out
+        assert "Unreadable scan report" in summary.read_text()
+
+    def test_scanner_vulns_but_none_parsed_fails_closed(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # Exit 1 = scanner saw vulns; empty parse = format drift, not clean.
+        head = self.write(tmp_path / "head.json", report())
+        rc = oad.main(
+            [str(head), "--head-rc", "1", "--summary", str(tmp_path / "s.md")]
+        )
+        assert rc == 2
+        assert "exit 1 but no findings parsed" in capsys.readouterr().out
+
+    def test_base_scanner_vulns_but_none_parsed_fails_closed(
+        self, tmp_path: Path
+    ) -> None:
+        head = self.write(tmp_path / "head.json", report())
+        base = self.write(tmp_path / "base.json", report())
+        summary = tmp_path / "s.md"
+        argv = [str(head), "--base", str(base), "--base-rc", "1"]
+        rc = oad.main([*argv, "--summary", str(summary)])
+        assert rc == 2
+
+    @pytest.mark.parametrize("head_rc", ["0", "1"])
+    def test_scanner_rc_consistent_with_parse_passes_through(
+        self, tmp_path: Path, head_rc: str
+    ) -> None:
+        packages = (OTEL,) if head_rc == "1" else ()
+        head = self.write(tmp_path / "head.json", report(*packages))
+        rc = oad.main(
+            [str(head), "--head-rc", head_rc, "--summary", str(tmp_path / "s.md")]
+        )
+        assert rc == int(head_rc)
 
     def test_unreadable_base_fails_closed(self, tmp_path: Path) -> None:
         head = self.write(tmp_path / "head.json", report())

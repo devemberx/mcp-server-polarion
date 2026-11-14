@@ -5,7 +5,7 @@ separate PRs: each stay red on the other's CVE. PR run pass `--base` -> only
 head-only vulns fail, pre-existing ones warn. No `--base` (push / schedule)
 = full audit, every finding fail, so main's own CVEs stay visible.
 
-Exit 0 = pass, 1 = blocking vulns, 2 = unreadable report (fail closed).
+Exit 0 = pass, 1 = blocking vulns, 2 = unreadable or drifted report (fail closed).
 """
 
 from __future__ import annotations
@@ -41,8 +41,12 @@ def parse_report(data: object) -> list[Finding]:
     """One finding per alias group (`groups[]` collapse GHSA/PYSEC/CVE twins)."""
     if not isinstance(data, dict):
         raise ValueError("scan report is not a JSON object")
+    results = data.get("results")
+    # Clean scan still emit `results: []`; absent/non-list = schema drift.
+    if not isinstance(results, list):
+        raise ValueError("scan report has no `results` list")
     findings: list[Finding] = []
-    for result in _as_list(data.get("results")):
+    for result in _as_list(results):
         for pkg in _as_list(result.get("packages")):
             info = pkg.get("package")
             info = info if isinstance(info, dict) else {}
@@ -51,7 +55,9 @@ def parse_report(data: object) -> list[Finding]:
             groups = _as_list(pkg.get("groups"))
             if groups:
                 for group in groups:
-                    ids = tuple(_strs(group.get("ids")))
+                    # Shared CVE id of twin advisories live in `aliases`, not `ids`.
+                    raw = _strs(group.get("ids")) + _strs(group.get("aliases"))
+                    ids = tuple(dict.fromkeys(raw))
                     severity = str(group.get("max_severity") or "?")
                     findings.append(Finding(name, version, ids, severity))
                 continue
@@ -100,34 +106,52 @@ def render(new: list[Finding], existing: list[Finding], *, baseline: bool) -> st
     if not new and not existing:
         lines.append("No known vulnerabilities.")
         return "\n".join(lines) + "\n"
-    lines.append(
-        f"**{len(new)} new** (blocking) · {len(existing)} pre-existing on base"
-    )
-    for title, items in (("New (blocking)", new), ("Pre-existing on base", existing)):
+    sections: tuple[tuple[str, list[Finding]], ...]
+    if baseline:
+        lines.append(
+            f"**{len(new)} new** (blocking) · {len(existing)} pre-existing on base"
+        )
+        sections = (("New (blocking)", new), ("Pre-existing on base", existing))
+    else:
+        # No base scanned: "new" would mislabel main's own CVEs as introduced.
+        lines.append(f"**{len(new)} found** (blocking)")
+        sections = (("Found (blocking)", new),)
+    for title, items in sections:
         if items:
             lines += ["", f"### {title}", "", *_table(items)]
     return "\n".join(lines) + "\n"
+
+
+def render_error(exc: Exception) -> str:
+    return f"## Dependency Audit (osv-scanner)\n\nUnreadable scan report: {exc}\n"
 
 
 def _describe(f: Finding) -> str:
     return f"{f.package} {f.version}: {', '.join(f.ids)} (severity {f.severity})"
 
 
-def _load(path: Path) -> list[Finding]:
-    return parse_report(json.loads(path.read_text()))
+def _load(path: Path, rc: int | None) -> list[Finding]:
+    findings = parse_report(json.loads(path.read_text()))
+    # Scanner saw vulns, parser none = drift inside `results`; key check miss it.
+    if rc == 1 and not findings:
+        raise ValueError(f"{path}: osv-scanner exit 1 but no findings parsed")
+    return findings
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Gate osv-scanner findings.")
     parser.add_argument("head", type=Path, help="osv-scanner JSON for PR head")
     parser.add_argument("--base", type=Path, help="osv-scanner JSON for PR base")
+    parser.add_argument("--head-rc", type=int, help="osv-scanner exit code, head")
+    parser.add_argument("--base-rc", type=int, help="osv-scanner exit code, base")
     parser.add_argument("--summary", type=Path, default=Path("osv-summary.md"))
     args = parser.parse_args(argv)
     try:
-        head = _load(args.head)
-        base = _load(args.base) if args.base else None
+        head = _load(args.head, args.head_rc)
+        base = _load(args.base, args.base_rc) if args.base else None
     except (OSError, ValueError) as exc:  # JSONDecodeError subclass ValueError
         print(f"::error title=osv audit::unreadable scan report: {exc}")
+        args.summary.write_text(render_error(exc))
         return 2
     new, existing = split(head, base)
     args.summary.write_text(render(new, existing, baseline=base is not None))
