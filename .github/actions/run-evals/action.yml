@@ -22,6 +22,10 @@ inputs:
     description: Runs per case (sets EVAL_RUNS).
     required: false
     default: "10"
+  workers:
+    description: Worker processes running case runs in parallel (sets EVAL_WORKERS).
+    required: false
+    default: "4"
   openai-api-key:
     description: OPENAI_API_KEY for the agent under test.
     required: true
@@ -47,6 +51,7 @@ runs:
         EVAL_MODEL: ${{ inputs.model }}
         EVAL_REASONING_EFFORT: ${{ inputs.reasoning-effort }}
         EVAL_RUNS: ${{ inputs.runs }}
+        EVAL_WORKERS: ${{ inputs.workers }}
       run: uv run python -m evals.run --category "${{ inputs.category }}"
 
     - name: Upload eval report

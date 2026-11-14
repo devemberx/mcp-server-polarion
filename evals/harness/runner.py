@@ -1,7 +1,8 @@
 """Run one eval case end to end. ``run_case`` = synchronous ``task`` callable
 for ``strands_evals``; one ``asyncio.run`` drive Agent -> bridged tools ->
-in-memory server -> respx -> FakePolarion. LLM traffic fall through to real
-provider (``assert_all_mocked=False``); Polarion never touched.
+in-memory server -> respx -> FakePolarion. LLM traffic bypass respx (litellm
+default aiohttp transport never go through httpx) and reach real provider;
+Polarion never touched.
 """
 
 from __future__ import annotations
@@ -12,10 +13,12 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any, Final
 
+import openai
 import respx
 from fastmcp import Client
 from strands import Agent
 from strands.hooks import BeforeModelCallEvent, HookRegistry
+from strands.types.exceptions import ModelThrottledException
 from strands_evals import Case
 from strands_evals.types import TaskOutput
 
@@ -46,6 +49,49 @@ SYSTEM_PROMPT = (
 # Output prefix for agent that raised before finishing; gate fail any output
 # starting with it (crashed agent clean verdict moot).
 AGENT_ERROR_PREFIX = "<agent-error:"
+
+# Output prefix for provider-side failure (throttle, timeout, 5xx, connection)
+# surviving litellm retries; infra flake, not agent verdict.
+INFRA_ERROR_PREFIX = "<infra-error:"
+
+_INFRA_STATUS_CODES: Final[frozenset[int]] = frozenset({408, 429})
+_MAX_CHAIN_DEPTH: Final[int] = 16
+
+
+def _is_infra_error(exc: BaseException) -> bool:
+    """True if any link in exception chain = provider-side transient failure.
+
+    Walk strands ``original_exception`` + ``__cause__``; cycle-safe, depth-bounded.
+    """
+    seen: set[int] = set()
+    stack: list[BaseException | None] = [exc]
+    depth = 0
+    while stack and depth < _MAX_CHAIN_DEPTH:
+        link = stack.pop()
+        if link is None or id(link) in seen:
+            continue
+        seen.add(id(link))
+        depth += 1
+        if isinstance(link, ModelThrottledException | openai.APIConnectionError):
+            return True
+        status = getattr(link, "status_code", None)
+        # bool = int subclass; exclude.
+        if (
+            isinstance(status, int)
+            and not isinstance(status, bool)
+            and (status in _INFRA_STATUS_CODES or status >= 500)
+        ):
+            return True
+        stack.append(link.__cause__)
+        original = getattr(link, "original_exception", None)
+        if isinstance(original, BaseException):
+            stack.append(original)
+    return False
+
+
+def _error_output(exc: BaseException) -> str:
+    prefix = INFRA_ERROR_PREFIX if _is_infra_error(exc) else AGENT_ERROR_PREFIX
+    return f"{prefix} {type(exc).__name__}: {exc}>"
 
 
 def _extract_text(result: Any) -> str:
@@ -131,7 +177,7 @@ async def _run_case_async(case: Case, recorder: TrajectoryRecorder) -> str:
                 f"case exceeded {_CASE_TIMEOUT_SECONDS:.0f}s>"
             )
         except Exception as exc:
-            return f"{AGENT_ERROR_PREFIX} {type(exc).__name__}: {exc}>"
+            return _error_output(exc)
         if cycle_guard.count > _MAX_CYCLES:
             return (
                 f"{AGENT_ERROR_PREFIX} CycleGuard: exceeded {_MAX_CYCLES} model cycles>"

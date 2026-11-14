@@ -33,6 +33,10 @@ on:
         description: "Runs per case (EVAL_RUNS)"
         default: "10"
         type: string
+      workers:
+        description: "Worker processes (EVAL_WORKERS)"
+        default: "4"
+        type: string
 
 jobs:
   evals:
@@ -48,4 +52,5 @@ jobs:
           model: ${{ inputs.model }}
           reasoning-effort: ${{ inputs.reasoning_effort }}
           runs: ${{ inputs.runs }}
+          workers: ${{ inputs.workers }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}

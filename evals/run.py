@@ -26,9 +26,15 @@ os.environ["FASTMCP_ENABLE_RICH_LOGGING"] = "false"
 
 import argparse
 import json
+import multiprocessing
 import re
+import resource
 import subprocess
-from typing import Any
+import time
+from collections.abc import Callable
+from concurrent.futures import Executor, ProcessPoolExecutor, as_completed
+from dataclasses import dataclass
+from typing import Any, NamedTuple
 
 from strands_evals import Case
 from strands_evals.types.evaluation import EvaluationData
@@ -39,9 +45,11 @@ from evals.cases.safety import CASES as SAFETY_CASES
 from evals.cases.triggers import CASES as TRIGGER_CASES
 from evals.evaluators.dispatch import CheckDispatchEvaluator
 from evals.harness.model import resolve_model_id, resolve_reasoning_effort
-from evals.harness.runner import AGENT_ERROR_PREFIX, run_case
+from evals.harness.runner import AGENT_ERROR_PREFIX, INFRA_ERROR_PREFIX, run_case
 
 _REPORT_DIR = Path(__file__).parent / "reports"
+
+DEFAULT_WORKERS = 8
 
 ALL_CASES = [*TRIGGER_CASES, *SAFETY_CASES, *EFFICIENCY_CASES, *ORCHESTRATION_CASES]
 
@@ -92,12 +100,31 @@ def _print_catalog(cases: list[Case]) -> None:
         print(f"{'':<24} {'':<14} intent: {meta.get('intent', '')}")
 
 
-def _evaluate_once(case: Case, evaluator: CheckDispatchEvaluator) -> tuple[bool, str]:
+class Verdict(NamedTuple):
+    passed: bool
+    reason: str
+    # Infra failure (network/provider), not agent behaviour: eligible for re-run.
+    infra: bool = False
+
+
+@dataclass(frozen=True)
+class RunOutcome:
+    """Picklable result of one gate run (after infra re-runs)."""
+
+    passed: bool
+    reason: str
+    duration_s: float
+    infra_retries: int
+
+
+def _evaluate_once(case: Case, evaluator: CheckDispatchEvaluator) -> Verdict:
     task_output = run_case(case)
     output = task_output.get("output")
+    if isinstance(output, str) and output.startswith(INFRA_ERROR_PREFIX):
+        return Verdict(False, f"infra error: {output}", infra=True)
     if isinstance(output, str) and output.startswith(AGENT_ERROR_PREFIX):
         # Crashed agent: partial trajectory must not read clean.
-        return False, f"agent run failed: {output}"
+        return Verdict(False, f"agent run failed: {output}")
     data: EvaluationData[Any, Any] = EvaluationData(
         input=case.input,
         name=case.name,
@@ -106,22 +133,35 @@ def _evaluate_once(case: Case, evaluator: CheckDispatchEvaluator) -> tuple[bool,
         metadata=case.metadata,
     )
     result = evaluator.evaluate(data)[0]
-    return result.test_pass, result.reason or ""
+    return Verdict(result.test_pass, result.reason or "")
 
 
-def _run_case_n_times(
-    case: Case, runs: int, evaluator: CheckDispatchEvaluator
-) -> dict[str, Any]:
+def _infra_retry_settings() -> tuple[int, float]:
+    # Call-time read: tests + CI env override without reimport.
+    retries = max(0, int(os.environ.get("EVAL_INFRA_RETRIES", "2")))
+    delay = max(0.0, float(os.environ.get("EVAL_INFRA_RETRY_DELAY", "30")))
+    return retries, delay
+
+
+def _run_job(case: Case, evaluator: CheckDispatchEvaluator) -> RunOutcome:
+    max_retries, delay = _infra_retry_settings()
+    start = time.monotonic()
+    verdict = _evaluate_once(case, evaluator)
+    retries = 0
+    while verdict.infra and retries < max_retries:
+        time.sleep(delay)
+        retries += 1
+        verdict = _evaluate_once(case, evaluator)
+    reason = verdict.reason
+    if verdict.infra:
+        reason = f"infra error after {retries} retries: {reason}"
+    return RunOutcome(verdict.passed, reason, time.monotonic() - start, retries)
+
+
+def _aggregate(case: Case, outcomes: list[RunOutcome]) -> dict[str, Any]:
     min_rate = float((case.metadata or {}).get("min_pass_rate", 1.0))
-    passes = 0
-    failures: list[str] = []
-    for i in range(runs):
-        passed, reason = _evaluate_once(case, evaluator)
-        if passed:
-            passes += 1
-        else:
-            failures.append(f"run {i + 1}: {reason}")
-        print(f"  {case.name} run {i + 1}/{runs}: {'PASS' if passed else 'FAIL'}")
+    runs = len(outcomes)
+    passes = sum(1 for o in outcomes if o.passed)
     pass_rate = passes / runs if runs else 0.0
     return {
         "name": case.name,
@@ -130,8 +170,77 @@ def _run_case_n_times(
         "pass_rate": pass_rate,
         "min_pass_rate": min_rate,
         "passed": pass_rate >= min_rate,
-        "failures": failures,
+        "failures": [
+            f"run {i + 1}: {o.reason}" for i, o in enumerate(outcomes) if not o.passed
+        ],
+        "durations_s": [o.duration_s for o in outcomes],
+        "infra_retries": sum(o.infra_retries for o in outcomes),
     }
+
+
+def _run_case_n_times(
+    case: Case, runs: int, evaluator: CheckDispatchEvaluator
+) -> dict[str, Any]:
+    outcomes: list[RunOutcome] = []
+    for i in range(runs):
+        outcome = _run_job(case, evaluator)
+        outcomes.append(outcome)
+        print(
+            f"  {case.name} run {i + 1}/{runs}: {'PASS' if outcome.passed else 'FAIL'}"
+        )
+    return _aggregate(case, outcomes)
+
+
+def _resolve_workers(cli: int | None) -> int:
+    if cli is not None:
+        return cli
+    raw = os.environ.get("EVAL_WORKERS", "").strip()
+    return int(raw) if raw else DEFAULT_WORKERS
+
+
+def _spawn_pool(n: int) -> Executor:
+    # spawn mandatory: fork default on Linux 3.13; respx routing, os.environ
+    # patches, write-delay module patch = process-global, must not leak across jobs.
+    return ProcessPoolExecutor(
+        max_workers=n, mp_context=multiprocessing.get_context("spawn")
+    )
+
+
+# Per-process cache: one evaluator per worker, built on first job.
+_EVALUATOR: CheckDispatchEvaluator | None = None
+
+
+def _pool_job(case_name: str, run_idx: int) -> tuple[str, int, RunOutcome]:
+    global _EVALUATOR  # noqa: PLW0603
+    if _EVALUATOR is None:
+        _EVALUATOR = CheckDispatchEvaluator()
+    case = next(c for c in ALL_CASES if c.name == case_name)
+    return case_name, run_idx, _run_job(case, _EVALUATOR)
+
+
+def _run_parallel(
+    cases: list[Case],
+    runs: int,
+    workers: int,
+    executor_factory: Callable[[int], Executor] = _spawn_pool,
+) -> list[dict[str, Any]]:
+    slots: dict[str, list[RunOutcome | None]] = {
+        str(c.name): [None] * runs for c in cases
+    }
+    with executor_factory(workers) as pool:
+        # Round-major: run 0 of every case first, spread load across cases.
+        futures = [
+            pool.submit(_pool_job, str(c.name), i) for i in range(runs) for c in cases
+        ]
+        for future in as_completed(futures):
+            name, idx, outcome = future.result()
+            slots[name][idx] = outcome
+            print(
+                f"  {name} run {idx + 1}/{runs}: {'PASS' if outcome.passed else 'FAIL'}"
+            )
+    return [
+        _aggregate(c, [o for o in slots[str(c.name)] if o is not None]) for c in cases
+    ]
 
 
 def main() -> int:
@@ -150,11 +259,23 @@ def main() -> int:
         help="runs per case (default EVAL_RUNS or 10)",
     )
     parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help=f"parallel worker processes (default EVAL_WORKERS or {DEFAULT_WORKERS})",
+    )
+    parser.add_argument(
         "--list",
         action="store_true",
         help="print the case catalog (name/category/check/covers/intent) and exit",
     )
     args = parser.parse_args()
+    try:
+        workers = _resolve_workers(args.workers)
+    except ValueError:
+        parser.error("EVAL_WORKERS must be an integer")
+    if workers < 1:
+        parser.error("workers must be >= 1")
 
     cases = CATEGORIES[args.category]
     if args.case:
@@ -168,14 +289,33 @@ def main() -> int:
         return 0
 
     evaluator = CheckDispatchEvaluator()
+    effective_workers = max(1, min(workers, len(cases) * args.runs))
     model = resolve_model_id()
     reasoning_effort = resolve_reasoning_effort()
     print(
         f"Eval gate · category={args.category} · model={model} · "
-        f"effort={reasoning_effort} · runs={args.runs} · cases={len(cases)}\n"
+        f"effort={reasoning_effort} · runs={args.runs} · cases={len(cases)} · "
+        f"workers={effective_workers}\n"
     )
 
-    results = [_run_case_n_times(c, args.runs, evaluator) for c in cases]
+    start = time.monotonic()
+    if effective_workers == 1:
+        results = [_run_case_n_times(c, args.runs, evaluator) for c in cases]
+    else:
+        results = _run_parallel(
+            cases, args.runs, effective_workers, executor_factory=_spawn_pool
+        )
+    wall_s = time.monotonic() - start
+    self_usage = resource.getrusage(resource.RUSAGE_SELF)
+    child_usage = resource.getrusage(resource.RUSAGE_CHILDREN)
+    # ru_maxrss = KiB on Linux.
+    peak_rss_mb = max(self_usage.ru_maxrss, child_usage.ru_maxrss) / 1024
+    cpu_s = (
+        self_usage.ru_utime
+        + self_usage.ru_stime
+        + child_usage.ru_utime
+        + child_usage.ru_stime
+    )
     for case, result in zip(cases, results, strict=True):
         meta = case.metadata or {}
         result["category"] = _CASE_CATEGORY.get(str(case.name), "?")
@@ -188,6 +328,10 @@ def main() -> int:
         "model": model,
         "reasoning_effort": reasoning_effort,
         "runs": args.runs,
+        "workers": effective_workers,
+        "wall_s": wall_s,
+        "peak_rss_mb": peak_rss_mb,
+        "cpu_s": cpu_s,
         "gate_passed": gate_passed,
         "cases": results,
     }
@@ -208,7 +352,8 @@ def main() -> int:
             print(f"        intent: {r['intent']}")
         for f in r["failures"]:
             print(f"        - {f}")
-    print(f"\nreport: {report_path}")
+    print(f"\nwall: {wall_s:.0f}s")
+    print(f"report: {report_path}")
     print(f"GATE: {'PASS' if gate_passed else 'FAIL'}")
     return 0 if gate_passed else 1
 

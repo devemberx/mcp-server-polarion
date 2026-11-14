@@ -6,8 +6,11 @@ from __future__ import annotations
 
 import json
 import os
+import pickle
 import subprocess
 import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +26,13 @@ from evals.cases.efficiency import CASES as EFFICIENCY_CASES
 from evals.cases.orchestration import CASES as ORCHESTRATION_CASES
 from evals.cases.safety import CASES as SAFETY_CASES
 from evals.cases.triggers import CASES as TRIGGER_CASES
-from evals.harness.runner import AGENT_ERROR_PREFIX
+from evals.harness.runner import AGENT_ERROR_PREFIX, INFRA_ERROR_PREFIX
+
+
+@pytest.fixture(autouse=True)
+def _serial_workers(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Serial path: main tests patch _run_case_n_times; spawned child miss patches.
+    monkeypatch.setenv("EVAL_WORKERS", "1")
 
 
 def _case(name: str = "GATE-X", min_rate: float = 1.0) -> Case:
@@ -58,7 +67,9 @@ class TestPlainLogging:
 
 class TestRunCaseNTimes:
     def test_all_pass_meets_gate(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(run, "_evaluate_once", lambda case, evaluator: (True, ""))
+        monkeypatch.setattr(
+            run, "_evaluate_once", lambda case, evaluator: run.Verdict(True, "")
+        )
         result = run._run_case_n_times(_case(), runs=3, evaluator=object())
         assert result["pass_count"] == 3
         assert result["pass_rate"] == 1.0
@@ -70,9 +81,9 @@ class TestRunCaseNTimes:
     ) -> None:
         calls = {"n": 0}
 
-        def _fake(case: Case, evaluator: Any) -> tuple[bool, str]:
+        def _fake(case: Case, evaluator: Any) -> run.Verdict:
             calls["n"] += 1
-            return (calls["n"] != 2, "boom" if calls["n"] == 2 else "")
+            return run.Verdict(calls["n"] != 2, "boom" if calls["n"] == 2 else "")
 
         monkeypatch.setattr(run, "_evaluate_once", _fake)
         result = run._run_case_n_times(_case(min_rate=1.0), runs=3, evaluator=object())
@@ -85,7 +96,7 @@ class TestRunCaseNTimes:
     ) -> None:
         seq = iter([True, False, True, True])
         monkeypatch.setattr(
-            run, "_evaluate_once", lambda case, evaluator: (next(seq), "")
+            run, "_evaluate_once", lambda case, evaluator: run.Verdict(next(seq), "")
         )
         result = run._run_case_n_times(_case(min_rate=0.5), runs=4, evaluator=object())
         assert result["pass_rate"] == 0.75
@@ -105,9 +116,143 @@ class TestEvaluateOnce:
                 "trajectory": [],
             },
         )
-        passed, reason = run._evaluate_once(_case(), evaluator=object())
-        assert passed is False
-        assert "agent run failed" in reason
+        verdict = run._evaluate_once(_case(), evaluator=object())
+        assert verdict.passed is False
+        assert "agent run failed" in verdict.reason
+
+
+class TestEvaluateOnceInfra:
+    def test_infra_output_flags_verdict(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            run,
+            "run_case",
+            lambda case: {
+                "input": case.input,
+                "output": f"{INFRA_ERROR_PREFIX} OSError: net down>",
+                "trajectory": [],
+            },
+        )
+        verdict = run._evaluate_once(_case(), evaluator=object())
+        assert verdict.passed is False
+        assert verdict.infra is True
+        assert verdict.reason.startswith("infra error: ")
+
+    def test_agent_error_not_infra(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            run,
+            "run_case",
+            lambda case: {
+                "input": case.input,
+                "output": f"{AGENT_ERROR_PREFIX} TimeoutError>",
+                "trajectory": [],
+            },
+        )
+        assert run._evaluate_once(_case(), evaluator=object()).infra is False
+
+
+class TestInfraRetrySettings:
+    def test_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("EVAL_INFRA_RETRIES", raising=False)
+        monkeypatch.delenv("EVAL_INFRA_RETRY_DELAY", raising=False)
+        assert run._infra_retry_settings() == (2, 30.0)
+
+    def test_custom(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("EVAL_INFRA_RETRIES", "5")
+        monkeypatch.setenv("EVAL_INFRA_RETRY_DELAY", "1.5")
+        assert run._infra_retry_settings() == (5, 1.5)
+
+    def test_negative_floored(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("EVAL_INFRA_RETRIES", "-3")
+        monkeypatch.setenv("EVAL_INFRA_RETRY_DELAY", "-1")
+        assert run._infra_retry_settings() == (0, 0.0)
+
+
+class TestRunJob:
+    def test_infra_once_then_pass(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("EVAL_INFRA_RETRIES", "2")
+        monkeypatch.setenv("EVAL_INFRA_RETRY_DELAY", "7")
+        seq = iter(
+            [run.Verdict(False, "infra error: x", infra=True), run.Verdict(True, "")]
+        )
+        monkeypatch.setattr(run, "_evaluate_once", lambda case, evaluator: next(seq))
+        sleeps: list[float] = []
+        monkeypatch.setattr(run.time, "sleep", sleeps.append)
+        outcome = run._run_job(_case(), object())
+        assert outcome.passed is True
+        assert outcome.infra_retries == 1
+        assert sleeps == [7.0]
+        assert outcome.duration_s >= 0.0
+
+    def test_infra_every_time_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("EVAL_INFRA_RETRIES", "2")
+        monkeypatch.setenv("EVAL_INFRA_RETRY_DELAY", "0")
+        calls = {"n": 0}
+
+        def _fake(case: Case, evaluator: Any) -> run.Verdict:
+            calls["n"] += 1
+            return run.Verdict(False, "infra error: down", infra=True)
+
+        monkeypatch.setattr(run, "_evaluate_once", _fake)
+        monkeypatch.setattr(run.time, "sleep", lambda s: None)
+        outcome = run._run_job(_case(), object())
+        assert calls["n"] == 3
+        assert outcome.passed is False
+        assert outcome.infra_retries == 2
+        assert "infra error after 2 retries" in outcome.reason
+        assert "down" in outcome.reason
+
+    def test_zero_retries_no_rerun(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("EVAL_INFRA_RETRIES", "0")
+        calls = {"n": 0}
+
+        def _fake(case: Case, evaluator: Any) -> run.Verdict:
+            calls["n"] += 1
+            return run.Verdict(False, "infra error: down", infra=True)
+
+        monkeypatch.setattr(run, "_evaluate_once", _fake)
+        monkeypatch.setattr(run.time, "sleep", lambda s: pytest.fail("no sleep"))
+        outcome = run._run_job(_case(), object())
+        assert calls["n"] == 1
+        assert outcome.passed is False
+        assert outcome.infra_retries == 0
+
+    def test_real_failure_not_retried(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        calls = {"n": 0}
+
+        def _fake(case: Case, evaluator: Any) -> run.Verdict:
+            calls["n"] += 1
+            return run.Verdict(False, "bad")
+
+        monkeypatch.setattr(run, "_evaluate_once", _fake)
+        outcome = run._run_job(_case(), object())
+        assert calls["n"] == 1
+        assert outcome.reason == "bad"
+
+
+class TestAggregate:
+    def test_fields_and_order(self) -> None:
+        outcomes = [
+            run.RunOutcome(True, "", 1.0, 0),
+            run.RunOutcome(False, "boom", 2.0, 1),
+            run.RunOutcome(False, "bang", 3.0, 2),
+        ]
+        result = run._aggregate(_case(min_rate=0.2), outcomes)
+        assert result["pass_count"] == 1
+        assert result["passed"] is True
+        assert result["failures"] == ["run 2: boom", "run 3: bang"]
+        assert result["durations_s"] == [1.0, 2.0, 3.0]
+        assert result["infra_retries"] == 3
+
+    def test_no_runs(self) -> None:
+        result = run._aggregate(_case(), [])
+        assert result["pass_rate"] == 0.0
+        assert result["passed"] is False
+
+
+class TestRunOutcome:
+    def test_pickle_round_trip(self) -> None:
+        outcome = run.RunOutcome(False, "r", 1.5, 2)
+        assert pickle.loads(pickle.dumps(outcome)) == outcome  # noqa: S301
 
 
 class TestGitSha:
@@ -213,3 +358,179 @@ class TestAllCases:
     def test_all_case_names_unique(self) -> None:
         names = [c.name for c in run.ALL_CASES]
         assert len(names) == len(set(names))
+
+
+def _ok_report_patches(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(run, "resolve_model_id", lambda: "test/model")
+    monkeypatch.setattr(run, "resolve_reasoning_effort", lambda: "high")
+    monkeypatch.setattr(run, "_git_sha", lambda: "abc123")
+    monkeypatch.setattr(run, "_REPORT_DIR", tmp_path)
+
+
+def _read_report(tmp_path: Path) -> dict[str, Any]:
+    path = tmp_path / "gate-abc123-test-model-high.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+class TestResolveWorkers:
+    def test_cli_wins_over_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("EVAL_WORKERS", "5")
+        assert run._resolve_workers(3) == 3
+
+    def test_env_used(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("EVAL_WORKERS", " 5 ")
+        assert run._resolve_workers(None) == 5
+
+    def test_blank_env_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("EVAL_WORKERS", "  ")
+        assert run._resolve_workers(None) == run.DEFAULT_WORKERS == 8
+
+    def test_unset_env_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("EVAL_WORKERS", raising=False)
+        assert run._resolve_workers(None) == 8
+
+    @pytest.mark.parametrize(
+        ("argv", "env"),
+        [
+            (["--workers", "0"], "1"),
+            ([], "0"),
+            ([], "abc"),
+        ],
+    )
+    def test_main_rejects_invalid(
+        self, monkeypatch: pytest.MonkeyPatch, argv: list[str], env: str
+    ) -> None:
+        monkeypatch.setenv("EVAL_WORKERS", env)
+        monkeypatch.setattr("sys.argv", ["run", "--runs", "1", *argv])
+        with pytest.raises(SystemExit) as exc:
+            run.main()
+        assert exc.value.code == 2
+
+
+class TestRunParallel:
+    def test_matches_serial_aggregation_in_catalog_order(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cases = run.ALL_CASES[:3]
+        bad = str(cases[1].name)
+        monkeypatch.setattr(
+            run,
+            "_evaluate_once",
+            lambda case, evaluator: run.Verdict(case.name != bad, f"r-{case.name}"),
+        )
+        parallel = run._run_parallel(cases, 2, 4, executor_factory=ThreadPoolExecutor)
+        serial = [
+            run._run_case_n_times(c, 2, run.CheckDispatchEvaluator()) for c in cases
+        ]
+        assert [r["name"] for r in parallel] == [c.name for c in cases]
+        for p, s in zip(parallel, serial, strict=True):
+            assert p["pass_count"] == s["pass_count"]
+            assert p["failures"] == s["failures"]
+            assert p["runs"] == 2
+        assert parallel[1]["passed"] is False
+
+    def test_failures_index_ordered_when_later_run_finishes_first(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _fake(case_name: str, run_idx: int) -> tuple[str, int, run.RunOutcome]:
+            if run_idx == 0:
+                time.sleep(0.2)
+            return case_name, run_idx, run.RunOutcome(False, f"bad{run_idx}", 0.1, 0)
+
+        monkeypatch.setattr(run, "_pool_job", _fake)
+        out = run._run_parallel(
+            run.ALL_CASES[:1], 3, 3, executor_factory=ThreadPoolExecutor
+        )
+        assert out[0]["failures"] == [
+            "run 1: bad0",
+            "run 2: bad1",
+            "run 3: bad2",
+        ]
+
+    def test_job_exception_propagates(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def _boom(case: Case, evaluator: Any) -> run.Verdict:
+            raise RuntimeError("pool boom")
+
+        monkeypatch.setattr(run, "_evaluate_once", _boom)
+        with pytest.raises(RuntimeError, match="pool boom"):
+            run._run_parallel(
+                run.ALL_CASES[:1], 1, 2, executor_factory=ThreadPoolExecutor
+            )
+
+
+class TestPoolJob:
+    def test_resolves_case_and_builds_evaluator_once(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        built: list[int] = []
+
+        class _Eval:
+            def __init__(self) -> None:
+                built.append(1)
+
+        monkeypatch.setattr(run, "_EVALUATOR", None)
+        monkeypatch.setattr(run, "CheckDispatchEvaluator", _Eval)
+        seen: list[str] = []
+
+        def _fake(case: Case, evaluator: Any) -> run.Verdict:
+            seen.append(str(case.name))
+            return run.Verdict(True, "")
+
+        monkeypatch.setattr(run, "_evaluate_once", _fake)
+        name = str(run.ALL_CASES[0].name)
+        n1, i1, o1 = run._pool_job(name, 0)
+        n2, i2, _ = run._pool_job(name, 1)
+        assert (n1, i1, n2, i2) == (name, 0, name, 1)
+        assert isinstance(o1, run.RunOutcome)
+        assert o1.passed is True
+        assert seen == [name, name]
+        assert built == [1]
+
+
+class TestSpawnPool:
+    def test_uses_spawn_and_runs_job(self) -> None:
+        pool = run._spawn_pool(2)
+        try:
+            assert pool._mp_context.get_start_method() == "spawn"  # type: ignore[attr-defined]
+            assert pool.submit(abs, -1).result(timeout=60) == 1
+        finally:
+            pool.shutdown()
+
+
+class TestMainWorkers:
+    def test_parallel_report_fields(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        _ok_report_patches(monkeypatch, tmp_path)
+        monkeypatch.setattr(run, "_spawn_pool", ThreadPoolExecutor)
+        monkeypatch.setattr(
+            run, "_evaluate_once", lambda case, evaluator: run.Verdict(True, "")
+        )
+        monkeypatch.setattr(
+            "sys.argv", ["run", "--category", "safety", "--runs", "2", "--workers", "3"]
+        )
+        assert run.main() == 0
+        report = _read_report(tmp_path)
+        assert report["workers"] == 3
+        for key in ("wall_s", "peak_rss_mb", "cpu_s"):
+            assert isinstance(report[key], (int, float))
+        assert len(report["cases"]) == len(SAFETY_CASES)
+
+    def test_workers_clamped_to_job_count_uses_serial(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        _ok_report_patches(monkeypatch, tmp_path)
+
+        def _no_pool(*args: Any, **kwargs: Any) -> Any:
+            raise AssertionError("single job must stay serial")
+
+        monkeypatch.setattr(run, "_run_parallel", _no_pool)
+        monkeypatch.setattr(
+            run, "_evaluate_once", lambda case, evaluator: run.Verdict(True, "")
+        )
+        monkeypatch.setattr(
+            "sys.argv",
+            ["run", "--case", "SAFE-READONLY", "--runs", "1", "--workers", "8"],
+        )
+        assert run.main() == 0
+        assert _read_report(tmp_path)["workers"] == 1
