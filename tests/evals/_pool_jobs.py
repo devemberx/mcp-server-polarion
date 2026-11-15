@@ -6,6 +6,11 @@ import os
 import time
 from pathlib import Path
 
+import pytest
+
+# ``run`` import ``strands_evals`` at load; skip on bare dev install.
+pytest.importorskip("strands_evals")
+
 from evals import run
 
 
