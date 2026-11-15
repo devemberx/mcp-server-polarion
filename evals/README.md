@@ -63,8 +63,8 @@ respx routing and the harness env/module patches are process-global.
 The gate fails (exit 1) if any case falls below its `min_pass_rate`. A JSON
 report is written to `evals/reports/gate-<sha>-<model>-<effort>.json` (gitignored).
 Besides per-case verdicts it records `workers`, `wall_s`, `peak_rss_mb` (largest
-single process), `cpu_s` (all processes), and per case `durations_s` and
-`infra_retries` — enough to size `workers` for a runner.
+single process), `cpu_s` (all processes; both `null` on Windows), and per case
+`durations_s` and `infra_retries` — enough to size `workers` for a runner.
 
 ## Model
 

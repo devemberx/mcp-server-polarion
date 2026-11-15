@@ -14,6 +14,7 @@ import sys
 import time
 from concurrent.futures import Executor, ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -67,6 +68,41 @@ class TestPlainLogging:
             env={**os.environ, "FASTMCP_ENABLE_RICH_LOGGING": "true"},
         )
         assert "RichHandler" not in result.stdout
+
+
+class TestResourceUsage:
+    @staticmethod
+    def _rusage(monkeypatch: pytest.MonkeyPatch, maxrss: int) -> None:
+        usage = SimpleNamespace(ru_maxrss=maxrss, ru_utime=1.0, ru_stime=0.5)
+        monkeypatch.setattr("resource.getrusage", lambda _who: usage)
+
+    def test_linux_maxrss_in_kib(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(sys, "platform", "linux")
+        self._rusage(monkeypatch, 2048)
+        assert run._resource_usage() == (2.0, 3.0)
+
+    def test_macos_maxrss_in_bytes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(sys, "platform", "darwin")
+        self._rusage(monkeypatch, 2 * 1024 * 1024)
+        assert run._resource_usage() == (2.0, 3.0)
+
+    def test_windows_has_no_resource_module(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setitem(sys.modules, "resource", None)
+        assert run._resource_usage() == (None, None)
+
+    def test_import_without_resource_module(self) -> None:
+        # Windows: no `resource` module; --list must still import.
+        code = "import sys; sys.modules['resource'] = None; import evals.run"
+        # Own interpreter + literal code = trusted input.
+        subprocess.run(  # noqa: S603
+            [sys.executable, "-c", code],
+            capture_output=True,
+            check=True,
+            cwd=Path(__file__).resolve().parents[2],
+        )
 
 
 class TestRunCaseNTimes:

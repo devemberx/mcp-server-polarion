@@ -29,7 +29,6 @@ import argparse
 import json
 import multiprocessing
 import re
-import resource
 import subprocess
 import time
 from collections.abc import Callable
@@ -232,6 +231,27 @@ def _resolve_workers(cli: int | None) -> int:
     return int(raw) if raw else DEFAULT_WORKERS
 
 
+def _resource_usage() -> tuple[float | None, float | None]:
+    """(peak RSS MiB of largest single process, CPU s of all processes)."""
+    if sys.platform == "win32":
+        # No `resource` module; module-level import would break even --list.
+        return None, None
+    import resource  # noqa: PLC0415
+
+    self_usage = resource.getrusage(resource.RUSAGE_SELF)
+    child_usage = resource.getrusage(resource.RUSAGE_CHILDREN)
+    # ru_maxrss = bytes on macOS, KiB on Linux.
+    per_mib = 1024 * 1024 if sys.platform == "darwin" else 1024
+    peak_rss_mb = max(self_usage.ru_maxrss, child_usage.ru_maxrss) / per_mib
+    cpu_s = (
+        self_usage.ru_utime
+        + self_usage.ru_stime
+        + child_usage.ru_utime
+        + child_usage.ru_stime
+    )
+    return peak_rss_mb, cpu_s
+
+
 def _spawn_pool(n: int) -> Executor:
     # spawn avoids fork copying parent globals/threads mid-state (respx router,
     # os.environ + module patches). Workers still run many jobs sequentially in
@@ -354,16 +374,7 @@ def main() -> int:
             cases, args.runs, effective_workers, executor_factory=_spawn_pool
         )
     wall_s = time.monotonic() - start
-    self_usage = resource.getrusage(resource.RUSAGE_SELF)
-    child_usage = resource.getrusage(resource.RUSAGE_CHILDREN)
-    # ru_maxrss = KiB on Linux.
-    peak_rss_mb = max(self_usage.ru_maxrss, child_usage.ru_maxrss) / 1024
-    cpu_s = (
-        self_usage.ru_utime
-        + self_usage.ru_stime
-        + child_usage.ru_utime
-        + child_usage.ru_stime
-    )
+    peak_rss_mb, cpu_s = _resource_usage()
     gate_passed = all(r["passed"] for r in results)
 
     report = {
