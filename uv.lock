@@ -9,6 +9,9 @@ resolution-markers = [
     "python_full_version < '3.14' and sys_platform != 'win32'",
 ]
 
+[manifest]
+constraints = [{ name = "filelock", specifier = ">=4.2.1" }]
+
 [[package]]
 name = "aiofile"
 version = "3.12.3"
@@ -1542,7 +1545,7 @@ dev = [
 ]
 evals = [
     { name = "litellm", specifier = ">=1.101.0" },
-    { name = "strands-agents", extras = ["litellm"] },
+    { name = "strands-agents", extras = ["litellm"], specifier = ">=1.64.0" },
     { name = "strands-agents-evals" },
 ]
 
