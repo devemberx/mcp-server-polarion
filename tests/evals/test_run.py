@@ -317,6 +317,17 @@ class TestAggregate:
         assert result["pass_rate"] == 0.0
         assert result["passed"] is False
 
+    def test_carries_catalog_fields(self) -> None:
+        case = SAFETY_CASES[0]
+        meta = case.metadata or {}
+        result = run._aggregate(case, [run.RunOutcome(True, "", 1.0, 0)])
+        assert result["category"] == "safety"
+        assert result["intent"] == str(meta.get("intent", ""))
+        assert result["covers"] == list(meta.get("covers", []))
+
+    def test_unknown_case_category(self) -> None:
+        assert run._aggregate(_case(), [])["category"] == "?"
+
 
 class TestRunOutcome:
     def test_pickle_round_trip(self) -> None:
@@ -330,6 +341,10 @@ class TestGitSha:
         assert run._git_sha() == "0123456789ab"
 
 
+def _all_pass(case: Case, runs: int) -> run.CaseResult:
+    return run._aggregate(case, [run.RunOutcome(True, "", 0.0, 0)] * runs)
+
+
 class TestMain:
     def test_unknown_case_returns_2(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("sys.argv", ["run", "--case", "DOES-NOT-EXIST"])
@@ -340,17 +355,9 @@ class TestMain:
     ) -> None:
         seen: list[str] = []
 
-        def _stub(case: Case, runs: int, evaluator: Any) -> dict[str, Any]:
+        def _stub(case: Case, runs: int, evaluator: Any) -> run.CaseResult:
             seen.append(case.name)
-            return {
-                "name": case.name,
-                "runs": runs,
-                "pass_count": runs,
-                "pass_rate": 1.0,
-                "min_pass_rate": 1.0,
-                "passed": True,
-                "failures": [],
-            }
+            return _all_pass(case, runs)
 
         monkeypatch.setattr(run, "_run_case_n_times", _stub)
         monkeypatch.setattr(run, "resolve_model_id", lambda: "test/model")
@@ -368,15 +375,7 @@ class TestMain:
         monkeypatch.setattr(
             run,
             "_run_case_n_times",
-            lambda case, runs, evaluator: {
-                "name": case.name,
-                "runs": runs,
-                "pass_count": runs,
-                "pass_rate": 1.0,
-                "min_pass_rate": 1.0,
-                "passed": True,
-                "failures": [],
-            },
+            lambda case, runs, evaluator: _all_pass(case, runs),
         )
         monkeypatch.setattr(run, "resolve_model_id", lambda: "openai/gpt-6-luna")
         monkeypatch.setattr(run, "resolve_reasoning_effort", lambda: "high")

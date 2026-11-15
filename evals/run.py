@@ -35,7 +35,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import Executor, ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, TypedDict
 
 from strands_evals import Case
 from strands_evals.types.evaluation import EvaluationData
@@ -118,6 +118,23 @@ class RunOutcome:
     infra_retries: int
 
 
+class CaseResult(TypedDict):
+    """Per-case gate verdict = one report ``cases`` entry."""
+
+    name: str
+    runs: int
+    pass_count: int
+    pass_rate: float
+    min_pass_rate: float
+    passed: bool
+    failures: list[str]
+    durations_s: list[float]
+    infra_retries: int
+    category: str
+    intent: str
+    covers: list[str]
+
+
 def _evaluate_once(case: Case, evaluator: CheckDispatchEvaluator) -> Verdict:
     task_output = run_case(case)
     output = task_output.get("output")
@@ -169,13 +186,14 @@ def _run_job(case: Case, evaluator: CheckDispatchEvaluator) -> RunOutcome:
     return RunOutcome(verdict.passed, reason, time.monotonic() - start, retries)
 
 
-def _aggregate(case: Case, outcomes: list[RunOutcome]) -> dict[str, Any]:
-    min_rate = float((case.metadata or {}).get("min_pass_rate", 1.0))
+def _aggregate(case: Case, outcomes: list[RunOutcome]) -> CaseResult:
+    meta = case.metadata or {}
+    min_rate = float(meta.get("min_pass_rate", 1.0))
     runs = len(outcomes)
     passes = sum(1 for o in outcomes if o.passed)
     pass_rate = passes / runs if runs else 0.0
     return {
-        "name": case.name,
+        "name": str(case.name),
         "runs": runs,
         "pass_count": passes,
         "pass_rate": pass_rate,
@@ -186,6 +204,9 @@ def _aggregate(case: Case, outcomes: list[RunOutcome]) -> dict[str, Any]:
         ],
         "durations_s": [o.duration_s for o in outcomes],
         "infra_retries": sum(o.infra_retries for o in outcomes),
+        "category": _CASE_CATEGORY.get(str(case.name), "?"),
+        "intent": str(meta.get("intent", "")),
+        "covers": list(meta.get("covers", [])),
     }
 
 
@@ -195,7 +216,7 @@ def _print_run(name: str, idx: int, runs: int, outcome: RunOutcome) -> None:
 
 def _run_case_n_times(
     case: Case, runs: int, evaluator: CheckDispatchEvaluator
-) -> dict[str, Any]:
+) -> CaseResult:
     outcomes: list[RunOutcome] = []
     for i in range(runs):
         outcome = _run_job(case, evaluator)
@@ -237,7 +258,7 @@ def _run_parallel(
     runs: int,
     workers: int,
     executor_factory: Callable[[int], Executor] = _spawn_pool,
-) -> list[dict[str, Any]]:
+) -> list[CaseResult]:
     slots: dict[str, list[RunOutcome | None]] = {
         str(c.name): [None] * runs for c in cases
     }
@@ -258,7 +279,7 @@ def _run_parallel(
         pool.shutdown(wait=True, cancel_futures=True)
         raise
     pool.shutdown(wait=True)
-    aggregated: list[dict[str, Any]] = []
+    aggregated: list[CaseResult] = []
     for c in cases:
         outcomes: list[RunOutcome] = []
         for i, o in enumerate(slots[str(c.name)]):
@@ -343,11 +364,6 @@ def main() -> int:
         + child_usage.ru_utime
         + child_usage.ru_stime
     )
-    for case, result in zip(cases, results, strict=True):
-        meta = case.metadata or {}
-        result["category"] = _CASE_CATEGORY.get(str(case.name), "?")
-        result["intent"] = str(meta.get("intent", ""))
-        result["covers"] = list(meta.get("covers", []))
     gate_passed = all(r["passed"] for r in results)
 
     report = {
@@ -372,10 +388,10 @@ def main() -> int:
     for r in results:
         status = "PASS" if r["passed"] else "FAIL"
         print(
-            f"  [{status}] {r['name']} ({r.get('category', '?')}): "
+            f"  [{status}] {r['name']} ({r['category']}): "
             f"{r['pass_count']}/{r['runs']} (need >= {r['min_pass_rate']:.0%})"
         )
-        if r.get("intent"):
+        if r["intent"]:
             print(f"        intent: {r['intent']}")
         for f in r["failures"]:
             print(f"        - {f}")
