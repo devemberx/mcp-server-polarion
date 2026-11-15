@@ -57,36 +57,68 @@ INFRA_ERROR_PREFIX = "<infra-error:"
 _INFRA_STATUS_CODES: Final[frozenset[int]] = frozenset({408, 429})
 _MAX_CHAIN_DEPTH: Final[int] = 16
 
+# litellm wrap unmapped exceptions (own bridge bugs) as APIConnectionError or
+# InternalServerError, status 500, original only on implicit __context__.
+# Programming error anywhere in chain = deterministic, re-run only burn time.
+_BUG_TYPES: Final[tuple[type[BaseException], ...]] = (
+    AssertionError,
+    AttributeError,
+    ImportError,
+    LookupError,
+    NameError,
+    NotImplementedError,
+    TypeError,
+)
 
-def _is_infra_error(exc: BaseException) -> bool:
-    """True if any link in exception chain = provider-side transient failure.
+# OpenAI exhausted-billing 429; litellm keep marker in message only (code/body
+# overwritten). Permanent until billing fixed.
+_PERMANENT_MARKERS: Final[tuple[str, ...]] = ("insufficient_quota",)
 
-    Walk strands ``original_exception`` + ``__cause__``; cycle-safe, depth-bounded.
+
+def _chain_links(exc: BaseException) -> Iterator[BaseException]:
+    """Yield links via ``__cause__``, ``__context__``, strands
+    ``original_exception``; cycle-safe, depth-bounded.
     """
     seen: set[int] = set()
     stack: list[BaseException | None] = [exc]
-    depth = 0
-    while stack and depth < _MAX_CHAIN_DEPTH:
+    while stack and len(seen) < _MAX_CHAIN_DEPTH:
         link = stack.pop()
         if link is None or id(link) in seen:
             continue
         seen.add(id(link))
-        depth += 1
-        if isinstance(link, ModelThrottledException | openai.APIConnectionError):
-            return True
-        status = getattr(link, "status_code", None)
-        # bool = int subclass; exclude.
-        if (
-            isinstance(status, int)
-            and not isinstance(status, bool)
-            and (status in _INFRA_STATUS_CODES or status >= 500)
-        ):
-            return True
+        yield link
+        stack.append(link.__context__)
         stack.append(link.__cause__)
         original = getattr(link, "original_exception", None)
         if isinstance(original, BaseException):
             stack.append(original)
-    return False
+
+
+def _is_transient(link: BaseException) -> bool:
+    if isinstance(link, ModelThrottledException | openai.APIConnectionError):
+        return True
+    status = getattr(link, "status_code", None)
+    # bool = int subclass; exclude.
+    return (
+        isinstance(status, int)
+        and not isinstance(status, bool)
+        and (status in _INFRA_STATUS_CODES or status >= 500)
+    )
+
+
+def _is_permanent(link: BaseException) -> bool:
+    if isinstance(link, _BUG_TYPES):
+        return True
+    text = str(link)
+    return any(marker in text for marker in _PERMANENT_MARKERS)
+
+
+def _is_infra_error(exc: BaseException) -> bool:
+    """True if chain hold provider-side transient failure and no permanent one."""
+    links = list(_chain_links(exc))
+    if any(_is_permanent(link) for link in links):
+        return False
+    return any(_is_transient(link) for link in links)
 
 
 def _error_output(exc: BaseException) -> str:
@@ -172,10 +204,11 @@ async def _run_case_async(case: Case, recorder: TrajectoryRecorder) -> str:
                 timeout=_CASE_TIMEOUT_SECONDS,
             )
         except TimeoutError:
-            return (
-                f"{AGENT_ERROR_PREFIX} TimeoutError: "
-                f"case exceeded {_CASE_TIMEOUT_SECONDS:.0f}s>"
-            )
+            # No tool call yet = first model call never returned: provider stall
+            # (litellm worst case (1 + retries) x timeout outlast case timeout).
+            # After one, re-run could erase forbidden write -> plain FAIL.
+            prefix = AGENT_ERROR_PREFIX if recorder.calls else INFRA_ERROR_PREFIX
+            return f"{prefix} TimeoutError: case exceeded {_CASE_TIMEOUT_SECONDS:.0f}s>"
         except Exception as exc:
             return _error_output(exc)
         if cycle_guard.count > _MAX_CYCLES:

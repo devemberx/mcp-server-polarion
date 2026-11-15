@@ -189,6 +189,29 @@ def _cyclic() -> BaseException:
     return a
 
 
+def _during(inner: BaseException, outer: BaseException) -> BaseException:
+    # Implicit __context__ (raise inside except, no `from`) = litellm wrap shape.
+    try:
+        try:
+            raise inner
+        except BaseException:
+            raise outer  # noqa: B904
+    except BaseException as exc:
+        return exc
+
+
+def _litellm_connection() -> litellm.APIConnectionError:
+    return litellm.APIConnectionError("c", llm_provider="p", model="m")
+
+
+def _quota() -> litellm.RateLimitError:
+    return litellm.RateLimitError(
+        'OpenAIException - {"error":{"type":"insufficient_quota"}}',
+        llm_provider="p",
+        model="m",
+    )
+
+
 _INFRA_CASES: list[tuple[str, BaseException, bool]] = [
     ("throttled", ModelThrottledException("x"), True),
     ("api-connection", _req_error(), True),
@@ -205,6 +228,23 @@ _INFRA_CASES: list[tuple[str, BaseException, bool]] = [
     ("chained-rate-limit", _chained(_rate_limit()), True),
     ("chained-plain", _chained(RuntimeError("in")), False),
     ("cyclic", _cyclic(), False),
+    ("implicit-rate-limit", _during(_rate_limit(), RuntimeError("outer")), True),
+    (
+        "transport-connection",
+        _during(httpx.ConnectError("refused"), _litellm_connection()),
+        True,
+    ),
+    # litellm 1.103 catch-all: unmapped bug -> APIConnectionError / 500 wrap.
+    ("catch-all-connection", _during(KeyError("k"), _litellm_connection()), False),
+    ("catch-all-500", _during(TypeError("t"), _server_error()), False),
+    (
+        "wrapped-catch-all",
+        EventLoopException(_during(KeyError("k"), _litellm_connection())),
+        False,
+    ),
+    ("quota-429", _quota(), False),
+    ("wrapped-quota", EventLoopException(_quota()), False),
+    ("throttled-quota", ModelThrottledException("insufficient_quota"), False),
     *[
         (f"status-{code}", _Status(code), infra)
         for code, infra in [
@@ -291,3 +331,38 @@ def test_run_case_async_classifies_exception(
             _run_case_async(Case(name="c", input="hi"), TrajectoryRecorder())
         )
     assert out.startswith(prefix)
+
+
+class _HangingAgent:
+    def __init__(self, **_: object) -> None:
+        pass
+
+    async def invoke_async(self, _: object) -> object:
+        await asyncio.sleep(60)
+        return None
+
+
+class TestCaseTimeout:
+    @pytest.fixture(autouse=True)
+    def _hang(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(runner, "Agent", _HangingAgent)
+        monkeypatch.setattr(runner, "build_model", object)
+        monkeypatch.setattr(runner, "_CASE_TIMEOUT_SECONDS", 0.05)
+
+    @staticmethod
+    def _run(recorder: TrajectoryRecorder) -> str:
+        with _patched_polarion_env():
+            return asyncio.run(_run_case_async(Case(name="c", input="hi"), recorder))
+
+    def test_before_any_tool_call_is_infra(self) -> None:
+        # Provider stall outlast case timeout: litellm worst case 1980s > 600s.
+        out = self._run(TrajectoryRecorder())
+        assert out.startswith(INFRA_ERROR_PREFIX)
+        assert "TimeoutError" in out
+
+    def test_after_tool_call_stays_agent_error(self) -> None:
+        recorder = TrajectoryRecorder()
+        recorder.record_call("list_work_items", {})
+        out = self._run(recorder)
+        assert out.startswith(AGENT_ERROR_PREFIX)
+        assert "TimeoutError" in out

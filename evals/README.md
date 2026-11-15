@@ -96,8 +96,13 @@ failure that outlives LiteLLM's retries — 408, 429, 5xx, connection error,
 provider timeout, anywhere in the exception chain — is reported as
 `<infra-error: ...>` instead: that run is re-run rather than counted as a FAIL
 (only if the error came before any tool call; after one it stays a plain FAIL),
-and fails closed once `EVAL_INFRA_RETRIES` re-runs are spent. The case timeout,
-the cycle cap and every other 4xx stay plain FAILs.
+and fails closed once `EVAL_INFRA_RETRIES` re-runs are spent. A case timeout
+before any tool call counts as infra too — the first model call never returned,
+and at the defaults one stalled model call can outlast `EVAL_CASE_TIMEOUT`.
+Two chains stay plain FAILs even when they carry a 429/5xx/connection error: a
+Python programming error anywhere in the chain (LiteLLM wraps its own unmapped
+exceptions as a 500 or connection error) and an `insufficient_quota` 429
+(exhausted billing). The cycle cap and every other 4xx stay plain FAILs too.
 
 | Env var | Default | Cap |
 | --- | --- | --- |
