@@ -25,7 +25,7 @@ inputs:
   workers:
     description: Worker processes running case runs in parallel (sets EVAL_WORKERS).
     required: false
-    default: "4"
+    default: "8"
   openai-api-key:
     description: OPENAI_API_KEY for the agent under test.
     required: true

@@ -106,7 +106,7 @@ the cycle cap and every other 4xx stay plain FAILs.
 | `EVAL_NUM_RETRIES` | `10` | LiteLLM retries per model call (see below). |
 | `EVAL_LLM_TIMEOUT` | `180` | Wall-clock seconds per model-call attempt. |
 | `EVAL_REASONING_EFFORT` | `medium` | Reasoning depth; higher raises latency and output-token cost. |
-| `EVAL_WORKERS` | `8` | Worker processes (`--workers`); the CI action defaults to `4`. |
+| `EVAL_WORKERS` | `8` | Worker processes (`--workers`); CI action uses the same default. |
 | `EVAL_INFRA_RETRIES` | `2` | Re-runs of a run that ended in `<infra-error: ...>`; not counted as runs. |
 | `EVAL_INFRA_RETRY_DELAY` | `30` | Seconds slept before each infra re-run. |
 

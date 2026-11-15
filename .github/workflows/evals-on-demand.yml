@@ -35,7 +35,7 @@ on:
         type: string
       workers:
         description: "Worker processes (EVAL_WORKERS)"
-        default: "4"
+        default: "8"
         type: string
 
 jobs:
