@@ -36,8 +36,9 @@ Strands Agent (LiteLLM)
 
 Each run lives in one process (the gate itself, or one spawned worker under
 `--workers`), so respx intercepts that process's Polarion HTTP. LLM traffic
-never touches respx — LiteLLM's default aiohttp transport bypasses httpx — and
-hits the real provider, while no request reaches a real Polarion
+never touches respx — LiteLLM's default aiohttp transport replaces httpcore
+under `httpx.AsyncClient`, and respx only patches httpcore — and hits the real
+provider, while no request reaches a real Polarion
 (`assert_all_mocked=False`); mutations are recorded but never applied.
 `TrajectoryRecorder` captures the tool calls; `CheckDispatchEvaluator` dispatches
 on `Case.metadata["check"]` to a pure check in

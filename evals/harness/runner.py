@@ -1,8 +1,8 @@
 """Run one eval case end to end. ``run_case`` = synchronous ``task`` callable
 for ``strands_evals``; one ``asyncio.run`` drive Agent -> bridged tools ->
-in-memory server -> respx -> FakePolarion. LLM traffic bypass respx (litellm
-default aiohttp transport never go through httpx) and reach real provider;
-Polarion never touched.
+in-memory server -> respx -> FakePolarion. LLM traffic bypass respx and reach
+real provider: litellm default aiohttp transport replace httpcore under
+``httpx.AsyncClient``, respx patch httpcore only. Polarion never touched.
 """
 
 from __future__ import annotations
