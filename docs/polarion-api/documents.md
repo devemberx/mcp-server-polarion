@@ -17,6 +17,19 @@ Document contracts, `renderingLayouts`, and the copy action. Read before touchin
 - `renderingLayouts` is absent from that default and served under `@all`.
 - No value normalization on `renderingLayouts` — `default` is served back verbatim.
 - `properties` order is not round-tripped: the server serves its own order, content preserved.
+- `structureLinkRole` is `parent` on UI-made documents and `relates_to` on REST-made ones.
+
+Body and parts:
+
+- `homePageContent` is the whole document. `/parts` is a 1:1 split of its top-level blocks, in body order — the body is the source of truth.
+- A member work item sits in the body as an empty macro placeholder whose `id` is `polarion_wiki macro name=module-workitem;params=id={wi}`.
+- A heading placeholder is `<hN id="...">` with no text — the heading text is the work item `title`. A body item placeholder is a `<div id="...">`.
+- Part `id` is `heading_{wi}` for a heading, `workitem_{wi}` for a body item, and the block's own `id` verbatim for a normal block.
+- Part attrs are `id`, `content`, and `type` (`heading`, `workitem`, `normal`).
+- Heading parts add `headingText` and `level`, where `level` is N-1 for `<hN>`. Body item parts add `level` `0` and `layout` `0`.
+- Part relationships are `workItem`, `previousPart`, and `nextPart`. `previousPart` is absent on the first part, and `nextPart` on the last.
+- `/parts` serves no `meta`.
+- A top-level block without an `id` makes `/parts` return 500.
 
 ## Write contract
 
@@ -28,6 +41,23 @@ Document contracts, `renderingLayouts`, and the copy action. Read before touchin
 - PATCH REPLACES the whole `renderingLayouts` array; `[]` clears it.
 - A missing layout breaks the work item property panel in the UI.
 - The copy action takes a flat body, not the `{"data": [...]}` wrapper, and its 201 `data` is a single dict.
+
+Body PATCH:
+
+- Block `id` values are stored verbatim. The `polarion_*` prefix is UI convention only.
+- A duplicate block `id` fails the whole PATCH with 400.
+- A plain `<hN>` with no placeholder `id` spawns a heading work item (next project-global id, `title` = the heading text) and is rewritten to a heading placeholder on save.
+- Re-sending the same heading text as plain `<hN>` spawns another heading work item.
+- A PATCH that drops a placeholder removes the item from the body and `/parts`, but the item keeps `module`. It becomes an orphan that no read of the document shows.
+
+Copy:
+
+- With only `targetDocumentName` in the body, the copy lands in the source space.
+- Every member work item is duplicated under a new project-global id, and the placeholders are rewritten to the new ids.
+- Normal blocks are copied verbatim, `id` included.
+- The copy keeps `type`, `structureLinkRole`, and `usesOutlineNumbering`. `status` resets to `draft`, and `title` is absent.
+- Structure links are re-created among the copies.
+- `linkOriginalItemsWithRole` adds one link from each copy to its original. The originals gain no outgoing link.
 
 Layout shape of a UI-made document:
 
@@ -46,11 +76,14 @@ Layout shape of a UI-made document:
 
 - Document attachments and `attachment:` body refs: [attachments.md](attachments.md).
 - Document comments and the portal sidebar gap: [comments.md](comments.md).
+- Moving items into or out of the body, and the structure link a move creates: [work-items.md](work-items.md).
 
 ## Verified
 
 | Date | Scope |
 |---|---|
+| 2026-05-20 | Block `id` storage, duplicate-id PATCH, heading spawn on re-send |
 | 2026-08-07 | `renderingLayouts` required members, layouter validation |
 | 2026-08-12 | Layout shape of UI-made documents, template readability |
 | 2026-08-13 | `properties` order round-trip |
+| 2026-11-15 | Body/parts split, part shape, placeholder forms, orphan PATCH, copy semantics |

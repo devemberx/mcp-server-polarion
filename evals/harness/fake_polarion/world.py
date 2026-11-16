@@ -284,7 +284,10 @@ class World:
     def move_to_document(
         self, short_id: str, target: str, previous: str = "", next_: str = ""
     ) -> None:
-        """No anchor = append (live). Any membership, orphan included, = 409."""
+        """No anchor = append (live). Any membership, orphan included, = 409.
+
+        Live-verified 409 = same-document re-move only; cross-document assumed.
+        """
         wi = self.work_item(short_id)
         doc = self.document_by_module(target)
         if wi.module:

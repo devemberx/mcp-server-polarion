@@ -23,6 +23,16 @@ Work item query, delete, document-membership, and link contracts. Read before to
 
 - The collection-body DELETE returns 204. This is API capability only: the repo ships no work item delete tool by policy, and documents stay 405 either way.
 
+Document-membership moves:
+
+- `moveToDocument` with neither `previousPart` nor `nextPart` appends the item at the end of the document.
+- `previousPart` inserts the item right after that part.
+- `moveToDocument` on an item whose `module` already names the target document returns 409 `"Work Item already in Document."`. This holds for a placed item and for an orphan alike.
+- `moveToDocument` into a different document than the item's current `module` is unverified.
+- A move under a heading auto-creates a link from the item to that heading. Its role is the document's `structureLinkRole`.
+- `moveFromDocument` removes that structure link.
+- `moveFromDocument` on an orphan returns 204 and clears `module`.
+
 ## Server does not validate
 
 - `workitemimg:` refs in a description — accepted verbatim (204) and persisted. Guard: `guard/work_items.py` `guard_work_item_attachment_refs`, built on `guard/_attachment_refs.py`.
@@ -32,9 +42,11 @@ Work item query, delete, document-membership, and link contracts. Read before to
 
 - Work item attachment ids, which make `workitemimg:` tokens unpredictable before upload: [attachments.md](attachments.md).
 - Ghost refs in comment bodies: [comments.md](comments.md).
+- Body placeholders, part ids, `structureLinkRole` values, and how a body PATCH orphans an item: [documents.md](documents.md).
 
 ## Verified
 
 | Date | Scope |
 |---|---|
 | — | No dated probe; observed across v2506 development |
+| 2026-11-15 | Move anchors, re-move 409, orphan release, auto structure link |

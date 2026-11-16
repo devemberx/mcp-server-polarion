@@ -62,7 +62,7 @@ def _build_move_to_document_payload(
     tags={"write"},
     timeout=60.0,
     annotations={
-        # Non-idempotent: re-move already-moved item may 400, not no-op.
+        # Non-idempotent: re-move into same document 409s, not no-op.
         "readOnlyHint": False,
         "destructiveHint": True,
         "idempotentHint": False,

@@ -2,9 +2,9 @@
 production data in eval logs), live write semantics -- writes land in one
 ``World`` per instance (= per eval run) and later reads see them, so
 verify-after-write agents observe their own effects. One catch-all respx
-route on Polarion host; other hosts (LLM provider) fall through
-(``assert_all_mocked=False``). Seeds from ``fixtures``; ``seeds`` injectable
-for per-case alternates.
+route on Polarion host. LLM traffic bypass respx: litellm aiohttp transport
+replace httpcore, respx patch httpcore only. Seeds from ``fixtures``;
+``seeds`` injectable for per-case alternates.
 
 Layers: ``world`` = state + write rules (no HTTP), ``body`` = document body
 <-> blocks, ``wire`` = JSON:API shapes, ``routes/`` = thin handlers on

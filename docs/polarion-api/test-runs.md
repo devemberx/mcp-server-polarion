@@ -21,18 +21,21 @@ Test run and test record contracts, including the e-signature block. Read before
 - Test record default GET ships attrs `result` and `iteration` plus the `testCase` relationship.
 - The `defect` relationship is absent from that default — serialize it only when named in `fields[testrecords]` or pulled via `include=defect` into `included`.
 - The first record iteration is `0`.
+- A record created without `result` ships no `attributes` block. Its iteration stays readable from the record `id`.
 
 ## Write contract
 
 - Test run POST requires an explicit `id`; without one the server returns 400. The UI autofill is UI-only.
 - `isTemplate` is settable at POST via `attributes.isTemplate`.
 - `homePageContent` is settable at POST and PATCH.
+- Test record POST for a test case already recorded in the run creates the next iteration (`iteration` + 1), not a conflict.
 - Test record PATCH batches are atomic — one bad id fails the whole batch with 400, and `"was not found"` arrives as 400, not 404.
 - Partial PATCH is safe: omitted attributes are preserved.
 - REST auto-fills nothing. The server never populates `executed`, `duration`, or `testCaseRevision`; all three are settable explicitly via PATCH (204, preserved).
 - A record comment is `attributes.comment` on the record itself, not a comment sub-resource. A `text/plain` value is stored and served as `text/html`, and the text stays editable by PATCH.
 - A run's type may require an e-signature. Record PATCH then fails 403 and the remedy is portal-only — REST cannot supply the signature. Surface the Polarion detail in the error; a token hint alone misleads the caller.
-- The e-signature block covers record PATCH only.
+- The e-signature block covers record PATCH and a record POST that carries `result` — that POST also fails 403.
+- A record POST without `result` succeeds on the same run.
 
 ## Server does not validate
 
@@ -50,3 +53,4 @@ Test run and test record contracts, including the e-signature block. Read before
 | Date | Scope |
 |---|---|
 | 2026-07-21 | E-signature scope on manual-type runs |
+| 2026-11-15 | E-signature on record POST, iteration increment, no-result record shape |
