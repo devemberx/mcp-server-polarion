@@ -83,6 +83,7 @@ jobs:
         run: uv python install 3.13
 
       - name: Export production-only requirements
+        id: export
         # Wheel deps only; --no-hashes since OSV's pip parser can't read multiline hashes.
         # --frozen: audit committed lock as-is; never re-resolve.
         # Base = HEAD^1, not pull_request.base.sha (can lag merge ref's base parent).
@@ -141,7 +142,8 @@ jobs:
         # Forced bump may roll back any locked package, any group; CVE gate above see
         # only prod CVEs. Dependabot PR = blocking (auto-merge wait on this check),
         # human PR = warn. !cancelled: report even when CVE gate already failed.
-        if: ${{ !cancelled() && env.DIFF_AUDIT == 'true' }}
+        # Export failure = base lock maybe never written; skip, no spurious unreadable error.
+        if: ${{ !cancelled() && env.DIFF_AUDIT == 'true' && steps.export.outcome == 'success' }}
         env:
           ENFORCE: ${{ github.event.pull_request.user.login == 'dependabot[bot]' }}
         run: |

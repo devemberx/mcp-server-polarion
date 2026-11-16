@@ -47,6 +47,8 @@ def find_downgrades(
     """Shared names whose newest or oldest fork version drop.
     Newest drop = some env lost newer release; oldest drop = some env now
     resolve below every base env. Added/removed packages ignored.
+    Blind spot: middle fork of 3+ (base 1.0/2.0 -> head 1.0/1.5/2.0) and env
+    swap; entries carry no stable env key across fork-set change.
     """
     found: list[Downgrade] = []
     for name in sorted(base.keys() & head.keys()):
