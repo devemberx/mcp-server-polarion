@@ -196,6 +196,7 @@ Seeds:
 - Orchestration adds doc `FakeParentDoc` (heading-less, so `list_documents`
   surfaces only `FakeDoc`); `MCPT-300` (links `satisfies`→`MCPT-400` and
   `verifies`→`MCPT-500`), `MCPT-301` (no test-case link — coverage-gap signal),
-  `MCPT-400` (parent, in `FakeParentDoc`), test case `MCPT-500`; enum
+  `MCPT-400` (parent, in `FakeParentDoc`), test case `MCPT-500`, test case
+  `MCPT-501` (no record in any run — recording it can only create); enum
   `workitem-link-role`. Forward links from `SEEDS.links` plus structure links;
   back direction via `query=linkedWorkItems:{wi}`.

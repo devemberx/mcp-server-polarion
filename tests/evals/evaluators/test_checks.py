@@ -9,6 +9,7 @@ from typing import Any, ClassVar
 import pytest
 
 from evals.evaluators import checks
+from mcp_server_polarion.server import mcp
 
 
 def _call(
@@ -22,6 +23,13 @@ def _call(
 def _update_call(*items: dict[str, Any], project: str = "P") -> dict[str, Any]:
     """Bulk ``update_work_items`` call with per-item dicts."""
     return _call("update_work_items", {"project_id": project, "items": list(items)})
+
+
+async def test_write_tools_match_server_write_tags() -> None:
+    # Missing entry = read_only check blind to that write + trigger reject
+    # rule (read rejects only by declaration) mis-sort it.
+    tagged = {t.name for t in await mcp.list_tools() if "write" in (t.tags or set())}
+    assert tagged == checks.WRITE_TOOLS
 
 
 class TestExpandItemCalls:

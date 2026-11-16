@@ -23,6 +23,7 @@ from evals.harness.fixtures import (
     TEST_RUN_TEMPLATE_ID,
     TESTCASE_ID,
     UNCOVERED_REQ_ID,
+    UNRECORDED_TESTCASE_ID,
     Attachment,
     Document,
     heading_html,
@@ -55,6 +56,14 @@ class TestSeeding:
         seeds = replace(SEEDS, documents={**SEEDS.documents, "Bad": bad})
         with pytest.raises(ValueError, match="no member"):
             World.from_seeds(seeds)
+
+    def test_unrecorded_test_case_has_no_record_in_any_run(self, world: World) -> None:
+        # TRIG-CREATE-TEST-RECORDS rely on it: only create answer the prompt.
+        assert all(
+            rec.test_case != UNRECORDED_TESTCASE_ID
+            for run in world.test_runs.values()
+            for rec in run.records
+        )
 
     def test_template_run_has_no_records(self, world: World) -> None:
         assert world.test_run(TEST_RUN_TEMPLATE_ID).records == []

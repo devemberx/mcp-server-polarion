@@ -23,6 +23,7 @@ from evals.harness.fixtures import (
     SPACE,
     TEST_RUN_ID,
     TESTCASE_ID,
+    UNRECORDED_TESTCASE_ID,
     WORKITEM_ATTACHMENT_ID,
 )
 
@@ -123,10 +124,11 @@ CASES: list[Case] = [
         f"'{SPACE}' space.",
         "triggers_tool",
         intent="Uploading a local file to a document must call "
-        "create_document_attachments; listing or reading attachments does not.",
+        "create_document_attachments, not the work item sibling; listing or "
+        "reading attachments alone does not upload.",
         covers=["create_document_attachments"],
         expect="create_document_attachments",
-        reject=["list_document_attachments", "get_document_attachment_content"],
+        reject=["create_work_item_attachments"],
     ),
     _case(
         "TRIG-WI-ATTACH-CREATE",
@@ -137,7 +139,7 @@ CASES: list[Case] = [
         "do not apply.",
         covers=["create_work_item_attachments"],
         expect="create_work_item_attachments",
-        reject=["create_document_attachments", "list_work_item_attachments"],
+        reject=["create_document_attachments"],
     ),
     _case(
         "TRIG-TR-ATTACH-CREATE",
@@ -177,7 +179,6 @@ CASES: list[Case] = [
         "list_document_attachments; rendering the body does not enumerate them.",
         covers=["list_document_attachments"],
         expect="list_document_attachments",
-        reject=["read_document"],
     ),
     _case(
         "TRIG-DOC-ATTACHMENT-CONTENT",
@@ -185,11 +186,13 @@ CASES: list[Case] = [
         f"'{DOC}' in the '{SPACE}' space.",
         "triggers_tool",
         intent="Viewing an attachment's image content must call "
-        "get_document_attachment_content; listing its metadata via "
-        "list_document_attachments does not render the image.",
+        "get_document_attachment_content; the work-item-side sibling and "
+        "metadata listing do not render it.",
         covers=["get_document_attachment_content"],
         expect="get_document_attachment_content",
-        reject=["list_document_attachments"],
+        # list_* not rejected: list-then-get is valid; expect still enforce
+        # content call fire (list-only stop fail expect).
+        reject=["get_work_item_attachment_content"],
     ),
     _case(
         "TRIG-WI-ATTACHMENTS",
@@ -200,7 +203,6 @@ CASES: list[Case] = [
         "list_work_item_attachments; rendering the body does not enumerate them.",
         covers=["list_work_item_attachments"],
         expect="list_work_item_attachments",
-        reject=["read_work_item"],
     ),
     _case(
         "TRIG-WI-ATTACHMENT-CONTENT",
@@ -320,7 +322,6 @@ CASES: list[Case] = [
         "list_test_runs.",
         covers=["list_test_records"],
         expect="list_test_records",
-        reject=["list_test_runs", "get_test_run"],
     ),
     _case(
         "TRIG-GET-TEST-RUN",
@@ -330,7 +331,6 @@ CASES: list[Case] = [
         "page through list_test_runs.",
         covers=["get_test_run"],
         expect="get_test_run",
-        reject=["list_test_runs"],
     ),
     _case(
         "TRIG-GET-TEST-RECORD",
@@ -343,7 +343,6 @@ CASES: list[Case] = [
         "run metadata via get_test_run.",
         covers=["get_test_record"],
         expect="get_test_record",
-        reject=["list_test_records", "get_test_run"],
     ),
     _case(
         "TRIG-TEST-RECORD-ATTACHMENTS",
@@ -357,7 +356,7 @@ CASES: list[Case] = [
         "does not enumerate them.",
         covers=["list_test_record_attachments"],
         expect="list_test_record_attachments",
-        reject=["get_test_record", "list_test_records", "list_work_item_attachments"],
+        reject=["list_work_item_attachments"],
     ),
     _case(
         "TRIG-CREATE-TEST-RUN",
@@ -372,10 +371,12 @@ CASES: list[Case] = [
     ),
     _case(
         "TRIG-CREATE-TEST-RECORDS",
-        f"Record that test case '{TESTCASE_ID}' passed in test run "
+        f"Record that test case '{UNRECORDED_TESTCASE_ID}' passed in test run "
         f"'{TEST_RUN_ID}' of project '{PROJECT}'.",
         "triggers_tool",
-        intent="Recording a test-case execution result must call "
+        # Case without record in run: only create answer it (seeded
+        # TESTCASE_ID record make updating it equally valid).
+        intent="Recording a first execution result for a test case must call "
         "create_test_records, not update_test_runs (run metadata) or "
         "create_work_items.",
         covers=["create_test_records"],

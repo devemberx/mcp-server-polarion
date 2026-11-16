@@ -6,9 +6,9 @@ id threading; sequence live in ``metadata["params"]["steps"]``.
 ``min_pass_rate = 0.8`` — ordered + observed-id flaky on weak models.
 
 Groups: W = authoring (write), R = traceability (read-only), M =
-read-then-write (gated). Doc work-item enumeration use ``list_work_items``
-(SQL), never ``read_document_parts`` — latter only fetch part-id anchor for
-move.
+read-then-write (gated). Doc work-item enumeration step accept any reader
+that list members with ids (``_ENUMERATE``); SQL-vs-parts choice owned by
+efficiency.
 """
 
 from __future__ import annotations
@@ -27,9 +27,11 @@ from evals.harness.fixtures import (
 
 MIN_PASS_RATE = 0.8
 
-# Reused step fragments. Move run after create (new id, via ``after``) + after
-# read_document_parts (anchor, via observed-id source).
+# Reused step fragments. ``read_document`` render each member with its id,
+# so it enumerate as well as SQL / parts. Move run after create (new id, via
+# ``after``) + after read_document_parts (anchor, via observed-id source).
 _READ_PARTS: Step = {"tool": "read_document_parts", "match": {"document_name": DOC}}
+_ENUMERATE: Step = {"tool": ["list_work_items", "read_document_parts", "read_document"]}
 _MOVE_ANCHORED: Step = {
     "tool": "move_work_item_to_document",
     "match": {"target_document_name": DOC},
@@ -136,12 +138,11 @@ CASES: list[Case] = [
         f"Check the consistency between the document '{DOC}' in space '{SPACE}' and "
         f"its parent document: for a requirement in '{DOC}' that links to a parent "
         f"requirement, compare their contents.",
-        # Enumeration + target read accept equivalent tools; SQL-vs-parts
-        # choice owned by efficiency.
+        # Enumeration + target read accept equivalent tools.
         intent="Enumerate doc reqs -> follow a link -> read the linked parent "
         "(target id observed from the link); read-only.",
         steps=[
-            {"tool": ["list_work_items", "read_document_parts"]},
+            _ENUMERATE,
             {"tool": "list_work_item_links"},
             {
                 "tool": ["read_work_item", "get_work_item"],
@@ -178,10 +179,9 @@ CASES: list[Case] = [
         "ORCH-COVERAGE-GAP",
         f"Which requirements in the document '{DOC}' in space '{SPACE}' have no "
         f"linked test case?",
-        # Enumeration accept equivalent tools model pick.
         intent="Enumerate doc reqs -> inspect each req's links; read-only.",
         steps=[
-            {"tool": ["list_work_items", "read_document_parts"]},
+            _ENUMERATE,
             {"tool": "list_work_item_links"},
         ],
         read_only=True,

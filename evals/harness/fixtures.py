@@ -67,6 +67,8 @@ CHILD_REQ_ID = (
 PARENT_REQ_ID = "MCPT-400"  # in FakeParentDoc
 UNCOVERED_REQ_ID = "MCPT-301"  # in FakeDoc; no test-case link (coverage-gap signal)
 TESTCASE_ID = "MCPT-500"  # test case linked from CHILD_REQ_ID
+# Test case without record in any run: recording its result can only create.
+UNRECORDED_TESTCASE_ID = "MCPT-501"
 
 # Section A heading part id served by read_document_parts; anchor positional moves.
 SECTION_A_PART_ID = f"heading_{DOC_HEADING_ID}"
@@ -261,6 +263,9 @@ SEEDS = Seeds(
             module_id=PARENT_MODULE_ID,
         ),
         TESTCASE_ID: WorkItem(TESTCASE_ID, "Coverage test case", "systemtestcase"),
+        UNRECORDED_TESTCASE_ID: WorkItem(
+            UNRECORDED_TESTCASE_ID, "Login test case", "systemtestcase"
+        ),
     },
     documents={
         DOC: Document(
