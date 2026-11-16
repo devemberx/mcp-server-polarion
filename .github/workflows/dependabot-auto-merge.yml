@@ -2,14 +2,59 @@ name: Dependabot auto-merge
 
 on: pull_request
 
-permissions:
-  contents: write
-  pull-requests: write
+permissions: {}
 
 jobs:
-  auto-merge:
+  detect:
     runs-on: ubuntu-latest
     if: github.actor == 'dependabot[bot]'
+    permissions:
+      contents: read   # fetched toolchain + PyPI package run here; no write token on runner
+    outputs:
+      lock: ${{ steps.lock.outputs.result }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2   # PR merge ref + parents: HEAD^1 = base
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      # Blocking gate = required `security-scan / audit`; this only route stuck PR to
+      # human (Dependabot-triggered run failure notify nobody).
+      # Script exit 1 = downgrade, other non-zero = no verdict (unreadable lock).
+      - name: Detect lock downgrades
+        id: lock
+        run: |
+          git show HEAD^1:uv.lock > "$RUNNER_TEMP/base-uv.lock"
+          rc=0
+          uv run --no-project --with packaging==26.0 \
+            python .github/scripts/lock_downgrade_diff.py \
+            "$RUNNER_TEMP/base-uv.lock" uv.lock --enforce \
+            --summary "$RUNNER_TEMP/lock-summary.md" || rc=$?
+          case "$rc" in
+            0) result=clean ;;
+            1) result=downgrade ;;
+            *) result=error ;;
+          esac
+          echo "result=$result" >> "$GITHUB_OUTPUT"
+          if [ -f "$RUNNER_TEMP/lock-summary.md" ]; then
+            cat "$RUNNER_TEMP/lock-summary.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  auto-merge:
+    needs: detect
+    runs-on: ubuntu-latest
+    # !cancelled: detect crash still route PR to human (empty output = not clean).
+    if: ${{ !cancelled() && github.actor == 'dependabot[bot]' }}
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      LOCK: ${{ needs.detect.outputs.lock }}
+      PR_URL: ${{ github.event.pull_request.html_url }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Fetch Dependabot metadata
         id: meta
@@ -17,27 +62,37 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Flag lock downgrades for manual review
+        if: env.LOCK == 'downgrade'
+        run: gh pr edit "$PR_URL" --add-label lock-downgrade --add-reviewer devemberx
+
+      # No verdict != downgrade: human decide, label stay truthful.
+      - name: Request review when lock check errored
+        if: env.LOCK != 'downgrade' && env.LOCK != 'clean'
+        run: gh pr edit "$PR_URL" --add-reviewer devemberx
+
+      # Rebase onto floored main can clear downgrade; stale label mislead reviewer.
+      - name: Clear stale lock-downgrade label
+        if: |
+          env.LOCK == 'clean'
+          && contains(github.event.pull_request.labels.*.name, 'lock-downgrade')
+        run: gh pr edit "$PR_URL" --remove-label lock-downgrade
+
       # indirect deps report a null update-type (fetch-metadata lacks the previous version),
       # so gate on "not major" to auto-merge those too while still flagging real majors below.
+      # Lock not clean = never arm; required audit check stay second line, not only line.
       - name: Enable auto-merge for non-major updates
-        if: steps.meta.outputs.update-type != 'version-update:semver-major'
+        if: |
+          env.LOCK == 'clean'
+          && steps.meta.outputs.update-type != 'version-update:semver-major'
         run: gh pr merge --auto --squash "$PR_URL"
-        env:
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Flag major updates for manual review
         if: steps.meta.outputs.update-type == 'version-update:semver-major'
         run: gh pr edit "$PR_URL" --add-label major-update
-        env:
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Request review on major updates
         if: |
           steps.meta.outputs.update-type == 'version-update:semver-major'
           && (github.event.action == 'opened' || github.event.action == 'reopened')
         run: gh pr edit "$PR_URL" --add-reviewer devemberx
-        env:
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
