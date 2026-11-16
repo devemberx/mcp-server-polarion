@@ -17,6 +17,34 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2   # PR merge ref + parents: HEAD^1 = base
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      # Blocking gate = required `security-scan / audit`; this only route stuck PR to
+      # human (Dependabot-triggered run failure notify nobody). Any failure, incl.
+      # unreadable lock, flag for review.
+      - name: Detect lock downgrades
+        id: lock
+        continue-on-error: true
+        run: |
+          git show HEAD^1:uv.lock > "$RUNNER_TEMP/base-uv.lock"
+          uv run --no-project --with packaging==26.0 \
+            python .github/scripts/lock_downgrade_diff.py \
+            "$RUNNER_TEMP/base-uv.lock" uv.lock --enforce \
+            --summary "$RUNNER_TEMP/lock-summary.md"
+
+      - name: Flag lock downgrades for manual review
+        if: steps.lock.outcome == 'failure'
+        run: gh pr edit "$PR_URL" --add-label lock-downgrade --add-reviewer devemberx
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       # indirect deps report a null update-type (fetch-metadata lacks the previous version),
       # so gate on "not major" to auto-merge those too while still flagging real majors below.
       - name: Enable auto-merge for non-major updates
