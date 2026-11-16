@@ -85,7 +85,7 @@ CASES: list[Case] = [
         f"In the document '{DOC}' in space '{SPACE}', first add a new 'Performance' "
         f"section heading with a one-sentence intro. Then add a requirement work "
         f"item titled 'p95 latency under 200ms' into the document under that heading.",
-        # No anchored move -- fresh heading not in static fake parts.
+        # Anchor optional: no-anchor move append under trailing new heading.
         intent="Prose/heading via update_document, spec via create + move — the "
         "two write paths must not collapse into one tool.",
         steps=[

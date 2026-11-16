@@ -1,13 +1,12 @@
 """Synthetic seed data + identifiers for in-process fake Polarion. Every
 string invented (no production data in eval logs) but *structure* mirror
-MCP_Test_Project. Eval cases import these ids; ``fake_polarion`` serve
-resources built from ``SEEDS``.
+MCP_Test_Project. Eval cases import these ids; ``fake_polarion`` deep-copy
+``SEEDS`` into one mutable world per run.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
 
 POLARION_HOST = "https://polarion.example.com"
 API_PREFIX = "/polarion/rest/v1"
@@ -98,6 +97,20 @@ RECORD_IMAGE_ATTACHMENT_CONTENT = (
 
 TS = "2026-01-01T00:00:00.000Z"
 
+# Body placeholder id of in-document work item (live form, verified
+# 2026-11-15): heading = empty ``<hN id=...>``, other item = ``<div id=...>``.
+MACRO_PREFIX = "polarion_wiki macro name=module-workitem;params=id="
+
+
+def heading_html(work_item_id: str, level: int) -> str:
+    """Heading placeholder; tag ``h{level + 1}`` (``<h2>`` = level 1)."""
+    tag = f"h{level + 1}"
+    return f'<{tag} id="{MACRO_PREFIX}{work_item_id}"></{tag}>'
+
+
+def work_item_html(work_item_id: str) -> str:
+    return f'<div id="{MACRO_PREFIX}{work_item_id}"></div>'
+
 
 @dataclass
 class WorkItem:
@@ -107,7 +120,9 @@ class WorkItem:
     status: str = "open"
     priority: str = "50.0"
     severity: str = "should_have"
-    module_id: str = ""  # full module id (PROJECT/SPACE/DOC) if in document, else ""
+    # Full module id (PROJECT/SPACE/DOC) = document membership, else "".
+    # Member must also sit in that document's body (else orphan).
+    module_id: str = ""
     outline_number: str = ""
     hyperlinks: list[dict[str, str]] = field(default_factory=list)
     # Keys MUST stay outside ``STANDARD_WORK_ITEM_ATTRIBUTES`` — else merge
@@ -115,17 +130,6 @@ class WorkItem:
     custom_fields: dict[str, str] = field(default_factory=dict)
     comments: list[Comment] = field(default_factory=list)
     attachments: list[Attachment] = field(default_factory=list)
-
-
-@dataclass
-class DocumentPart:
-    """One entry in document's ordered part chain. ``part_id`` suffix derive
-    as ``{kind}_{work_item_id}``; ``nextPart`` links derived from order.
-    """
-
-    kind: Literal["heading", "workitem"]
-    work_item_id: str
-    level: int = 1  # heading level; ignored for workitem parts
 
 
 @dataclass
@@ -166,32 +170,40 @@ class Attachment:
     shape vary by domain (doc = fileName, WI = counter-prefixed, testrecord
     = ``{testCaseId}_`` prefixed); doc body token ``attachment:{id}``, work
     item body token ``workitemimg:{id}``. Polarion serve no mime type and
-    no created timestamp here.
+    no created timestamp here. ``content`` = bytes the content route serve.
     """
 
     attachment_id: str
     title: str
     length: int
+    content: bytes = b""
 
 
 @dataclass
 class Document:
+    """Seed document. ``body_html`` = whole document in live stored form:
+    work items as macro placeholders (``heading_html`` / ``work_item_html``),
+    every other top-level block carry a unique ``id`` (= its part id).
+    ``/parts`` derive from body order. ``structure_link_role`` = role of
+    auto link from item to heading above it (REST-made default
+    ``relates_to``, UI-made ``parent``).
+    """
+
     name: str
     title: str
     body_html: str
     type: str = "systemRequirementSpecification"
     status: str = "draft"
-    parts: list[DocumentPart] = field(default_factory=list)
+    structure_link_role: str = "relates_to"
     comments: list[Comment] = field(default_factory=list)
     attachments: list[Attachment] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
 class Seeds:
-    """Read-only seed tables. ``frozen`` block attribute rebind, not dict
-    mutation — sufficient since nothing mutate these (writes record into
-    ``FakePolarion.mutations`` instead). Add entity by adding table entry;
-    ``FakePolarion`` serve it without per-entity branching.
+    """Read-only seed tables. ``frozen`` block attribute rebind; ``FakePolarion``
+    deep-copy tables into its own world, so writes never reach these. Add
+    entity by adding table entry; fake serve it without per-entity branching.
     """
 
     work_items: dict[str, WorkItem]
@@ -220,7 +232,14 @@ SEEDS = Seeds(
             # One root comment so list_work_item_comments return populated
             # page; work-item comment ids 3-segment + carry title.
             comments=[Comment("c-1", "Fake work item comment", title="Initial note")],
-            attachments=[Attachment(WORKITEM_ATTACHMENT_ID, "fake-screenshot", 4096)],
+            attachments=[
+                Attachment(
+                    WORKITEM_ATTACHMENT_ID,
+                    "fake-screenshot",
+                    4096,
+                    WORKITEM_ATTACHMENT_CONTENT,
+                )
+            ],
         ),
         FLOATING_HEADING_ID: WorkItem(
             FLOATING_HEADING_ID, "Floating heading", "heading"
@@ -247,15 +266,16 @@ SEEDS = Seeds(
         DOC: Document(
             name=DOC,
             title="Fake Doc",
-            body_html=(
-                '<h1 id="h-1">Fake Doc</h1>'
-                f'<p id="{DOC_INTRO_PARAGRAPH_ID}">Fake intro paragraph.</p>'
+            # Intro paragraph, then Section A heading (positional-move anchor)
+            # over both requirements.
+            body_html="\n".join(
+                [
+                    f'<p id="{DOC_INTRO_PARAGRAPH_ID}">Fake intro paragraph.</p>',
+                    heading_html(DOC_HEADING_ID, level=1),
+                    work_item_html(CHILD_REQ_ID),
+                    work_item_html(UNCOVERED_REQ_ID),
+                ]
             ),
-            # Section A heading (positional-move anchor) -> one work-item part.
-            parts=[
-                DocumentPart("heading", DOC_HEADING_ID, level=1),
-                DocumentPart("workitem", CHILD_REQ_ID),
-            ],
             # Root + one reply; resolve root = resolve whole thread.
             comments=[
                 Comment(ROOT_COMMENT_ID, "fake root comment"),
@@ -263,12 +283,23 @@ SEEDS = Seeds(
                     REPLY_COMMENT_ID, "fake reply comment", parent_id=ROOT_COMMENT_ID
                 ),
             ],
-            attachments=[Attachment(DOC_ATTACHMENT_ID, "fake-diagram", 17834)],
+            attachments=[
+                Attachment(
+                    DOC_ATTACHMENT_ID, "fake-diagram", 17834, DOC_ATTACHMENT_CONTENT
+                )
+            ],
         ),
+        # Heading-less on purpose: list_documents discovery scan surface only
+        # docs with heading, so FakeDoc stay sole discoverable spec.
         PARENT_DOC: Document(
             name=PARENT_DOC,
             title="Fake Parent Doc",
-            body_html='<h1 id="ph-1">Fake Parent Doc</h1>',
+            body_html="\n".join(
+                [
+                    '<p id="pp-1">Fake parent intro.</p>',
+                    work_item_html(PARENT_REQ_ID),
+                ]
+            ),
         ),
     },
     test_runs={
@@ -280,11 +311,12 @@ SEEDS = Seeds(
             status="open",
             finished_on=TS,
             record_attachments=[
-                Attachment(RECORD_ATTACHMENT_ID, "fake-log", 256),
+                Attachment(RECORD_ATTACHMENT_ID, "fake-log", 256, b"fake log line\n"),
                 Attachment(
                     RECORD_IMAGE_ATTACHMENT_ID,
                     "fake-screenshot",
                     len(RECORD_IMAGE_ATTACHMENT_CONTENT),
+                    RECORD_IMAGE_ATTACHMENT_CONTENT,
                 ),
             ],
         ),
