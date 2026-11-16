@@ -1,7 +1,8 @@
 """Run one eval case end to end. ``run_case`` = synchronous ``task`` callable
 for ``strands_evals``; one ``asyncio.run`` drive Agent -> bridged tools ->
-in-memory server -> respx -> FakePolarion. LLM traffic fall through to real
-provider (``assert_all_mocked=False``); Polarion never touched.
+in-memory server -> respx -> FakePolarion. LLM traffic bypass respx and reach
+real provider: litellm default aiohttp transport replace httpcore under
+``httpx.AsyncClient``, respx patch httpcore only. Polarion never touched.
 """
 
 from __future__ import annotations
@@ -12,10 +13,12 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any, Final
 
+import openai
 import respx
 from fastmcp import Client
 from strands import Agent
 from strands.hooks import BeforeModelCallEvent, HookRegistry
+from strands.types.exceptions import ModelThrottledException
 from strands_evals import Case
 from strands_evals.types import TaskOutput
 
@@ -46,6 +49,81 @@ SYSTEM_PROMPT = (
 # Output prefix for agent that raised before finishing; gate fail any output
 # starting with it (crashed agent clean verdict moot).
 AGENT_ERROR_PREFIX = "<agent-error:"
+
+# Output prefix for provider-side failure (throttle, timeout, 5xx, connection)
+# surviving litellm retries; infra flake, not agent verdict.
+INFRA_ERROR_PREFIX = "<infra-error:"
+
+_INFRA_STATUS_CODES: Final[frozenset[int]] = frozenset({408, 429})
+_MAX_CHAIN_DEPTH: Final[int] = 16
+
+# litellm wrap unmapped exceptions (own bridge bugs) as APIConnectionError or
+# InternalServerError, status 500, original only on implicit __context__.
+# Programming error anywhere in chain = deterministic, re-run only burn time.
+_BUG_TYPES: Final[tuple[type[BaseException], ...]] = (
+    AssertionError,
+    AttributeError,
+    ImportError,
+    LookupError,
+    NameError,
+    NotImplementedError,
+    TypeError,
+)
+
+# OpenAI exhausted-billing 429; litellm keep marker in message only (code/body
+# overwritten). Permanent until billing fixed.
+_PERMANENT_MARKERS: Final[tuple[str, ...]] = ("insufficient_quota",)
+
+
+def _chain_links(exc: BaseException) -> Iterator[BaseException]:
+    """Yield links via ``__cause__``, ``__context__``, strands
+    ``original_exception``; cycle-safe, depth-bounded.
+    """
+    seen: set[int] = set()
+    stack: list[BaseException | None] = [exc]
+    while stack and len(seen) < _MAX_CHAIN_DEPTH:
+        link = stack.pop()
+        if link is None or id(link) in seen:
+            continue
+        seen.add(id(link))
+        yield link
+        stack.append(link.__context__)
+        stack.append(link.__cause__)
+        original = getattr(link, "original_exception", None)
+        if isinstance(original, BaseException):
+            stack.append(original)
+
+
+def _is_transient(link: BaseException) -> bool:
+    if isinstance(link, ModelThrottledException | openai.APIConnectionError):
+        return True
+    status = getattr(link, "status_code", None)
+    # bool = int subclass; exclude.
+    return (
+        isinstance(status, int)
+        and not isinstance(status, bool)
+        and (status in _INFRA_STATUS_CODES or status >= 500)
+    )
+
+
+def _is_permanent(link: BaseException) -> bool:
+    if isinstance(link, _BUG_TYPES):
+        return True
+    text = str(link)
+    return any(marker in text for marker in _PERMANENT_MARKERS)
+
+
+def _is_infra_error(exc: BaseException) -> bool:
+    """True if chain hold provider-side transient failure and no permanent one."""
+    links = list(_chain_links(exc))
+    if any(_is_permanent(link) for link in links):
+        return False
+    return any(_is_transient(link) for link in links)
+
+
+def _error_output(exc: BaseException) -> str:
+    prefix = INFRA_ERROR_PREFIX if _is_infra_error(exc) else AGENT_ERROR_PREFIX
+    return f"{prefix} {type(exc).__name__}: {exc}>"
 
 
 def _extract_text(result: Any) -> str:
@@ -126,12 +204,13 @@ async def _run_case_async(case: Case, recorder: TrajectoryRecorder) -> str:
                 timeout=_CASE_TIMEOUT_SECONDS,
             )
         except TimeoutError:
-            return (
-                f"{AGENT_ERROR_PREFIX} TimeoutError: "
-                f"case exceeded {_CASE_TIMEOUT_SECONDS:.0f}s>"
-            )
+            # No tool call yet = first model call never returned: provider stall
+            # (litellm worst case (1 + retries) x timeout outlast case timeout).
+            # After one, re-run could erase forbidden write -> plain FAIL.
+            prefix = AGENT_ERROR_PREFIX if recorder.calls else INFRA_ERROR_PREFIX
+            return f"{prefix} TimeoutError: case exceeded {_CASE_TIMEOUT_SECONDS:.0f}s>"
         except Exception as exc:
-            return f"{AGENT_ERROR_PREFIX} {type(exc).__name__}: {exc}>"
+            return _error_output(exc)
         if cycle_guard.count > _MAX_CYCLES:
             return (
                 f"{AGENT_ERROR_PREFIX} CycleGuard: exceeded {_MAX_CYCLES} model cycles>"

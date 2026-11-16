@@ -34,9 +34,12 @@ Strands Agent (LiteLLM)
   → respx → FakePolarion  (structure of MCP_Test_Project, synthetic content)
 ```
 
-One process, so respx intercepts Polarion HTTP. The router runs with
-`assert_all_mocked=False` — agent LLM traffic hits the real provider while no
-request reaches a real Polarion; mutations are recorded but never applied.
+Each run lives in one process (the gate itself, or one spawned worker under
+`--workers`), so respx intercepts that process's Polarion HTTP. LLM traffic
+never touches respx — LiteLLM's default aiohttp transport replaces httpcore
+under `httpx.AsyncClient`, and respx only patches httpcore — and hits the real
+provider, while no request reaches a real Polarion
+(`assert_all_mocked=False`); mutations are recorded but never applied.
 `TrajectoryRecorder` captures the tool calls; `CheckDispatchEvaluator` dispatches
 on `Case.metadata["check"]` to a pure check in
 [`evaluators/checks.py`](evaluators/checks.py), plus cross-cutting global checks
@@ -50,10 +53,19 @@ uv sync --group evals
 uv run python -m evals.run                                  # full gate (each case EVAL_RUNS times, default 10)
 uv run python -m evals.run --list                           # case catalog, no model cost
 uv run python -m evals.run --case SAFE-READONLY --runs 1    # one case, once (smoke)
+uv run python -m evals.run --workers 4                      # 4 worker processes
 ```
+
+`--workers N` (or `EVAL_WORKERS`, default `8`) spreads the (case, run) pairs
+over `N` spawned processes; verdicts match a serial run, only progress lines
+interleave. `--workers 1` runs serially in-process. Processes, not threads:
+respx routing and the harness env/module patches are process-global.
 
 The gate fails (exit 1) if any case falls below its `min_pass_rate`. A JSON
 report is written to `evals/reports/gate-<sha>-<model>-<effort>.json` (gitignored).
+Besides per-case verdicts it records `workers`, `wall_s`, `peak_rss_mb` (largest
+single process), `cpu_s` (all processes; both `null` on Windows), and per case
+`durations_s` and `infra_retries` — enough to size `workers` for a runner.
 
 ## Model
 
@@ -80,20 +92,40 @@ would run the whole gate unreasoned and still report a pass.
 ## Limits
 
 An agent can loop; cloud providers return 429 when TPM/RPM is exhausted.
-Each case is bounded fail-closed (via `<agent-error: ...>`).
+Each case is bounded fail-closed (via `<agent-error: ...>`). A provider-side
+failure that outlives LiteLLM's retries — 408, 429, 5xx, connection error,
+provider timeout, anywhere in the exception chain — is reported as
+`<infra-error: ...>` instead: that run is re-run rather than counted as a FAIL
+(only if the error came before any tool call; after one it stays a plain FAIL),
+and fails closed once `EVAL_INFRA_RETRIES` re-runs are spent. A case timeout
+before any tool call counts as infra too — the first model call never returned,
+and at the defaults one stalled model call can outlast `EVAL_CASE_TIMEOUT`.
+Two chains stay plain FAILs even when they carry a 429/5xx/connection error: a
+Python programming error anywhere in the chain (LiteLLM wraps its own unmapped
+exceptions as a 500 or connection error) and an `insufficient_quota` 429
+(exhausted billing). The cycle cap and every other 4xx stay plain FAILs too.
 
 | Env var | Default | Cap |
 | --- | --- | --- |
 | `EVAL_MAX_CYCLES` | `10` | Model calls per case. |
 | `EVAL_CASE_TIMEOUT` | `600` | Wall-clock seconds per case. |
-| `EVAL_NUM_RETRIES` | `10` | LiteLLM retries; OpenAI SDK sleeps `min(0.5·2ⁿ, 8)s` ±25 % jitter, or honours `Retry-After`. |
-| `EVAL_LLM_TIMEOUT` | `180` | Wall-clock seconds per model call. |
+| `EVAL_NUM_RETRIES` | `10` | LiteLLM retries per model call (see below). |
+| `EVAL_LLM_TIMEOUT` | `180` | Wall-clock seconds per model-call attempt. |
 | `EVAL_REASONING_EFFORT` | `medium` | Reasoning depth; higher raises latency and output-token cost. |
+| `EVAL_WORKERS` | `8` | Worker processes (`--workers`); CI action uses the same default. |
+| `EVAL_INFRA_RETRIES` | `2` | Re-runs of a run that ended in `<infra-error: ...>`; not counted as runs. |
+| `EVAL_INFRA_RETRY_DELAY` | `30` | Seconds slept before each infra re-run. |
+
+On the default (Responses-bridged) model LiteLLM retries by itself: a 429 backs
+off 1, 2, 4, 8, then 10 s per attempt (about 65 s in total at 10 retries,
+`Retry-After` ignored), and every other error is retried with no wait. Only
+models served on chat completions go through the OpenAI SDK's own retry
+(`min(0.5·2ⁿ, 8)s` ±25 % jitter, or `Retry-After`) first.
 
 The timeout defaults assume reasoning at `medium` — a raised effort needs them
 raised too. `EVAL_LLM_TIMEOUT` is per attempt, so worst-case per model call is
-`EVAL_NUM_RETRIES × EVAL_LLM_TIMEOUT`. Raise `EVAL_CASE_TIMEOUT` in lockstep when
-bumping either, or the case fail-closes first.
+`(1 + EVAL_NUM_RETRIES) × EVAL_LLM_TIMEOUT`. Raise `EVAL_CASE_TIMEOUT` in lockstep
+when bumping either, or the case fail-closes first.
 
 ## Release pipeline
 
@@ -101,8 +133,8 @@ bumping either, or the case fail-closes first.
   calls [`publish-gate.yml`](../.github/workflows/publish-gate.yml) on tag push;
   every later publish job depends on it.
 - **On-demand** — [`evals-on-demand.yml`](../.github/workflows/evals-on-demand.yml)
-  is `workflow_dispatch`: pick a `model`, `reasoning_effort` and `runs` from the
-  Actions tab before tagging.
+  is `workflow_dispatch`: pick a `model`, `reasoning_effort`, `runs` and
+  `workers` from the Actions tab before tagging.
 
 Both read the **`OPENAI_API_KEY` repository secret**; if it is missing the job
 fails and the release is blocked (fail-closed).
