@@ -23,6 +23,7 @@ from evals.harness.fixtures import (
     DOC_HEADING_ID,
     FLOATING_TASK_HYPERLINK_URI,
     FLOATING_TASK_ID,
+    PARENT_REQ_ID,
     POLARION_HOST,
     PROJECT,
     SECTION_A_PART_ID,
@@ -41,10 +42,9 @@ async def tool(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Tool]:
     monkeypatch.setenv("POLARION_TOKEN", "fake-token")
     monkeypatch.setenv("POLARION_MAX_REQUESTS_PER_SECOND", "0")
     monkeypatch.setattr(client_mod, "_WRITE_DELAY_SECONDS", 0.0)
-    # Process-wide caches outlive fake worlds (runner clear them per case).
-    for value in vars(cache_mod).values():
-        if isinstance(value, cache_mod.TTLCache):
-            value.clear()
+    # Process-wide caches outlive fake worlds (runner clear them per case);
+    # clear on exit too so this world's ids never reach later tests.
+    cache_mod.clear_all_caches()
     fake = FakePolarion()
     with respx.mock(assert_all_mocked=True, assert_all_called=False) as router:
         fake.install(router)
@@ -55,6 +55,7 @@ async def tool(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Tool]:
                 return result.structured_content
 
             yield call
+    cache_mod.clear_all_caches()
 
 
 def _doc(**args: Any) -> dict[str, Any]:
@@ -179,3 +180,45 @@ async def test_comment_and_link_writes_visible(tool: Tool) -> None:
     await tool("delete_work_item_links", work_item_id=FLOATING_TASK_ID, links=[link])
     forward = await tool("list_work_item_links", work_item_id=FLOATING_TASK_ID)
     assert forward["items"] == []
+
+
+async def test_member_structure_role_link_phantom_and_repeat_rejected(
+    tool: Tool,
+) -> None:
+    # Live: doc member + structureLinkRole = created reply, nothing stored.
+    phantom = {"role": "relates_to", "target_work_item_id": FLOATING_TASK_ID}
+    created = await tool(
+        "create_work_item_links", work_item_id=CHILD_REQ_ID, links=[phantom]
+    )
+    assert created["created"] is True
+    links = await tool("list_work_item_links", work_item_id=CHILD_REQ_ID)
+    assert FLOATING_TASK_ID not in [x["id"] for x in links["items"]]
+    repeat = {"role": "satisfies", "target_work_item_id": PARENT_REQ_ID}
+    with pytest.raises(ToolError, match="already linked with role 'satisfies'"):
+        await tool("create_work_item_links", work_item_id=CHILD_REQ_ID, links=[repeat])
+
+
+async def test_record_defect_visible_after_update(tool: Tool) -> None:
+    record_id = f"{PROJECT}/{TEST_RUN_ID}/{PROJECT}/{TESTCASE_ID}/0"
+    await tool(
+        "update_test_records",
+        test_run_id=TEST_RUN_ID,
+        items=[{"record_id": record_id, "defect_id": FLOATING_TASK_ID}],
+    )
+    records = await tool("list_test_records", test_run_id=TEST_RUN_ID)
+    assert records["items"][0]["defect_id"].endswith(FLOATING_TASK_ID)
+
+
+async def test_parts_paging_terminates(tool: Tool) -> None:
+    whole = await tool("read_document_parts", **_doc())
+    size = len(whole["items"])
+    first = await tool("read_document_parts", **_doc(page_size=size))
+    second = await tool("read_document_parts", **_doc(page_size=size, page_number=2))
+    assert first["items"] == whole["items"]
+    assert (second["items"], second["has_more"]) == ([], False)
+    halves = [
+        await tool("read_document_parts", **_doc(page_size=2, page_number=n))
+        for n in (1, 2)
+    ]
+    assert halves[0]["items"] + halves[1]["items"] == whole["items"]
+    assert (halves[0]["has_more"], halves[1]["has_more"]) == (True, False)

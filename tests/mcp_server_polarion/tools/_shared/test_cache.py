@@ -29,11 +29,7 @@ from mcp_server_polarion.tools._shared.cache import (
 @pytest.fixture(autouse=True)
 def _reset_caches() -> None:
     """Start each test with every module-level cache cold."""
-    cache_mod._document_list_cache.clear()
-    cache_mod._field_option_cache.clear()
-    cache_mod._enum_option_id_cache.clear()
-    cache_mod._work_item_custom_key_cache.clear()
-    cache_mod._document_type_custom_key_cache.clear()
+    cache_mod.clear_all_caches()
 
 
 @pytest.fixture
@@ -124,6 +120,17 @@ class TestTTLCachePrimitive:
 
         assert cache.get("a") is None
         assert cache.get("b") is None
+
+
+def test_clear_all_caches_empties_every_module_cache() -> None:
+    caches = [v for v in vars(cache_mod).values() if isinstance(v, TTLCache)]
+    for cache in caches:
+        cache.set("k", "v")
+
+    cache_mod.clear_all_caches()
+
+    assert len(caches) >= 7
+    assert all(cache.get("k") is None for cache in caches)
 
 
 class TestDocumentListCache:

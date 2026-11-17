@@ -4,7 +4,13 @@ stored form (testdrive 2026-11-15).
 
 from __future__ import annotations
 
-from evals.harness.fake_polarion.body import Block, parse, render, text_of
+from evals.harness.fake_polarion.body import (
+    Block,
+    has_stray_text,
+    parse,
+    render,
+    text_of,
+)
 from evals.harness.fixtures import MACRO_PREFIX, heading_html, work_item_html
 
 
@@ -32,6 +38,10 @@ class TestParse:
     def test_single_quoted_id(self) -> None:
         assert parse("<p id='q-1'>x</p>")[0].ref == "q-1"
 
+    def test_hyphenated_id_attribute_is_not_id(self) -> None:
+        assert parse('<p data-id="x">a</p>')[0].ref == ""
+        assert parse('<p data-id="a" id="b">a</p>')[0].ref == "b"
+
     def test_anchorless_block_has_empty_ref(self) -> None:
         assert parse("<p>no id</p>")[0].ref == ""
 
@@ -41,6 +51,16 @@ class TestParse:
     def test_text_between_blocks_dropped(self) -> None:
         blocks = parse('stray <p id="a">1</p>\n\n<p id="b">2</p> tail')
         assert [b.ref for b in blocks] == ["a", "b"]
+
+
+class TestStrayText:
+    def test_blank_and_nested_text_is_not_stray(self) -> None:
+        assert not has_stray_text('<p id="a">x</p>\n  \n<!-- c --><div><p>t</p></div>')
+        assert not has_stray_text('<div id="b"><p>open tail')
+
+    def test_top_level_text_anywhere_is_stray(self) -> None:
+        for body in ('lead<p id="a">x</p>', '<p id="a">x</p>mid<br/>', "<hr/> tail"):
+            assert has_stray_text(body), body
 
     def test_void_and_self_closing_top_level_tags_are_blocks(self) -> None:
         blocks = parse('<hr id="h"><br/><img id="i" src="x"/>')

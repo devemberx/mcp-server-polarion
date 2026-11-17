@@ -19,7 +19,8 @@ BlockKind = Literal["heading", "workitem", "normal"]
 
 # Comment alternative first so ``<!-- <p> -->`` never count as tag.
 _TAG = re.compile(r"<!--.*?-->|<(/?)([A-Za-z][A-Za-z0-9]*)\b[^>]*?(/?)>", re.DOTALL)
-_ID = re.compile(r"""\bid\s*=\s*(?:"([^"]*)"|'([^']*)')""")
+# Lookbehind, not \b: ``data-id=`` must not count as ``id=``.
+_ID = re.compile(r"""(?<![\w-])id\s*=\s*(?:"([^"]*)"|'([^']*)')""")
 _HEADING_TAG = re.compile(r"h([1-6])")
 _VOID = frozenset(
     {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta"}
@@ -52,9 +53,11 @@ class Block:
 
 
 def parse(body: str) -> list[Block]:
-    """Split *body* into blocks; text between top-level elements dropped."""
+    """Split *body* into blocks; text between top-level elements dropped
+    (writes reject non-blank one first, see :func:`has_stray_text`).
+    """
     blocks: list[Block] = []
-    for markup in _top_level(body):
+    for markup in _top_level(body)[0]:
         name = re.match(r"<([A-Za-z][A-Za-z0-9]*)", markup)
         tag = name.group(1).lower() if name else ""
         heading = _HEADING_TAG.fullmatch(tag)
@@ -88,12 +91,23 @@ def _opening_id(markup: str) -> str:
     return match.group(1) if match.group(1) is not None else match.group(2)
 
 
-def _top_level(body: str) -> list[str]:
-    """Outer markup of each depth-0 element; unclosed tail = one block."""
+def has_stray_text(body: str) -> bool:
+    """Non-blank text between top-level elements (live: body write 400)."""
+    return _top_level(body)[1]
+
+
+def _top_level(body: str) -> tuple[list[str], bool]:
+    """Outer markup of each depth-0 element (unclosed tail = one block) +
+    whether non-blank depth-0 text sit between them.
+    """
     out: list[str] = []
     depth = 0
     start = 0
+    cursor = 0
+    stray = False
     for match in _TAG.finditer(body):
+        stray = stray or (depth == 0 and bool(body[cursor : match.start()].strip()))
+        cursor = match.end()
         closing, name, self_closing = match.groups()
         if name is None:
             continue  # comment
@@ -112,4 +126,6 @@ def _top_level(body: str) -> list[str]:
             depth += 1
     if depth:
         out.append(body[start:])
-    return out
+    else:
+        stray = stray or bool(body[cursor:].strip())
+    return out, stray

@@ -25,14 +25,12 @@ from strands.types.exceptions import (
 )
 from strands_evals import Case
 
-import mcp_server_polarion.tools._shared.cache as cache_mod
 from evals.harness import runner
 from evals.harness.mcp_bridge import TrajectoryRecorder
 from evals.harness.runner import (
     AGENT_ERROR_PREFIX,
     INFRA_ERROR_PREFIX,
     POLARION_HOST,
-    _clear_server_caches,
     _CycleGuard,
     _error_output,
     _extract_text,
@@ -136,15 +134,6 @@ class TestPatchedPolarionEnv:
             raise RuntimeError("case blew up")
 
         assert os.environ["POLARION_MAX_REQUESTS_PER_SECOND"] == "2"
-
-
-def test_clear_server_caches_empties_every_ttl_cache() -> None:
-    # Stateful fake = fresh world per case; stale discovery/id caches lie.
-    cache_mod._document_list_cache.set("P", ())
-    cache_mod._confirmed_work_item_cache.set(("P", "X"), True)
-    _clear_server_caches()
-    assert cache_mod._document_list_cache.get("P") is None
-    assert cache_mod._confirmed_work_item_cache.get(("P", "X")) is None
 
 
 def test_agent_error_prefix_is_a_sentinel() -> None:

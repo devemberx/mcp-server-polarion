@@ -16,7 +16,6 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any
 
 import httpx
 import respx
@@ -36,7 +35,7 @@ class FakePolarion:
 
     seeds: Seeds = SEEDS
     # Every write request, applied or rejected -- debugging + tests.
-    mutations: list[dict[str, Any]] = field(default_factory=list)
+    mutations: list[dict[str, object]] = field(default_factory=list)
     world: World = field(init=False)
 
     def __post_init__(self) -> None:

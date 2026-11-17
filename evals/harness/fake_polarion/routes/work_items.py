@@ -15,13 +15,20 @@ _ITEMS = PROJECT_PATH + "/workitems"
 _ITEM = _ITEMS + "/{work_item}"
 
 
+# Title clause only; other clauses (``AND type:x``) ignored, never part of term.
+_TITLE_CLAUSE = re.compile(r'title:\s*(?:"([^"]*)"|\(([^)]*)\)|([^\s()"]+))')
+
+
 def _title_query_terms(query: str) -> list[str]:
-    """Lowercased phrases of ``title:"x"`` / ``title:(a OR b)`` clause;
-    ``[]`` when nothing extractable (caller fall back to all).
+    """Lowercased phrases of ``title:"x"`` / ``title:(a OR b)`` / ``title:x``
+    clause; ``[]`` when nothing extractable (caller fall back to all).
     """
-    _, _, tail = query.partition("title:")
-    tail = tail.strip().strip('()"')
-    terms = (t.strip('"').strip().lower() for t in re.split(r"\s+OR\s+", tail))
+    match = _TITLE_CLAUSE.search(query)
+    if match is None:
+        return []
+    phrase, group, word = match.groups()
+    raw = re.split(r"\s+OR\s+", group) if group is not None else [phrase or word]
+    terms = (t.strip().strip('"').strip().lower() for t in raw)
     return [t for t in terms if t]
 
 
@@ -47,8 +54,8 @@ def list_work_items(world: World, call: Call) -> httpx.Response:
             for w in items
             if any(t in str(w.attributes.get("title", "")).lower() for t in terms)
         ]
-    data = [wire.work_item(w) for w in items]
-    return wire.respond({"data": data, "meta": {"totalCount": len(data)}})
+    data = [wire.work_item(w) for w in wire.window(items, call.query)]
+    return wire.respond({"data": data, "meta": {"totalCount": len(items)}})
 
 
 @ROUTER.post(_ITEMS)
@@ -59,7 +66,11 @@ def create_work_items(world: World, call: Call) -> httpx.Response:
 
 @ROUTER.patch(_ITEMS)
 def update_work_items(world: World, call: Call) -> httpx.Response:
-    world.update_work_items(call.entries(), call.query.get("changeTypeTo", ""))
+    world.update_work_items(
+        call.entries(),
+        call.query.get("changeTypeTo", ""),
+        call.query.get("workflowAction", ""),
+    )
     return httpx.Response(204)
 
 
@@ -91,7 +102,7 @@ def move_from_document(world: World, call: Call) -> httpx.Response:
 
 @ROUTER.get(_ITEM + "/linkedworkitems")
 def list_links(world: World, call: Call) -> httpx.Response:
-    return wire.respond(wire.links(world, call.args["work_item"]))
+    return wire.respond(wire.links(world, call.args["work_item"], call.query))
 
 
 @ROUTER.post(_ITEM + "/linkedworkitems")
@@ -123,12 +134,13 @@ def update_link(world: World, call: Call) -> httpx.Response:
 def list_comments(world: World, call: Call) -> httpx.Response:
     wi_id = call.args["work_item"]
     wi = world.work_item(wi_id)
-    data = wire.comments(wi.comments, f"{PROJECT}/{wi_id}", "workitem_comments")
+    thread = wire.comments(wi.comments, f"{PROJECT}/{wi_id}", "workitem_comments")
+    data = wire.window(thread, call.query)
     return wire.respond(
         {
             "data": data,
             "included": wire.author_included() if data else [],
-            "meta": {"totalCount": len(data)},
+            "meta": {"totalCount": len(thread)},
         }
     )
 

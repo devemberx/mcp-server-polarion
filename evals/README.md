@@ -179,9 +179,16 @@ Live behaviour the world reproduces (probed on the testdrive project):
   carries a unique `id`. `/parts` is the body split block by block, in order.
 - A plain `<hN>` in a body write spawns a heading work item. A member dropped
   from the body stays in the document as an orphan (move-in answers `409`).
-- `moveToDocument` without an anchor appends; an item under a heading gets an
-  automatic link to it, role = the document's `structure_link_role`
-  (`relates_to` for `FakeDoc`).
+  Top-level text in a body write answers `400`.
+- `moveToDocument` without an anchor appends; a member of another document
+  moves; headings never move (`400`). An item under a heading gets an automatic
+  link to it, role = the document's `structure_link_role` (`relates_to` for
+  `FakeDoc`). That role is server-owned on members: a move drops the item's
+  links of it, a new one answers `201` but is not stored, and the automatic
+  link ignores PATCH and DELETE.
+- A repeated link role + target answers `409` for the whole batch. Any
+  `workflowAction` answers `400` (no workflow is seeded). Lists honor
+  `page[size]` / `page[number]`.
 - Server-assigned ids continue across calls (`MCPT-9001`, …); a repeated test
   case gets the next record iteration; bulk POSTs echo one id per entry.
 

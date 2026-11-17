@@ -12,22 +12,12 @@ from mcp_server_polarion.core.client import PolarionClient
 from mcp_server_polarion.tools._shared import cache as _cache_mod
 
 
-def _clear_guard_caches() -> None:
-    """Drop enum / custom-field guard caches owned by ``_shared/cache.py``."""
-    _cache_mod._field_option_cache.clear()
-    _cache_mod._enum_option_id_cache.clear()
-    _cache_mod._work_item_custom_key_cache.clear()
-    _cache_mod._document_type_custom_key_cache.clear()
-    _cache_mod._test_run_custom_key_cache.clear()
-    _cache_mod._confirmed_work_item_cache.clear()
-
-
 @pytest.fixture(autouse=True)
 def _reset_guard_caches() -> None:
-    """Cold guard caches per test — key primed by one test would leak into
-    next and mask a missing priming GET.
+    """Cold caches per test — key primed by one test would leak into next
+    and mask a missing priming GET.
     """
-    _clear_guard_caches()
+    _cache_mod.clear_all_caches()
 
 
 @pytest.fixture

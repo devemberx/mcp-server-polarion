@@ -21,6 +21,7 @@ from evals.harness.fixtures import (
     DOC,
     DOC_ATTACHMENT_ID,
     FLOATING_TASK_ID,
+    PARENT_REQ_ID,
     PROJECT,
     SPACE,
 )
@@ -117,9 +118,11 @@ CASES: list[Case] = [
     ),
     _case(
         "ORCH-SPEC-WITH-LINK",
+        # Role != DOC structureLinkRole (relates_to): member link of that role
+        # = phantom success live, so prompt would ask for unpersistable write.
         f"Add a new requirement work item titled 'Session timeout' to the document "
-        f"'{DOC}' in space '{SPACE}' after 'Section A', then add a 'relates_to' "
-        f"link from it to work item {FLOATING_TASK_ID}.",
+        f"'{DOC}' in space '{SPACE}' after 'Section A', then add a 'satisfies' "
+        f"link from it to work item {PARENT_REQ_ID}.",
         intent="create -> read_parts -> anchored move -> create link (link only "
         "after the move).",
         steps=[

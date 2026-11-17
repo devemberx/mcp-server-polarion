@@ -196,6 +196,12 @@ class TestReadRouting:
         )
         assert _json(response)["meta"]["totalCount"] == len(SEEDS.work_items)
 
+    def test_work_item_list_dangling_title_returns_all(self) -> None:
+        response = _get(
+            FakePolarion(), f"/projects/{PROJECT}/workitems", query="type:x OR title:"
+        )
+        assert _json(response)["meta"]["totalCount"] == len(SEEDS.work_items)
+
     def test_linked_work_items_empty_when_unlinked(self) -> None:
         response = _get(
             FakePolarion(),
@@ -2159,3 +2165,126 @@ class TestStatefulRoutes:
         assert patch.status_code == 204
         run = _json(_get(fake, f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}"))
         assert run["data"]["attributes"]["status"] == "finished"
+
+    def test_workflow_action_is_400_unapplied(self) -> None:
+        fake = FakePolarion()
+        patch = _mutate(
+            fake,
+            "PATCH",
+            f"/projects/{PROJECT}/workitems?workflowAction=close",
+            {"data": [{"id": f"{PROJECT}/{FLOATING_TASK_ID}", "attributes": {}}]},
+        )
+        assert patch.status_code == 400
+        assert _json(patch)["errors"][0]["detail"] == (
+            "The workflow action 'close' was not found."
+        )
+
+    def test_title_clause_inside_compound_query(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/workitems",
+            query='title:"Section A" AND type:heading',
+        )
+        ids = [i["id"] for i in _json(response)["data"]]
+        assert ids == [f"{PROJECT}/{DOC_HEADING_ID}"]
+
+    def test_bare_title_word_query(self) -> None:
+        response = _get(
+            FakePolarion(), f"/projects/{PROJECT}/workitems", query="title:Section"
+        )
+        assert [i["id"] for i in _json(response)["data"]] == [
+            f"{PROJECT}/{DOC_HEADING_ID}"
+        ]
+
+    def test_record_without_attributes_and_with_defect(self) -> None:
+        # Live: no-result record ship no attributes block; defect = relationship.
+        fake = FakePolarion()
+        records = f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}/testrecords"
+        _mutate(
+            fake,
+            "POST",
+            records,
+            {
+                "data": [
+                    {
+                        "relationships": {
+                            "testCase": {"data": {"id": f"{PROJECT}/{TESTCASE_ID}"}},
+                            "defect": {"data": {"id": f"{PROJECT}/{FLOATING_TASK_ID}"}},
+                        }
+                    }
+                ]
+            },
+        )
+        new = _json(_get(fake, records))["data"][-1]
+        assert new["id"].endswith(f"/{TESTCASE_ID}/1")
+        assert "attributes" not in new
+        defect = new["relationships"]["defect"]["data"]["id"]
+        assert defect == f"{PROJECT}/{FLOATING_TASK_ID}"
+        failed = _json(_get(fake, records, testResultId="failed"))["data"]
+        assert [r["id"].rsplit("/", 1)[-1] for r in failed] == ["0"]
+
+
+class TestPaging:
+    """Live honor page[size] / page[number]; meta rule stay per route."""
+
+    _PARTS = f"/projects/{PROJECT}/spaces/{SPACE}/documents/{DOC}/parts"
+
+    def test_parts_pages_with_sparse_meta(self) -> None:
+        fake = FakePolarion()
+        whole = _json(_get(fake, self._PARTS))
+        assert "meta" not in whole
+        first = _json(_get(fake, self._PARTS, **{"page[size]": "2"}))
+        second = _json(
+            _get(fake, self._PARTS, **{"page[size]": "2", "page[number]": "2"})
+        )
+        assert first["data"] + second["data"] == whole["data"]
+        assert first["meta"] == second["meta"] == {"totalCount": len(whole["data"])}
+        assert (
+            second["data"][0]["relationships"]["previousPart"]["data"]["id"]
+            == (first["data"][-1]["id"])
+        )
+        size = str(len(whole["data"]))
+        exact = _json(_get(fake, self._PARTS, **{"page[size]": size}))
+        assert "meta" not in exact
+        over = _json(
+            _get(fake, self._PARTS, **{"page[size]": "2", "page[number]": "9"})
+        )
+        assert over["data"] == []
+        assert over["meta"] == {"totalCount": len(whole["data"])}
+
+    def test_list_routes_slice_but_count_all(self) -> None:
+        fake = FakePolarion()
+        one = {"page[size]": "1"}
+        for path in (
+            f"/projects/{PROJECT}/workitems",
+            f"/projects/{PROJECT}/workitems/{CHILD_REQ_ID}/linkedworkitems",
+            f"/projects/{PROJECT}/testruns",
+        ):
+            page = _json(_get(fake, path, **one))
+            assert len(page["data"]) == 1, path
+            assert page["meta"]["totalCount"] > 1, path
+        records = f"/projects/{PROJECT}/testruns/{TEST_RUN_ID_2}/testrecords"
+        assert len(_json(_get(fake, records, **one))["data"]) == 1
+
+    def test_comment_and_attachment_lists_slice(self) -> None:
+        fake = FakePolarion()
+        doc = f"/projects/{PROJECT}/spaces/{SPACE}/documents/{DOC}"
+        wi = f"/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}"
+        _mutate(
+            fake,
+            "POST",
+            f"{wi}/comments",
+            {"data": [{"attributes": {"text": {"value": "second"}}}]},
+        )
+        wi_page = _json(_get(fake, f"{wi}/comments", **{"page[size]": "1"}))
+        assert (len(wi_page["data"]), wi_page["meta"]["totalCount"]) == (1, 2)
+        doc_page = _json(_get(fake, f"{doc}/comments", **{"page[size]": "1"}))
+        assert len(doc_page["data"]) == 1
+        assert "meta" not in doc_page
+        over = _json(
+            _get(fake, f"{doc}/comments", **{"page[size]": "1", "page[number]": "9"})
+        )
+        assert over["data"] == []
+        assert over["meta"]["totalCount"] > 1
+        attachments = _json(_get(fake, f"{doc}/attachments", **{"page[number]": "2"}))
+        assert attachments["data"] == []

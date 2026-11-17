@@ -276,10 +276,21 @@ def invalidate_test_run_custom_keys(project_id: str) -> None:
     _test_run_custom_key_cache.invalidate(project_id)
 
 
+def clear_all_caches() -> None:
+    """Empty every module cache. Caller swap backing server (eval case,
+    test) -- stale entry would describe old one. Scan pick up new cache
+    without registration.
+    """
+    for value in list(globals().values()):
+        if isinstance(value, TTLCache):
+            value.clear()
+
+
 __all__ = [
     "DiscoveredDocument",
     "Resource",
     "TTLCache",
+    "clear_all_caches",
     "get_cached_confirmed_work_item",
     "get_cached_documents",
     "get_cached_enum_option_ids",

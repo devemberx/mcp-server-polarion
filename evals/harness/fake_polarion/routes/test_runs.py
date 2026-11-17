@@ -24,12 +24,12 @@ def _record(world: World, call: Call) -> TestRecord:
 def list_test_runs(world: World, call: Call) -> httpx.Response:
     want_templates = call.query.get("templates", "").lower() == "true"
     runs = [r for r in world.test_runs.values() if r.is_template == want_templates]
-    data = [wire.test_run(r) for r in runs]
+    data = [wire.test_run(r) for r in wire.window(runs, call.query)]
     return wire.respond(
         {
             "data": data,
             "included": wire.author_included() if data else [],
-            "meta": {"totalCount": len(data)},
+            "meta": {"totalCount": len(runs)},
         }
     )
 
@@ -60,9 +60,13 @@ def list_test_records(world: World, call: Call) -> httpx.Response:
     verified 2026-07-12).
     """
     run = world.test_run(call.args["run"])
-    data = [wire.test_record(run.id, rec) for rec in run.records]
-    if wanted := call.query.get("testResultId", ""):
-        data = [r for r in data if r["attributes"].get("result") == wanted]
+    wanted = call.query.get("testResultId", "")
+    records = [
+        rec
+        for rec in run.records
+        if not wanted or rec.attributes.get("result") == wanted
+    ]
+    data = [wire.test_record(run.id, rec) for rec in wire.window(records, call.query)]
     return wire.respond(
         {"data": data, "included": wire.author_included() if data else []}
     )

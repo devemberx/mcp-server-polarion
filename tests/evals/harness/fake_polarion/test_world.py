@@ -1,4 +1,4 @@
-"""World write semantics, pinned to live testdrive probes (2026-11-15)."""
+"""World write semantics, pinned to live testdrive probes (2026-11-15/16)."""
 
 from __future__ import annotations
 
@@ -14,6 +14,8 @@ from evals.harness.fixtures import (
     FLOATING_HEADING_ID,
     FLOATING_TASK_ID,
     MODULE_ID,
+    PARENT_DOC,
+    PARENT_MODULE_ID,
     PARENT_REQ_ID,
     PROJECT,
     SECTION_A_PART_ID,
@@ -104,14 +106,51 @@ class TestMoves:
             world.move_to_document(CHILD_REQ_ID, MODULE_ID)
         assert _fault(excinfo) == (409, "Work Item already in Document.")
 
-    def test_heading_type_lands_as_heading_part(self, world: World) -> None:
-        world.move_to_document(FLOATING_HEADING_ID, MODULE_ID)
-        block = world.document(SPACE, DOC).blocks[-1]
-        assert (block.kind, block.ref, block.level) == (
-            "heading",
-            FLOATING_HEADING_ID,
-            1,
+    def test_heading_move_in_or_out_is_400(self, world: World) -> None:
+        before = _parts(world)
+        for move in (
+            lambda: world.move_to_document(FLOATING_HEADING_ID, MODULE_ID),
+            lambda: world.move_to_document(DOC_HEADING_ID, MODULE_ID),  # not 409
+            lambda: world.move_from_document(DOC_HEADING_ID),
+        ):
+            with pytest.raises(Fault) as excinfo:
+                move()
+            assert _fault(excinfo) == (400, "Cannot move headings.")
+        assert _parts(world) == before
+
+    def test_cross_document_move_relocates(self, world: World) -> None:
+        world.move_to_document(
+            CHILD_REQ_ID, PARENT_MODULE_ID, previous=f"{PARENT_MODULE_ID}/pp-1"
         )
+        assert f"workitem_{CHILD_REQ_ID}" not in _parts(world)
+        assert _parts(world, PARENT_DOC)[1] == f"workitem_{CHILD_REQ_ID}"
+        assert world.work_item(CHILD_REQ_ID).module == PARENT_MODULE_ID
+        roles = [x.role for x in world.links_of(CHILD_REQ_ID)]
+        assert roles == ["satisfies", "verifies"]  # no heading above in target
+
+    def test_bad_anchor_leaves_source_untouched(self, world: World) -> None:
+        with pytest.raises(Fault):
+            world.move_to_document(
+                CHILD_REQ_ID, PARENT_MODULE_ID, previous=f"{PARENT_MODULE_ID}/nope"
+            )
+        assert f"workitem_{CHILD_REQ_ID}" in _parts(world)
+        assert world.work_item(CHILD_REQ_ID).module == MODULE_ID
+
+    def test_orphan_moves_to_other_document(self, world: World) -> None:
+        doc = world.document(SPACE, DOC)
+        world.update_document(doc, {"homePageContent": {"value": '<p id="p">x</p>'}})
+        world.move_to_document(CHILD_REQ_ID, PARENT_MODULE_ID)
+        assert _parts(world, PARENT_DOC)[-1] == f"workitem_{CHILD_REQ_ID}"
+
+    def test_move_in_drops_structure_role_links(self, world: World) -> None:
+        # Live: move replace item's links of target structureLinkRole --
+        # heading above or not; other roles survive.
+        world.create_links(
+            FLOATING_TASK_ID,
+            [_entry("relates_to", CHILD_REQ_ID), _entry("parent", CHILD_REQ_ID)],
+        )
+        world.move_to_document(FLOATING_TASK_ID, MODULE_ID, previous=f"{MODULE_ID}/p-1")
+        assert [x.role for x in world.links_of(FLOATING_TASK_ID)] == ["parent"]
 
     def test_move_from_detaches(self, world: World) -> None:
         world.move_from_document(CHILD_REQ_ID)
@@ -154,21 +193,47 @@ class TestStructureLinks:
         world.move_from_document(FLOATING_TASK_ID)
         assert world.links_of(FLOATING_TASK_ID) == []
 
-    def test_stored_duplicate_not_doubled(self, world: World) -> None:
-        world.create_links(
-            UNCOVERED_REQ_ID,
-            [
-                {
-                    "attributes": {"role": "relates_to"},
-                    "relationships": {"workItem": {"data": {"id": DOC_HEADING_ID}}},
-                }
-            ],
-        )
+    def test_repeat_of_structure_link_is_409(self, world: World) -> None:
+        with pytest.raises(Fault) as excinfo:
+            world.create_links(UNCOVERED_REQ_ID, [_entry("relates_to", DOC_HEADING_ID)])
+        assert excinfo.value.status == 409
         assert len(world.links_of(UNCOVERED_REQ_ID)) == 1
+
+    def test_member_structure_role_link_is_phantom(self, world: World) -> None:
+        # Live: 201 + id, never stored; other roles persist.
+        ids = world.create_links(
+            UNCOVERED_REQ_ID, [_entry("relates_to"), _entry("satisfies")]
+        )
+        assert ids[0].endswith(f"/relates_to/{PROJECT}/{FLOATING_TASK_ID}")
+        assert [(x.role, x.target) for x in world.links_of(UNCOVERED_REQ_ID)] == [
+            ("satisfies", FLOATING_TASK_ID),
+            ("relates_to", DOC_HEADING_ID),
+        ]
+
+    def test_member_above_heading_still_phantom(self, world: World) -> None:
+        world.move_to_document(FLOATING_TASK_ID, MODULE_ID, previous=f"{MODULE_ID}/p-1")
+        world.create_links(FLOATING_TASK_ID, [_entry("relates_to", CHILD_REQ_ID)])
+        assert world.links_of(FLOATING_TASK_ID) == []
+
+    def test_structure_link_ignores_update_and_delete(self, world: World) -> None:
+        # Live: both 204, link unchanged.
+        flag = {"suspect": True}
+        world.update_link(UNCOVERED_REQ_ID, "relates_to", DOC_HEADING_ID, flag)
+        link_id = f"{PROJECT}/{UNCOVERED_REQ_ID}/relates_to/{PROJECT}/{DOC_HEADING_ID}"
+        world.delete_links(UNCOVERED_REQ_ID, [link_id])
+        (link,) = world.links_of(UNCOVERED_REQ_ID)
+        assert (link.target, link.suspect) == (DOC_HEADING_ID, False)
 
     def test_back_links_include_structure_links(self, world: World) -> None:
         sources = {wi.id for wi in world.linking_to(DOC_HEADING_ID)}
         assert sources == {CHILD_REQ_ID, UNCOVERED_REQ_ID}
+
+
+def _entry(role: str, target: str = FLOATING_TASK_ID) -> dict[str, object]:
+    return {
+        "attributes": {"role": role},
+        "relationships": {"workItem": {"data": {"id": f"{PROJECT}/{target}"}}},
+    }
 
 
 _LINK_ENTRY = {
@@ -194,6 +259,19 @@ class TestLinks:
         assert (link.suspect, link.revision) == (False, "8")
         world.delete_links(FLOATING_TASK_ID, [*ids, "malformed"])
         assert world.links_of(FLOATING_TASK_ID) == []
+
+    def test_repeat_role_target_is_409_whole_batch(self, world: World) -> None:
+        world.create_links(FLOATING_TASK_ID, [_entry("relates_to", CHILD_REQ_ID)])
+        batches = (
+            [_entry("parent", CHILD_REQ_ID), _entry("relates_to", CHILD_REQ_ID)],
+            [_entry("verifies", CHILD_REQ_ID), _entry("verifies", CHILD_REQ_ID)],
+        )
+        for batch in batches:
+            with pytest.raises(Fault) as excinfo:
+                world.create_links(FLOATING_TASK_ID, batch)
+            assert excinfo.value.status == 409
+            assert "is already linked with role" in excinfo.value.detail
+        assert [x.role for x in world.links_of(FLOATING_TASK_ID)] == ["relates_to"]
 
     def test_update_unknown_link_is_404(self, world: World) -> None:
         with pytest.raises(Fault) as excinfo:
@@ -259,6 +337,17 @@ class TestBody:
         with pytest.raises(Fault) as excinfo:
             self._patch(world, '<p id="d">1</p>', "<h2>New</h2>", '<p id="d">2</p>')
         assert excinfo.value.status == 400
+        assert _parts(world) == before
+        assert all(wi.attributes["title"] != "New" for wi in world.work_items.values())
+
+    def test_top_level_text_rejects_whole_write(self, world: World) -> None:
+        before = _parts(world)
+        with pytest.raises(Fault) as excinfo:
+            self._patch(world, "<h2>New</h2>", "loose text")
+        assert _fault(excinfo) == (
+            400,
+            "Invalid Home Page HTML. Unexpected top-level text nodes",
+        )
         assert _parts(world) == before
         assert all(wi.attributes["title"] != "New" for wi in world.work_items.values())
 
@@ -350,6 +439,13 @@ class TestWorkItems:
                     {"id": f"{PROJECT}/MCPT-9999", "attributes": {"title": "y"}},
                 ]
             )
+        assert world.work_item(FLOATING_TASK_ID).attributes["title"] == "Floating task"
+
+    def test_workflow_action_unknown_rejects_batch(self, world: World) -> None:
+        entry = {"id": f"{PROJECT}/{FLOATING_TASK_ID}", "attributes": {"title": "x"}}
+        with pytest.raises(Fault) as excinfo:
+            world.update_work_items([entry], workflow_action="close")
+        assert _fault(excinfo) == (400, "The workflow action 'close' was not found.")
         assert world.work_item(FLOATING_TASK_ID).attributes["title"] == "Floating task"
 
     def test_update_merges_attributes_assignees_and_type(self, world: World) -> None:
@@ -492,6 +588,33 @@ class TestTestRuns:
             TEST_RUN_ID, [{"id": rid, "attributes": {"result": "passed"}}]
         )
         assert record.attributes["result"] == "passed"
+
+    def test_record_defect_relationship_stored(self, world: World) -> None:
+        defect = {"defect": {"data": {"id": f"{PROJECT}/{FLOATING_TASK_ID}"}}}
+        (rid,) = world.create_test_records(
+            TEST_RUN_ID,
+            [
+                {
+                    "relationships": {
+                        "testCase": {"data": {"id": f"{PROJECT}/{TESTCASE_ID}"}},
+                        **defect,
+                    }
+                }
+            ],
+        )
+        created = world.record(TEST_RUN_ID, PROJECT, TESTCASE_ID, "1")
+        assert created.defect == FLOATING_TASK_ID
+        seeded = world.record(TEST_RUN_ID, PROJECT, TESTCASE_ID, "0")
+        seeded_id = f"{PROJECT}/{TEST_RUN_ID}/{PROJECT}/{TESTCASE_ID}/0"
+        world.update_test_records(
+            TEST_RUN_ID,
+            [{"id": seeded_id, "relationships": defect}, {"id": rid}],
+        )
+        assert (seeded.defect, created.defect) == (FLOATING_TASK_ID, FLOATING_TASK_ID)
+        world.update_test_records(
+            TEST_RUN_ID, [{"id": rid, "relationships": {"defect": {"data": None}}}]
+        )
+        assert created.defect == ""
 
     def test_record_lookup_misses_are_404(self, world: World) -> None:
         for args in (

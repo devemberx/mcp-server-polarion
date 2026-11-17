@@ -147,16 +147,17 @@ def discovery(world: World) -> Json:
     return {"data": data, "included": included, "meta": {"totalCount": len(data)}}
 
 
-def parts(world: World, doc: DocumentState) -> Json:
+def parts(world: World, doc: DocumentState, query: httpx.QueryParams) -> Json:
     """Live shape: ``content`` = block markup, heading + ``headingText`` /
     ``level``, workitem + ``level``/``layout`` 0, ``previousPart`` /
-    ``nextPart`` chain (absent at ends), member work items in ``included``,
-    no ``meta``.
+    ``nextPart`` chain over whole body (absent at ends), page members in
+    ``included``, paged with sparse ``meta``.
     """
     data: list[Json] = []
     included: list[Json] = []
     blocks = doc.blocks
-    for i, block in enumerate(blocks):
+    for i in window(list(range(len(blocks))), query):
+        block = blocks[i]
         attributes: Json = {
             "id": block.part_id,
             "content": block.render(),
@@ -187,21 +188,22 @@ def parts(world: World, doc: DocumentState) -> Json:
                 "relationships": relationships,
             }
         )
-    return {"data": data, "included": included}
+    return sparse_meta({"data": data, "included": included}, len(blocks), query)
 
 
-def links(world: World, source_id: str) -> Json:
+def links(world: World, source_id: str, query: httpx.QueryParams) -> Json:
     """Targets ship as ``include=workItem`` -- parser derive target from
     ``relationships.workItem``, never composite id.
     """
     data: list[Json] = []
     included: list[Json] = []
-    for link in world.links_of(source_id):
+    every = world.links_of(source_id)
+    for link in window(every, query):
         data.append(_link(source_id, link))
         target = world.work_items.get(link.target)
         if target is not None:
             included.append(work_item(target))
-    return {"data": data, "included": included, "meta": {"totalCount": len(data)}}
+    return {"data": data, "included": included, "meta": {"totalCount": len(every)}}
 
 
 def comments(thread: list[Comment], base: str, comment_type: str) -> list[Json]:
@@ -264,19 +266,30 @@ def attachments(items: list[Attachment], base: str, resource_type: str) -> list[
     ]
 
 
-def attachment_page(resources: list[Json], query: httpx.QueryParams) -> Json:
-    """Work item / test record attachment page. Live: ``meta.totalCount``
-    every page once collection span >1 page, plus overshoot past non-empty
-    collection; single-page / empty omit meta.
-    """
+def window[T](items: list[T], query: httpx.QueryParams) -> list[T]:
+    """``page[size]`` / ``page[number]`` slice of *items* (live default 100)."""
     size = int(query.get("page[size]", str(DEFAULT_PAGE_SIZE)))
     number = int(query.get("page[number]", "1"))
-    start = (number - 1) * size
-    data = resources[start : start + size]
-    page: Json = {"data": data, "included": author_included() if data else []}
-    if len(resources) > size or (number > 1 and not data and resources):
-        page["meta"] = {"totalCount": len(resources)}
+    return items[(number - 1) * size : number * size]
+
+
+def sparse_meta(page: Json, total: int, query: httpx.QueryParams) -> Json:
+    """Add ``meta.totalCount`` per live rule of work item / test record
+    attachments + document parts: every page once collection span >1 page,
+    plus overshoot past non-empty collection; single page / empty omit it.
+    """
+    size = int(query.get("page[size]", str(DEFAULT_PAGE_SIZE)))
+    overshoot = int(query.get("page[number]", "1")) > 1 and not page["data"]
+    if total > size or (overshoot and total):
+        page["meta"] = {"totalCount": total}
     return page
+
+
+def attachment_page(resources: list[Json], query: httpx.QueryParams) -> Json:
+    """Work item / test record attachment page."""
+    data = window(resources, query)
+    page: Json = {"data": data, "included": author_included() if data else []}
+    return sparse_meta(page, len(resources), query)
 
 
 def attachment_content(items: list[Attachment], wanted: str) -> httpx.Response:
@@ -316,21 +329,31 @@ def test_run(run: TestRunState, *, detail: bool = False) -> Json:
 
 
 def test_record(run_id: str, record: TestRecord, *, detail: bool = False) -> Json:
-    attributes = {**record.attributes, "iteration": record.iteration}
-    if not detail:
-        for key in _RECORD_DETAIL_ONLY:
-            attributes.pop(key, None)
-    return {
+    """Record POSTed without any attribute (no ``result``) ship no
+    ``attributes`` block -- ``iteration`` included (live); id still carry it.
+    """
+    relationships: Json = {
+        "testCase": {
+            "data": {"type": "workitems", "id": f"{PROJECT}/{record.test_case}"}
+        },
+        "executedBy": _AUTHOR_REF,
+    }
+    if record.defect:
+        relationships["defect"] = {
+            "data": {"type": "workitems", "id": f"{PROJECT}/{record.defect}"}
+        }
+    resource: Json = {
         "type": "testrecords",
         "id": record_id(run_id, record),
-        "attributes": attributes,
-        "relationships": {
-            "testCase": {
-                "data": {"type": "workitems", "id": f"{PROJECT}/{record.test_case}"}
-            },
-            "executedBy": _AUTHOR_REF,
-        },
+        "relationships": relationships,
     }
+    if record.attributes:
+        attributes = {**record.attributes, "iteration": record.iteration}
+        if not detail:
+            for key in _RECORD_DETAIL_ONLY:
+                attributes.pop(key, None)
+        resource["attributes"] = attributes
+    return resource
 
 
 def enum_options(options: list[tuple[str, bool]]) -> Json:

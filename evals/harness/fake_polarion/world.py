@@ -2,7 +2,7 @@
 ``FakePolarion`` (= per eval run), deep-copied from seeds so writes never
 leak across runs. Ops raise ``Fault``; routes render it as JSON:API error.
 
-Semantics mirror live testdrive (v2506, probed 2026-11-15) unless comment
+Semantics mirror live testdrive (v2506, probed 2026-11-15/16) unless comment
 say "not live-verified".
 """
 
@@ -63,6 +63,11 @@ class DocumentState:
     def module_id(self) -> str:
         return f"{PROJECT}/{self.space}/{self.name}"
 
+    @property
+    def structure_role(self) -> str:
+        """Link role server own on members (structure link to heading)."""
+        return str(self.attributes.get("structureLinkRole", "relates_to"))
+
     def index_of(self, part_ref: str) -> int:
         """Block index of full part id (``{module_id}/{part_id}``)."""
         prefix = f"{self.module_id}/"
@@ -81,6 +86,7 @@ class TestRecord:
     iteration: int
     attributes: Json = field(default_factory=dict)
     attachments: list[Attachment] = field(default_factory=list)
+    defect: str = ""  # short id; relationship, not attribute
 
 
 @dataclass
@@ -269,8 +275,15 @@ class World:
             created.append(wi.id)
         return created
 
-    def update_work_items(self, entries: list[Json], change_type_to: str = "") -> None:
-        """Atomic (live): unknown id fail batch before any write."""
+    def update_work_items(
+        self, entries: list[Json], change_type_to: str = "", workflow_action: str = ""
+    ) -> None:
+        """Atomic (live): unknown id fail batch before any write. Workflow
+        (actions, target status, conditions) = instance config, unseeded --
+        every action unknown, live 400 wording.
+        """
+        if workflow_action:
+            raise Fault(400, f"The workflow action '{workflow_action}' was not found.")
         targets = [
             (self.work_item(_short(entry.get("id"))), entry) for entry in entries
         ]
@@ -284,13 +297,16 @@ class World:
     def move_to_document(
         self, short_id: str, target: str, previous: str = "", next_: str = ""
     ) -> None:
-        """No anchor = append (live). Any membership, orphan included, = 409.
-
-        Live-verified 409 = same-document re-move only; cross-document assumed.
+        """Live: no anchor = append; heading = 400 (before 409); re-move into
+        own ``module`` (placed or orphan) = 409; member of other document =
+        moved, source body drop it. Move-in drop item's stored links of
+        target ``structureLinkRole`` -- heading above or not.
         """
         wi = self.work_item(short_id)
         doc = self.document_by_module(target)
-        if wi.module:
+        if wi.attributes.get("type") == "heading":
+            raise Fault(400, "Cannot move headings.")
+        if wi.module == doc.module_id:
             raise Fault(409, "Work Item already in Document.")
         if previous:
             position = doc.index_of(previous) + 1
@@ -298,20 +314,22 @@ class World:
             position = doc.index_of(next_)
         else:
             position = len(doc.blocks)
-        # Not live-verified: heading-type item land as level-1 heading.
-        is_heading = wi.attributes.get("type") == "heading"
-        block = (
-            Block("heading", wi.id, level=1) if is_heading else Block("workitem", wi.id)
-        )
-        doc.blocks.insert(position, block)
+        source = self.find_document(wi.module) if wi.module else None
+        if source is not None:
+            source.blocks = [b for b in source.blocks if not _places(b, wi.id)]
+        wi.links = [x for x in wi.links if x.role != doc.structure_role]
+        doc.blocks.insert(position, Block("workitem", wi.id))
         wi.module = doc.module_id
 
     def move_from_document(self, short_id: str) -> None:
+        """Live: heading = 400, placed or orphan."""
         wi = self.work_item(short_id)
+        if wi.attributes.get("type") == "heading":
+            raise Fault(400, "Cannot move headings.")
         if not wi.module:
             raise Fault(400, "Work Item is not in Document.")
         doc = self.document_by_module(wi.module)
-        doc.blocks = [b for b in doc.blocks if b.kind == "normal" or b.ref != wi.id]
+        doc.blocks = [b for b in doc.blocks if not _places(b, wi.id)]
         wi.module = ""
 
     def structure_link(self, wi: WorkItemState) -> Link | None:
@@ -328,10 +346,7 @@ class World:
             if block.kind == "heading":
                 heading = block.ref
             elif block.kind == "workitem" and block.ref == wi.id:
-                if not heading:
-                    return None
-                role = str(doc.attributes.get("structureLinkRole", "relates_to"))
-                return Link(role, heading)
+                return Link(doc.structure_role, heading) if heading else None
         return None
 
     def links_of(self, short_id: str) -> list[Link]:
@@ -352,28 +367,38 @@ class World:
         ]
 
     def create_links(self, source_id: str, entries: list[Json]) -> list[str]:
-        """Server validate neither role nor target (ghost link) -- guard/ job.
-        Not live-verified: same role + target twice stored once.
+        """Live: role + target unvalidated (ghost link) -- guard/ job. Repeat
+        role + target, existing or within batch, = 409 whole batch. Document
+        member: role = ``structureLinkRole`` answer 201 + id but never stored
+        (phantom success), heading above or not. Not live-verified: orphan
+        count as member; repeat of structure link itself = 409.
         """
         wi = self.work_item(source_id)
-        ids = []
+        taken = {(x.role, x.target) for x in self.links_of(source_id)}
+        doc = self.find_document(wi.module) if wi.module else None
+        planned: list[Link] = []
         for entry in entries:
             attributes = _dict(entry.get("attributes"))
-            role = str(attributes.get("role", ""))
-            target = _short(_relationship_id(entry, "workItem"))
-            if not any((x.role, x.target) == (role, target) for x in wi.links):
-                wi.links.append(
-                    Link(
-                        role,
-                        target,
-                        bool(attributes.get("suspect", False)),
-                        str(attributes.get("revision", "")),
-                    )
+            link = Link(
+                str(attributes.get("role", "")),
+                _short(_relationship_id(entry, "workItem")),
+                bool(attributes.get("suspect", False)),
+                str(attributes.get("revision", "")),
+            )
+            if (link.role, link.target) in taken:
+                raise Fault(
+                    409,
+                    f"Work Item '{PROJECT}/{link.target}' is already linked "
+                    f"with role '{link.role}'.",
                 )
-            ids.append(f"{PROJECT}/{source_id}/{role}/{PROJECT}/{target}")
-        return ids
+            taken.add((link.role, link.target))
+            planned.append(link)
+        owned = doc.structure_role if doc is not None else None
+        wi.links.extend(x for x in planned if x.role != owned)
+        return [f"{PROJECT}/{source_id}/{x.role}/{PROJECT}/{x.target}" for x in planned]
 
     def delete_links(self, source_id: str, link_ids: list[str]) -> None:
+        """Structure link = derived, so delete leave it (live: 204, stays)."""
         wi = self.work_item(source_id)
         doomed = set()
         for link_id in link_ids:
@@ -385,8 +410,11 @@ class World:
     def update_link(
         self, source_id: str, role: str, target: str, attributes: Json
     ) -> None:
+        """Structure link immutable: live 204, change dropped."""
         wi = self.work_item(source_id)
         link = next((x for x in wi.links if (x.role, x.target) == (role, target)), None)
+        if link is None and self.structure_link(wi) == Link(role, target):
+            return
         if link is None:
             link_ref = f"{PROJECT}/{source_id}/{role}/{PROJECT}/{target}"
             raise Fault(404, f"Linked Work Item '{link_ref}' was not found.")
@@ -470,11 +498,13 @@ class World:
         doc.attributes.update(attributes)
 
     def set_body(self, doc: DocumentState, markup: str) -> None:
-        """Replace body (live): duplicate block id = 400 whole write; plain
-        ``<hN>`` spawn heading work item + become placeholder; member dropped
-        from body = orphan (module kept). Not live-verified: placeholder of
-        non-member dropped, no implicit move.
+        """Replace body (live): non-blank top-level text or duplicate block id
+        = 400 whole write; plain ``<hN>`` spawn heading work item + become
+        placeholder; member dropped from body = orphan (module kept). Not
+        live-verified: placeholder of non-member dropped, no implicit move.
         """
+        if body.has_stray_text(markup):
+            raise Fault(400, "Invalid Home Page HTML. Unexpected top-level text nodes")
         blocks = body.parse(markup)
         ids = [b.ref for b in blocks if b.kind == "normal" and b.ref]
         duplicates = sorted({i for i in ids if ids.count(i) > 1})
@@ -635,7 +665,12 @@ class World:
                     400, "Test Case is missing, or the one specified is invalid."
                 )
             planned.append(
-                TestRecord(case, seen[case], dict(_dict(entry.get("attributes"))))
+                TestRecord(
+                    case,
+                    seen[case],
+                    dict(_dict(entry.get("attributes"))),
+                    defect=_short(_relationship_id(entry, "defect")),
+                )
             )
             seen[case] += 1
         run.records.extend(planned)
@@ -653,6 +688,13 @@ class World:
             targets.append((by_id[rid], entry))
         for rec, entry in targets:
             rec.attributes.update(_dict(entry.get("attributes")))
+            if "defect" in _dict(entry.get("relationships")):
+                rec.defect = _short(_relationship_id(entry, "defect"))
+
+
+def _places(block: Block, short_id: str) -> bool:
+    """*block* = placeholder of work item *short_id*."""
+    return block.kind != "normal" and block.ref == short_id
 
 
 def _dict(value: object) -> Json:
