@@ -337,10 +337,8 @@ RECORD_ID_SEGMENTS: Final = 5
 
 
 def _record_id_iteration(record_id: str) -> int:
-    """Iteration = last segment of 5-segment record id
-    (``project/run/tcProject/tcId/iteration``); 0 when not digits. Live:
-    record POSTed without ``result`` ship no ``attributes`` block, id = only
-    iteration source.
+    """Last id segment as int, 0 if malformed. Record POSTed without ``result``
+    ships no ``attributes`` block — id = only iteration source.
     """
     segments = record_id.split("/")
     if len(segments) == RECORD_ID_SEGMENTS and segments[-1].isdigit():
@@ -365,11 +363,7 @@ def parse_test_record_summary_kwargs(
         relationships = {}
 
     record_id = safe_str(item.get("id", ""))
-    iteration = (
-        attributes["iteration"]
-        if "iteration" in attributes
-        else _record_id_iteration(record_id)
-    )
+    iteration = attributes.get("iteration", _record_id_iteration(record_id))
     executed_by_id = extract_relationship_id(relationships, "executedBy")
     return {
         "id": record_id,
