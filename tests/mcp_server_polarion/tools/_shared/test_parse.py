@@ -564,7 +564,14 @@ class TestParseTestRecordSummaries:
         assert kwargs["iteration"] == 3
 
     @pytest.mark.parametrize(
-        "record_id", ["proj/TR-1/proj/TC-1/x", "TR-1/TC-1/2", "", "proj/TR-1/p/T/-1"]
+        "record_id",
+        [
+            "proj/TR-1/proj/TC-1/x",
+            "TR-1/TC-1/2",
+            "",
+            "proj/TR-1/p/T/-1",
+            "proj/TR-1/proj/TC-1/\u00b2",  # superscript two: isdigit, not int
+        ],
     )
     def test_unusable_id_tail_defaults_zero(self, record_id: str) -> None:
         kwargs = parse_test_record_summary_kwargs({"id": record_id}, user_names={})
@@ -573,7 +580,8 @@ class TestParseTestRecordSummaries:
     def test_non_numeric_duration_and_iteration_default_zero(self) -> None:
         kwargs = parse_test_record_summary_kwargs(
             {
-                "id": "proj/TR-1/proj/TC-1/0",
+                # id tail 5 != 0: invalid present value must not fall back to id.
+                "id": "proj/TR-1/proj/TC-1/5",
                 "attributes": {"duration": "fast", "iteration": True},
             },
             user_names={},
@@ -813,7 +821,7 @@ class TestParseTestRecordDetail:
 
     def test_bool_iteration_rejected_to_zero(self) -> None:
         item: dict[str, object] = {
-            "id": "proj/TR-1/proj/TC-1/0",
+            "id": "proj/TR-1/proj/TC-1/5",
             "attributes": {"iteration": True},
         }
         detail = parse_test_record_detail(

@@ -341,7 +341,8 @@ def _record_id_iteration(record_id: str) -> int:
     ships no ``attributes`` block — id = only iteration source.
     """
     segments = record_id.split("/")
-    if len(segments) == RECORD_ID_SEGMENTS and segments[-1].isdigit():
+    # isdecimal, not isdigit: superscript digits pass isdigit, int() reject.
+    if len(segments) == RECORD_ID_SEGMENTS and segments[-1].isdecimal():
         return int(segments[-1])
     return 0
 
