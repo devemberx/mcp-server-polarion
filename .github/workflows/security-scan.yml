@@ -83,6 +83,7 @@ jobs:
         run: uv python install 3.13
 
       - name: Export production-only requirements
+        id: export
         # Wheel deps only; --no-hashes since OSV's pip parser can't read multiline hashes.
         # --frozen: audit committed lock as-is; never re-resolve.
         # Base = HEAD^1, not pull_request.base.sha (can lag merge ref's base parent).
@@ -137,9 +138,26 @@ jobs:
           fi
           python3 .github/scripts/osv_audit_diff.py "${args[@]}"
 
+      - name: Gate on lock downgrades
+        # Forced bump may roll back any locked package, any group; CVE gate above see
+        # only prod CVEs. Dependabot PR = blocking (auto-merge wait on this check),
+        # human PR = warn. !cancelled: report even when CVE gate already failed.
+        # Export failure = base lock maybe never written; skip, no spurious unreadable error.
+        if: ${{ !cancelled() && env.DIFF_AUDIT == 'true' && steps.export.outcome == 'success' }}
+        env:
+          ENFORCE: ${{ github.event.pull_request.user.login == 'dependabot[bot]' }}
+        run: |
+          args=("$RUNNER_TEMP/osv-base/uv.lock" uv.lock)
+          if [ "$ENFORCE" = true ]; then args+=(--enforce); fi
+          uv run --no-project --with packaging==26.0 \
+            python .github/scripts/lock_downgrade_diff.py "${args[@]}"
+
       - name: Summarize audit
         if: always()
-        run: if [ -f osv-summary.md ]; then cat osv-summary.md >> "$GITHUB_STEP_SUMMARY"; fi
+        run: |
+          for f in osv-summary.md lock-summary.md; do
+            if [ -f "$f" ]; then cat "$f" >> "$GITHUB_STEP_SUMMARY"; fi
+          done
 
       - name: Upload report
         if: always()
@@ -150,5 +168,6 @@ jobs:
             osv-head.json
             osv-base.json
             osv-summary.md
+            lock-summary.md
           retention-days: 30
           if-no-files-found: warn
