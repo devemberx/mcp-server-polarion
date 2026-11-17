@@ -390,9 +390,10 @@ async def create_work_item_links(
     batch — re-query list_work_item_links before retrying. link_ids are the
     delete-path ids, input order.
 
-    Phantom success: a document-attached source already has an auto-created
-    heading link; a NEW same-role link reports created but is NOT
-    persisted — verify with list_work_item_links.
+    Phantom success: when the source sits in a document, a link with the
+    document's structure role (the role of its auto heading link) reports
+    created but is NOT persisted, heading above or not — verify with
+    list_work_item_links.
     """
     payload = _build_create_links_payload(
         source_project_id=project_id,
@@ -477,7 +478,8 @@ async def delete_work_item_links(
     Outgoing only — delete a back link from its source item instead. Refs
     from list_work_item_links(direction="forward") or a prior create. Stale
     refs never fail: results split into deleted_link_ids /
-    not_found_link_ids.
+    not_found_link_ids. A document item's auto heading link cannot be
+    deleted: it is reported deleted but stays.
     """
     link_ids, payload = _build_delete_links_payload(
         source_project_id=project_id,
@@ -575,7 +577,8 @@ async def update_work_item_link(  # noqa: PLR0913
     Identify the link via list_work_item_links(direction="forward") — role +
     target address one link; copy the role exactly as listed. None =
     unchanged; at least one of suspect / revision required. One link per
-    call.
+    call. A document item's auto heading link ignores updates: the call
+    succeeds, the link stays unchanged.
     """
     if suspect is None and revision is None:
         raise ValueError(

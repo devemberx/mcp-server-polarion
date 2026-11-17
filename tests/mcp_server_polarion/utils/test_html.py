@@ -702,9 +702,35 @@ class TestRoundTrip:
 
 
 class TestStampBlockIds:
-    """``stamp_block_ids`` cover exactly the blocks Polarion ``/parts``
-    derivation require; headings left alone.
+    """``stamp_block_ids`` cover what Polarion ``/parts`` derivation require:
+    every top-level element + nested block tags; headings left alone.
     """
+
+    @pytest.mark.parametrize(
+        ("markup", "tag"),
+        [
+            ("<hr/>", "hr"),
+            ('<img src="x.png"/>', "img"),
+            ("<br/>", "br"),
+            ("<span>s</span>", "span"),
+            ("<b>bold</b>", "b"),
+        ],
+    )
+    def test_top_level_element_of_any_tag_is_stamped(
+        self, markup: str, tag: str
+    ) -> None:
+        # Live: any id-less top-level element 500s /parts; with id it parses.
+        result = stamp_block_ids(f'<p id="a">x</p>{markup}')
+        assert f'<{tag} id="polarion_mcp_0"' in result
+
+    def test_top_level_heading_still_not_stamped(self) -> None:
+        result = stamp_block_ids("<hr/><h2>Spawn me</h2>")
+        assert "<h2>Spawn me</h2>" in result
+        assert '<hr id="polarion_mcp_0"/>' in result
+
+    def test_anchored_top_level_inline_returned_verbatim(self) -> None:
+        html = '<span id="s">a&nbsp;b</span><hr id="h"/>'
+        assert stamp_block_ids(html) == html
 
     def test_each_block_tag_gets_unique_sequential_id(self) -> None:
         html = (
@@ -784,8 +810,21 @@ class TestStampBlockIds:
 
 class TestFirstAnchorlessBlock:
     """``first_anchorless_block`` = write-side reject predicate; every
-    block in ``_BLOCK_TAGS_NEEDING_IDS`` must carry non-empty id.
+    top-level non-heading element and every nested block in
+    ``_BLOCK_TAGS_NEEDING_IDS`` must carry non-empty id.
     """
+
+    @pytest.mark.parametrize(
+        ("markup", "tag"),
+        [("<hr/>", "hr"), ("<span>s</span>", "span"), ('<img src="x"/>', "img")],
+    )
+    def test_top_level_element_of_any_tag_without_id_is_flagged(
+        self, markup: str, tag: str
+    ) -> None:
+        assert first_anchorless_block(f'<p id="a">x</p>{markup}') == tag
+
+    def test_top_level_element_with_id_passes(self) -> None:
+        assert first_anchorless_block('<hr id="h"/><span id="s">s</span>') is None
 
     @pytest.mark.parametrize("value", ["", "   ", "\n\t"])
     def test_empty_or_whitespace_input_is_none(self, value: str) -> None:

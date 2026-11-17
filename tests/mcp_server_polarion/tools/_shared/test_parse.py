@@ -549,6 +549,27 @@ class TestParseTestRecordSummaries:
         assert kwargs["executed_by_name"] == ""
         assert kwargs["defect_id"] == ""
 
+    def test_no_attributes_block_takes_iteration_from_id(self) -> None:
+        # Live: record POSTed without result ship no attributes block.
+        kwargs = parse_test_record_summary_kwargs(
+            {"id": "proj/TR-1/proj/TC-1/1"}, user_names={}
+        )
+        assert kwargs["iteration"] == 1
+
+    def test_attributes_without_iteration_take_it_from_id(self) -> None:
+        kwargs = parse_test_record_summary_kwargs(
+            {"id": "proj/TR-1/proj/TC-1/3", "attributes": {"result": "passed"}},
+            user_names={},
+        )
+        assert kwargs["iteration"] == 3
+
+    @pytest.mark.parametrize(
+        "record_id", ["proj/TR-1/proj/TC-1/x", "TR-1/TC-1/2", "", "proj/TR-1/p/T/-1"]
+    )
+    def test_unusable_id_tail_defaults_zero(self, record_id: str) -> None:
+        kwargs = parse_test_record_summary_kwargs({"id": record_id}, user_names={})
+        assert kwargs["iteration"] == 0
+
     def test_non_numeric_duration_and_iteration_default_zero(self) -> None:
         kwargs = parse_test_record_summary_kwargs(
             {
@@ -799,6 +820,13 @@ class TestParseTestRecordDetail:
             item, project_id="proj", test_run_id="TR-1", user_names={}
         )
         assert detail.iteration == 0
+
+    def test_no_attributes_block_detail_takes_iteration_from_id(self) -> None:
+        item: dict[str, object] = {"id": "proj/TR-1/proj/TC-1/2"}
+        detail = parse_test_record_detail(
+            item, project_id="proj", test_run_id="TR-1", user_names={}
+        )
+        assert detail.iteration == 2
 
     def test_user_names_miss_keeps_id_blanks_name(self) -> None:
         item: dict[str, object] = {

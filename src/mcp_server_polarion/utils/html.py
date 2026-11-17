@@ -429,12 +429,31 @@ def sanitize_html(html: str) -> str:
 _BLOCK_TAGS_NEEDING_IDS: Final[frozenset[str]] = frozenset(
     {"p", "ul", "ol", "table", "div", "blockquote", "pre"}
 )
+# Plain <hN> spawn heading work item; Polarion rewrite heading ids on save.
+_HEADING_TAGS: Final[frozenset[str]] = frozenset({f"h{n}" for n in range(1, 7)})
+
+
+def _anchor_targets(soup: BeautifulSoup) -> list[Tag]:
+    """Elements needing id, document order: every top-level non-heading
+    element, any tag (live: id-less ``hr``/``img``/``br``/``span`` 500
+    ``/parts`` too, anchored they parse), plus nested
+    ``_BLOCK_TAGS_NEEDING_IDS``.
+    """
+    return [
+        tag
+        for tag in soup.find_all(True)
+        if isinstance(tag, Tag)
+        and (
+            tag.name in _BLOCK_TAGS_NEEDING_IDS
+            or (tag.parent is soup and tag.name not in _HEADING_TAGS)
+        )
+    ]
 
 
 def stamp_block_ids(html: str, prefix: str = "polarion_mcp") -> str:
-    """Stamp unique ``id="{prefix}_{N}"`` on anchorless ``_BLOCK_TAGS_NEEDING_IDS``
-    blocks — anchorless block save fine but make next ``GET .../parts``
-    return HTTP 500. Headings skipped (Polarion rewrite their ids on save).
+    """Stamp unique ``id="{prefix}_{N}"`` on anchorless :func:`_anchor_targets`
+    — anchorless element save fine but make next ``GET .../parts`` return
+    HTTP 500. Headings skipped (Polarion rewrite their ids on save).
     Existing non-blank ids preserved; generated ids skip in-document values
     (Polarion 400 on duplicates). Input returned verbatim (not reserialized)
     when nothing need stamping — anchored round-trip body never perturbed.
@@ -451,7 +470,7 @@ def stamp_block_ids(html: str, prefix: str = "polarion_mcp") -> str:
 
     counter = 0
     stamped = False
-    for tag in soup.find_all(list(_BLOCK_TAGS_NEEDING_IDS)):
+    for tag in _anchor_targets(soup):
         existing = tag.get("id")
         if isinstance(existing, str) and existing.strip():
             continue
@@ -467,15 +486,15 @@ def stamp_block_ids(html: str, prefix: str = "polarion_mcp") -> str:
 
 
 def first_anchorless_block(html: str) -> str | None:
-    """Name of first block lacking non-empty ``id=`` (whitespace-only
-    counts), or ``None``. Defensive counterpart to :func:`stamp_block_ids` —
-    document tools run it post-stamping so stamping regression cannot reach
-    Polarion (anchorless block ⇒ ``GET .../parts`` HTTP 500).
+    """Tag name of first :func:`_anchor_targets` element lacking non-empty
+    ``id=`` (whitespace-only counts), or ``None``. Defensive counterpart to
+    :func:`stamp_block_ids` — document tools run it post-stamping so stamping
+    regression cannot reach Polarion (anchorless ⇒ ``GET .../parts`` 500).
     """
     if not html or not html.strip():
         return None
     soup = BeautifulSoup(html, "html.parser")
-    for tag in soup.find_all(list(_BLOCK_TAGS_NEEDING_IDS)):
+    for tag in _anchor_targets(soup):
         existing = tag.get("id")
         if not (isinstance(existing, str) and existing.strip()):
             return str(tag.name)
