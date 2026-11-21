@@ -27,8 +27,14 @@ WRITE_TOOLS: frozenset[str] = frozenset(
         "update_work_item_link",
         "create_document",
         "update_document",
+        "copy_document",
         "create_document_comments",
         "update_document_comment",
+        "create_work_item_comments",
+        "update_work_item_comment",
+        "create_document_attachments",
+        "create_work_item_attachments",
+        "create_test_record_attachments",
     }
 )
 

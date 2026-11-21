@@ -6,9 +6,9 @@ id threading; sequence live in ``metadata["params"]["steps"]``.
 ``min_pass_rate = 0.8`` — ordered + observed-id flaky on weak models.
 
 Groups: W = authoring (write), R = traceability (read-only), M =
-read-then-write (gated). Doc work-item enumeration use ``list_work_items``
-(SQL), never ``read_document_parts`` — latter only fetch part-id anchor for
-move.
+read-then-write (gated). Doc work-item enumeration step accept any reader
+that list members with ids (``_ENUMERATE``); SQL-vs-parts choice owned by
+efficiency.
 """
 
 from __future__ import annotations
@@ -21,15 +21,18 @@ from evals.harness.fixtures import (
     DOC,
     DOC_ATTACHMENT_ID,
     FLOATING_TASK_ID,
+    PARENT_REQ_ID,
     PROJECT,
     SPACE,
 )
 
 MIN_PASS_RATE = 0.8
 
-# Reused step fragments. Move run after create (new id, via ``after``) + after
-# read_document_parts (anchor, via observed-id source).
+# Reused step fragments. ``read_document`` render each member with its id,
+# so it enumerate as well as SQL / parts. Move run after create (new id, via
+# ``after``) + after read_document_parts (anchor, via observed-id source).
 _READ_PARTS: Step = {"tool": "read_document_parts", "match": {"document_name": DOC}}
+_ENUMERATE: Step = {"tool": ["list_work_items", "read_document_parts", "read_document"]}
 _MOVE_ANCHORED: Step = {
     "tool": "move_work_item_to_document",
     "match": {"target_document_name": DOC},
@@ -85,7 +88,7 @@ CASES: list[Case] = [
         f"In the document '{DOC}' in space '{SPACE}', first add a new 'Performance' "
         f"section heading with a one-sentence intro. Then add a requirement work "
         f"item titled 'p95 latency under 200ms' into the document under that heading.",
-        # No anchored move -- fresh heading not in static fake parts.
+        # Anchor optional: no-anchor move append under trailing new heading.
         intent="Prose/heading via update_document, spec via create + move — the "
         "two write paths must not collapse into one tool.",
         steps=[
@@ -115,9 +118,11 @@ CASES: list[Case] = [
     ),
     _case(
         "ORCH-SPEC-WITH-LINK",
+        # Role != DOC structureLinkRole (relates_to): member link of that role
+        # = phantom success live, so prompt would ask for unpersistable write.
         f"Add a new requirement work item titled 'Session timeout' to the document "
-        f"'{DOC}' in space '{SPACE}' after 'Section A', then add a 'relates_to' "
-        f"link from it to work item {FLOATING_TASK_ID}.",
+        f"'{DOC}' in space '{SPACE}' after 'Section A', then add a 'satisfies' "
+        f"link from it to work item {PARENT_REQ_ID}.",
         intent="create -> read_parts -> anchored move -> create link (link only "
         "after the move).",
         steps=[
@@ -136,12 +141,11 @@ CASES: list[Case] = [
         f"Check the consistency between the document '{DOC}' in space '{SPACE}' and "
         f"its parent document: for a requirement in '{DOC}' that links to a parent "
         f"requirement, compare their contents.",
-        # Enumeration + target read accept equivalent tools; SQL-vs-parts
-        # choice owned by efficiency.
+        # Enumeration + target read accept equivalent tools.
         intent="Enumerate doc reqs -> follow a link -> read the linked parent "
         "(target id observed from the link); read-only.",
         steps=[
-            {"tool": ["list_work_items", "read_document_parts"]},
+            _ENUMERATE,
             {"tool": "list_work_item_links"},
             {
                 "tool": ["read_work_item", "get_work_item"],
@@ -178,10 +182,9 @@ CASES: list[Case] = [
         "ORCH-COVERAGE-GAP",
         f"Which requirements in the document '{DOC}' in space '{SPACE}' have no "
         f"linked test case?",
-        # Enumeration accept equivalent tools model pick.
         intent="Enumerate doc reqs -> inspect each req's links; read-only.",
         steps=[
-            {"tool": ["list_work_items", "read_document_parts"]},
+            _ENUMERATE,
             {"tool": "list_work_item_links"},
         ],
         read_only=True,

@@ -39,6 +39,7 @@ from evals.harness.fixtures import (
     WORKITEM_ATTACHMENT_CONTENT,
     WORKITEM_ATTACHMENT_ID,
     Attachment,
+    heading_html,
 )
 
 _BASE = f"{POLARION_HOST}{API_PREFIX}"
@@ -195,6 +196,12 @@ class TestReadRouting:
         )
         assert _json(response)["meta"]["totalCount"] == len(SEEDS.work_items)
 
+    def test_work_item_list_dangling_title_returns_all(self) -> None:
+        response = _get(
+            FakePolarion(), f"/projects/{PROJECT}/workitems", query="type:x OR title:"
+        )
+        assert _json(response)["meta"]["totalCount"] == len(SEEDS.work_items)
+
     def test_linked_work_items_empty_when_unlinked(self) -> None:
         response = _get(
             FakePolarion(),
@@ -211,12 +218,20 @@ class TestReadRouting:
         ids = [p["id"].rsplit("/", 1)[-1] for p in data]
         assert SECTION_A_PART_ID in ids
 
-    def test_parts_empty_for_other_document(self) -> None:
+    def test_parts_follow_other_document_body(self) -> None:
         response = _get(
             FakePolarion(),
             f"/projects/{PROJECT}/spaces/{SPACE}/documents/{PARENT_DOC}/parts",
         )
-        assert _json(response)["meta"]["totalCount"] == 0
+        ids = [p["id"].rsplit("/", 1)[-1] for p in _json(response)["data"]]
+        assert ids == ["pp-1", f"workitem_{PARENT_REQ_ID}"]
+
+    def test_parts_unseeded_document_is_404(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/spaces/{SPACE}/documents/Nope/parts",
+        )
+        assert response.status_code == 404
 
     def test_comments_thread_shape(self) -> None:
         response = _get(
@@ -936,11 +951,26 @@ class TestWorkItemResource:
 
 
 class TestMutations:
-    def test_post_workitems_echoes_id(self) -> None:
+    def test_post_workitems_echoes_server_assigned_id(self) -> None:
         fake = FakePolarion()
-        response = _mutate(fake, "POST", f"/projects/{PROJECT}/workitems", {"data": []})
+        response = _mutate(
+            fake,
+            "POST",
+            f"/projects/{PROJECT}/workitems",
+            {"data": [{"type": "workitems", "attributes": {"title": "T"}}]},
+        )
         assert response.status_code == 201
-        assert _json(response)["data"][0]["type"] == "workitems"
+        assert _json(response)["data"] == [
+            {"type": "workitems", "id": f"{PROJECT}/MCPT-9001"}
+        ]
+
+    def test_post_workitems_ids_continue_across_calls(self) -> None:
+        # Live ids = project-global sequence; per-call restart = overwrite.
+        fake = FakePolarion()
+        path = f"/projects/{PROJECT}/workitems"
+        first = _mutate(fake, "POST", path, {"data": [{"attributes": {}}]})
+        second = _mutate(fake, "POST", path, {"data": [{"attributes": {}}]})
+        assert _json(first)["data"][0]["id"] != _json(second)["data"][0]["id"]
 
     def test_post_workitems_echoes_one_id_per_submitted_entry(self) -> None:
         fake = FakePolarion()
@@ -971,20 +1001,18 @@ class TestMutations:
         ids = [entry["id"] for entry in _json(response)["data"]]
         assert ids == [f"{PROJECT}/Fake-TR-New", f"{PROJECT}/Fake-TR-New2"]
 
-    def test_post_testruns_without_ids_still_echoes_entries(self) -> None:
+    def test_post_testruns_without_id_is_400(self) -> None:
+        # Live: client id required, UI autofill UI-only (test-runs.md).
         fake = FakePolarion()
         response = _mutate(
             fake, "POST", f"/projects/{PROJECT}/testruns", {"data": [{}, {}]}
         )
-        ids = [entry["id"] for entry in _json(response)["data"]]
-        assert len(ids) == 2
-        assert len(set(ids)) == 2
+        assert response.status_code == 400
 
-    def test_post_testruns_without_body_falls_back_to_one_id(self) -> None:
+    def test_post_testruns_without_body_is_400(self) -> None:
         fake = FakePolarion()
         response = _mutate(fake, "POST", f"/projects/{PROJECT}/testruns")
-        assert response.status_code == 201
-        assert len(_json(response)["data"]) == 1
+        assert response.status_code == 400
 
     def test_post_testrecords_composes_five_segment_ids(self) -> None:
         fake = FakePolarion()
@@ -1021,8 +1049,9 @@ class TestMutations:
         )
         assert response.status_code == 201
         ids = [entry["id"] for entry in _json(response)["data"]]
+        # Seeded TESTCASE_ID record hold iteration 0 -> repeat = next (live).
         assert ids == [
-            f"{PROJECT}/{TEST_RUN_ID}/{PROJECT}/{TESTCASE_ID}/0",
+            f"{PROJECT}/{TEST_RUN_ID}/{PROJECT}/{TESTCASE_ID}/1",
             f"{PROJECT}/{TEST_RUN_ID}/{PROJECT}/{CHILD_REQ_ID}/0",
         ]
 
@@ -1063,9 +1092,23 @@ class TestMutations:
     def test_post_documents_echoes_module_id(self) -> None:
         fake = FakePolarion()
         response = _mutate(
-            fake, "POST", f"/projects/{PROJECT}/spaces/{SPACE}/documents", {"data": []}
+            fake,
+            "POST",
+            f"/projects/{PROJECT}/spaces/{SPACE}/documents",
+            {"data": [{"type": "documents", "attributes": {"moduleName": "NewDoc"}}]},
         )
-        assert _json(response)["data"][0]["id"] == MODULE_ID
+        assert response.status_code == 201
+        assert _json(response)["data"][0]["id"] == f"{PROJECT}/{SPACE}/NewDoc"
+
+    def test_post_documents_existing_name_is_409(self) -> None:
+        fake = FakePolarion()
+        response = _mutate(
+            fake,
+            "POST",
+            f"/projects/{PROJECT}/spaces/{SPACE}/documents",
+            {"data": [{"type": "documents", "attributes": {"moduleName": DOC}}]},
+        )
+        assert response.status_code == 409
 
     def test_post_copy_action_returns_sparse_dict(self) -> None:
         fake = FakePolarion()
@@ -1086,19 +1129,32 @@ class TestMutations:
             fake,
             "POST",
             f"/projects/{PROJECT}/spaces/{SPACE}/documents/{DOC}/comments",
-            {"data": []},
+            {"data": [{"attributes": {"text": {"type": "text/html", "value": "x"}}}]},
         )
-        assert _json(response)["data"][0]["type"] == "document_comments"
+        assert response.status_code == 201
+        assert _json(response)["data"] == [
+            {"type": "document_comments", "id": f"{MODULE_ID}/100"}
+        ]
 
-    def test_post_linked_work_items_echoes_id(self) -> None:
+    def test_post_linked_work_items_echoes_composite_id(self) -> None:
         fake = FakePolarion()
         response = _mutate(
             fake,
             "POST",
-            f"/projects/{PROJECT}/workitems/{DOC_HEADING_ID}/linkedworkitems",
-            {"data": []},
+            f"/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}/linkedworkitems",
+            {
+                "data": [
+                    {
+                        "attributes": {"role": "relates_to"},
+                        "relationships": {
+                            "workItem": {"data": {"id": f"{PROJECT}/{CHILD_REQ_ID}"}}
+                        },
+                    }
+                ]
+            },
         )
-        assert _json(response)["data"][0]["type"] == "linkedworkitems"
+        link_id = f"{PROJECT}/{FLOATING_TASK_ID}/relates_to/{PROJECT}/{CHILD_REQ_ID}"
+        assert _json(response)["data"] == [{"type": "linkedworkitems", "id": link_id}]
 
     def test_post_doc_attachments_echoes_ordered_ids(self) -> None:
         fake = FakePolarion()
@@ -1342,7 +1398,7 @@ class TestMutations:
             headers=_BYTES_ACCEPT,
         )
         assert response.status_code == 200
-        assert response.content == WORKITEM_ATTACHMENT_CONTENT
+        assert response.content == b"png-a"  # uploaded bytes, not seed
 
     def test_post_workitem_attachments_unseeded_work_item_404(self) -> None:
         fake = FakePolarion()
@@ -1412,7 +1468,8 @@ class TestMutations:
         assert response.status_code == 400
         assert "File data" in _json(response)["errors"][0]["detail"]
 
-    def test_patch_and_delete_return_204(self) -> None:
+    def test_unmodeled_writes_are_501_not_silent_success(self) -> None:
+        # Single-item PATCH unused by server; work item DELETE never shipped.
         fake = FakePolarion()
         patch = _mutate(
             fake,
@@ -1423,8 +1480,8 @@ class TestMutations:
         delete = _mutate(
             fake, "DELETE", f"/projects/{PROJECT}/workitems/{DOC_HEADING_ID}"
         )
-        assert patch.status_code == 204
-        assert delete.status_code == 204
+        assert patch.status_code == 501
+        assert delete.status_code == 501
 
     def test_every_mutation_is_recorded(self) -> None:
         fake = FakePolarion()
@@ -1864,7 +1921,7 @@ class TestTestRecordAttachmentReads:
             headers=_BYTES_ACCEPT,
         )
         assert response.status_code == 200
-        assert response.content == RECORD_IMAGE_ATTACHMENT_CONTENT
+        assert response.content == b"x"  # uploaded bytes, not seed
 
     def test_content_json_only_accept_is_406(self) -> None:
         response = _get(
@@ -1908,17 +1965,23 @@ class TestOrchestrationSeeding:
         )
         payload = _json(response)
         roles = {item["attributes"]["role"] for item in payload["data"]}
-        assert roles == {"satisfies", "verifies"}
+        # relates_to = structure link to Section A (FakeDoc structureLinkRole).
+        assert roles == {"satisfies", "verifies", "relates_to"}
         target_ids = {item["id"] for item in payload["included"]}
         assert f"{PROJECT}/{PARENT_REQ_ID}" in target_ids
         assert f"{PROJECT}/{TESTCASE_ID}" in target_ids
+        assert f"{PROJECT}/{DOC_HEADING_ID}" in target_ids
 
-    def test_uncovered_requirement_has_no_links(self) -> None:
+    def test_uncovered_requirement_links_only_its_heading(self) -> None:
         response = _get(
             FakePolarion(),
             f"/projects/{PROJECT}/workitems/MCPT-301/linkedworkitems",
         )
-        assert _json(response)["meta"]["totalCount"] == 0
+        targets = [
+            item["relationships"]["workItem"]["data"]["id"]
+            for item in _json(response)["data"]
+        ]
+        assert targets == [f"{PROJECT}/{DOC_HEADING_ID}"]
 
     def test_back_direction_query_finds_source(self) -> None:
         response = _get(
@@ -1937,3 +2000,291 @@ class TestOrchestrationSeeding:
         assert response.status_code == 200
         ids = [o["id"] for o in _json(response)["data"]["attributes"]["options"]]
         assert "relates_to" in ids
+
+
+class TestStatefulRoutes:
+    """Write route -> later read see it; routing edge answers."""
+
+    _DOC_PATH = f"/projects/{PROJECT}/spaces/{SPACE}/documents/{DOC}"
+    _WI_PATH = f"/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}"
+
+    def test_unknown_read_path_is_404_with_path(self) -> None:
+        response = _get(FakePolarion(), "/nowhere")
+        assert response.status_code == 404
+        assert _json(response)["errors"][0]["path"] == "/nowhere"
+
+    def test_other_project_is_404(self) -> None:
+        response = _get(FakePolarion(), f"/projects/Other/workitems/{FLOATING_TASK_ID}")
+        assert response.status_code == 404
+
+    def test_options_for_unsupported_resource_is_404(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/testruns/fields/type/actions/getAvailableOptions",
+        )
+        assert response.status_code == 404
+
+    def test_copy_without_target_name_is_400(self) -> None:
+        response = _mutate(FakePolarion(), "POST", f"{self._DOC_PATH}/actions/copy", {})
+        assert response.status_code == 400
+
+    def test_anchorless_block_breaks_parts_read(self) -> None:
+        # Live: body PATCH accept anchorless block, /parts then 500.
+        fake = FakePolarion()
+        body = {"type": "text/html", "value": "<p>no id</p>"}
+        patch = _mutate(
+            fake,
+            "PATCH",
+            self._DOC_PATH,
+            {"data": {"attributes": {"homePageContent": body}}},
+        )
+        assert patch.status_code == 204
+        assert _get(fake, f"{self._DOC_PATH}/parts").status_code == 500
+
+    def test_document_comment_resolve_visible(self) -> None:
+        fake = FakePolarion()
+        patch = _mutate(
+            fake,
+            "PATCH",
+            f"{self._DOC_PATH}/comments/{1}",
+            {"data": {"attributes": {"resolved": True}}},
+        )
+        assert patch.status_code == 204
+        data = _json(_get(fake, f"{self._DOC_PATH}/comments"))["data"]
+        assert all(c["attributes"]["resolved"] for c in data)
+
+    def test_work_item_comment_create_resolve_visible(self) -> None:
+        fake = FakePolarion()
+        created = _mutate(
+            fake,
+            "POST",
+            f"{self._WI_PATH}/comments",
+            {"data": [{"attributes": {"text": {"value": "hi"}, "title": "T"}}]},
+        )
+        (entry,) = _json(created)["data"]
+        assert entry["id"] == f"{PROJECT}/{FLOATING_TASK_ID}/100"
+        _mutate(
+            fake,
+            "PATCH",
+            f"{self._WI_PATH}/comments/100",
+            {"data": {"attributes": {"resolved": True}}},
+        )
+        page = _json(_get(fake, f"{self._WI_PATH}/comments"))
+        assert page["meta"]["totalCount"] == 2
+        assert [c["attributes"]["title"] for c in page["data"]] == ["Initial note", "T"]
+        assert page["data"][1]["attributes"]["resolved"] is True
+
+    def test_link_update_and_delete_routes(self) -> None:
+        fake = FakePolarion()
+        target = f"{PROJECT}/{CHILD_REQ_ID}"
+        _mutate(
+            fake,
+            "POST",
+            f"{self._WI_PATH}/linkedworkitems",
+            {
+                "data": [
+                    {
+                        "attributes": {"role": "relates_to"},
+                        "relationships": {"workItem": {"data": {"id": target}}},
+                    }
+                ]
+            },
+        )
+        patch = _mutate(
+            fake,
+            "PATCH",
+            f"{self._WI_PATH}/linkedworkitems/relates_to/{target}",
+            {"data": {"attributes": {"suspect": True, "revision": "4"}}},
+        )
+        assert patch.status_code == 204
+        (link,) = _json(_get(fake, f"{self._WI_PATH}/linkedworkitems"))["data"]
+        assert link["attributes"] == {
+            "role": "relates_to",
+            "suspect": True,
+            "revision": "4",
+        }
+        link_id = f"{PROJECT}/{FLOATING_TASK_ID}/relates_to/{target}"
+        delete = _mutate(
+            fake,
+            "DELETE",
+            f"{self._WI_PATH}/linkedworkitems",
+            {"data": [{"type": "linkedworkitems", "id": link_id}]},
+        )
+        assert delete.status_code == 204
+        page = _json(_get(fake, f"{self._WI_PATH}/linkedworkitems"))
+        assert page["meta"]["totalCount"] == 0
+
+    def test_move_routes_round_trip(self) -> None:
+        fake = FakePolarion()
+        moved = _mutate(
+            fake,
+            "POST",
+            f"{self._WI_PATH}/actions/moveToDocument",
+            {"targetDocument": MODULE_ID, "previousPart": f"{MODULE_ID}/p-1"},
+        )
+        assert moved.status_code == 204
+        wi = _json(_get(fake, self._WI_PATH))["data"]
+        assert wi["relationships"]["module"]["data"]["id"] == MODULE_ID
+        parts = _json(_get(fake, f"{self._DOC_PATH}/parts"))["data"]
+        assert parts[1]["id"] == f"{MODULE_ID}/workitem_{FLOATING_TASK_ID}"
+        assert parts[1]["relationships"]["previousPart"]["data"]["id"].endswith("/p-1")
+        back = _mutate(fake, "POST", f"{self._WI_PATH}/actions/moveFromDocument")
+        assert back.status_code == 204
+        assert "module" not in _json(_get(fake, self._WI_PATH))["data"]["relationships"]
+
+    def test_body_patch_reflected_in_get_document(self) -> None:
+        fake = FakePolarion()
+        value = '<p id="p-1">Edited.</p>\n<h2>Fresh</h2>'
+        _mutate(
+            fake,
+            "PATCH",
+            self._DOC_PATH,
+            {"data": {"attributes": {"homePageContent": {"value": value}}}},
+        )
+        body = _json(_get(fake, self._DOC_PATH))["data"]["attributes"]
+        # Plain heading spawned as MCPT-9001 + stored as placeholder.
+        assert body["homePageContent"]["value"] == (
+            '<p id="p-1">Edited.</p>\n' + heading_html("MCPT-9001", level=1)
+        )
+
+    def test_test_run_patch_visible(self) -> None:
+        fake = FakePolarion()
+        patch = _mutate(
+            fake,
+            "PATCH",
+            f"/projects/{PROJECT}/testruns",
+            {
+                "data": [
+                    {
+                        "id": f"{PROJECT}/{TEST_RUN_ID}",
+                        "attributes": {"status": "finished"},
+                    }
+                ]
+            },
+        )
+        assert patch.status_code == 204
+        run = _json(_get(fake, f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}"))
+        assert run["data"]["attributes"]["status"] == "finished"
+
+    def test_workflow_action_is_400_unapplied(self) -> None:
+        fake = FakePolarion()
+        patch = _mutate(
+            fake,
+            "PATCH",
+            f"/projects/{PROJECT}/workitems?workflowAction=close",
+            {"data": [{"id": f"{PROJECT}/{FLOATING_TASK_ID}", "attributes": {}}]},
+        )
+        assert patch.status_code == 400
+        assert _json(patch)["errors"][0]["detail"] == (
+            "The workflow action 'close' was not found."
+        )
+
+    def test_title_clause_inside_compound_query(self) -> None:
+        response = _get(
+            FakePolarion(),
+            f"/projects/{PROJECT}/workitems",
+            query='title:"Section A" AND type:heading',
+        )
+        ids = [i["id"] for i in _json(response)["data"]]
+        assert ids == [f"{PROJECT}/{DOC_HEADING_ID}"]
+
+    def test_bare_title_word_query(self) -> None:
+        response = _get(
+            FakePolarion(), f"/projects/{PROJECT}/workitems", query="title:Section"
+        )
+        assert [i["id"] for i in _json(response)["data"]] == [
+            f"{PROJECT}/{DOC_HEADING_ID}"
+        ]
+
+    def test_record_without_attributes_and_with_defect(self) -> None:
+        # Live: no-result record ship no attributes block; defect = relationship.
+        fake = FakePolarion()
+        records = f"/projects/{PROJECT}/testruns/{TEST_RUN_ID}/testrecords"
+        _mutate(
+            fake,
+            "POST",
+            records,
+            {
+                "data": [
+                    {
+                        "relationships": {
+                            "testCase": {"data": {"id": f"{PROJECT}/{TESTCASE_ID}"}},
+                            "defect": {"data": {"id": f"{PROJECT}/{FLOATING_TASK_ID}"}},
+                        }
+                    }
+                ]
+            },
+        )
+        new = _json(_get(fake, records))["data"][-1]
+        assert new["id"].endswith(f"/{TESTCASE_ID}/1")
+        assert "attributes" not in new
+        defect = new["relationships"]["defect"]["data"]["id"]
+        assert defect == f"{PROJECT}/{FLOATING_TASK_ID}"
+        failed = _json(_get(fake, records, testResultId="failed"))["data"]
+        assert [r["id"].rsplit("/", 1)[-1] for r in failed] == ["0"]
+
+
+class TestPaging:
+    """Live honor page[size] / page[number]; meta rule stay per route."""
+
+    _PARTS = f"/projects/{PROJECT}/spaces/{SPACE}/documents/{DOC}/parts"
+
+    def test_parts_pages_with_sparse_meta(self) -> None:
+        fake = FakePolarion()
+        whole = _json(_get(fake, self._PARTS))
+        assert "meta" not in whole
+        first = _json(_get(fake, self._PARTS, **{"page[size]": "2"}))
+        second = _json(
+            _get(fake, self._PARTS, **{"page[size]": "2", "page[number]": "2"})
+        )
+        assert first["data"] + second["data"] == whole["data"]
+        assert first["meta"] == second["meta"] == {"totalCount": len(whole["data"])}
+        assert (
+            second["data"][0]["relationships"]["previousPart"]["data"]["id"]
+            == (first["data"][-1]["id"])
+        )
+        size = str(len(whole["data"]))
+        exact = _json(_get(fake, self._PARTS, **{"page[size]": size}))
+        assert "meta" not in exact
+        over = _json(
+            _get(fake, self._PARTS, **{"page[size]": "2", "page[number]": "9"})
+        )
+        assert over["data"] == []
+        assert over["meta"] == {"totalCount": len(whole["data"])}
+
+    def test_list_routes_slice_but_count_all(self) -> None:
+        fake = FakePolarion()
+        one = {"page[size]": "1"}
+        for path in (
+            f"/projects/{PROJECT}/workitems",
+            f"/projects/{PROJECT}/workitems/{CHILD_REQ_ID}/linkedworkitems",
+            f"/projects/{PROJECT}/testruns",
+        ):
+            page = _json(_get(fake, path, **one))
+            assert len(page["data"]) == 1, path
+            assert page["meta"]["totalCount"] > 1, path
+        records = f"/projects/{PROJECT}/testruns/{TEST_RUN_ID_2}/testrecords"
+        assert len(_json(_get(fake, records, **one))["data"]) == 1
+
+    def test_comment_and_attachment_lists_slice(self) -> None:
+        fake = FakePolarion()
+        doc = f"/projects/{PROJECT}/spaces/{SPACE}/documents/{DOC}"
+        wi = f"/projects/{PROJECT}/workitems/{FLOATING_TASK_ID}"
+        _mutate(
+            fake,
+            "POST",
+            f"{wi}/comments",
+            {"data": [{"attributes": {"text": {"value": "second"}}}]},
+        )
+        wi_page = _json(_get(fake, f"{wi}/comments", **{"page[size]": "1"}))
+        assert (len(wi_page["data"]), wi_page["meta"]["totalCount"]) == (1, 2)
+        doc_page = _json(_get(fake, f"{doc}/comments", **{"page[size]": "1"}))
+        assert len(doc_page["data"]) == 1
+        assert "meta" not in doc_page
+        over = _json(
+            _get(fake, f"{doc}/comments", **{"page[size]": "1", "page[number]": "9"})
+        )
+        assert over["data"] == []
+        assert over["meta"]["totalCount"] > 1
+        attachments = _json(_get(fake, f"{doc}/attachments", **{"page[number]": "2"}))
+        assert attachments["data"] == []

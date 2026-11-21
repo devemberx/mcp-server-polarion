@@ -39,7 +39,12 @@ Each run lives in one process (the gate itself, or one spawned worker under
 never touches respx — LiteLLM's default aiohttp transport replaces httpcore
 under `httpx.AsyncClient`, and respx only patches httpcore — and hits the real
 provider, while no request reaches a real Polarion
-(`assert_all_mocked=False`); mutations are recorded but never applied.
+(`assert_all_mocked=False`). `FakePolarion` is stateful: each case gets a
+fresh world copied from the seeds, writes apply with live Polarion semantics,
+and later reads see them — an agent that verifies its own write finds it. The
+runner clears the server's process-wide TTL caches per case so no case sees a
+previous case's world. A write to a route the fake does not model answers
+`501` instead of faking success.
 `TrajectoryRecorder` captures the tool calls; `CheckDispatchEvaluator` dispatches
 on `Case.metadata["check"]` to a pure check in
 [`evaluators/checks.py`](evaluators/checks.py), plus cross-cutting global checks
@@ -157,17 +162,48 @@ fails and the release is blocked (fail-closed).
 ## Fixtures
 
 Seeds live in [`harness/fixtures.py`](harness/fixtures.py) (`SEEDS`);
-[`harness/fake_polarion.py`](harness/fake_polarion.py) serves them. Mirror the
-real server's *structure*; keep content synthetic. Bulk POSTs echo one id per
-submitted entry, so bulk cases exercise the count-match rule.
+[`harness/fake_polarion/`](harness/fake_polarion/) serves them. Mirror the real
+server's *structure*; keep content synthetic.
 
-- Project `MCP_Test_Project`, doc `FakeDoc` (anchored intro paragraph).
+| Module | Owns |
+| --- | --- |
+| `world.py` | state + write rules (no HTTP) — a new rule is one `World` method |
+| `body.py` | document body ↔ ordered blocks |
+| `wire.py` | JSON:API response shapes and live response quirks |
+| `routes/` | thin per-domain handlers on `router.py` — a new endpoint is one handler |
+
+Live behaviour the world reproduces (probed on the testdrive project):
+
+- A document body is the whole document. Work items sit in it as empty macro
+  placeholders (`heading_html` / `work_item_html`); every other top-level block
+  carries a unique `id`. `/parts` is the body split block by block, in order.
+- A plain `<hN>` in a body write spawns a heading work item. A member dropped
+  from the body stays in the document as an orphan (move-in answers `409`).
+  Top-level text in a body write answers `400`.
+- `moveToDocument` without an anchor appends; a member of another document
+  moves; headings never move (`400`). An item under a heading gets an automatic
+  link to it, role = the document's `structure_link_role` (`relates_to` for
+  `FakeDoc`). That role is server-owned on members: a move drops the item's
+  links of it, a new one answers `201` but is not stored, and the automatic
+  link ignores PATCH and DELETE.
+- A repeated link role + target answers `409` for the whole batch. Any
+  `workflowAction` answers `400` (no workflow is seeded). Lists honor
+  `page[size]` / `page[number]`.
+- Server-assigned ids continue across calls (`MCPT-9001`, …); a repeated test
+  case gets the next record iteration; bulk POSTs echo one id per entry.
+
+Seeds:
+
+- Project `MCP_Test_Project`; doc `FakeDoc` = intro paragraph `p-1`, then the
+  `Section A` heading `MCPT-100` (`heading_MCPT-100`, the positional-move
+  anchor) over requirements `MCPT-300` and `MCPT-301`.
 - `MCPT-200` free-floating task (`custom_fields={"acceptance_criteria_id": "AC-1"}`,
   one `ref_ext` hyperlink), `MCPT-201` heading, `MCPT-202` ghost-typed task;
   comment thread `1`→`2`; enum `hyperlink-role`.
-- Orchestration adds doc `FakeParentDoc`; `MCPT-300` (in `FakeDoc`, links
-  `satisfies`→`MCPT-400` and `verifies`→`MCPT-500`), `MCPT-301` (no test-case link
-  — coverage-gap signal), `MCPT-400` (parent, in `FakeParentDoc`), test case
-  `MCPT-500`; a `FakeDoc` `/parts` `Section A` heading (`heading_MCPT-100`, the
-  positional-move anchor); enum `workitem-link-role`. Forward links from
-  `SEEDS.links`; back direction via `query=linkedWorkItems:{wi}`.
+- Orchestration adds doc `FakeParentDoc` (heading-less, so `list_documents`
+  surfaces only `FakeDoc`); `MCPT-300` (links `satisfies`→`MCPT-400` and
+  `verifies`→`MCPT-500`), `MCPT-301` (no test-case link — coverage-gap signal),
+  `MCPT-400` (parent, in `FakeParentDoc`), test case `MCPT-500`, test case
+  `MCPT-501` (no record in any run — recording it can only create); enum
+  `workitem-link-role`. Forward links from `SEEDS.links` plus structure links;
+  back direction via `query=linkedWorkItems:{wi}`.

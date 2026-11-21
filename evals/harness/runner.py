@@ -23,6 +23,7 @@ from strands_evals import Case
 from strands_evals.types import TaskOutput
 
 import mcp_server_polarion.core.client as _client_mod
+import mcp_server_polarion.tools._shared.cache as _cache_mod
 from mcp_server_polarion.server import mcp
 
 from .fake_polarion import FakePolarion
@@ -222,6 +223,9 @@ def run_case(case: Case) -> TaskOutput:
     """Drive one case, return tool-call trajectory as ``TaskOutput``."""
     recorder = TrajectoryRecorder()
     fake = FakePolarion()
+    # Fresh fake world per case; process-wide caches (document discovery,
+    # confirmed ids, enum options) would replay prior case's state.
+    _cache_mod.clear_all_caches()
 
     old_delay = _client_mod._WRITE_DELAY_SECONDS
     _client_mod._WRITE_DELAY_SECONDS = 0.0
