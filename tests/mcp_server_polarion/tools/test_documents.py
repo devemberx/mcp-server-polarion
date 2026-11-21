@@ -4310,6 +4310,22 @@ class TestUpdateDocumentAnchorlessGuard:
         assert 'id="polarion_mcp_' in body
         mock_client.patch.assert_not_called()
 
+    async def test_top_level_non_block_elements_are_stamped(
+        self,
+        mock_ctx: MagicMock,
+        mock_client: AsyncMock,
+        reset_enum_guard_caches: None,
+    ) -> None:
+        # Live: id-less top-level <hr>/<span> 500 /parts like a bare <p>.
+        result = await _call_update_doc(
+            mock_ctx,
+            home_page_content_html='<p id="a">x</p><hr/><span>s</span>',
+            dry_run=True,
+        )
+        body = _doc_body_value(result)
+        assert '<hr id="polarion_mcp_0"/>' in body
+        assert '<span id="polarion_mcp_1">s</span>' in body
+
     async def test_anchored_body_sent_verbatim(
         self,
         mock_ctx: MagicMock,

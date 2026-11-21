@@ -106,7 +106,9 @@ async def move_work_item_to_document(  # noqa: PLR0913
     At most one of previous_part_id (AFTER) / next_part_id (BEFORE); omit
     both to append. Part ids from read_document_parts.
 
-    Auto-creates one link to the enclosing heading; a later same-role
+    Auto-creates one link to the enclosing heading. Its role is the
+    document's structure role, which Polarion owns on members: the move
+    drops the item's existing links of that role, and a later same-role
     create_work_item_links reports created but is NOT persisted.
     """
     if previous_part_id is not None and next_part_id is not None:
@@ -188,10 +190,12 @@ async def move_work_item_from_document(
 ) -> WorkItemMoveResult:
     """Detach a work item from its document — the ONLY detach path.
 
+    Headings cannot be detached — drop them from the body via
+    update_document instead.
+
     NOT idempotent: an already free-floating item fails — confirm attachment
     first (get_work_item: non-empty space_id). The item is preserved and
-    re-attachable via move_work_item_to_document. Headings are detachable
-    too.
+    re-attachable via move_work_item_to_document.
     """
     if dry_run:
         return WorkItemMoveResult(

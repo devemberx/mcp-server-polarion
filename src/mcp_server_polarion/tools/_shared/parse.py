@@ -6,7 +6,7 @@ unchanged round-trip.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Literal, TypedDict
+from typing import Final, Literal, TypedDict
 
 from mcp_server_polarion.models import (
     Attachment,
@@ -332,13 +332,29 @@ class TestRecordSummaryKwargs(TypedDict):
     defect_id: str
 
 
+# record id = projectId/testRunId/testCaseProjectId/testCaseId/iteration.
+RECORD_ID_SEGMENTS: Final = 5
+
+
+def _record_id_iteration(record_id: str) -> int:
+    """Last id segment as int, 0 if malformed. Record POSTed without ``result``
+    ships no ``attributes`` block — id = only iteration source.
+    """
+    segments = record_id.split("/")
+    # isdecimal, not isdigit: superscript digits pass isdigit, int() reject.
+    if len(segments) == RECORD_ID_SEGMENTS and segments[-1].isdecimal():
+        return int(segments[-1])
+    return 0
+
+
 def parse_test_record_summary_kwargs(
     item: dict[str, object],
     user_names: dict[str, str],
 ) -> TestRecordSummaryKwargs:
     """``TestRecordSummary`` kwargs from JSON:API resource; ``user_names``
     map full user id → display name (from included ``users``). Work-item
-    targets keep full ids — record 5-segment id never parsed.
+    targets keep full ids from relationships. Record id read only for
+    ``iteration`` when attribute absent (see :func:`_record_id_iteration`).
     """
     attributes = item.get("attributes", {})
     if not isinstance(attributes, dict):
@@ -347,10 +363,11 @@ def parse_test_record_summary_kwargs(
     if not isinstance(relationships, dict):
         relationships = {}
 
-    iteration = attributes.get("iteration", 0)
+    record_id = safe_str(item.get("id", ""))
+    iteration = attributes.get("iteration", _record_id_iteration(record_id))
     executed_by_id = extract_relationship_id(relationships, "executedBy")
     return {
-        "id": safe_str(item.get("id", "")),
+        "id": record_id,
         "test_case_id": extract_relationship_id(relationships, "testCase"),
         # bool is int subclass -- reject as iteration.
         "iteration": iteration
@@ -657,6 +674,7 @@ def parse_enum_option(entry: dict[str, object]) -> EnumOption:
 
 
 __all__: list[str] = [
+    "RECORD_ID_SEGMENTS",
     "WorkItemSummaryKwargs",
     "extract_created_full_ids",
     "extract_created_short_ids",

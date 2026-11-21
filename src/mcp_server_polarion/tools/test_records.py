@@ -48,6 +48,7 @@ from mcp_server_polarion.tools._shared.pagination import (
     make_page,
 )
 from mcp_server_polarion.tools._shared.parse import (
+    RECORD_ID_SEGMENTS,
     extract_created_full_ids,
     parse_included_user_name_map,
     parse_test_record_detail,
@@ -206,10 +207,6 @@ async def create_test_records(
     )
 
 
-# record_id = projectId/testRunId/testCaseProjectId/testCaseId/iteration.
-_RECORD_ID_SEGMENTS = 5
-
-
 def _build_update_test_record_resource(
     *,
     project_id: str,
@@ -312,7 +309,7 @@ async def update_test_records(
     for index, spec in enumerate(items):
         with reraise_with_item_context(index, spec.record_id):
             segments = spec.record_id.split("/")
-            if len(segments) != _RECORD_ID_SEGMENTS or not spec.record_id.startswith(
+            if len(segments) != RECORD_ID_SEGMENTS or not spec.record_id.startswith(
                 prefix
             ):
                 raise ValueError(

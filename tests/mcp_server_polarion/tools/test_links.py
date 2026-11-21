@@ -1641,3 +1641,24 @@ class TestUpdateWorkItemLinkFieldValidation:
             dry_run=False,
         )
         assert result.updated is True
+
+
+def _doc_text(tool: object) -> str:
+    return " ".join((getattr(tool, "__doc__", None) or "").split())
+
+
+class TestLinkDocstringContracts:
+    """Live-probed facts (testdrive, 2026-11-16) the docstrings must keep."""
+
+    def test_create_phantom_covers_any_document_member(self) -> None:
+        # Live: structure-role link on member dropped, heading above or not.
+        text = _doc_text(create_work_item_links)
+        assert "reports created but is NOT persisted, heading above or not" in text
+
+    def test_update_says_auto_heading_link_unchangeable(self) -> None:
+        text = _doc_text(update_work_item_link)
+        assert "auto heading link ignores updates" in text
+
+    def test_delete_says_auto_heading_link_undeletable(self) -> None:
+        text = _doc_text(delete_work_item_links)
+        assert "auto heading link cannot be deleted" in text
