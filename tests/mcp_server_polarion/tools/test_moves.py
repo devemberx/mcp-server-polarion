@@ -500,3 +500,23 @@ class TestMoveWorkItemFromDocumentFieldValidation:
 
     def test_work_item_id_accepts_non_empty(self) -> None:
         assert self._adapter_for("work_item_id").validate_python("MCPT-1") == "MCPT-1"
+
+
+def _doc_text(tool: object) -> str:
+    return " ".join((getattr(tool, "__doc__", None) or "").split())
+
+
+class TestMoveDocstringContracts:
+    """Live-probed facts (testdrive, 2026-11-16) the docstrings must keep."""
+
+    def test_from_document_says_headings_cannot_be_detached(self) -> None:
+        # Live: moveFromDocument on a heading, placed or orphan = rejected.
+        text = _doc_text(move_work_item_from_document)
+        assert "Headings cannot be detached" in text
+        assert "detachable" not in text
+
+    def test_to_document_warns_structure_role_links_dropped(self) -> None:
+        # Live: move-in drop item's links of document structure role.
+        text = _doc_text(move_work_item_to_document)
+        assert "the move drops the item's existing links of that role" in text
+        assert "reports created but is NOT persisted" in text
